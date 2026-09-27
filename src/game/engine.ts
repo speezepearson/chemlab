@@ -3,7 +3,7 @@ import type { Fluid, ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP, FILL_RATE, GOAL_ATOMS, N_FLASKS, POUR_RATE, SUPPLY_MOLECULES } from './config';
 import { FAUCETS, faucetOutput, type Faucet } from './faucets';
-import { coronaAlpha, coronaRadius, css, haloAlpha, haloRadius, type RGB } from './appearance';
+import { coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
 import { Flask, fluidColor, glowColor, transfer, type Point } from './flask';
 
 /** What the god-mode panel needs to show for one flask. */
@@ -43,6 +43,8 @@ interface Layout {
 
 const THEME_KEYS = ['ink', 'muted', 'line', 'bench', 'glass', 'glasshi', 'pipe', 'accent', 'shadow'] as const;
 type Theme = Record<(typeof THEME_KEYS)[number], string>;
+
+const GLOW_STOPS = 32;
 
 const FLASK_PATH = new Path2D('M-11 0 L11 0 L9 22 L26 64 Q28 70 22 70 L-22 70 Q-28 70 -26 64 L-9 22 Z');
 
@@ -460,17 +462,20 @@ export class GameEngine {
     // centered on the flask's bulb (local point (0, 50)), following any tilt
     const cx = mx - 50 * S * Math.sin(ang);
     const cy = my + 50 * S * Math.cos(ang);
-    this.radialGlow(cx, cy, haloRadius(f.T) * S, color, haloAlpha(f.T) * amount, 0.3);
-    this.radialGlow(cx, cy, coronaRadius(f.T) * S, color, coronaAlpha(f.T) * amount, 0.6);
+    this.radialGlow(cx, cy, haloRadius(f.T) * S, color, haloAlpha(f.T) * amount, 2);
+    this.radialGlow(cx, cy, coronaRadius(f.T) * S, color, coronaAlpha(f.T) * amount, 1.5);
   }
 
-  private radialGlow(cx: number, cy: number, R: number, color: RGB, alpha: number, knee: number): void {
+  private radialGlow(cx: number, cy: number, R: number, color: RGB, alpha: number, sharpness: number): void {
     if (alpha < 0.002) return;
     const { ctx } = this;
     const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
-    grad.addColorStop(0, css(color, alpha));
-    grad.addColorStop(knee, css(color, alpha * 0.5));
-    grad.addColorStop(1, css(color, 0));
+    // canvas gradients interpolate linearly between stops, so sample the
+    // falloff densely enough that the piecewise-linear version looks smooth
+    for (let i = 0; i <= GLOW_STOPS; i++) {
+      const x = i / GLOW_STOPS;
+      grad.addColorStop(x, css(color, alpha * glowFalloff(x, sharpness)));
+    }
     ctx.fillStyle = grad;
     ctx.fillRect(cx - R, cy - R, 2 * R, 2 * R);
   }

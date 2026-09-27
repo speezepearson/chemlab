@@ -30,7 +30,7 @@ export function coronaAlpha(T: number): number {
 
 /** Corona radius in unscaled layout pixels. */
 export function coronaRadius(T: number): number {
-  return 38 + 30 * glowStrength(T);
+  return 64 + 40 * glowStrength(T);
 }
 
 /** Peak opacity of the wide halo around a (full enough) flask. */
@@ -42,6 +42,18 @@ export function haloAlpha(T: number): number {
 /** Halo radius in unscaled layout pixels (a flask is 70 tall). */
 export function haloRadius(T: number): number {
   return 30 + 420 * glowStrength(T) ** 1.5;
+}
+
+/**
+ * Glow opacity at fraction x of the way out from the center, relative to the
+ * center: a Gaussian bump times a (1 − x²)² window. It is smooth everywhere
+ * and reaches 0 at x = 1 with zero slope, so neither the interior nor the
+ * rim shows an edge. Larger `sharpness` concentrates the light at the center.
+ */
+export function glowFalloff(x: number, sharpness: number): number {
+  if (x >= 1) return 0;
+  const w = 1 - x * x;
+  return Math.exp(-sharpness * x * x) * w * w;
 }
 
 export type RGB = [number, number, number];
