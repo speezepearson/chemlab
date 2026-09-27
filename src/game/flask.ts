@@ -2,6 +2,8 @@ import { ATOMS, ATOM_RGB } from '../chem/atoms';
 import { T_ROOM } from '../chem/params';
 import { atomCounts, type Fluid } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
+import { TRACE } from './config';
+import { GLASS_GRAMS } from './scale';
 import { css, glowWhiteHeat, heatValue, whiteHeat, whiten, type RGB } from './appearance';
 
 export interface Point {
@@ -9,22 +11,16 @@ export interface Point {
   y: number;
 }
 
-export class Flask implements Fluid {
+/** A container of fluid with a fixed capacity, in atoms. */
+export class Vessel implements Fluid {
   n = new Float64Array(NS);
   N = 0;
   T = T_ROOM;
-  x: number;
-  y: number;
-  ang = 0;
 
   constructor(
-    public home: Point,
     readonly cap: number,
     public label = '',
-  ) {
-    this.x = home.x;
-    this.y = home.y;
-  }
+  ) {}
 
   /** Set one species' molecule count, clamped to [0, what fits]; returns the count actually set. */
   setMolecules(s: number, molecules: number): number {
@@ -47,10 +43,29 @@ export class Flask implements Fluid {
   }
 }
 
+/** A flask on the shelf. It lives in a slot (`home`) and can be picked up and carried. */
+export class Flask extends Vessel {
+  x: number;
+  y: number;
+  ang = 0;
+  /** Weight of the empty flask, in grams. */
+  glass = GLASS_GRAMS;
+
+  constructor(
+    public home: Point,
+    cap: number,
+    label = '',
+  ) {
+    super(cap, label);
+    this.x = home.x;
+    this.y = home.y;
+  }
+}
+
 /** Move `atoms` atoms' worth of src's contents into dst (or down the sink if dst is null). */
 export function transfer(src: Fluid, dst: (Fluid & { cap: number }) | null, atoms: number): number {
   atoms = Math.min(atoms, src.N, dst ? dst.cap - dst.N : Infinity);
-  if (atoms <= 1e-9) return 0;
+  if (atoms <= 0) return 0;
   const f = atoms / src.N;
   for (let s = 0; s < NS; s++) {
     const m = src.n[s] * f;
@@ -62,7 +77,7 @@ export function transfer(src: Fluid, dst: (Fluid & { cap: number }) | null, atom
     dst.N += atoms;
   }
   src.N -= atoms;
-  if (src.N < 1e-6) {
+  if (src.N < TRACE) {
     src.N = 0;
     src.n.fill(0);
   }

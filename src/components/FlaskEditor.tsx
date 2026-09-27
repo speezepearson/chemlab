@@ -1,17 +1,21 @@
 import { useEffect, useReducer } from 'react';
 import { NS, SPECIES, TARGET } from '../chem/species';
+import { CAP } from '../game/config';
 import type { GameEngine } from '../game/engine';
+import { fmtCount } from '../game/format';
 import { DragNumber } from './DragNumber';
 
 /** Smallest molecule count worth listing; reactions leave dust below this. */
-const SHOWN = 0.005;
-const ADDED = 10;
+const SHOWN = CAP * 1e-5;
+/** Molecules of a species added from the "add species" menu. */
+const ADDED = CAP / 30;
 
 /**
- * God-mode editor for one flask's temperature and composition. The flask
- * keeps reacting while this is open, so the numbers update live.
+ * God-mode editor for one vessel's temperature and composition: a flask or a
+ * tool's tank. The vessel keeps reacting while this is open, so the numbers
+ * update live.
  */
-export function FlaskEditor({ engine, index, onClose }: { engine: GameEngine; index: number; onClose(): void }) {
+export function FlaskEditor({ engine, id, onClose }: { engine: GameEngine; id: string; onClose(): void }) {
   const [, rerender] = useReducer((x: number) => x + 1, 0);
 
   useEffect(() => {
@@ -19,8 +23,9 @@ export function FlaskEditor({ engine, index, onClose }: { engine: GameEngine; in
     return () => clearInterval(id);
   }, []);
 
-  const f = engine.flaskAt(index);
-  if (!f) return null;
+  const found = engine.vessel(id);
+  if (!found) return null;
+  const f = found.vessel;
 
   const present = SPECIES.filter((s) => f.n[s.i] >= SHOWN);
   const absent = SPECIES.filter((s) => f.n[s.i] < SHOWN);
@@ -32,10 +37,7 @@ export function FlaskEditor({ engine, index, onClose }: { engine: GameEngine; in
   return (
     <div id="editor" onPointerDown={(e) => e.stopPropagation()}>
       <div className="hd">
-        <b>
-          Flask {index + 1}
-          {f.label ? ` (${f.label})` : ''}
-        </b>
+        <b>{found.title}</b>
         <button aria-label="close" onClick={onClose}>
           ×
         </button>
@@ -44,7 +46,7 @@ export function FlaskEditor({ engine, index, onClose }: { engine: GameEngine; in
         <span>T</span>
         <DragNumber typeable min={0} value={f.T} onChange={(v) => edit(() => (f.T = Math.max(0, v)))} />
         <span className="muted">
-          {Math.round(f.N)} / {f.cap} atoms
+          {fmtCount(f.N)} / {fmtCount(f.cap)} atoms
         </span>
       </div>
       <table>
@@ -100,7 +102,7 @@ export function FlaskEditor({ engine, index, onClose }: { engine: GameEngine; in
         </select>
         <button onClick={() => edit(() => { for (let s = 0; s < NS; s++) f.setMolecules(s, 0); })}>Empty</button>
       </div>
-      <p className="muted">Drag a number to scale it, or double-click to type. The flask keeps reacting while you edit.</p>
+      <p className="muted">Drag a number to scale it, or double-click to type. It keeps reacting while you edit.</p>
     </div>
   );
 }

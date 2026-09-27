@@ -7,6 +7,7 @@ import { FlaskEditor } from './components/FlaskEditor';
 import { InfoPanel } from './components/InfoPanel';
 import { SpeedControl } from './components/SpeedControl';
 import { GOAL_ATOMS } from './game/config';
+import { fmtCount } from './game/format';
 import { GameEngine, type Inspection } from './game/engine';
 import { DEFAULT_PRESET, PRESETS } from './game/presets';
 
@@ -19,7 +20,7 @@ export function App() {
   const [won, setWon] = useState(false);
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [preset, setPreset] = useState(DEFAULT_PRESET);
-  const [editing, setEditing] = useState<number | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
   const presetRef = useRef(preset);
   presetRef.current = preset;
   const stageRef = useRef<HTMLDivElement>(null);
@@ -30,7 +31,7 @@ export function App() {
       onProgress: setProgress,
       onWin: () => setWon(true),
       onInspect: setInspection,
-      onEditFlask: setEditing,
+      onEdit: setEditing,
     }, presetRef.current);
     setEngine(e);
     return () => e.destroy();
@@ -63,7 +64,7 @@ export function App() {
         <h1>Slurry Lab</h1>
         <div className="goal">
           <span>
-            Sustenance {progress} / {GOAL_ATOMS}
+            Sustenance {fmtCount(progress)} / {fmtCount(GOAL_ATOMS)}
           </span>
           <div className="bar">
             <i style={{ width: `${Math.min(100, (100 * progress) / GOAL_ATOMS)}%` }} />
@@ -90,7 +91,7 @@ export function App() {
       <div id="stage" ref={stageRef}>
         <canvas ref={canvasRef} />
         {inspection && <InfoPanel info={inspection} />}
-        {engine && editing !== null && <FlaskEditor engine={engine} index={editing} onClose={() => setEditing(null)} />}
+        {engine && editing !== null && <FlaskEditor engine={engine} id={editing} onClose={() => setEditing(null)} />}
         {won && <div id="win">Enough sustenance to last until relief arrives.</div>}
       </div>
     </>

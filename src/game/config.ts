@@ -1,5 +1,7 @@
-export const CAP = 300; // flask capacity, atoms
-export const POUR_RATE = 70; // atoms/s, flask to flask
-export const FILL_RATE = 110; // atoms/s, from faucet
+export const CAP = 1e9; // flask capacity, atoms
+export const POUR_RATE = (7 / 30) * CAP; // atoms/s, flask to flask
+export const FILL_RATE = (11 / 30) * CAP; // atoms/s, from faucet
 export const N_FLASKS = 8;
-export const GOAL_ATOMS = 600;
+export const GOAL_ATOMS = 2 * CAP;
+/** Amounts of fluid below this many atoms count as nothing: too little to see or pour. */
+export const TRACE = CAP * 1e-6;

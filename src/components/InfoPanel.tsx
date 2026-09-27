@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { SPECIES, TARGET } from '../chem/species';
 import type { Inspection } from '../game/engine';
+import { fmtCount } from '../game/format';
 
 const PIE = 176; // backing pixels; drawn at half size
 const MAX_ROWS = 8;
 
-/** God-mode readout for one flask: temperature, fill, species pie and top species. */
+/** God-mode readout for one vessel: temperature, fill, species pie and top species. */
 export function InfoPanel({ info }: { info: Inspection }) {
   const ref = useRef<HTMLDivElement>(null);
   const pieRef = useRef<HTMLCanvasElement>(null);
@@ -42,12 +43,12 @@ export function InfoPanel({ info }: { info: Inspection }) {
 
   useLayoutEffect(() => {
     const el = ref.current!;
-    const { x, y, scale: S, stageW: W, stageH: H } = info;
+    const { x0, x1, y, stageW: W, stageH: H } = info;
     const pw = el.offsetWidth;
     const ph = el.offsetHeight;
-    let left = x + 36 * S;
+    let left = x1 + 8;
     let top = y - 10;
-    if (left + pw > W - 6) left = x - pw - 36 * S;
+    if (left + pw > W - 6) left = x0 - pw - 8;
     if (left < 6) left = 6;
     if (top + ph > H - 6) top = H - 6 - ph;
     if (top < 6) top = 6;
@@ -59,7 +60,7 @@ export function InfoPanel({ info }: { info: Inspection }) {
       <div className="hd">
         <span>T {info.T.toFixed(2)}</span>
         <span>
-          {Math.round(info.N)} / {info.cap} atoms
+          {fmtCount(info.N)} / {fmtCount(info.cap)} atoms
         </span>
       </div>
       <div className="row">
