@@ -2,7 +2,7 @@ import type { Fluid, ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP, FILL_RATE, GOAL_ATOMS, N_FLASKS, POUR_RATE } from './config';
 import { FAUCETS, faucetOutput, type Faucet } from './faucets';
-import { coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
+import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
 import { Flask, fluidColor, glowColor, transfer, type Point } from './flask';
 import { DEFAULT_PRESET, applyFill, type Preset } from './presets';
 
@@ -30,7 +30,7 @@ export interface EngineCallbacks {
 }
 
 type Zone = { kind: 'flask'; f: Flask } | { kind: 'faucet'; fa: FaucetLayout } | { kind: 'sink' };
-type FaucetLayout = Faucet & { x: number; output: Fluid; color: string };
+type FaucetLayout = Faucet & { x: number; output: Fluid };
 
 interface Layout {
   pipeY: number;
@@ -130,10 +130,7 @@ export class GameEngine {
     L.pipeY = 30 * S;
     L.spoutY = 62 * S;
     L.fillMouthY = L.spoutY + 16 * S;
-    L.faucets = FAUCETS.map((fa, i) => {
-      const output = faucetOutput(fa);
-      return { ...fa, output, color: fluidColor(output), x: W * 0.06 + W * 0.72 * (i / (nF - 1)) };
-    });
+    L.faucets = FAUCETS.map((fa, i) => ({ ...fa, output: faucetOutput(fa), x: W * 0.06 + W * 0.72 * (i / (nF - 1)) }));
     L.sink = { cx: W * 0.905, top: 34 * S, w: 74 * S, h: 36 * S };
     const cols = W < 560 ? 4 : 8;
     const rows = Math.ceil(N_FLASKS / cols);
@@ -398,7 +395,7 @@ export class GameEngine {
       ctx.stroke();
       ctx.fillStyle = theme.pipe;
       ctx.fillRect(fa.x - 5 * S, L.spoutY - 6 * S, 10 * S, 7 * S);
-      ctx.fillStyle = fa.color;
+      ctx.fillStyle = fluidColor(fa.output);
       ctx.beginPath();
       ctx.arc(fa.x, L.pipeY, 10 * S, 0, Math.PI * 2);
       ctx.fill();
@@ -446,7 +443,7 @@ export class GameEngine {
       const D = drag.flask;
       const z = drag.zone;
       if (z?.kind === 'faucet' && D.N < D.cap - 0.01)
-        this.drawStream(z.fa.x, L.spoutY, D.x, D.y + 2 * S, z.fa.color);
+        this.drawStream(z.fa.x, L.spoutY, D.x, D.y + 2 * S, fluidColor(z.fa.output));
       if (z?.kind === 'flask' && D.N > 0.01 && z.f.N < z.f.cap - 0.01)
         this.drawStream(D.x, D.y, z.f.home.x, z.f.home.y + 4 * S, fluidColor(D));
       if (z?.kind === 'sink' && D.N > 0.01) this.drawStream(D.x, D.y, k.cx, k.top + k.h - 6 * S, fluidColor(D));
@@ -469,8 +466,8 @@ export class GameEngine {
     // centered on the flask's bulb (local point (0, 50)), following any tilt
     const cx = mx - 50 * S * Math.sin(ang);
     const cy = my + 50 * S * Math.cos(ang);
-    this.radialGlow(cx, cy, haloRadius(f.T) * S, color, haloAlpha(f.T) * amount, 2);
-    this.radialGlow(cx, cy, coronaRadius(f.T) * S, color, coronaAlpha(f.T) * amount, 1.5);
+    this.radialGlow(cx, cy, haloRadius(f.T) * S, color, haloAlpha(f.T) * amount, LOOK.haloSharpness);
+    this.radialGlow(cx, cy, coronaRadius(f.T) * S, color, coronaAlpha(f.T) * amount, LOOK.coronaSharpness);
   }
 
   private radialGlow(cx: number, cy: number, R: number, color: RGB, alpha: number, sharpness: number): void {

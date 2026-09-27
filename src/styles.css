@@ -54,6 +54,7 @@ details > div{
   position:absolute;right:0;top:26px;background:var(--panel);border:1px solid var(--line);
   border-radius:8px;padding:8px 10px 10px;font-size:12px;z-index:5;
   box-shadow:0 8px 24px var(--shadow);line-height:1.5;
+  max-height:calc(100vh - 120px);overflow:auto;max-width:calc(100vw - 32px);
 }
 details table{border-collapse:collapse}
 details th{font-weight:500;color:var(--muted);text-align:right;padding:0 6px 4px}
@@ -66,6 +67,12 @@ details tr.sep td{padding-top:8px}
 }
 .num:hover,.num.live{border-color:var(--accent)}
 details p{margin:8px 0 0;color:var(--muted);font-size:11px}
+details tr.group td{padding-top:8px;text-align:left;white-space:normal}
+details tr.group:first-child td{padding-top:0}
+details tr.group b{font-weight:500}
+details tr.group span{color:var(--muted);font-size:11px}
+details > div.wide{width:320px}
+details .actions{display:flex;gap:8px;margin-top:8px}
 .hint{width:100%;margin:0;color:var(--muted);font-size:12px}
 #stage{flex:1;position:relative;min-height:0}
 canvas{display:block;width:100%;height:100%;touch-action:none}

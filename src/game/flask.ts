@@ -2,7 +2,7 @@ import { ATOMS, ATOM_RGB } from '../chem/atoms';
 import { T_ROOM } from '../chem/params';
 import { atomCounts, type Fluid } from '../chem/reactions';
 import { NS } from '../chem/species';
-import { css, heatValue, whiteHeat, whiten, type RGB } from './appearance';
+import { css, glowWhiteHeat, heatValue, whiteHeat, whiten, type RGB } from './appearance';
 
 export interface Point {
   x: number;
@@ -86,5 +86,5 @@ export function fluidColor(f: Fluid): string {
 /** Color of the light a hot fluid gives off. */
 export function glowColor(f: Fluid): RGB | null {
   const hue = fluidHue(f);
-  return hue && whiten(hue, whiteHeat(f.T));
+  return hue && whiten(hue, glowWhiteHeat(f.T));
 }

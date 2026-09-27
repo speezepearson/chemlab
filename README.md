@@ -68,6 +68,7 @@ The reaction types are:
   - **Hot** fluids glow. The glow's strength is `ln(1+T) / ln(101)`, and it drives the size and opacity of a corona and a wider halo around the flask. At high T it also bleaches the fluid itself toward white.
   - The glow is subtle but visible at T = 1, obvious at T = 10 and nearly blinding at T = 100.
   - God mode shows the actual number.
+  - The **Appearance** debug panel tunes every constant in these curves live. *Copy values* puts the current settings on the clipboard as JSON, and *Restore defaults* undoes your changes.
 
 ## The intended puzzle
 

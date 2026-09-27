@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { defaultChemParams } from './chem/params';
 import { ReactionNetwork } from './chem/reactions';
+import { AppearancePanel } from './components/AppearancePanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
 import { InfoPanel } from './components/InfoPanel';
 import { SpeedControl } from './components/SpeedControl';
@@ -78,6 +79,7 @@ export function App() {
           </select>
           <button onClick={reset}>Reset</button>
           <ChemistryPanel network={network} />
+          <AppearancePanel />
         </div>
         <p className="hint">{preset.description}</p>
       </header>

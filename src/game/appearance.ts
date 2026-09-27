@@ -2,46 +2,115 @@
  * How temperature looks. Every function here is continuous and monotone in T;
  * there is no threshold where one effect hands over to another.
  *
+ * With the default LOOK:
  *   T:            0     0.4    1      10     100
  *   value         0     0.70   0.95   1.00   1.00   cold fluids fade to black
- *   glow          0     0.07   0.15   0.52   1.00   corona/halo size and opacity, white heat
+ *   glow          0     0.07   0.15   0.52   1.00   corona/halo size and opacity
+ *   whitening     0     0.01   0.02   0.27   1.00   hot fluids wash out to white
+ *
+ * LOOK is mutable so the Appearance debug panel can tune it live.
  */
+
+export interface Look {
+  /** value = 1 − e^(−coldRate·T) */
+  coldRate: number;
+  /** glow g = ln(1+T) / ln(1+glowRef): reaches 1 at T = glowRef, keeps rising after */
+  glowRef: number;
+  /** whitening curve s = min(1, ln(1+T) / ln(1+whiteRef))^whitePow */
+  whiteRef: number;
+  whitePow: number;
+  /** fluid whitening = fluidWhite·s; glow-color whitening = glowWhite·s (each capped at 1) */
+  fluidWhite: number;
+  glowWhite: number;
+  /** corona alpha = min(coronaMax, coronaGain·g); radius = coronaR0 + coronaR1·g */
+  coronaGain: number;
+  coronaMax: number;
+  coronaR0: number;
+  coronaR1: number;
+  coronaSharpness: number;
+  /** halo alpha = min(haloMax, haloLin·g + haloQuad·g²); radius = haloR0 + haloR1·g^haloPow */
+  haloLin: number;
+  haloQuad: number;
+  haloMax: number;
+  haloR0: number;
+  haloR1: number;
+  haloPow: number;
+  haloSharpness: number;
+}
+
+export function defaultLook(): Look {
+  return {
+    coldRate: 3,
+    glowRef: 100,
+    whiteRef: 100,
+    whitePow: 2,
+    fluidWhite: 1,
+    glowWhite: 1,
+    coronaGain: 1.3,
+    coronaMax: 0.85,
+    coronaR0: 64,
+    coronaR1: 40,
+    coronaSharpness: 1.5,
+    haloLin: 0.35,
+    haloQuad: 0.6,
+    haloMax: 0.95,
+    haloR0: 30,
+    haloR1: 420,
+    haloPow: 1.5,
+    haloSharpness: 2,
+  };
+}
+
+export const LOOK: Look = defaultLook();
+
+export function resetLook(): void {
+  Object.assign(LOOK, defaultLook());
+}
 
 /** HSV value multiplier: black at T = 0, almost full by T = 1. */
 export function heatValue(T: number): number {
-  return 1 - Math.exp(-3 * Math.max(T, 0));
+  return 1 - Math.exp(-LOOK.coldRate * Math.max(T, 0));
 }
 
-/** Glow strength: 0 at T = 0, subtle at 1, strong at 10, 1 at 100, still rising beyond. */
+/** Glow strength: 0 at T = 0, subtle at 1, strong at 10, 1 at glowRef, still rising beyond. */
 export function glowStrength(T: number): number {
-  return Math.log1p(Math.max(T, 0)) / Math.log(101);
+  return Math.log1p(Math.max(T, 0)) / Math.log1p(LOOK.glowRef);
 }
 
-/** How far the fluid itself is washed out toward white: negligible at 1, total by 100. */
+/** Shape of the whitening curve, 0 at T = 0 rising to 1 at T = whiteRef. */
+function whiteCurve(T: number): number {
+  return Math.min(1, Math.log1p(Math.max(T, 0)) / Math.log1p(LOOK.whiteRef)) ** LOOK.whitePow;
+}
+
+/** How far the fluid itself is washed out toward white. */
 export function whiteHeat(T: number): number {
-  const g = glowStrength(T);
-  return Math.min(1, g * g);
+  return Math.min(1, LOOK.fluidWhite * whiteCurve(T));
+}
+
+/** How far the color of the light a hot fluid gives off is washed out toward white. */
+export function glowWhiteHeat(T: number): number {
+  return Math.min(1, LOOK.glowWhite * whiteCurve(T));
 }
 
 /** Peak opacity of the tight corona hugging a (full enough) flask: visible from T = 1 up. */
 export function coronaAlpha(T: number): number {
-  return Math.min(0.85, 1.3 * glowStrength(T));
+  return Math.min(LOOK.coronaMax, LOOK.coronaGain * glowStrength(T));
 }
 
 /** Corona radius in unscaled layout pixels. */
 export function coronaRadius(T: number): number {
-  return 64 + 40 * glowStrength(T);
+  return LOOK.coronaR0 + LOOK.coronaR1 * glowStrength(T);
 }
 
 /** Peak opacity of the wide halo around a (full enough) flask. */
 export function haloAlpha(T: number): number {
   const g = glowStrength(T);
-  return Math.min(0.95, 0.35 * g + 0.6 * g * g);
+  return Math.min(LOOK.haloMax, LOOK.haloLin * g + LOOK.haloQuad * g * g);
 }
 
 /** Halo radius in unscaled layout pixels (a flask is 70 tall). */
 export function haloRadius(T: number): number {
-  return 30 + 420 * glowStrength(T) ** 1.5;
+  return LOOK.haloR0 + LOOK.haloR1 * glowStrength(T) ** LOOK.haloPow;
 }
 
 /**
