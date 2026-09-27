@@ -88,6 +88,14 @@ describe('equilibrium', () => {
     expect(atomCounts({ n, N: 6, T: 2 })).toEqual(want.map((v) => expect.closeTo(v, 10)));
   });
 
+  it('converges when traces bind into one dominant species in the cold', () => {
+    const want = atoms({ B: 0.9999, R: 0.00005, G: 0.00005 });
+    const n = equilibrium(want, net.U, 0.2);
+    expect(n.every(Number.isFinite)).toBe(true);
+    atomCounts({ n, N: 1, T: 0.2 }).forEach((v, a) => expect(v).toBeCloseTo(want[a], 12));
+    expect(n[TARGET]).toBeCloseTo(0.00005, 9);
+  });
+
   it('satisfies detailed balance for bond formation', () => {
     const n = equilibrium(atoms({ R: 1, G: 1 }), net.U, 1);
     const [R, G, RG] = [singleOf('R'), singleOf('G'), speciesIndex(['R', 'G', null], 1)];

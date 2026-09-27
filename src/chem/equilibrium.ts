@@ -27,11 +27,14 @@ export function equilibrium(atoms: readonly number[], U: Float64Array, T: number
   const y = present.map((a) => Math.log(atoms[a] / N));
 
   const amounts = () => species.map((_, j) => Math.exp(logW[j] + counts[j].reduce((t, c, i) => t + c * y[i], 0)));
-  for (let iter = 0; iter < 200; iter++) {
+  for (let iter = 0; iter < 500; iter++) {
     const m = amounts();
     const F = present.map((a, i) => species.reduce((t, _, j) => t + counts[j][i] * m[j], 0) - atoms[a]);
     if (F.every((f, i) => Math.abs(f) <= 1e-13 * atoms[present[i]])) break;
     const J = present.map((_, i) => present.map((_, l) => species.reduce((t, _, j) => t + counts[j][i] * counts[j][l] * m[j], 0)));
+    // when one species dominates, J is nearly singular (every row ∝ its counts); a tiny ridge keeps the step finite
+    const ridge = 1e-12 * Math.max(...J.map((row, i) => row[i]));
+    J.forEach((row, i) => (row[i] += ridge));
     const step = solve(J, F.map((f) => -f));
     // the log-space objective is convex, but a full step can still overshoot wildly from a bad start
     const big = Math.max(...step.map(Math.abs));
