@@ -63,7 +63,11 @@ The reaction types are:
 ### Appearance
 
 - **Color:** a fluid looks like the atom-weighted mix of its colors, and the bond structure is invisible. This is lossy on purpose: R + C averages to grey, for example.
-- **Temperature:** shown as brightness, blending toward white when hot and black when cold via `tanh((T − T_room) / 3)`. Brightness saturates, so very hot fluids all look white-hot. God mode shows the actual number.
+- **Temperature:** each effect is a smooth function of T, with no cutoff where one effect takes over from another (see `src/game/appearance.ts`).
+  - **Cold** fluids fade toward black. The color's brightness is scaled by `1 − e^(−3T)`: black at T = 0 and almost full brightness by T = 1.
+  - **Hot** fluids glow. The glow's strength is `ln(1+T) / ln(101)`, and it drives the size and opacity of a corona and a wider halo around the flask. At high T it also bleaches the fluid itself toward white.
+  - The glow is subtle but visible at T = 1, obvious at T = 10 and nearly blinding at T = 100.
+  - God mode shows the actual number.
 
 ## The intended puzzle
 

@@ -2,6 +2,7 @@ import { ATOMS, ATOM_RGB } from '../chem/atoms';
 import { T_ROOM } from '../chem/params';
 import { atomCounts, type Fluid } from '../chem/reactions';
 import { NS } from '../chem/species';
+import { css, heatValue, whiteHeat, whiten, type RGB } from './appearance';
 
 export interface Point {
   x: number;
@@ -59,22 +60,31 @@ export function transfer(src: Fluid, dst: (Fluid & { cap: number }) | null, atom
   return atoms;
 }
 
-/**
- * Atom-weighted mix of the six colors (bond structure is invisible), then
- * tanh((T - T_room)/3) toward white when hot or black when cold.
- */
-export function fluidColor(f: Fluid): string {
+/** Atom-weighted mix of the six colors (bond structure is invisible); null if empty. */
+export function fluidHue(f: Fluid): RGB | null {
   const c = atomCounts(f);
   let tot = 0;
   for (const v of c) tot += v;
-  if (tot <= 0) return 'transparent';
-  const col = [0, 0, 0];
+  if (tot <= 0) return null;
+  const col: RGB = [0, 0, 0];
   for (let a = 0; a < ATOMS.length; a++) {
     const w = c[a] / tot;
     const rgb = ATOM_RGB[ATOMS[a]];
     for (let k = 0; k < 3; k++) col[k] += w * rgb[k];
   }
-  const t = Math.tanh((f.T - T_ROOM) / 3);
-  for (let k = 0; k < 3; k++) col[k] = t > 0 ? col[k] + (255 - col[k]) * t : col[k] * (1 + t);
-  return `rgb(${col.map(Math.round).join(',')})`;
+  return col;
+}
+
+/** The fluid's own color: its hue, darkened when cold and washed toward white when very hot. */
+export function fluidColor(f: Fluid): string {
+  const hue = fluidHue(f);
+  if (!hue) return 'transparent';
+  const v = heatValue(f.T);
+  return css(whiten(hue.map((x) => x * v), whiteHeat(f.T)));
+}
+
+/** Color of the light a hot fluid gives off. */
+export function glowColor(f: Fluid): RGB | null {
+  const hue = fluidHue(f);
+  return hue && whiten(hue, whiteHeat(f.T));
 }

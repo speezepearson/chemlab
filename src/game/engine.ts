@@ -3,7 +3,8 @@ import type { Fluid, ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP, FILL_RATE, GOAL_ATOMS, N_FLASKS, POUR_RATE, SUPPLY_MOLECULES } from './config';
 import { FAUCETS, faucetOutput, type Faucet } from './faucets';
-import { Flask, fluidColor, transfer, type Point } from './flask';
+import { coronaAlpha, coronaRadius, css, haloAlpha, haloRadius, type RGB } from './appearance';
+import { Flask, fluidColor, glowColor, transfer, type Point } from './flask';
 
 /** What the god-mode panel needs to show for one flask. */
 export interface Inspection {
@@ -442,5 +443,35 @@ export class GameEngine {
       if (z?.kind === 'sink' && D.N > 0.01) this.drawStream(D.x, D.y, k.cx, k.top + k.h - 6 * S, fluidColor(D));
       this.drawFlask(D, D.x, D.y, D.ang);
     }
+
+    // glow goes on top of everything, so a very hot flask washes out its surroundings
+    for (const f of this.flasks) {
+      if (drag?.flask === f) this.drawGlow(f, f.x, f.y, f.ang);
+      else this.drawGlow(f, f.home.x, f.home.y, 0);
+    }
+  }
+
+  private drawGlow(f: Flask, mx: number, my: number, ang: number): void {
+    const color = glowColor(f);
+    if (!color) return;
+    // a trace of hot fluid shouldn't blaze like a full flask
+    const amount = Math.sqrt(Math.min(1, (4 * f.N) / f.cap));
+    const { S } = this;
+    // centered on the flask's bulb (local point (0, 50)), following any tilt
+    const cx = mx - 50 * S * Math.sin(ang);
+    const cy = my + 50 * S * Math.cos(ang);
+    this.radialGlow(cx, cy, haloRadius(f.T) * S, color, haloAlpha(f.T) * amount, 0.3);
+    this.radialGlow(cx, cy, coronaRadius(f.T) * S, color, coronaAlpha(f.T) * amount, 0.6);
+  }
+
+  private radialGlow(cx: number, cy: number, R: number, color: RGB, alpha: number, knee: number): void {
+    if (alpha < 0.002) return;
+    const { ctx } = this;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+    grad.addColorStop(0, css(color, alpha));
+    grad.addColorStop(knee, css(color, alpha * 0.5));
+    grad.addColorStop(1, css(color, 0));
+    ctx.fillStyle = grad;
+    ctx.fillRect(cx - R, cy - R, 2 * R, 2 * R);
   }
 }
