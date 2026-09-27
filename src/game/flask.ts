@@ -20,7 +20,7 @@ export class Flask implements Fluid {
   constructor(
     public home: Point,
     readonly cap: number,
-    readonly label = '',
+    public label = '',
   ) {
     this.x = home.x;
     this.y = home.y;

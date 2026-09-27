@@ -6,6 +6,7 @@ import { InfoPanel } from './components/InfoPanel';
 import { SpeedControl } from './components/SpeedControl';
 import { GOAL_ATOMS } from './game/config';
 import { GameEngine, type Inspection } from './game/engine';
+import { DEFAULT_PRESET, PRESETS } from './game/presets';
 
 export function App() {
   const [network] = useState(() => new ReactionNetwork(defaultChemParams()));
@@ -15,6 +16,9 @@ export function App() {
   const [progress, setProgress] = useState(0);
   const [won, setWon] = useState(false);
   const [inspection, setInspection] = useState<Inspection | null>(null);
+  const [preset, setPreset] = useState(DEFAULT_PRESET);
+  const presetRef = useRef(preset);
+  presetRef.current = preset;
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -23,7 +27,7 @@ export function App() {
       onProgress: setProgress,
       onWin: () => setWon(true),
       onInspect: setInspection,
-    });
+    }, presetRef.current);
     setEngine(e);
     return () => e.destroy();
   }, [network]);
@@ -38,6 +42,13 @@ export function App() {
 
   const reset = () => {
     engine?.reset();
+    setWon(false);
+  };
+
+  const loadPreset = (id: string) => {
+    const p = PRESETS.find((x) => x.id === id)!;
+    setPreset(p);
+    engine?.load(p);
     setWon(false);
   };
 
@@ -58,13 +69,17 @@ export function App() {
           <label className="tog">
             <input type="checkbox" checked={god} onChange={(e) => setGod(e.target.checked)} /> god mode
           </label>
+          <select aria-label="preset" value={preset.id} onChange={(e) => loadPreset(e.target.value)}>
+            {PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
           <button onClick={reset}>Reset</button>
           <ChemistryPanel network={network} />
         </div>
-        <p className="hint">
-          You're stranded. The supply flask holds the last of your nutrient slurry. Drag a flask under a faucet to
-          fill it, over another flask to pour, or over the sink to dump it.
-        </p>
+        <p className="hint">{preset.description}</p>
       </header>
       <div id="stage" ref={stageRef}>
         <canvas ref={canvasRef} />

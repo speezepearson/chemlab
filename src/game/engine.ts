@@ -1,10 +1,10 @@
-import { T_ROOM } from '../chem/params';
 import type { Fluid, ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
-import { CAP, FILL_RATE, GOAL_ATOMS, N_FLASKS, POUR_RATE, SUPPLY_MOLECULES } from './config';
+import { CAP, FILL_RATE, GOAL_ATOMS, N_FLASKS, POUR_RATE } from './config';
 import { FAUCETS, faucetOutput, type Faucet } from './faucets';
 import { coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
 import { Flask, fluidColor, glowColor, transfer, type Point } from './flask';
+import { DEFAULT_PRESET, applyFill, type Preset } from './presets';
 
 /** What the god-mode panel needs to show for one flask. */
 export interface Inspection {
@@ -81,6 +81,7 @@ export class GameEngine {
     private stage: HTMLElement,
     private chem: ReactionNetwork,
     private cb: EngineCallbacks,
+    private preset: Preset = DEFAULT_PRESET,
   ) {
     this.ctx = canvas.getContext('2d')!;
     this.resizeObserver = new ResizeObserver(() => this.layout());
@@ -97,12 +98,18 @@ export class GameEngine {
     for (const c of this.cleanups) c();
   }
 
+  /** Restart from the current preset. */
   reset(): void {
-    this.flasks = this.L.homes.map((h, i) => new Flask(h, CAP, i === 0 ? 'supply' : ''));
-    const s = this.flasks[0];
-    s.n[TARGET] = SUPPLY_MOLECULES;
-    s.N = SUPPLY_MOLECULES * 3;
-    s.T = T_ROOM;
+    this.load(this.preset);
+  }
+
+  load(preset: Preset): void {
+    this.preset = preset;
+    this.flasks = this.L.homes.map((h, i) => {
+      const f = new Flask(h, CAP);
+      applyFill(f, preset.flasks[i] ?? null);
+      return f;
+    });
     this.won = false;
     this.drag = null;
     this.hover = null;
