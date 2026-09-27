@@ -37,7 +37,11 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
                 </td>
                 {FIELDS.map((f) => (
                   <td key={f}>
-                    <DragNumber value={b[f]} onChange={(v) => edit(() => (b[f] = v))} />
+                    <DragNumber
+                      value={b[f]}
+                      onChange={(v) => edit(() => (b[f] = v))}
+                      onDoubleClick={f === 'E' ? () => edit(() => (b.E = -b.E)) : undefined}
+                    />
                   </td>
                 ))}
               </tr>
@@ -61,7 +65,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
           </tbody>
         </table>
         <p>
-          Drag a number sideways to scale it. Target: {SPECIES[TARGET].name}, T_room = {T_ROOM}.
+          Drag a number sideways to scale it; double-click a bond energy to flip its sign. Target: {SPECIES[TARGET].name}, T_room = {T_ROOM}.
         </p>
       </div>
     </details>

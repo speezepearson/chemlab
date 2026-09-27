@@ -10,10 +10,18 @@ function fmt(v: number): string {
 
 /**
  * A number you drag sideways to scale: 1% per pixel, continuously, so 100px
- * left is a factor of 1/e. Multiplicative scaling can't leave zero, so a
- * drag starting from below 0.01 starts from 0.01.
+ * left is a factor of 1/e. Scaling keeps the sign, and since it can't leave
+ * zero, a drag starting from a magnitude below 0.01 starts from 0.01.
  */
-export function DragNumber({ value, onChange }: { value: number; onChange(v: number): void }) {
+export function DragNumber({
+  value,
+  onChange,
+  onDoubleClick,
+}: {
+  value: number;
+  onChange(v: number): void;
+  onDoubleClick?(): void;
+}) {
   const [live, setLive] = useState(false);
 
   const onPointerDown = (e: ReactPointerEvent<HTMLSpanElement>) => {
@@ -21,7 +29,7 @@ export function DragNumber({ value, onChange }: { value: number; onChange(v: num
     e.stopPropagation();
     const el = e.currentTarget;
     const x0 = e.clientX;
-    const base = Math.max(value, 0.01);
+    const base = (value < 0 ? -1 : 1) * Math.max(Math.abs(value), 0.01);
     el.setPointerCapture(e.pointerId);
     setLive(true);
     const move = (ev: PointerEvent) => onChange(base * Math.exp((ev.clientX - x0) / 100));
@@ -37,7 +45,7 @@ export function DragNumber({ value, onChange }: { value: number; onChange(v: num
   };
 
   return (
-    <span className={live ? 'num live' : 'num'} onPointerDown={onPointerDown}>
+    <span className={live ? 'num live' : 'num'} onPointerDown={onPointerDown} onDoubleClick={onDoubleClick}>
       {fmt(value)}
     </span>
   );
