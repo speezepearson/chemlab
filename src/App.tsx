@@ -3,6 +3,7 @@ import { defaultChemParams } from './chem/params';
 import { ReactionNetwork } from './chem/reactions';
 import { AppearancePanel } from './components/AppearancePanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
+import { FlaskEditor } from './components/FlaskEditor';
 import { InfoPanel } from './components/InfoPanel';
 import { SpeedControl } from './components/SpeedControl';
 import { GOAL_ATOMS } from './game/config';
@@ -18,6 +19,7 @@ export function App() {
   const [won, setWon] = useState(false);
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [preset, setPreset] = useState(DEFAULT_PRESET);
+  const [editing, setEditing] = useState<number | null>(null);
   const presetRef = useRef(preset);
   presetRef.current = preset;
   const stageRef = useRef<HTMLDivElement>(null);
@@ -28,6 +30,7 @@ export function App() {
       onProgress: setProgress,
       onWin: () => setWon(true),
       onInspect: setInspection,
+      onEditFlask: setEditing,
     }, presetRef.current);
     setEngine(e);
     return () => e.destroy();
@@ -39,6 +42,7 @@ export function App() {
 
   useEffect(() => {
     if (engine) engine.god = god;
+    if (!god) setEditing(null);
   }, [engine, god]);
 
   const reset = () => {
@@ -86,6 +90,7 @@ export function App() {
       <div id="stage" ref={stageRef}>
         <canvas ref={canvasRef} />
         {inspection && <InfoPanel info={inspection} />}
+        {engine && editing !== null && <FlaskEditor engine={engine} index={editing} onClose={() => setEditing(null)} />}
         {won && <div id="win">Enough sustenance to last until relief arrives.</div>}
       </div>
     </>

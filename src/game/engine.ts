@@ -27,6 +27,8 @@ export interface EngineCallbacks {
   onWin(): void;
   /** Throttled to ~10 Hz; null when nothing is inspected. */
   onInspect(info: Inspection | null): void;
+  /** A flask was double-clicked in god mode. */
+  onEditFlask(index: number): void;
 }
 
 type Zone = { kind: 'flask'; f: Flask } | { kind: 'faucet'; fa: FaucetLayout } | { kind: 'sink' };
@@ -96,6 +98,11 @@ export class GameEngine {
     cancelAnimationFrame(this.raf);
     this.resizeObserver.disconnect();
     for (const c of this.cleanups) c();
+  }
+
+  /** The flask in shelf slot i (replaced on reset/load, so look it up each time). */
+  flaskAt(i: number): Flask | undefined {
+    return this.flasks[i];
   }
 
   /** Restart from the current preset. */
@@ -187,9 +194,14 @@ export class GameEngine {
       if (!this.drag) this.hover = null;
     });
     on('contextmenu', (e) => e.preventDefault());
+    on('dblclick', (e) => {
+      if (!this.god) return;
+      const f = this.hitFlask(this.ptr(e));
+      if (f) this.cb.onEditFlask(this.flasks.indexOf(f));
+    });
   }
 
-  private ptr(e: PointerEvent): Point {
+  private ptr(e: MouseEvent): Point {
     const r = this.canvas.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }

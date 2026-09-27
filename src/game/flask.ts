@@ -1,7 +1,7 @@
 import { ATOMS, ATOM_RGB } from '../chem/atoms';
 import { T_ROOM } from '../chem/params';
 import { atomCounts, type Fluid } from '../chem/reactions';
-import { NS } from '../chem/species';
+import { NS, SPECIES } from '../chem/species';
 import { css, glowWhiteHeat, heatValue, whiteHeat, whiten, type RGB } from './appearance';
 
 export interface Point {
@@ -24,6 +24,15 @@ export class Flask implements Fluid {
   ) {
     this.x = home.x;
     this.y = home.y;
+  }
+
+  /** Set one species' molecule count, clamped to [0, what fits]; returns the count actually set. */
+  setMolecules(s: number, molecules: number): number {
+    const size = SPECIES[s].size;
+    const m = Math.max(0, Math.min(molecules, this.n[s] + (this.cap - this.N) / size));
+    this.N = Math.max(0, this.N + (m - this.n[s]) * size);
+    this.n[s] = m;
+    return m;
   }
 
   /** Add `amount` atoms' worth of a fluid without depleting it; returns the amount actually added. */

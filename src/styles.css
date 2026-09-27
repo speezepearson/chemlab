@@ -89,6 +89,24 @@ canvas{display:block;width:100%;height:100%;touch-action:none}
 #info li b{font-weight:500;display:flex;align-items:center;gap:5px}
 #info li i{display:inline-block;width:9px;height:9px;border-radius:2px;flex:none}
 #info li span{color:var(--muted)}
+#editor{
+  position:absolute;left:12px;top:96px;width:250px;max-height:calc(100% - 108px);overflow:auto;
+  background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px 10px;
+  font-size:12px;box-shadow:0 6px 20px var(--shadow);z-index:3;
+}
+#editor .hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+#editor .hd b{font-weight:500}
+#editor .line{display:flex;gap:8px;align-items:center;margin:6px 0}
+#editor .muted{color:var(--muted)}
+#editor p.muted{margin:8px 0 0;font-size:11px}
+#editor table{border-collapse:collapse;width:100%}
+#editor th{font-weight:500;color:var(--muted);text-align:left;padding:0 4px 4px 0}
+#editor td{padding:1px 4px 1px 0}
+#editor td:first-child{display:flex;align-items:center;gap:5px}
+#editor td i{display:inline-block;width:9px;height:9px;border-radius:2px;flex:none}
+#editor button{padding:0 7px;line-height:1.5}
+#editor select{padding:2px 6px;flex:1}
+.num-input{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--accent);border-radius:4px;width:70px;padding:0 4px}
 #win{
   position:absolute;left:50%;top:14px;transform:translateX(-50%);background:var(--accent);color:var(--bg);
   padding:8px 14px;border-radius:8px;font-weight:500;box-shadow:0 6px 20px var(--shadow)

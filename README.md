@@ -88,7 +88,7 @@ The current target is the **△RGB triangle**. The intended route is R + G → R
 - **Filling:** drag a flask under a faucet to fill it. There are six faucets, one per atom. Faucet output is always at room temperature and in chemical equilibrium with itself, so a flask filled from one faucet just sits there. `src/game/faucets.test.ts` enforces both.
 - **Pouring:** drag a flask over another flask to pour gradually, or over the sink to dump it.
 - **Supply:** the supply flask starts with 40 molecules of the target. The goal bar counts target atoms across all flasks, and 600 wins.
-- **God mode:** hovering or dragging a flask shows its temperature, fill level, a species pie chart and the top species.
+- **God mode:** hovering or dragging a flask shows its temperature, fill level, a species pie chart and the top species. Double-clicking a flask opens an editor for its temperature and composition. You can drag or type each number, add or remove any of the 50 species, or empty the flask. It updates live while the flask reacts.
 - **Sim speed:** pause, 1×, 4× or 16×, since Arrhenius waiting is boring.
 - **Presets:** the dropdown next to Reset loads a starting layout, and Reset restarts the current one. *Stranded* is the game. *Temperature range* shows flasks from T = 0 to T = 100, to show how temperature looks. Presets are defined in `src/game/presets.ts`.
 - **Chemistry table:** every parameter is live-editable. Drag a number sideways to scale it by 1% per pixel (100 px ≈ ×e), and double-click a bond energy `E` to flip its sign. All reaction rates rebuild on every change.
