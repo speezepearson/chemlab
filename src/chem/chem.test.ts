@@ -60,7 +60,7 @@ describe('reactions', () => {
     expect(f.T).toBeGreaterThan(1.3);
   });
 
-  it('makes the target by building △RGY and washing it with blue', () => {
+  it('makes the target by building △RGY and washing it with room-temperature blue', () => {
     const f = fluid([single('R', 50), single('G', 50)]);
     run(net, f, 60);
     const withY = mix(f, fluid([single('Y', 50)]));
@@ -68,7 +68,7 @@ describe('reactions', () => {
     const RGY = speciesIndex(['R', 'G', 'Y'], 7);
     expect(withY.n[RGY]).toBeGreaterThan(20);
 
-    const washed = mix(withY, fluid([single('B', 150)], 0.4));
+    const washed = mix(withY, fluid([single('B', 150)]));
     run(net, washed, 120);
     expect(washed.n[TARGET]).toBeGreaterThan(30);
     // nearly all of the yellow has been displaced from molecules

@@ -1,7 +1,7 @@
-import { ATOMS, ATOM_RGB, type Atom } from '../chem/atoms';
+import { ATOMS, ATOM_RGB } from '../chem/atoms';
 import { T_ROOM } from '../chem/params';
 import { atomCounts, type Fluid } from '../chem/reactions';
-import { NS, singleOf } from '../chem/species';
+import { NS } from '../chem/species';
 
 export interface Point {
   x: number;
@@ -25,12 +25,13 @@ export class Flask implements Fluid {
     this.y = home.y;
   }
 
-  /** Add free atoms at temperature T; returns the amount actually added. */
-  addSingle(atom: Atom, amount: number, T: number): number {
+  /** Add `amount` atoms' worth of a fluid without depleting it; returns the amount actually added. */
+  addFrom(src: Fluid, amount: number): number {
     amount = Math.min(amount, this.cap - this.N);
     if (amount <= 0) return 0;
-    this.n[singleOf(atom)] += amount;
-    this.T = (this.N * this.T + amount * T) / (this.N + amount);
+    const f = amount / src.N;
+    for (let s = 0; s < NS; s++) this.n[s] += src.n[s] * f;
+    this.T = (this.N * this.T + amount * src.T) / (this.N + amount);
     this.N += amount;
     return amount;
   }
@@ -76,10 +77,4 @@ export function fluidColor(f: Fluid): string {
   const t = Math.tanh((f.T - T_ROOM) / 3);
   for (let k = 0; k < 3; k++) col[k] = t > 0 ? col[k] + (255 - col[k]) * t : col[k] * (1 + t);
   return `rgb(${col.map(Math.round).join(',')})`;
-}
-
-export function pureColor(atom: Atom, T: number): string {
-  const n = new Float64Array(NS);
-  n[singleOf(atom)] = 1;
-  return fluidColor({ n, N: 1, T });
 }

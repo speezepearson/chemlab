@@ -58,7 +58,7 @@ The reaction types are:
 
 - **Reaction heat:** exotherms heat the fluid through a per-atom heat capacity.
 - **Mixing:** temperatures average, weighted by atom count.
-- **Cooling:** none in v1, so flasks stay hot forever. The only ways to lower a temperature are pouring in cold faucet fluid or running endothermic reactions, which makes faucet temperatures a real design lever.
+- **Cooling:** none in v1, so flasks stay hot forever. Faucets only give room-temperature fluid, so the only ways to lower a temperature are diluting with faucet fluid or running endothermic reactions.
 
 ### Appearance
 
@@ -76,11 +76,11 @@ To get blue into a molecule:
 
 Detailed balance means the tiny prefactor slows breaking as much as forming. Once blue is in, it's kinetically locked, and the product is stable in a way its yellow precursor isn't.
 
-The current target is the **△RGB triangle**. The intended route is R + G → R–G, then + Y → mostly △RGY, then wash with cold B. The test suite checks that this route works.
+The current target is the **△RGB triangle**. The intended route is R + G → R–G, then + Y → mostly △RGY, then wash with B. The test suite checks that this route works.
 
 ## What's playable now (v1)
 
-- **Filling:** drag a flask under a faucet to fill it. There are six faucets, one per atom. Blue comes out cold (T = 0.4), magenta hot (T = 2.5), and the rest at room temperature.
+- **Filling:** drag a flask under a faucet to fill it. There are six faucets, one per atom. Faucet output is always at room temperature and in chemical equilibrium with itself, so a flask filled from one faucet just sits there. `src/game/faucets.test.ts` enforces both.
 - **Pouring:** drag a flask over another flask to pour gradually, or over the sink to dump it.
 - **Supply:** the supply flask starts with 40 molecules of the target. The goal bar counts target atoms across all flasks, and 600 wins.
 - **God mode:** hovering or dragging a flask shows its temperature, fill level, a species pie chart and the top species.

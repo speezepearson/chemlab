@@ -1,8 +1,9 @@
 import { T_ROOM } from '../chem/params';
-import type { ReactionNetwork } from '../chem/reactions';
+import type { Fluid, ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
-import { CAP, FAUCETS, FILL_RATE, GOAL_ATOMS, N_FLASKS, POUR_RATE, SUPPLY_MOLECULES, type Faucet } from './config';
-import { Flask, fluidColor, pureColor, transfer, type Point } from './flask';
+import { CAP, FILL_RATE, GOAL_ATOMS, N_FLASKS, POUR_RATE, SUPPLY_MOLECULES } from './config';
+import { FAUCETS, faucetOutput, type Faucet } from './faucets';
+import { Flask, fluidColor, transfer, type Point } from './flask';
 
 /** What the god-mode panel needs to show for one flask. */
 export interface Inspection {
@@ -28,7 +29,7 @@ export interface EngineCallbacks {
 }
 
 type Zone = { kind: 'flask'; f: Flask } | { kind: 'faucet'; fa: FaucetLayout } | { kind: 'sink' };
-type FaucetLayout = Faucet & { x: number };
+type FaucetLayout = Faucet & { x: number; output: Fluid; color: string };
 
 interface Layout {
   pipeY: number;
@@ -119,7 +120,10 @@ export class GameEngine {
     L.pipeY = 30 * S;
     L.spoutY = 62 * S;
     L.fillMouthY = L.spoutY + 16 * S;
-    L.faucets = FAUCETS.map((fa, i) => ({ ...fa, x: W * 0.06 + W * 0.72 * (i / (nF - 1)) }));
+    L.faucets = FAUCETS.map((fa, i) => {
+      const output = faucetOutput(fa);
+      return { ...fa, output, color: fluidColor(output), x: W * 0.06 + W * 0.72 * (i / (nF - 1)) };
+    });
     L.sink = { cx: W * 0.905, top: 34 * S, w: 74 * S, h: 36 * S };
     const cols = W < 560 ? 4 : 8;
     const rows = Math.ceil(N_FLASKS / cols);
@@ -229,7 +233,7 @@ export class GameEngine {
         D.x = z.fa.x;
         D.y = L.fillMouthY;
         D.ang = 0;
-        D.addSingle(z.fa.atom, FILL_RATE * dt, z.fa.T);
+        D.addFrom(z.fa.output, FILL_RATE * dt);
       } else if (z.kind === 'flask') {
         D.x = z.f.home.x + 16 * S;
         D.y = z.f.home.y - 32 * S;
@@ -384,16 +388,13 @@ export class GameEngine {
       ctx.stroke();
       ctx.fillStyle = theme.pipe;
       ctx.fillRect(fa.x - 5 * S, L.spoutY - 6 * S, 10 * S, 7 * S);
-      ctx.fillStyle = pureColor(fa.atom, fa.T);
+      ctx.fillStyle = fa.color;
       ctx.beginPath();
       ctx.arc(fa.x, L.pipeY, 10 * S, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = theme.glass;
       ctx.lineWidth = 1.2;
       ctx.stroke();
-      ctx.fillStyle = theme.muted;
-      ctx.textAlign = 'center';
-      ctx.fillText(fa.T.toFixed(1), fa.x, L.pipeY - 15 * S);
     }
 
     // sink
@@ -435,7 +436,7 @@ export class GameEngine {
       const D = drag.flask;
       const z = drag.zone;
       if (z?.kind === 'faucet' && D.N < D.cap - 0.01)
-        this.drawStream(z.fa.x, L.spoutY, D.x, D.y + 2 * S, pureColor(z.fa.atom, z.fa.T));
+        this.drawStream(z.fa.x, L.spoutY, D.x, D.y + 2 * S, z.fa.color);
       if (z?.kind === 'flask' && D.N > 0.01 && z.f.N < z.f.cap - 0.01)
         this.drawStream(D.x, D.y, z.f.home.x, z.f.home.y + 4 * S, fluidColor(D));
       if (z?.kind === 'sink' && D.N > 0.01) this.drawStream(D.x, D.y, k.cx, k.top + k.h - 6 * S, fluidColor(D));
