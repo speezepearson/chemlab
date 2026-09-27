@@ -30,7 +30,8 @@ describe('presets', () => {
     it(`${p.name} has sensible tools`, () => {
       for (const t of p.tools ?? []) {
         for (const c of t.at) expect(c >= 0 && c <= 1).toBe(true);
-        if (t.valve !== undefined) expect(t.valve >= 0 && t.valve <= 1).toBe(true);
+        for (const v of t.valves ?? []) expect(v >= 0 && v <= 1).toBe(true);
+        expect((t.valves ?? []).length).toBeLessThanOrEqual(SHAPES[t.kind].tanks.length);
         expect((t.tanks ?? []).length).toBeLessThanOrEqual(SHAPES[t.kind].tanks.length);
         for (const fill of t.tanks ?? []) if (fill) expect(fillAtoms(fill)).toBeLessThanOrEqual(TANK_CAP);
       }

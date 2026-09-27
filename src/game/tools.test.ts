@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SPECIES, singleOf } from '../chem/species';
 import { CAP } from './config';
 import { Vessel } from './flask';
-import { MAX_FLOW, TANK_CAP, Tool, equilibrate, mouthBelow, type Mouth } from './tools';
+import { EXCHANGE_RATE, MAX_FLOW, TANK_CAP, Tool, counterflow, mouthBelow, type Mouth } from './tools';
 
 const R = singleOf('R');
 const G = singleOf('G');
@@ -16,30 +16,30 @@ function filled(v: Vessel, species: number, atoms: number, T: number): Vessel {
 
 describe('dispenser', () => {
   it('dispenses valve × MAX_FLOW atoms per sim second', () => {
-    const d = new Tool('dispenser', 0, 0, 0, 0.5);
+    const d = new Tool('dispenser', 0, 0, 0, [0.5]);
     filled(d.tanks[0], R, 2 * CAP, 3);
-    const out = d.step(0.1)!;
+    const out = d.step(0.1)[0]!;
     expect(out.N).toBeCloseTo(0.5 * MAX_FLOW * 0.1);
     expect(out.T).toBe(3);
     expect(d.tanks[0].N).toBeCloseTo(2 * CAP - out.N);
     expect(atomTotal(out) + atomTotal(d.tanks[0])).toBeCloseTo(2 * CAP);
   });
 
-  it('dispenses nothing when closed or empty', () => {
-    const d = new Tool('dispenser', 0, 0, 0, 0);
+  it('starts closed, and dispenses nothing when closed or empty', () => {
+    const d = new Tool('dispenser', 0, 0, 0);
     filled(d.tanks[0], R, CAP, 1);
-    expect(d.step(0.1)).toBeNull();
+    expect(d.step(0.1)).toEqual([null]);
     expect(d.tanks[0].N).toBe(CAP);
-    d.valve = 1;
+    d.valves[0] = 1;
     d.tanks[0].setMolecules(R, 0);
-    expect(d.step(0.1)).toBeNull();
+    expect(d.step(0.1)).toEqual([null]);
   });
 
   it('empties completely rather than leaving a trace behind', () => {
-    const d = new Tool('dispenser', 0, 0, 0, 1);
+    const d = new Tool('dispenser', 0, 0, 0, [1]);
     filled(d.tanks[0], R, CAP, 1);
     let total = 0;
-    for (let i = 0; i < 200; i++) total += d.step(0.01)?.N ?? 0;
+    for (let i = 0; i < 200; i++) total += d.step(0.01)[0]?.N ?? 0;
     expect(d.tanks[0].N).toBe(0);
     expect(total).toBeCloseTo(CAP);
   });
@@ -50,46 +50,57 @@ describe('dispenser', () => {
 });
 
 describe('heat exchanger', () => {
-  it('sends feed out at the bath temperature, conserving heat and keeping the fluids apart', () => {
-    const x = new Tool('exchanger', 0, 0, 0, 1);
-    const [feed, bath] = x.tanks;
-    filled(feed, R, CAP, 10);
-    filled(bath, G, 3 * CAP, 1);
-    const out = x.step(0.05)!;
-    expect(out.T).toBeCloseTo(bath.T);
-    // heat is conserved: what the feed lost, the bath gained
-    expect(out.N * out.T + bath.N * bath.T).toBeCloseTo(out.N * 10 + 3 * CAP * 1, 0);
-    expect(out.n[G]).toBe(0);
-    expect(bath.n[R]).toBe(0);
-    expect(bath.N).toBe(3 * CAP);
+  function run(valves: number[], TA = 10, TB = 1) {
+    const x = new Tool('exchanger', 0, 0, 0, valves);
+    filled(x.tanks[0], R, CAP, TA);
+    filled(x.tanks[1], G, CAP, TB);
+    return x.step(0.05);
+  }
+
+  it('trades heat between the streams without mixing them, conserving heat', () => {
+    const [a, b] = run([0.5, 0.5]);
+    expect(a!.T).toBeLessThan(10);
+    expect(b!.T).toBeGreaterThan(1);
+    expect(a!.N * a!.T + b!.N * b!.T).toBeCloseTo(a!.N * 10 + b!.N * 1);
+    expect(a!.n[G]).toBe(0);
+    expect(b!.n[R]).toBe(0);
   });
 
-  it('warms the bath toward the feed temperature as it runs', () => {
-    const x = new Tool('exchanger', 0, 0, 0, 0.5);
-    const [feed, bath] = x.tanks;
-    filled(feed, R, CAP, 10);
-    filled(bath, G, CAP, 1);
-    const temps: number[] = [];
-    for (let i = 0; i < 400 && feed.N > 0; i++) temps.push(x.step(0.01)!.T);
-    // continuous exchange: bath T = T_feed + (T_bath0 − T_feed)·e^(−passed / bath size)
-    expect(bath.T).toBeCloseTo(10 - 9 * Math.exp(-1), 1);
-    for (let i = 1; i < temps.length; i++) expect(temps[i]).toBeGreaterThan(temps[i - 1]);
+  it('nearly swaps the temperatures of equal slow streams, and trades less at speed', () => {
+    const [slowA] = run([0.1, 0.1]);
+    const [fastA] = run([1, 1]);
+    // ε = NTU / (1 + NTU), NTU = EXCHANGE_RATE / flow
+    const eff = (flow: number) => (EXCHANGE_RATE / flow) / (1 + EXCHANGE_RATE / flow);
+    expect(slowA!.T).toBeCloseTo(10 - 9 * eff(0.1 * MAX_FLOW));
+    expect(fastA!.T).toBeCloseTo(10 - 9 * eff(MAX_FLOW));
+    expect(slowA!.T).toBeLessThan(2);
+    expect(fastA!.T).toBeGreaterThan(slowA!.T);
   });
 
-  it('passes feed through unchanged with an empty bath', () => {
-    const x = new Tool('exchanger', 0, 0, 0, 1);
-    filled(x.tanks[0], R, CAP, 7);
-    expect(x.step(0.05)!.T).toBe(7);
+  it('brings a slow stream close to the inlet temperature of a fast one, and never overshoots', () => {
+    const [a, b] = run([0.05, 1]);
+    expect(a!.T).toBeCloseTo(1, 1);
+    expect(a!.T).toBeGreaterThanOrEqual(1);
+    expect(b!.T).toBeLessThanOrEqual(10);
+    const [a2, b2] = run([1, 0.05]);
+    expect(b2!.T).toBeCloseTo(10, 1);
+    expect(b2!.T).toBeLessThanOrEqual(10);
+    expect(a2!.T).toBeGreaterThanOrEqual(1);
+  });
+
+  it('passes one stream through unchanged while the other is shut', () => {
+    const [a, b] = run([1, 0]);
+    expect(a!.T).toBe(10);
+    expect(b).toBeNull();
   });
 });
 
-describe('equilibrate', () => {
-  it('meets at the atom-weighted mean temperature', () => {
+describe('counterflow', () => {
+  it('does nothing with an empty side', () => {
     const a = { n: new Float64Array(1), N: 100, T: 1 };
-    const b = { n: new Float64Array(1), N: 300, T: 5 };
-    equilibrate(a, b);
-    expect(a.T).toBe(4);
-    expect(b.T).toBe(4);
+    const b = { n: new Float64Array(1), N: 0, T: 5 };
+    counterflow(a, b, 1000);
+    expect(a.T).toBe(1);
   });
 });
 

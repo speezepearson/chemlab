@@ -18,7 +18,8 @@ export interface ToolSpec {
   kind: ToolKind;
   /** Top center of the tool, as fractions of the stage's width and height. */
   at: [number, number];
-  valve?: number;
+  /** Per tank, 0 (closed) to 1 (fully open); closed if left out. */
+  valves?: number[];
   /** Starting contents of each tank, in the order the tool's shape lists them. */
   tanks?: (FlaskFill | null)[];
 }
@@ -61,15 +62,13 @@ export const PRESETS: readonly Preset[] = [
     id: 'exchanger',
     name: 'Heat exchanger demo',
     description:
-      'A dispenser of hot red feeds a heat exchanger whose bath is room-temperature green. The red leaves at the ' +
-      "bath's temperature and the bath warms up. Right-click-drag a tool to turn its valve.",
+      'Hot red and room-temperature green pass each other in a counterflow heat exchanger, trading heat but not ' +
+      'mixing: the red comes out cool and the green hot. Slower flows trade more. Right-click-drag a valve to turn it.',
     flasks: [],
     tools: [
-      { kind: 'dispenser', at: [0.47, 0.2], valve: 0.3, tanks: [{ contents: [atomsOf(singleOf('R'), 3 * CAP)], T: 10 }] },
-      {
-        kind: 'exchanger', at: [0.5625 - 0.046, 0.46], valve: 0.1,
-        tanks: [null, { contents: [atomsOf(singleOf('G'), 4 * CAP)], T: T_ROOM }],
-      },
+      { kind: 'dispenser', at: [0.5625, 0.22], valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('R'), 4 * CAP)], T: 10 }] },
+      { kind: 'dispenser', at: [0.6545, 0.22], valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('G'), 4 * CAP)], T: T_ROOM }] },
+      { kind: 'exchanger', at: [0.5625 + 0.046, 0.48], valves: [0.25, 0.25] },
     ],
   },
   {

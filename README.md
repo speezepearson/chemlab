@@ -87,16 +87,16 @@ The current target is the **△RGB triangle**. The intended route is R + G → R
 
 - **Filling:** drag a flask under a faucet to fill it. There are six faucets, one per atom. Faucet output is always at room temperature and in chemical equilibrium with itself, so a flask filled from one faucet just sits there. `src/game/faucets.test.ts` enforces both. A faucet fills anything held or parked right under it, including a tool's tank.
 - **Pouring:** drag a flask over another flask or a tool's tank to pour gradually, or down to the sink along the bottom of the screen to dump it.
-- **Tools** (`src/game/tools.ts`) can be dragged anywhere and stay where you drop them. Each has tanks on top that hold four flasks' worth, and a valved spout on the bottom. Right-click-drag a tool to turn its valve, from closed to 1 flask/s. Right or up opens it. Valves start closed.
+- **Tools** (`src/game/tools.ts`) can be dragged anywhere and stay where you drop them. Each has tanks on top that hold four flasks' worth, and each tank drains through its own valved spout. Right-click-drag a tool near a valve to turn it, from closed to 1 flask/s. Right or up opens it. Valves start closed.
   - **Spouts** pour into the first open top below them: a flask, including one you're holding under the spout, or another tool's tank. If there isn't one, the fluid falls into the sink. Whatever doesn't fit overflows to the sink. A tool whose spout is close to lined up over a mouth snaps the rest of the way.
   - **Dispenser:** one tank, drained through the spout.
-  - **Heat exchanger:** a *feed* tank drains through a coil immersed in a *bath* tank and out the spout. Fluid in the coil leaves at the bath's temperature, and the bath absorbs the difference, so heat is conserved. The two fluids never mix. The bath has no outlet.
+  - **Heat exchanger:** two tanks, A and B, whose streams pass each other in counterflow on the way to their spouts. They trade heat but never mix, and heat is conserved. It uses the standard effectiveness–NTU model with a fixed exchange capacity (`EXCHANGE_RATE`, 2 flasks/s): the slower stream gets a fraction ε of the way to the other's inlet temperature. Two equal streams at 0.25 flask/s nearly swap temperatures (ε = 8/9). At 1 flask/s they get ε = 2/3. If one valve is shut, the other stream passes through unchanged.
   - Tools run on **sim time**, interleaved with the chemistry, so a slow drip into a reacting flask comes out the same at any sim speed, and pausing freezes them. Faucets and your own pouring stay in real time.
 - **Scale** (`src/game/scale.ts`): drop up to three flasks on its platform to weigh them. They stay there until you pick them up, and a spout above one pours into it, so you can dispense by weight. It reads whole grams up to 5 kg (OVER beyond that), and *tare* zeroes it. Fluid weighs 1 µg per atom, so a full flask of fluid is 1 kg. Each empty flask weighs about 100 g, off by up to 6 g. The error is fixed per shelf slot, so weighing fluid means taring with its flask first.
 - **Supply:** the supply flask starts with 0.4 billion atoms of the target. The goal bar counts target atoms across every flask and tank, and 2 billion wins.
 - **God mode:** hovering or dragging a flask, or hovering a tank, shows its temperature, fill level, a species pie chart and the top species. Double-clicking one opens an editor for its temperature and composition. You can drag or type each number, add or remove any of the 50 species, or empty it. It updates live while the contents react.
 - **Sim speed:** pause, 1×, 4× or 16×, since Arrhenius waiting is boring.
-- **Presets:** the dropdown next to Reset loads a starting layout, and Reset restarts the current one. *Stranded* is the game. *Temperature range* shows flasks from T = 0 to T = 100, to show how temperature looks. *Heat exchanger demo* runs hot fluid through an exchanger with a room-temperature bath. Presets are defined in `src/game/presets.ts`.
+- **Presets:** the dropdown next to Reset loads a starting layout, and Reset restarts the current one. *Stranded* is the game. *Temperature range* shows flasks from T = 0 to T = 100, to show how temperature looks. *Heat exchanger demo* passes hot red and room-temperature green through the exchanger. Presets are defined in `src/game/presets.ts`.
 - **Chemistry table:** every parameter is live-editable. Drag a number sideways to scale it by 1% per pixel (100 px ≈ ×e), and double-click a bond energy `E` to flip its sign. All reaction rates rebuild on every change.
 
 ## Open questions / next steps
@@ -110,8 +110,7 @@ The current target is the **△RGB triangle**. The intended route is R + G → R
 - **Temperature control.** A burner or ice bath, and possibly Newtonian cooling toward ambient, so that "the target sits behind a kinetic barrier that needs heat" works as a puzzle.
 - **More glassware and tools.** Graduated cylinders and pipettes.
 - **Tool follow-ups.**
-  - The exchanger's bath never drains, so it saturates toward the feed temperature and then stops helping. Giving the bath its own flow would make it a counterflow exchanger, which can nearly swap two streams' temperatures instead of just averaging them.
-  - A tank can only be emptied through its spout, and a bath can only be emptied in god mode.
+  - A tank can only be emptied through its spout.
   - The valve needs a right mouse button, so there's no touch equivalent yet.
   - Tools can't stand on the scale, so a dispenser's contents can't be weighed.
   - Every atom weighs the same. Giving colors different masses would make the scale reveal something about composition.
