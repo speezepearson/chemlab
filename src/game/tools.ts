@@ -22,10 +22,11 @@ export type ToolKind = 'dispenser' | 'exchanger';
  * A tool's geometry in local units: multiply by the stage scale and offset by
  * the tool's position, which is the top center of its bounding box.
  * Every tank is open at y = 0 and has its floor at y = TANK_H, and drains
- * through its own valve and out its own spout, straight below its center.
+ * through its own valve, straight below its center, and out its own spout.
  */
 export interface ToolShape {
-  tanks: { name: string; x0: number; x1: number }[];
+  /** `spoutX` is where the tank's stream leaves the tool, if not straight below the tank. */
+  tanks: { name: string; x0: number; x1: number; spoutX?: number }[];
   /** Height of each tank's valve and of the tip of its spout, where fluid leaves the tool. */
   valveY: number;
   spoutY: number;
@@ -40,18 +41,30 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -34, x1: 34, y0: -6, y1: 116 },
   },
   exchanger: {
+    // the streams cross over in the exchanger, so each leaves on the other side
     tanks: [
-      { name: 'A', x0: -64, x1: -6 },
-      { name: 'B', x0: 6, x1: 64 },
+      { name: 'A', x0: -64, x1: -6, spoutX: 35 },
+      { name: 'B', x0: 6, x1: 64, spoutX: -35 },
     ],
-    valveY: 122,
-    spoutY: 138,
-    box: { x0: -68, x1: 68, y0: -6, y1: 140 },
+    valveY: 94,
+    spoutY: 136,
+    box: { x0: -68, x1: 68, y0: -6, y1: 138 },
   },
 };
 
-/** Horizontal center of a tank, which is also where its valve and spout are. */
+/** Horizontal center of a tank, which is also where its valve is. */
 export const tankX = (tk: { x0: number; x1: number }) => (tk.x0 + tk.x1) / 2;
+
+/** Where a tank's stream leaves the tool. */
+export const spoutX = (tk: { x0: number; x1: number; spoutX?: number }) => tk.spoutX ?? tankX(tk);
+
+/**
+ * The exchanger's two hoses, wound around each other along the axis between
+ * the tanks, in local units. Three half-twists take each hose from the top of
+ * one end to the bottom of the other, so a stream comes down from its tank,
+ * winds across, and drops out the far side.
+ */
+export const HELIX = { x0: -35, x1: 35, y: 110, r: 6, halfTwists: 3 };
 
 export const TOOL_NAMES: Record<ToolKind, string> = { dispenser: 'Dispenser', exchanger: 'Heat exchanger' };
 

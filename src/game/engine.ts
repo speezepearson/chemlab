@@ -6,7 +6,7 @@ import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadiu
 import { Flask, Vessel, fluidColor, glowColor, transfer, type Point } from './flask';
 import { DEFAULT_PRESET, applyFill, type Preset } from './presets';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
-import { TANK_H, TOOL_NAMES, Tool, mouthBelow, tankX, type Mouth } from './tools';
+import { HELIX, TANK_H, TOOL_NAMES, Tool, mouthBelow, spoutX, tankX, type Mouth } from './tools';
 
 /** What the god-mode panel needs to show for one vessel. */
 export interface Inspection {
@@ -273,7 +273,7 @@ export class GameEngine {
 
   /** Where tank k's fluid leaves the tool, in stage coordinates. */
   private spoutAt(t: Tool, k: number): Point {
-    return this.onTool(t, { x: tankX(t.shape.tanks[k]), y: t.shape.spoutY });
+    return this.onTool(t, { x: spoutX(t.shape.tanks[k]), y: t.shape.spoutY });
   }
 
   private valveAt(t: Tool, k: number): Point {
@@ -756,41 +756,21 @@ export class GameEngine {
       ctx.restore();
     };
 
-    // a drain pipe and spout under each tank, behind the tanks
+    // drain pipes and spouts, behind the tanks
     ctx.fillStyle = theme.pipe;
     for (const tk of sh.tanks) {
-      const x = tankX(tk);
-      pipes([[x, TANK_H], [x, sh.spoutY - 4]], 4);
-      ctx.fillRect(o.x + (x - 4) * S, o.y + (sh.spoutY - 6) * S, 8 * S, 6 * S);
+      if (t.kind === 'exchanger') {
+        // down into the helix at one end, and out of it at the other
+        pipes([[tankX(tk), TANK_H], [tankX(tk), HELIX.y - HELIX.r]], 4);
+        pipes([[spoutX(tk), HELIX.y + HELIX.r], [spoutX(tk), sh.spoutY - 4]], 4);
+      } else pipes([[tankX(tk), TANK_H], [spoutX(tk), sh.spoutY - 4]], 4);
+      ctx.fillRect(o.x + (spoutX(tk) - 4) * S, o.y + (sh.spoutY - 6) * S, 8 * S, 6 * S);
     }
     t.tanks.forEach((v, k) => {
       const r = this.tankRect(t, k);
       this.drawTank(v, r.x0, r.y0, r.x1, r.y1);
     });
-
-    if (t.kind === 'exchanger') {
-      // the exchanger body both drains pass through, with the streams going opposite ways
-      const X = (x: number) => o.x + x * S;
-      const Y = (y: number) => o.y + y * S;
-      ctx.fillStyle = theme.bench;
-      ctx.strokeStyle = theme.pipe;
-      ctx.lineWidth = 2 * S;
-      ctx.beginPath();
-      ctx.roundRect(X(-50), Y(92), 100 * S, 20 * S, 5 * S);
-      ctx.fill();
-      ctx.stroke();
-      ctx.strokeStyle = theme.muted;
-      ctx.lineWidth = 1.5 * S;
-      ctx.beginPath();
-      for (const [y, dir] of [[98, 1], [106, -1]]) {
-        ctx.moveTo(X(-34 * dir), Y(y));
-        ctx.lineTo(X(34 * dir), Y(y));
-        ctx.moveTo(X(28 * dir), Y(y - 3));
-        ctx.lineTo(X(34 * dir), Y(y));
-        ctx.lineTo(X(28 * dir), Y(y + 3));
-      }
-      ctx.stroke();
-    }
+    if (t.kind === 'exchanger') this.drawHelix(t);
 
     // the rate, while turning a valve or hovering the tool (but not a tank, which shows the god-mode panel)
     const showRates = this.valveDrag?.tool === t || (this.hoverTool === t && !(this.god && this.hoverTank));
@@ -874,6 +854,60 @@ export class GameEngine {
     ctx.font = `${Math.round(10 * Math.max(S, 0.85))}px "Schibsted Grotesk", sans-serif`;
     ctx.textAlign = 'center';
     ctx.fillText('tare', X((tare.x0 + tare.x1) / 2), Y((tare.y0 + tare.y1) / 2 + 0.5));
+    ctx.restore();
+  }
+
+  /**
+   * The exchanger's two hoses as a double helix: glass tubes that pass over
+   * and under each other, each showing its stream going from inlet color to
+   * outlet color as it trades heat (or empty, when its valve is shut).
+   */
+  private drawHelix(t: Tool): void {
+    const { ctx, S, theme } = this;
+    const o = this.toolXY(t);
+    const { x0, x1, y, r, halfTwists } = HELIX;
+    const X = (x: number) => o.x + x * S;
+    const steps = 16; // per half-twist
+    // Strand k's phase runs 0 → halfTwists·π across the helix; its height is
+    // cos(phase) and its depth sin(phase), flipped for the second strand.
+    // Strand A (k = 0) enters at the left and B at the right.
+    const point = (k: number, u: number) => {
+      const x = x0 + (x1 - x0) * u;
+      const th = Math.PI * halfTwists * u;
+      return { x: X(x), y: o.y + (y - (k ? -1 : 1) * r * Math.cos(th)) * S, z: (k ? -1 : 1) * Math.sin(th) };
+    };
+    // split at each half-twist, where the strands are furthest apart, and draw back to front
+    const segs: { k: number; i: number; z: number }[] = [];
+    for (let k = 0; k < 2; k++)
+      for (let i = 0; i < halfTwists; i++) segs.push({ k, i, z: point(k, (i + 0.5) / halfTwists).z });
+    segs.sort((a, b) => a.z - b.z);
+
+    const fill = t.tanks.map((tank, k) => {
+      const out = t.out[k];
+      if (!out) return theme.bench;
+      // inlet at the tank's end, outlet at the far end
+      const g = ctx.createLinearGradient(X(k ? x1 : x0), 0, X(k ? x0 : x1), 0);
+      g.addColorStop(0, fluidColor(tank.N > TRACE ? tank : out));
+      g.addColorStop(1, fluidColor(out));
+      return g;
+    });
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (const { k, i } of segs) {
+      ctx.beginPath();
+      for (let j = 0; j <= steps; j++) {
+        const p = point(k, (i + j / steps) / halfTwists);
+        if (j) ctx.lineTo(p.x, p.y);
+        else ctx.moveTo(p.x, p.y);
+      }
+      ctx.strokeStyle = theme.pipe;
+      ctx.lineWidth = 7 * S;
+      ctx.stroke();
+      ctx.strokeStyle = fill[k];
+      ctx.lineWidth = 4 * S;
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
