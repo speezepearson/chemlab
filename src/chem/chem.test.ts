@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { defaultChemParams } from './params';
 import { ReactionNetwork, atomCounts, type Fluid } from './reactions';
 import { NS, SPECIES, TARGET, singleOf, speciesIndex } from './species';
-import type { Atom } from './atoms';
+import { ATOMS, type Atom } from './atoms';
+import { equilibrium } from './equilibrium';
 
 function fluid(contents: [number, number][], T = 1): Fluid {
   const n = new Float64Array(NS);
@@ -74,5 +75,30 @@ describe('reactions', () => {
     // nearly all of the yellow has been displaced from molecules
     const boundY = SPECIES.filter((s) => s.size > 1 && s.atoms[2] === 'Y').reduce((t, s) => t + washed.n[s.i], 0);
     expect(boundY).toBeLessThan(5);
+  });
+});
+
+describe('equilibrium', () => {
+  const net = new ReactionNetwork(defaultChemParams());
+  const atoms = (counts: Partial<Record<Atom, number>>) => ATOMS.map((a) => counts[a] ?? 0);
+
+  it('conserves atoms', () => {
+    const want = atoms({ R: 2, G: 1, Y: 3 });
+    const n = equilibrium(want, net.U, 2);
+    expect(atomCounts({ n, N: 6, T: 2 })).toEqual(want.map((v) => expect.closeTo(v, 10)));
+  });
+
+  it('satisfies detailed balance for bond formation', () => {
+    const n = equilibrium(atoms({ R: 1, G: 1 }), net.U, 1);
+    const [R, G, RG] = [singleOf('R'), singleOf('G'), speciesIndex(['R', 'G', null], 1)];
+    // formation rate ∝ n_R·n_G/N, breaking rate ∝ n_RG·e^(−E/T), with N = 2 atoms
+    expect((n[R] * n[G]) / 2).toBeCloseTo(n[RG] * Math.exp(-6), 12);
+  });
+
+  it('favors the most stable shape of a triple', () => {
+    // △RMB has all three bonds; every other arrangement of R, M and B has fewer
+    const n = equilibrium(atoms({ R: 1, M: 1, B: 1 }), net.U, 1);
+    const ring = speciesIndex(['R', 'M', 'B'], 7);
+    expect(n[ring]).toBeGreaterThan(0.5);
   });
 });

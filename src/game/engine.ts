@@ -194,7 +194,9 @@ export class GameEngine {
     L.pipeY = 30 * S;
     L.spoutY = 62 * S;
     L.fillMouthY = L.spoutY + 16 * S;
-    L.faucets = FAUCETS.map((fa, i) => ({ ...fa, output: faucetOutput(fa), x: W * 0.06 + W * 0.72 * (i / (nF - 1)) }));
+    L.faucets = FAUCETS.map((fa, i) => ({
+      ...fa, output: faucetOutput(fa, this.chem.U), x: W * 0.06 + W * 0.72 * (i / (nF - 1)),
+    }));
     L.floorY = H - SINK_H * S;
     const cols = W < 560 ? 4 : 8;
     const rows = Math.ceil(N_FLASKS / cols);
@@ -572,6 +574,7 @@ export class GameEngine {
     const mouths = this.mouths();
     this.faucetFlows = [];
     for (const fa of L.faucets) {
+      fa.output = faucetOutput(fa, this.chem.U); // cheap, and follows edits to the chemistry
       const m = mouthBelow(mouths, { x: fa.x, y: L.spoutY });
       if (!m || m.y - L.spoutY > FAUCET_REACH * S || m.v.N > m.v.cap - TRACE) continue;
       m.v.addFrom(fa.output, FILL_RATE * dt);

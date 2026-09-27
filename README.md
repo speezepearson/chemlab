@@ -58,7 +58,7 @@ The reaction types are:
 
 - **Reaction heat:** exotherms heat the fluid through a per-atom heat capacity.
 - **Mixing:** temperatures average, weighted by atom count.
-- **Cooling:** none in v1, so flasks stay hot forever. Faucets only give room-temperature fluid, so the only ways to lower a temperature are diluting with faucet fluid or running endothermic reactions.
+- **Cooling:** none in v1, so flasks stay hot forever. Faucets only give room-temperature fluid, so the ways to lower a temperature are diluting with faucet fluid, running endothermic reactions, or passing it through the heat exchanger against something cooler.
 
 ### Appearance
 
@@ -81,11 +81,23 @@ To get blue into a molecule:
 
 Detailed balance means the tiny prefactor slows breaking as much as forming. Once blue is in, it's kinetically locked, and the product is stable in a way its yellow precursor isn't.
 
-The current target is the **△RGB triangle**. The intended route is R + G → R–G, then + Y → mostly △RGY, then wash with B. The test suite checks that this route works.
+The current target is the **△RGB triangle**. The intended route is R + G → R–G, then + Y → mostly △RGY, then wash with B. The test suite checks that this route works from free atoms.
+
+**This needs rework for the current faucets**, which don't give free atoms. Mixing faucet fluids at room temperature reaches the target far too easily:
+
+- R–M–B + R–G gives about 45% △RGB (by atoms) within a minute. The R–M–B faucet is already mostly the ring △RMB, and a fast swap trades its M for G.
+- R–M–B + G–B gives about 32% within a minute.
+- R–G + G–B gives about 42% after an hour, because ring closure through a blue bond isn't really frozen: at A = 0.002 and Ea = 1 it runs at about 7×10⁻⁴/s.
 
 ## What's playable now (v1)
 
-- **Filling:** drag a flask under a faucet to fill it. There are six faucets, one per atom. Faucet output is always at room temperature and in chemical equilibrium with itself, so a flask filled from one faucet just sits there. `src/game/faucets.test.ts` enforces both. A faucet fills anything held or parked right under it, including a tool's tank.
+- **Filling:** drag a flask under a faucet to fill it. The five faucets are scrounged mixes rather than pure atoms, so that the atoms and their chemistry aren't handed to the player. Each is named for a compound (R–G, B, R–M–B, C–Y, G–B), and it dispenses that compound's atoms at chemical equilibrium at room temperature. The equilibrium is solved exactly in `src/chem/equilibrium.ts` and follows live edits to the chemistry, so the output can be mostly something else:
+  - R–G is 93% R–G, with 3.4% each of free R and G.
+  - C–Y is only 44% C–Y, since the bond is weak. The rest is free C and Y.
+  - R–M–B is 93% the ring △RMB.
+  - G–B is 98% G–B, and B is pure.
+
+  Faucet output is always at room temperature and in chemical equilibrium with itself, so a flask filled from one faucet just sits there. `src/game/faucets.test.ts` enforces both. A faucet fills anything held or parked right under it, including a tool's tank.
 - **Pouring:** drag a flask over another flask or a tool's tank to pour gradually, or down to the sink along the bottom of the screen to dump it.
 - **Tools** (`src/game/tools.ts`) can be dragged anywhere and stay where you drop them. Each has tanks on top that hold four flasks' worth, and each tank drains through its own valved spout. Right-click-drag a tool near a valve to turn it, from closed to 1 flask/s. Right or up opens it. Valves start closed.
   - **Spouts** pour into the first open top below them: a flask, including one you're holding under the spout, or another tool's tank. If there isn't one, the fluid falls into the sink. Whatever doesn't fit overflows to the sink. A tool whose spout is close to lined up over a mouth snaps the rest of the way.

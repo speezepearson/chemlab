@@ -84,6 +84,13 @@ export function speciesIndex(atoms: Slots, mask: number): number {
   return i;
 }
 
+/** The species with this name, e.g. 'R–M–B' or '△RGB' (with en dashes, as SPECIES names them). */
+export function speciesNamed(name: string): number {
+  const s = SPECIES.find((x) => x.name === name);
+  if (!s) throw new Error(`no species named ${name}`);
+  return s.i;
+}
+
 function slotsFor(atom: Atom): Slots {
   const g = GROUP[atom];
   return [0, 1, 2].map((k) => (k === g ? atom : null));
