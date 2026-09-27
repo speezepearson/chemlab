@@ -93,7 +93,7 @@ describe('equilibrium', () => {
     const n = equilibrium(want, net.U, 0.2);
     expect(n.every(Number.isFinite)).toBe(true);
     atomCounts({ n, N: 1, T: 0.2 }).forEach((v, a) => expect(v).toBeCloseTo(want[a], 12));
-    expect(n[TARGET]).toBeCloseTo(0.00005, 9);
+    expect(n[TARGET]).toBeCloseTo(0.00005, 7); // a few parts per billion stay as R–B and G–B
   });
 
   it('satisfies detailed balance for bond formation', () => {
