@@ -89,14 +89,15 @@ The current target is the **△RGB triangle**. The intended route is R + G → R
 
 ## What's playable now (v1)
 
-- **Filling:** drag a flask under a faucet to fill it. The seven faucets are scrounged mixes rather than pure atoms, so that the atoms and their chemistry aren't handed to the player. Each is a recipe of atoms by share, at room temperature unless noted:
+- **Filling:** hold a flask under a faucet with the right mouse button to fill it. The eight faucets are scrounged mixes rather than pure atoms, so that the atoms and their chemistry aren't handed to the player. Each is a recipe of atoms by share, at room temperature unless noted:
   - 49% R, 49% G, and 0.5% each of C, M, B and Y;
   - 99.99% B and 0.005% each of R and G, at T = 0.2;
   - 95% R, M and B in equal parts, and 5% G, C and Y in equal parts;
   - 40% R, 40% G, 20% B;
   - 66.6% C, 33.3% Y, 0.1% M, at T = 10;
   - 95% R, 5% G;
-  - 98% G, 2% R.
+  - 98% G, 2% R;
+  - 50% R, 50% C.
 
   A faucet dispenses its atoms at chemical equilibrium at its temperature. The equilibrium is solved exactly in `src/chem/equilibrium.ts` and follows live edits to the chemistry, so the output can be mostly something else:
   - The R–G faucet is 96% R–G, 1.5% △RGB and 1.5% △RGY (by atoms), plus traces.
@@ -105,9 +106,10 @@ The current target is the **△RGB triangle**. The intended route is R + G → R
   - The 40/40/20 one is 60% △RGB, the target itself, and 40% R–G.
   - The hot C–Y one is only 25% C–Y, since the bond is weak and it's hot. The rest is mostly free C and Y.
   - 95% R / 5% G is 90% free R and 10% R–G. 98% G / 2% R is 96% free G and 4% R–G.
+  - The R–C one is just free R and free C, since opposite colors never bond.
 
-  Faucet output is in chemical equilibrium with itself at the faucet's temperature, so a flask filled from one faucet just sits there. `src/game/faucets.test.ts` enforces this. A faucet fills anything held or parked right under it, including a tool's tank.
-- **Pouring:** drag a flask over another flask or a tool's tank to pour gradually, or down to the sink along the bottom of the screen to dump it.
+  Faucet output is in chemical equilibrium with itself at the faucet's temperature, so a flask filled from one faucet just sits there. `src/game/faucets.test.ts` enforces this. A faucet fills anything parked right under it, including a tool's tank, and a flask you're carrying only while you hold the right mouse button.
+- **Pouring:** drag a flask over another flask or a tool's tank and hold the right mouse button to pour gradually, or do the same down at the sink along the bottom of the screen to dump it. Without the right button a carried flask just moves, so it doesn't spill on everything it passes. Letting go of the left button while holding the right still drops it.
 - **Placing:** a flask stays wherever you let go of it. One tilted to pour stands back up where you're holding it. Left under a faucet or spout, it keeps filling.
 - **Tools** (`src/game/tools.ts`) can be dragged anywhere and stay where you drop them. Each has tanks on top that hold four flasks' worth. Each tank drains through its own valve, and fluid leaves through one or more spouts on the bottom. Right-click a tool near a valve and point: the lever follows the pointer, fully open (1 flask/s) straight up from the valve, closed straight right, and partly open in between. Valves start closed.
   - **Spouts** pour into the first open top below them: a flask, including one you're holding under the spout, or another tool's tank. If there isn't one, the fluid falls into the sink. Whatever doesn't fit overflows to the sink. A tool whose spout is close to lined up over a mouth snaps the rest of the way.
@@ -136,7 +138,7 @@ The current target is the **△RGB triangle**. The intended route is R + G → R
 - **More glassware and tools.** Graduated cylinders and pipettes.
 - **Tool follow-ups.**
   - A tank can only be emptied through its spout.
-  - The valve needs a right mouse button, so there's no touch equivalent yet.
+  - Valves and pouring need a right mouse button, so there's no touch equivalent yet.
   - Tools can't stand on the scale, so a dispenser's contents can't be weighed.
   - Every atom weighs the same. Giving colors different masses would make the scale reveal something about composition.
 - **Tuning.**

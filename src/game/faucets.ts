@@ -31,6 +31,7 @@ export const FAUCETS: readonly Faucet[] = [
   { atoms: { C: 0.666, Y: 0.333, M: 0.001 }, T: 10 },
   { atoms: { R: 0.95, G: 0.05 } },
   { atoms: { G: 0.98, R: 0.02 } },
+  { atoms: { R: 0.5, C: 0.5 } },
 ];
 
 /** A faucet's recipe as text, e.g. "95% R, 5% G" or "66.6% C, 33.3% Y, 0.1% M at T = 10". */
