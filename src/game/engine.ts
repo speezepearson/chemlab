@@ -5,8 +5,9 @@ import { FAUCETS, faucetOutput, type Faucet } from './faucets';
 import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
 import { Flask, Vessel, fluidColor, glowColor, transfer, type Point } from './flask';
 import { DEFAULT_PRESET, applyFill, type Preset } from './presets';
+import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
-import { HELIX, Hose, TANK_H, TOOL_NAMES, Tool, mouthBelow, tankX, type Mouth, type ToolKind } from './tools';
+import { HELIX, Hose, SHAPES, TANK_H, TOOL_NAMES, Tool, mouthBelow, tankX, type Mouth, type ToolKind } from './tools';
 
 /** What the god-mode panel needs to show for one vessel. */
 export interface Inspection {
@@ -67,7 +68,6 @@ const FLASK_CATCH = 14;
 /** A tool's spout snaps to line up with a mouth this close below it, in local units. */
 const SNAP = 24;
 /** Pixels of right-click drag (right or up opens) to turn a valve from closed to fully open. */
-const VALVE_PX = 150;
 const SINK_H = 16;
 /** The separator's splitter, below its valve, in local units. */
 const SEP_BODY = { x0: -42, x1: 42, y0: 100, y1: 112 };
@@ -96,7 +96,7 @@ export class GameEngine {
   private hoses: Hose[] = [];
   /** A hose end being carried, or (just out of the palette) the whole hose, with its outlet this far from the inlet. */
   private hoseDrag: { hose: Hose; end: 'inlet' | 'outlet' | 'both'; gap?: Point } | null = null;
-  private valveDrag: { tool: Tool; k: number; v0: number; p0: Point } | null = null;
+  private valveDrag: { tool: Tool; k: number } | null = null;
   private hover: Flask | null = null;
   private hoverTool: Tool | null = null;
   private hoverTank: Vessel | null = null;
@@ -179,6 +179,67 @@ export class GameEngine {
     this.snapAll();
     this.won = false;
     this.hoses = [];
+    this.drag = this.toolDrag = this.valveDrag = this.scaleDrag = this.hoseDrag = null;
+    this.hover = this.hoverTool = this.hoverTank = null;
+    this.lastProgress = -1;
+  }
+
+  /** Everything on the bench, plus the chemistry parameters, for saving. */
+  snapshot(): SaveState {
+    const { W, S, L } = this;
+    return {
+      v: 1,
+      preset: this.preset.id,
+      flasks: this.flasks.map((f) => ({ ...saveVessel(f), x: f.home.x / W, up: (L.floorY - f.home.y) / S, glass: f.glass })),
+      tools: this.tools.map((t) => ({
+        kind: t.kind, id: t.id, fx: t.fx, fy: t.fy, valves: [...t.valves], tanks: t.tanks.map(saveVessel),
+      })),
+      scales: this.scales.map((sc) => ({
+        fx: sc.fx, fy: sc.fy, tare: sc.tare,
+        load: sc.load.map(({ f, dx }) => ({ f: this.flasks.indexOf(f), dx })).filter((l) => l.f >= 0),
+      })),
+      hoses: this.hoses.map((h) => ({ inlet: { ...h.inlet }, outlet: { ...h.outlet }, funnel: saveVessel(h.funnel) })),
+      chem: saveChem(this.chem.params),
+    };
+  }
+
+  /** Replace the bench with a saved one. `preset` is what Reset will go back to afterwards. */
+  restore(s: SaveState, preset: Preset): void {
+    const { W, S, L } = this;
+    this.preset = preset;
+    loadChem(this.chem.params, s.chem);
+    this.chem.rebuild();
+    L.faucets = L.faucets.map((fa) => ({ ...fa, output: faucetOutput(fa, this.chem.U) }));
+    this.flasks = s.flasks.map((sf, i) => {
+      const f = new Flask(this.clampRest({ x: sf.x * W, y: L.floorY - sf.up * S }), CAP);
+      f.glass = Number.isFinite(sf.glass) ? sf.glass : glassGrams(i);
+      loadVessel(f, sf);
+      return f;
+    });
+    this.tools = s.tools
+      .filter((st) => st.kind in SHAPES)
+      .map((st) => {
+        const t = new Tool(st.kind, st.id, st.fx, st.fy, st.valves ?? []);
+        t.tanks.forEach((v, k) => st.tanks?.[k] && loadVessel(v, st.tanks[k]));
+        return t;
+      });
+    this.nextToolId = Math.max(-1, ...this.tools.map((t) => t.id)) + 1;
+    this.scales = s.scales.map((ss) => {
+      const sc = new Scale(ss.fx, ss.fy);
+      sc.tare = ss.tare ?? 0;
+      for (const { f, dx } of ss.load ?? []) if (this.flasks[f]) sc.put(this.flasks[f], dx);
+      return sc;
+    });
+    this.hoses = s.hoses.map((sh) => {
+      const h = new Hose({ ...sh.inlet }, { ...sh.outlet });
+      if (sh.funnel) loadVessel(h.funnel, sh.funnel);
+      return h;
+    });
+    for (const t of this.tools) this.place(t, this.toolXY(t));
+    for (const sc of this.scales) this.placeScale(sc, this.scaleXY(sc));
+    this.settle();
+    this.snapAll();
+    this.won = false;
     this.drag = this.toolDrag = this.valveDrag = this.scaleDrag = this.hoseDrag = null;
     this.hover = this.hoverTool = this.hoverTank = null;
     this.lastProgress = -1;
@@ -322,6 +383,18 @@ export class GameEngine {
     return this.onTool(t, { x: tankX(t.shape.tanks[k]), y: t.shape.valveY });
   }
 
+  /**
+   * Point a valve's lever at p: straight up from the valve is fully open, straight right is closed,
+   * and in between is partly open. Below the valve it closes, and left of it (past the down-left
+   * diagonal) it opens, so a wild swing lands at the nearer end.
+   */
+  private aimValve(t: Tool, k: number, p: Point): void {
+    const vc = this.valveAt(t, k);
+    const a = Math.atan2(vc.y - p.y, p.x - vc.x); // counterclockwise from right
+    const open = a < -0.75 * Math.PI ? 1 : a / (Math.PI / 2);
+    t.valves[k] = Math.max(0, Math.min(1, open));
+  }
+
   private tankRect(t: Tool, k: number): { x0: number; x1: number; y0: number; y1: number } {
     const o = this.toolXY(t);
     const { S } = this;
@@ -442,7 +515,8 @@ export class GameEngine {
           const dist = (j: number) => Math.abs(p.x - o.x - tankX(t.shape.tanks[j]) * this.S);
           let k = 0;
           for (let j = 1; j < t.tanks.length; j++) if (dist(j) < dist(k)) k = j;
-          this.valveDrag = { tool: t, k, v0: t.valves[k], p0: p };
+          this.valveDrag = { tool: t, k };
+          this.aimValve(t, k, p);
           c.setPointerCapture(e.pointerId);
         }
       } else if (e.button === 0) {
@@ -480,8 +554,7 @@ export class GameEngine {
     onWindow('pointermove', (e) => {
       const p = (this.pointer = this.ptr(e));
       if (this.valveDrag) {
-        const { tool, k, v0, p0 } = this.valveDrag;
-        tool.valves[k] = Math.max(0, Math.min(1, v0 + (p.x - p0.x - (p.y - p0.y)) / VALVE_PX));
+        this.aimValve(this.valveDrag.tool, this.valveDrag.k, p);
       } else if (this.toolDrag) {
         const { tool, off } = this.toolDrag;
         this.place(tool, { x: p.x - off.x, y: p.y - off.y });
@@ -899,16 +972,16 @@ export class GameEngine {
     // the rate, while turning a valve or hovering the tool (but not a tank, which shows the god-mode panel)
     const showRates = this.valveDrag?.tool === t || (this.hoverTool === t && !(this.god && this.hoverTank));
     t.tanks.forEach((_, k) => {
-      // valve: the lever lies across the pipe when closed and along it when open
+      // valve: the lever points right when closed and up when open, toward where the pointer turned it
       const vc = this.valveAt(t, k);
-      const side = vc.x < this.toolXY(t).x - 1 ? -1 : 1; // levers and labels point away from the middle
+      const side = vc.x < this.toolXY(t).x - 1 ? -1 : 1; // labels point away from the middle
       const a = -t.valves[k] * (Math.PI / 2);
       ctx.strokeStyle = theme.ink;
       ctx.lineWidth = 3 * S;
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(vc.x, vc.y);
-      ctx.lineTo(vc.x + side * 13 * S * Math.cos(a), vc.y + 13 * S * Math.sin(a));
+      ctx.lineTo(vc.x + 13 * S * Math.cos(a), vc.y + 13 * S * Math.sin(a));
       ctx.stroke();
       ctx.fillStyle = theme.bench;
       ctx.strokeStyle = theme.pipe;

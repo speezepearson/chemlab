@@ -50,7 +50,7 @@ export const PRESETS: readonly Preset[] = [
     description:
       "You're stranded. The supply flask holds the last of your nutrient slurry. Drag a flask under a faucet or " +
       'spout to fill it, over a flask or tank to pour, onto the scale to weigh it, or down to the sink to dump it. ' +
-      'Drag tools anywhere, and right-click-drag a tool to turn its valve.',
+      'Drag tools anywhere, and right-click a tool and point up (open) or right (closed) to set its valve.',
     flasks: [{ contents: [atomsOf(TARGET, 0.4 * CAP)], T: T_ROOM, label: 'supply' }],
     tools: [
       { kind: 'separator', at: [0.1, 0.3] },
@@ -64,7 +64,7 @@ export const PRESETS: readonly Preset[] = [
     name: 'Heat exchanger demo',
     description:
       'Hot red and room-temperature green pass each other in a counterflow heat exchanger, trading heat but not ' +
-      'mixing: the red comes out cool and the green hot. Slower flows trade more. Right-click-drag a valve to turn it.',
+      'mixing: the red comes out cool and the green hot. Slower flows trade more. Right-click a valve and point up to open it, right to close it.',
     flasks: [],
     tools: [
       { kind: 'dispenser', at: [0.5625, 0.22], valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('R'), 4 * CAP)], T: 10 }] },
