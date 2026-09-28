@@ -7,7 +7,7 @@ import { FlaskEditor } from './components/FlaskEditor';
 import { InfoPanel } from './components/InfoPanel';
 import { Palette } from './components/Palette';
 import { SpeedControl } from './components/SpeedControl';
-import { GOAL_ATOMS } from './game/config';
+import { GOAL_ATOMS, GOAL_PURITY } from './game/config';
 import { fmtCount } from './game/format';
 import { GameEngine, type Inspection } from './game/engine';
 import { DEFAULT_PRESET, PRESETS } from './game/presets';
@@ -114,7 +114,7 @@ export function App() {
         <h1>Slurry Lab</h1>
         <div className="goal">
           <span>
-            Sustenance {fmtCount(progress)} / {fmtCount(GOAL_ATOMS)}
+            {Math.round(100 * GOAL_PURITY)}+% pure sustenance {fmtCount(progress)} / {fmtCount(GOAL_ATOMS)}
           </span>
           <div className="bar">
             <i style={{ width: `${Math.min(100, (100 * progress) / GOAL_ATOMS)}%` }} />

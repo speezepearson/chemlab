@@ -1,7 +1,7 @@
 import { ATOMS, ATOM_RGB } from '../chem/atoms';
 import { atomCounts, heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
-import { NS, SPECIES } from '../chem/species';
-import { TRACE } from './config';
+import { NS, SPECIES, TARGET } from '../chem/species';
+import { GOAL_PURITY, TRACE } from './config';
 import { GLASS_GRAMS } from './scale';
 import { css, glowWhiteHeat, heatValue, whiteHeat, whiten, type RGB } from './appearance';
 
@@ -58,6 +58,12 @@ export class Vessel implements Fluid {
     this.N += added;
     return added;
   }
+}
+
+/** Atoms of the target in a fluid that counts toward the goal: all of them if it's at least GOAL_PURITY target, else none. */
+export function sustenance(f: Fluid): number {
+  const t = f.n[TARGET] * SPECIES[TARGET].size;
+  return f.N > 0 && t >= GOAL_PURITY * f.N ? t : 0;
 }
 
 /** A flask on the shelf. It lives in a slot (`home`) and can be picked up and carried. */

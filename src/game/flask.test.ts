@@ -1,9 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { SPECIES, TARGET, singleOf } from '../chem/species';
-import { Flask, transfer } from './flask';
+import { Flask, sustenance, transfer } from './flask';
 import { separate } from './tools';
 
 const atomTotal = (f: Flask) => SPECIES.reduce((t, s) => t + f.n[s.i] * s.size, 0);
+
+describe('sustenance', () => {
+  it('counts the target only in vessels at least 99% pure', () => {
+    const f = new Flask({ x: 0, y: 0 }, 1e6);
+    f.setMolecules(TARGET, 1000);
+    expect(sustenance(f)).toBe(3000);
+    f.setMolecules(singleOf('R'), 30); // exactly 99%
+    expect(sustenance(f)).toBe(3000);
+    f.setMolecules(singleOf('R'), 31);
+    expect(sustenance(f)).toBe(0);
+    expect(sustenance(new Flask({ x: 0, y: 0 }, 10))).toBe(0);
+  });
+});
 
 describe('Flask.setMolecules', () => {
   it('sets a count and keeps N equal to the atom total', () => {

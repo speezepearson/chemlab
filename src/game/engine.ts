@@ -1,9 +1,9 @@
 import { temperature, type Fluid, type ReactionNetwork } from '../chem/reactions';
-import { NS, SPECIES, TARGET } from '../chem/species';
+import { NS, SPECIES } from '../chem/species';
 import { CAP, FILL_RATE, GOAL_ATOMS, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { FAUCETS, faucetOutput, type Faucet } from './faucets';
 import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
-import { Flask, Vessel, fluidColor, glowColor, transfer, type Point } from './flask';
+import { Flask, Vessel, fluidColor, glowColor, sustenance, transfer, type Point } from './flask';
 import { DEFAULT_PRESET, applyFill, type Preset } from './presets';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
@@ -25,7 +25,7 @@ export interface Inspection {
 }
 
 export interface EngineCallbacks {
-  /** Target atoms across all vessels, rounded to a thousandth of the goal. Called only when it changes. */
+  /** Target atoms across all vessels at least GOAL_PURITY pure, rounded to a thousandth of the goal. Called only when it changes. */
   onProgress(targetAtoms: number): void;
   onWin(): void;
   /** Throttled to ~10 Hz; null when nothing is inspected. */
@@ -777,7 +777,7 @@ export class GameEngine {
 
     // goal
     let tgt = 0;
-    for (const v of vessels) tgt += v.n[TARGET] * 3;
+    for (const v of vessels) tgt += sustenance(v);
     const q = GOAL_ATOMS / 1000;
     const rounded = Math.round(tgt / q) * q;
     if (rounded !== this.lastProgress) {
