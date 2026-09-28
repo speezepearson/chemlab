@@ -62,7 +62,7 @@ const GLOW_STOPS = 32;
 
 const POUR_ANG = Math.PI * 0.61;
 /** How far below a faucet something can be and still get filled, in local units. */
-const FAUCET_REACH = 60;
+const FAUCET_REACH = 24;
 /** Half-width of the part of a flask's mouth that catches a falling stream, in local units. */
 const FLASK_CATCH = 14;
 /** A tool's spout snaps to line up with a mouth this close below it, in local units. */
