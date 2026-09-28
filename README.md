@@ -99,8 +99,8 @@ The current target is the **△RGB triangle**. The intended route is R + G → R
   - 95% R / 5% G is 90% free R and 10% R–G. 98% G / 2% R is 96% free G and 4% R–G.
 
   Faucet output is always at room temperature and in chemical equilibrium with itself, so a flask filled from one faucet just sits there. `src/game/faucets.test.ts` enforces both. A faucet fills anything held or parked right under it, including a tool's tank.
-- **Pouring:** a carried flask has a target fullness, which starts at 100%. Holding right-click while carrying lowers it (100% per second by default; the Appearance panel has a slider). The flask pours from its lip at a rate proportional to how far it's over the target, into whatever open top is below (a flask, a tank or a hose funnel). If there isn't one, it pours into the sink. Aim the lip and let the target down to pour a measured amount.
-- **Placing:** a flask stays wherever you let go of it. One that was pouring stands back up. Left under a faucet or spout, it keeps filling.
+- **Pouring:** drag a flask over another flask or a tool's tank to pour gradually, or down to the sink along the bottom of the screen to dump it.
+- **Placing:** a flask stays wherever you let go of it. One tilted to pour stands back up where you're holding it. Left under a faucet or spout, it keeps filling.
 - **Tools** (`src/game/tools.ts`) can be dragged anywhere and stay where you drop them. Each has tanks on top that hold four flasks' worth. Each tank drains through its own valve, and fluid leaves through one or more spouts on the bottom. Right-click-drag a tool near a valve to turn it, from closed to 1 flask/s. Right or up opens it. Valves start closed.
   - **Spouts** pour into the first open top below them: a flask, including one you're holding under the spout, or another tool's tank. If there isn't one, the fluid falls into the sink. Whatever doesn't fit overflows to the sink. A tool whose spout is close to lined up over a mouth snaps the rest of the way.
   - **Dispenser:** one tank, drained through one spout.

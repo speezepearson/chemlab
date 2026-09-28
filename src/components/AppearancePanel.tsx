@@ -1,6 +1,5 @@
 import { Fragment, useReducer, useState } from 'react';
 import { LOOK, resetLook, type Look } from '../game/appearance';
-import { CONTROLS } from '../game/config';
 import { DragNumber } from './DragNumber';
 
 interface Group {
@@ -77,33 +76,6 @@ export function AppearancePanel() {
         <p>
           Drag a number sideways to scale it. Try the Temperature range preset to see every temperature at once.
         </p>
-        <table>
-          <tbody>
-            <tr className="group">
-              <td colSpan={2}>
-                <b>Pouring</b> <span>holding right-click lowers a carried flask's target fullness</span>
-              </td>
-            </tr>
-            <tr>
-              <td>rate</td>
-              <td>
-                <input
-                  type="range"
-                  aria-label="target fullness drop rate"
-                  min={0.05}
-                  max={3}
-                  step={0.05}
-                  value={CONTROLS.pourTargetRate}
-                  onChange={(e) => {
-                    CONTROLS.pourTargetRate = +e.target.value;
-                    rerender();
-                  }}
-                />{' '}
-                {Math.round(100 * CONTROLS.pourTargetRate)}%/s
-              </td>
-            </tr>
-          </tbody>
-        </table>
         <div className="actions">
           <button
             onClick={() => {
