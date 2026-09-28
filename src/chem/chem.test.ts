@@ -64,6 +64,9 @@ describe('reactions', () => {
   it('makes the target by building △RGY and washing it with room-temperature blue', () => {
     const f = fluid([single('R', 50), single('G', 50)]);
     run(net, f, 60);
+    // forming R–G is very exothermic, so cool it back down (in the game, with the heat exchanger)
+    expect(f.T).toBeGreaterThan(10);
+    f.T = 1;
     const withY = mix(f, fluid([single('Y', 50)]));
     run(net, withY, 120);
     const RGY = speciesIndex(['R', 'G', 'Y'], 7);
@@ -100,7 +103,8 @@ describe('equilibrium', () => {
     const n = equilibrium(atoms({ R: 1, G: 1 }), net.U, 1);
     const [R, G, RG] = [singleOf('R'), singleOf('G'), speciesIndex(['R', 'G', null], 1)];
     // formation rate ∝ n_R·n_G/N, breaking rate ∝ n_RG·e^(−E/T), with N = 2 atoms
-    expect((n[R] * n[G]) / 2).toBeCloseTo(n[RG] * Math.exp(-6), 12);
+    const E = net.params.bonds.RG.E;
+    expect((n[R] * n[G]) / 2 / (n[RG] * Math.exp(-E))).toBeCloseTo(1, 9);
   });
 
   it('favors the most stable shape of a triple', () => {

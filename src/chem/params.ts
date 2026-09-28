@@ -29,7 +29,7 @@ export interface ChemParams {
 
 export function defaultChemParams(): ChemParams {
   const bonds: Record<string, Omit<BondParams, 'A'> & { A?: number }> = {
-    RG: { E: 6, Ea: 2 }, RM: { E: 3, Ea: 3 }, CG: { E: 2, Ea: 4 }, CM: { E: 5, Ea: 2 },
+    RG: { E: 100, Ea: 2 }, RM: { E: 3, Ea: 3 }, CG: { E: 2, Ea: 4 }, CM: { E: 5, Ea: 2 },
     RY: { E: 4, Ea: 1 }, CY: { E: 1, Ea: 2 }, GY: { E: 4, Ea: 1 }, MY: { E: 2, Ea: 2 },
     // blue: strong bonds that essentially never form directly
     RB: { E: 9, Ea: 1, A: 0.002 }, CB: { E: 7, Ea: 1, A: 0.002 },
