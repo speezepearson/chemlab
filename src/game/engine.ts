@@ -1,6 +1,6 @@
 import type { Fluid, ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
-import { CAP, FILL_RATE, GOAL_ATOMS, N_FLASKS, POUR_RATE, TRACE } from './config';
+import { CAP, CONTROLS, FILL_RATE, GOAL_ATOMS, N_FLASKS, POUR_GAIN, TRACE } from './config';
 import { FAUCETS, faucetOutput, type Faucet } from './faucets';
 import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
 import { Flask, Vessel, fluidColor, glowColor, transfer, type Point } from './flask';
@@ -35,12 +35,8 @@ export interface EngineCallbacks {
   isDiscard(clientX: number, clientY: number): boolean;
 }
 
-/** Where a carried flask is: pouring zones tilt it, and a scale stands it on its platform. */
-type Zone =
-  | { kind: 'flask'; f: Flask }
-  | { kind: 'tank'; v: Vessel; x: number; y: number }
-  | { kind: 'scale'; scale: Scale; dx: number; p: Point }
-  | { kind: 'sink' };
+/** A carried flask over a scale, which would stand it on the platform. */
+type Zone = { kind: 'scale'; scale: Scale; dx: number; p: Point };
 type FaucetLayout = Faucet & { x: number; output: Fluid };
 
 interface Layout {
@@ -60,6 +56,8 @@ type Theme = Record<(typeof THEME_KEYS)[number], string>;
 const GLOW_STOPS = 32;
 
 const POUR_ANG = Math.PI * 0.61;
+/** A carried flask stops pouring within this fraction of its target fullness. */
+const POUR_DONE = 0.001;
 /** How far below a faucet something can be and still get filled, in local units. */
 const FAUCET_REACH = 24;
 /** Half-width of the part of a flask's mouth that catches a falling stream, in local units. */
@@ -88,8 +86,18 @@ export class GameEngine {
   private flasks: Flask[] = [];
   /** Back to front. */
   private tools: Tool[] = [];
-  /** The carried flask; `off` is where it was grabbed, relative to its mouth. */
-  private drag: { flask: Flask; zone: Zone | null; off: Point } | null = null;
+  /**
+   * The carried flask: `off` is where it was grabbed, relative to its mouth; `target` is the fullness it
+   * pours down to (holding right-click lowers it); `pour` is where it's pouring and how fast, in flasks/s.
+   */
+  private drag: {
+    flask: Flask;
+    zone: Zone | null;
+    off: Point;
+    target: number;
+    pour: { m: Mouth | null; rate: number } | null;
+  } | null = null;
+  private rightHeld = false;
   private toolDrag: { tool: Tool; off: Point } | null = null;
   private scales: Scale[] = [];
   private scaleDrag: { scale: Scale; off: Point } | null = null;
@@ -197,7 +205,7 @@ export class GameEngine {
       const f = new Flask({ x: p.x, y: p.y - 35 * S }, CAP);
       f.glass = glassGrams(this.flasks.length);
       this.flasks.push(f);
-      this.drag = { flask: f, zone: null, off: { x: 0, y: 35 * S } };
+      this.drag = { flask: f, zone: null, off: { x: 0, y: 35 * S }, target: 1, pour: null };
     } else if (kind === 'scale') {
       const sc = new Scale(p.x / W, p.y / H);
       this.scales.push(sc);
@@ -463,7 +471,7 @@ export class GameEngine {
         } else {
           const f = this.hitFlask(p);
           if (f) {
-            this.drag = { flask: f, zone: null, off: { x: p.x - f.home.x, y: p.y - f.home.y } };
+            this.drag = { flask: f, zone: null, off: { x: p.x - f.home.x, y: p.y - f.home.y }, target: 1, pour: null };
             for (const sc of this.scales) sc.remove(f);
             c.setPointerCapture(e.pointerId);
           }
@@ -478,6 +486,8 @@ export class GameEngine {
       this.cleanups.push(() => window.removeEventListener(type, fn));
     };
     onWindow('pointermove', (e) => {
+      // pressing or releasing a second button mid-drag only shows up here, as a change in `buttons`
+      this.rightHeld = (e.buttons & 2) !== 0;
       const p = (this.pointer = this.ptr(e));
       if (this.valveDrag) {
         const { tool, k, v0, p0 } = this.valveDrag;
@@ -500,6 +510,7 @@ export class GameEngine {
       this.updateHover();
     });
     const endDrag = (e: PointerEvent) => {
+      this.rightHeld = false;
       this.pointer = this.ptr(e);
       if (this.cb.isDiscard(e.clientX, e.clientY)) {
         // dropped back on the palette: put it away
@@ -518,10 +529,9 @@ export class GameEngine {
       }
       this.toolDrag = this.valveDrag = this.scaleDrag = this.hoseDrag = null;
       if (this.drag) {
-        // a flask stays where it's let go; one tilted to pour stands back up where it's held
-        const { flask: f, zone, off } = this.drag;
+        // a flask stays where it's let go, standing back up if it was pouring
+        const { flask: f, zone } = this.drag;
         if (zone?.kind === 'scale') zone.scale.put(f, zone.dx);
-        else if (f.ang !== 0) f.home = this.clampRest({ x: this.pointer.x - off.x, y: this.pointer.y - off.y });
         else f.home = this.clampRest({ x: f.x, y: f.y });
         f.ang = 0;
         this.drag = null;
@@ -537,6 +547,10 @@ export class GameEngine {
       this.updateHover();
     });
     on('contextmenu', (e) => e.preventDefault());
+    // right-clicking to pour mid-drag shouldn't open a menu wherever the pointer happens to be
+    onWindow('contextmenu', (e) => {
+      if (this.drag) e.preventDefault();
+    });
     on('dblclick', (e) => {
       if (!this.god) return;
       const p = this.ptr(e);
@@ -598,26 +612,8 @@ export class GameEngine {
     return null;
   }
 
-  private zoneAt(p: Point, D: Flask): Zone | null {
-    const { S, L } = this;
-    for (const f of this.flasks) {
-      if (f === D) continue;
-      if (p.x > f.home.x - 34 * S && p.x < f.home.x + 34 * S && p.y > f.home.y - 30 * S && p.y < f.home.y + 80 * S)
-        return { kind: 'flask', f };
-    }
-    for (let i = this.tools.length - 1; i >= 0; i--) {
-      const t = this.tools[i];
-      for (let k = 0; k < t.tanks.length; k++) {
-        const r = this.tankRect(t, k);
-        if (p.x > r.x0 - 8 * S && p.x < r.x1 + 8 * S && p.y > r.y0 - 40 * S && p.y < r.y1)
-          return { kind: 'tank', v: t.tanks[k], x: (r.x0 + r.x1) / 2, y: r.y0 };
-      }
-    }
-    for (const h of this.hoses) {
-      const e = this.hoseEnd(h, 'inlet');
-      if (Math.abs(p.x - e.x) < 24 * S && p.y > e.y - 40 * S && p.y < e.y + 20 * S)
-        return { kind: 'tank', v: h.funnel, x: e.x, y: e.y };
-    }
+  private zoneAt(p: Point): Zone | null {
+    const { S } = this;
     for (const sc of this.scales) {
       const o = this.scaleXY(sc);
       const pl = SCALE_SHAPE.platform;
@@ -628,8 +624,16 @@ export class GameEngine {
       const x = Math.max(o.x + (pl.x0 + 24) * S, Math.min(o.x + (pl.x1 - 24) * S, held));
       return { kind: 'scale', scale: sc, dx: (x - o.x) / S, p: { x, y: o.y - 70 * S } };
     }
-    if (p.y > L.benchY + 8 * S) return { kind: 'sink' };
     return null;
+  }
+
+  /**
+   * How far a carried flask's fullness is over its target, or 0 once within POUR_DONE: a proportional pour
+   * only approaches its target, so without a cutoff it would stay tipped with an endless trickle.
+   */
+  private pourExcess(f: Flask, target: number): number {
+    const excess = f.N / f.cap - target;
+    return f.N > TRACE && excess > POUR_DONE ? excess : 0;
   }
 
   /* ---------------- main loop ---------------- */
@@ -642,34 +646,35 @@ export class GameEngine {
     // player actions, real time
     if (drag) {
       const D = drag.flask;
-      const z = (drag.zone = this.zoneAt(pointer, D));
-      D.ang = 0;
-      if (!z) {
-        D.x = pointer.x - drag.off.x;
-        D.y = pointer.y - drag.off.y;
-      } else if (z.kind === 'scale') {
+      const z = (drag.zone = this.zoneAt(pointer));
+      if (z) {
         D.x = z.p.x;
         D.y = z.p.y;
       } else {
-        D.ang = POUR_ANG;
-        if (z.kind === 'flask') {
-          D.x = z.f.home.x + 16 * S;
-          D.y = z.f.home.y - 32 * S;
-          transfer(D, z.f, POUR_RATE * dt);
-        } else if (z.kind === 'tank') {
-          D.x = z.x + 16 * S;
-          D.y = z.y - 32 * S;
-          transfer(D, z.v, POUR_RATE * dt);
-        } else {
-          D.x = pointer.x;
-          D.y = L.floorY - 8 * S;
-          transfer(D, null, POUR_RATE * dt);
-        }
+        D.x = pointer.x - drag.off.x;
+        D.y = pointer.y - drag.off.y;
       }
+      if (this.rightHeld) drag.target = Math.max(0, drag.target - CONTROLS.pourTargetRate * dt);
+      // tilt as far as it's over its target, pivoting on the lip so the pour stays where it's aimed
+      const excess = this.pourExcess(D, drag.target);
+      D.ang = excess > 0 ? POUR_ANG * Math.min(1, 0.4 + excess / 0.1) : 0;
     }
 
     // faucets also run in real time: each fills whatever is held right under it
     const mouths = this.mouths();
+    if (drag) {
+      // pour at a rate proportional to how far over its target the flask is, into whatever is below its lip
+      const D = drag.flask;
+      const excess = this.pourExcess(D, drag.target);
+      drag.pour = null;
+      if (excess > 0) {
+        const amount = POUR_GAIN * excess * D.cap * dt;
+        const m = mouthBelow(mouths, { x: D.x, y: D.y });
+        const moved = m ? transfer(D, m.v, amount) : 0;
+        transfer(D, null, amount - moved); // what doesn't fit overflows to the sink
+        drag.pour = { m, rate: POUR_GAIN * excess };
+      }
+    }
     this.faucetFlows = [];
     for (const fa of L.faucets) {
       fa.output = faucetOutput(fa, this.chem.U); // cheap, and follows edits to the chemistry
@@ -1129,13 +1134,9 @@ export class GameEngine {
       this.drawStream(sp.x, sp.y, sp.x, m ? m.y + 2 * S : H, fluidColor(hose.out), 1.5 + 3 * Math.min(1, hose.flow));
     }
     for (const { fa, m } of this.faucetFlows) this.drawStream(fa.x, L.spoutY, fa.x, m.y + 2 * S, fluidColor(fa.output));
-    if (drag && drag.flask.N > TRACE) {
-      const D = drag.flask;
-      const z = drag.zone;
-      if (z?.kind === 'flask' && z.f.N < z.f.cap - TRACE)
-        this.drawStream(D.x, D.y, z.f.home.x, z.f.home.y + 4 * S, fluidColor(D));
-      if (z?.kind === 'tank' && z.v.N < z.v.cap - TRACE) this.drawStream(D.x, D.y, z.x, z.y + 4 * S, fluidColor(D));
-      if (z?.kind === 'sink') this.drawStream(D.x, D.y, D.x - 4 * S, H, fluidColor(D));
+    if (drag?.pour) {
+      const { flask: D, pour } = drag;
+      this.drawStream(D.x, D.y, D.x, pour.m ? pour.m.y + 2 * S : H, fluidColor(D), 1.5 + 3 * Math.min(1, pour.rate));
     }
 
     // shelves
