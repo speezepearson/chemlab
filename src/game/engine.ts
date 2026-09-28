@@ -176,9 +176,19 @@ export class GameEngine {
       spec.tanks?.forEach((fill, k) => t.tanks[k] && applyFill(t.tanks[k], fill));
       return t;
     });
+    for (const t of this.tools) this.place(t, this.toolXY(t));
+    // hoses first, so a spout above a funnel snaps onto it
+    const { S } = this;
+    this.hoses = (preset.hoses ?? []).map(({ from, to }) => {
+      const h = new Hose({ x: 0, y: 0 }, { x: 0, y: 0 });
+      const sp = this.spoutAt(this.tools[from.tool], from.spout);
+      const r = this.tankRect(this.tools[to.tool], to.tank ?? 0);
+      this.moveHoseEnd(h, 'inlet', { x: sp.x, y: sp.y + 16 * S });
+      this.moveHoseEnd(h, 'outlet', { x: (r.x0 + r.x1) / 2 + (to.dx ?? 0) * S, y: r.y0 - 24 * S });
+      return h;
+    });
     this.snapAll();
     this.won = false;
-    this.hoses = [];
     this.drag = this.toolDrag = this.valveDrag = this.scaleDrag = this.hoseDrag = null;
     this.hover = this.hoverTool = this.hoverTank = null;
     this.lastProgress = -1;

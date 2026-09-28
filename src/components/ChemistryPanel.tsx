@@ -1,5 +1,5 @@
 import { useReducer } from 'react';
-import { THERMO, T_ROOM, type BondParams } from '../chem/params';
+import { THERMO, T_ROOM, restoreDefaultChem, type BondParams } from '../chem/params';
 import type { ReactionNetwork } from '../chem/reactions';
 import { SPECIES, TARGET } from '../chem/species';
 import { DragNumber } from './DragNumber';
@@ -41,6 +41,8 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
                       value={b[f]}
                       onChange={(v) => edit(() => (b[f] = v))}
                       onDoubleClick={f === 'E' ? () => edit(() => (b.E = -b.E)) : undefined}
+                      typeable={f !== 'E'}
+                      min={0}
                     />
                   </td>
                 ))}
@@ -65,8 +67,12 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
           </tbody>
         </table>
         <p>
-          Drag a number sideways to scale it; double-click a bond energy to flip its sign. Target: {SPECIES[TARGET].name}, T_room = {T_ROOM}.
+          Drag a number sideways to scale it; double-click a bond energy to flip its sign, or any other number to type
+          it (0 included). Target: {SPECIES[TARGET].name}, T_room = {T_ROOM}.
         </p>
+        <div className="actions">
+          <button onClick={() => edit(() => restoreDefaultChem(p))}>Restore defaults</button>
+        </div>
       </div>
     </details>
   );

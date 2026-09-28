@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { defaultChemParams } from './chem/params';
+import { defaultChemParams, restoreDefaultChem } from './chem/params';
 import { ReactionNetwork } from './chem/reactions';
 import { AppearancePanel } from './components/AppearancePanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
@@ -72,6 +72,11 @@ export function App() {
 
   const loadPreset = (id: string) => {
     const p = PRESETS.find((x) => x.id === id)!;
+    if (p.defaultChem) {
+      restoreDefaultChem(network.params);
+      network.rebuild();
+      setChemVersion((v) => v + 1);
+    }
     setPreset(p);
     engine?.load(p);
     setWon(false);

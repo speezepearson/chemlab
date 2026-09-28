@@ -74,18 +74,17 @@ The reaction types are:
 
 ## The intended puzzle
 
-Blue is the atom that barely bonds. Its bonds have a tiny prefactor, so they essentially never form directly, even when white-hot. A barrier alone could be overcome by heat, which is why this uses the prefactor.
+Blue bonds are uphill (E = −10) and have no prefactor (A = 0), so they never form or break on their own, at any temperature. Blue gets into a molecule, or out of one, only by swapping places with yellow, its opposite color. The target, the **△RGB triangle**, sits above R–G + B, so nothing settles into it by accident, and the faucets pour essentially none (`src/game/faucets.test.ts` checks for under a part in 10⁸).
 
-To get blue into a molecule:
+The intended route:
 
-1. Build the shape with **yellow** in blue's place.
-2. **Wash** it with blue. The swap doesn't go through blue's formation kinetics, and Y→B is downhill because B–X bonds are meaningfully stronger than Y–X bonds, so the wash runs nearly to completion.
+1. Build **△RGY**: R–G plus yellow.
+2. **Wash** it with blue, hot and with blue in excess. The swap that puts blue in yellow's place is uphill, so the yellow has to be pulled out as it's freed, which a separator does if its left spout is hosed back into its own tank.
+3. Separate the △RGB from what's left.
 
-Detailed balance means the tiny prefactor slows breaking as much as forming. Once blue is in, it's kinetically locked, and the product is stable in a way its yellow precursor isn't.
+With no yellow around, the product stays put hot or cold. Any yellow it meets undoes it, downhill and fast, and the heat that releases can free more yellow.
 
-The current target is the **△RGB triangle**. The intended route is R + G → R–G, then + Y → mostly △RGY, then wash with B. The test suite checks that this route works from free atoms.
-
-**This needs rework for the current faucets**, which don't give free atoms. With the current chemistry the target comes too easily: the 40% R / 40% G / 20% B faucet pours out 60% △RGB (by atoms), so two flasks of it win. The R–G and R–M–B faucets also carry a few percent of it at equilibrium. The planned chemistry redesign (blue bonds with E < 0 and A = 0, so they only form by swapping) is meant to fix this.
+**This doesn't work yet.** The wash also turns open chains (R–G–Y, and R–G + Y) into blue chains, R–G–B and G–R–B. These are dead ends that no separator tells from the target, and with the default chemistry they come out ahead of it by 3–10 times. `npm run route` prints the route stage by stage, and the *Wash route (sandbox)* preset sets up the wash step to tinker with.
 
 ## What's playable now (v1)
 
@@ -99,10 +98,10 @@ The current target is the **△RGB triangle**. The intended route is R + G → R
   - 98% G, 2% R.
 
   A faucet dispenses its atoms at chemical equilibrium at its temperature. The equilibrium is solved exactly in `src/chem/equilibrium.ts` and follows live edits to the chemistry, so the output can be mostly something else:
-  - The R–G faucet is 96% R–G, 1.5% △RGB and 1.5% △RGY (by atoms), plus traces.
-  - The cold blue one is pure B apart from 0.015% △RGB.
-  - The R–M–B one is 80% the ring △RMB and 5% △RGB, with a long tail.
-  - The 40/40/20 one is 60% △RGB, the target itself, and 40% R–G.
+  - The R–G faucet is 97% R–G and 1.5% △RGY (by atoms), plus traces.
+  - The cold blue one is pure B: blue bonds are uphill, so the traces of R and G stay free.
+  - The R–M–B one is 38% R–M and 32% free B, with a long tail of R, M and yellow-bearing rings.
+  - The 40/40/20 one is 80% R–G and 20% free B.
   - The hot C–Y one is only 25% C–Y, since the bond is weak and it's hot. The rest is mostly free C and Y.
   - 95% R / 5% G is 90% free R and 10% R–G. 98% G / 2% R is 96% free G and 4% R–G.
 
@@ -120,12 +119,17 @@ The current target is the **△RGB triangle**. The intended route is R + G → R
 - **Supply:** the supply flask starts with 0.4 billion atoms of the target. The goal bar counts target atoms in every flask, tank and hose funnel that is at least 99% target by atoms (vessels less pure count for nothing), and 2 billion wins.
 - **God mode:** hovering or dragging a flask, or hovering a tank, shows its temperature, fill level, a species pie chart and the top species. The pie keeps a fixed order (singles, then pairs, then triples, counterclockwise from north), so its sectors don't jump around as amounts shift. The list is sorted by amount. Double-clicking one opens an editor for its temperature and composition. You can drag or type each number, add or remove any of the 50 species, or empty it. It updates live while the contents react.
 - **Sim speed:** pause, 1×, 4× or 16×, since Arrhenius waiting is boring.
-- **Presets:** the dropdown next to Reset loads a starting layout, and Reset restarts the current one. *Stranded* is the game. *Temperature range* shows flasks from T = 0 to T = 100, to show how temperature looks. *Heat exchanger demo* passes hot red and room-temperature green through the exchanger. *Separator demo* splits red from cyan. Presets are defined in `src/game/presets.ts`.
-- **Chemistry table:** every parameter is live-editable. Drag a number sideways to scale it by 1% per pixel (100 px ≈ ×e), and double-click a bond energy `E` to flip its sign. All reaction rates rebuild on every change.
+- **Presets:** the dropdown next to Reset loads a starting layout, and Reset restarts the current one. *Stranded* is the game. *Temperature range* shows flasks from T = 0 to T = 100, to show how temperature looks. *Heat exchanger demo* passes hot red and room-temperature green through the exchanger. *Separator demo* splits red from cyan. *Wash route (sandbox)* is the wash step of the intended route, set up to tinker with: a hot separator of △RGY and blue with its left spout hosed back into its tank, hot blue dripping in from above, and a catch tank under the right spout. Picking it from the menu also restores the default chemistry. Presets are defined in `src/game/presets.ts`, and can place hoses by naming the tool spout and tank each end goes to.
+- **Chemistry table:** every parameter is live-editable. Drag a number sideways to scale it by 1% per pixel (100 px ≈ ×e). Double-click a bond energy `E` to flip its sign, or any other number to type it, which is how to set an `A` back to 0. *Restore defaults* puts the default chemistry back. All reaction rates rebuild on every change.
 - **Saving** (`src/game/save.ts`): the bench (every flask, tool, scale and hose, their contents, valves and tares) and the chemistry parameters are saved to local storage every 2 seconds and when you leave the page, and restored on load. *Export* copies the whole setup as a string (base64 of JSON), and *Import* loads one. Contents are stored by species name, so saves survive reordering the species list.
 
 ## Open questions / next steps
 
+- **Blue chains beat the target in the wash.** The route harness (`npm run route`, `src/game/route.test.ts`) shows the wash preset peaking at about 0.04 flasks of △RGB at 1–2% purity, with 3–6 times as much R–G–B and G–R–B. Two things feed the chains:
+  - An open chain R–G–Y washes with one uphill blue bond instead of the ring's two, so it's favored by about e^(|E(R–B)|/T).
+  - The default yellow bonds are weak (E = 4), so at wash temperature most △RGY falls apart into R–G + Y, and G–R–Y from those washes into G–R–B.
+
+  Stronger, slower yellow bonds keep the ring shut, but then the wash is so far uphill that the separator (yellow vs. △RGY: e per pass) can't pull yellow out fast enough. Parameter scans, including asymmetric blue bonds (R–B stable, G–B very uphill), found nothing much better. Candidate levers: a separator that tells shapes apart, a sharper separator, or a separate barrier for ring closure.
 - **Separation.** Nothing yet separates species, so washed product sits in a flask with free Y and leftover B. The candidates are:
   - boiling: small species are volatile, which reuses temperature;
   - a size sieve: singles pass, pairs and triples stay;
@@ -150,13 +154,14 @@ The current target is the **△RGB triangle**. The intended route is R + G → R
 npm install
 npm run dev        # local dev server
 npm test           # chemistry tests (vitest)
+npm run route      # the synthesis route, printed stage by stage (src/game/route.test.ts)
 npm run build      # typecheck + production build into dist/
 ```
 
 Code layout:
 
 - `src/chem/`: the chemistry model, pure TypeScript with no DOM. It covers atoms, species enumeration, parameters, and the reaction network with its integrator.
-- `src/game/`: flasks, tools, the scale, pouring, fluid color, and `GameEngine`, which owns the canvas. It handles layout, pointer input, the simulation loop and drawing.
+- `src/game/`: flasks, tools, the scale, pouring, fluid color, and `GameEngine`, which owns the canvas. It handles layout, pointer input, the simulation loop and drawing. `route.ts` is a harness that runs a synthesis on the same pieces without the UI and reports each stage.
 - `src/components/`: the React UI around the canvas: speed control, the chemistry table and the god-mode panel.
 
 ### Deploys and PR previews

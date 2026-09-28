@@ -1,7 +1,9 @@
-import type { Atom } from '../chem/atoms';
-import { T_ROOM } from '../chem/params';
-import { SPECIES, TARGET, singleOf } from '../chem/species';
+import { ATOMS, type Atom } from '../chem/atoms';
+import { equilibrium } from '../chem/equilibrium';
+import { T_ROOM, defaultChemParams } from '../chem/params';
+import { SPECIES, TARGET, singleOf, speciesEnergies } from '../chem/species';
 import { CAP } from './config';
+import { FAUCETS } from './faucets';
 import type { Vessel } from './flask';
 import type { ToolKind } from './tools';
 
@@ -24,6 +26,16 @@ export interface ToolSpec {
   tanks?: (FlaskFill | null)[];
 }
 
+/**
+ * A hose on the bench at the start, running from just under one tool's spout to just above one of a
+ * tool's tanks (the same tool's, to loop it back on itself). Tools are indexed in the preset's list.
+ */
+export interface HoseSpec {
+  from: { tool: number; spout: number };
+  /** `dx` shifts the outlet sideways from the tank's center, in the tool's local units. */
+  to: { tool: number; tank?: number; dx?: number };
+}
+
 /** A starting layout: one entry per shelf slot (null for an empty flask), plus any tools. */
 export interface Preset {
   id: string;
@@ -34,10 +46,53 @@ export interface Preset {
   tools?: ToolSpec[];
   /** Top center of each scale's platform, as fractions of the stage's width and height. */
   scales?: [number, number][];
+  hoses?: HoseSpec[];
+  /** Whether picking the preset from the menu restores the default chemistry. Reset leaves the chemistry alone. */
+  defaultChem?: boolean;
 }
 
 /** `atoms` atoms' worth of one species. */
 const atomsOf = (species: number, atoms: number) => ({ species, molecules: atoms / SPECIES[species].size });
+
+/**
+ * A mix of faucets left to settle at temperature T: faucet i's recipe weighted by `mix[i]` flasks,
+ * at chemical equilibrium under the default chemistry.
+ */
+function settled(mix: Record<number, number>, T: number): { species: number; molecules: number }[] {
+  const atoms = ATOMS.map((a) => Object.entries(mix).reduce((t, [i, fl]) => t + fl * (FAUCETS[+i].atoms[a] ?? 0), 0));
+  const n = equilibrium(atoms, speciesEnergies(defaultChemParams()), T);
+  return SPECIES.filter((s) => n[s.i] * CAP >= 1).map((s) => ({ species: s.i, molecules: n[s.i] * CAP }));
+}
+
+/** Where the wash route's separator stands; its feed and catch tanks are placed relative to it. */
+const WASH_AT: [number, number] = [0.36, 0.4];
+const WASH_T = 12;
+
+/** The wash route's starting bench. route.test.ts runs the same thing without the UI. */
+export const WASH_PRESET: Preset = {
+  id: 'wash',
+  name: 'Wash route (sandbox)',
+  description:
+    'Midway through the intended route, to tinker with: the separator holds △RGY (from ½ flask of the R–G faucet ' +
+    'and 1½ of the hot C–Y one, settled at T = 1) plus 1½ flasks of blue, heated to T = 12. Its left spout is ' +
+    'hosed back into its own tank, so each pass strips out yellow, and hot blue drips in from the tank above. ' +
+    'Whatever goes right collects in the catch tank below. Picking this preset also restores the default chemistry.',
+  flasks: [],
+  tools: [
+    {
+      kind: 'separator', at: WASH_AT, valves: [0.02],
+      tanks: [{ contents: [...settled({ 0: 0.5, 4: 1.5 }, 1), atomsOf(singleOf('B'), 1.5 * CAP)], T: WASH_T }],
+    },
+    {
+      kind: 'dispenser', at: [WASH_AT[0], 0.14], valves: [0.005],
+      tanks: [{ contents: [atomsOf(singleOf('B'), 4 * CAP)], T: WASH_T }],
+    },
+    // under the separator's right spout, 36 local units right of its center (a unit is 1/760 of the stage's width)
+    { kind: 'dispenser', at: [WASH_AT[0] + 36 / 760, WASH_AT[1] + 0.25] },
+  ],
+  hoses: [{ from: { tool: 0, spout: 0 }, to: { tool: 0, dx: -20 } }],
+  defaultChem: true,
+};
 
 const SHOWCASE: [Atom, number][] = [
   ['R', 0], ['G', 0.2], ['B', 0.5], ['Y', 1], ['C', 3], ['M', 10], ['R', 30], ['G', 100],
@@ -88,6 +143,7 @@ export const PRESETS: readonly Preset[] = [
       { kind: 'dispenser', at: [0.3 + 0.047, 0.5] },
     ],
   },
+  WASH_PRESET,
   {
     id: 'temperatures',
     name: 'Temperature range',
