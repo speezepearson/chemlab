@@ -5,6 +5,7 @@ import { AppearancePanel } from './components/AppearancePanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
 import { FlaskEditor } from './components/FlaskEditor';
 import { InfoPanel } from './components/InfoPanel';
+import { Palette } from './components/Palette';
 import { SpeedControl } from './components/SpeedControl';
 import { GOAL_ATOMS } from './game/config';
 import { fmtCount } from './game/format';
@@ -32,6 +33,7 @@ export function App() {
       onWin: () => setWon(true),
       onInspect: setInspection,
       onEdit: setEditing,
+      isDiscard: (x, y) => !!document.elementFromPoint(x, y)?.closest('.palette'),
     }, presetRef.current);
     setEngine(e);
     return () => e.destroy();
@@ -88,11 +90,14 @@ export function App() {
         </div>
         <p className="hint">{preset.description}</p>
       </header>
-      <div id="stage" ref={stageRef}>
-        <canvas ref={canvasRef} />
-        {inspection && <InfoPanel info={inspection} />}
-        {engine && editing !== null && <FlaskEditor engine={engine} id={editing} onClose={() => setEditing(null)} />}
-        {won && <div id="win">Enough sustenance to last until relief arrives.</div>}
+      <div className="main">
+        {engine && <Palette engine={engine} />}
+        <div id="stage" ref={stageRef}>
+          <canvas ref={canvasRef} />
+          {inspection && <InfoPanel info={inspection} />}
+          {engine && editing !== null && <FlaskEditor engine={engine} id={editing} onClose={() => setEditing(null)} />}
+          {won && <div id="win">Enough sustenance to last until relief arrives.</div>}
+        </div>
       </div>
     </>
   );

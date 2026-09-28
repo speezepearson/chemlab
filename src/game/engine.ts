@@ -6,7 +6,7 @@ import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadiu
 import { Flask, Vessel, fluidColor, glowColor, transfer, type Point } from './flask';
 import { DEFAULT_PRESET, applyFill, type Preset } from './presets';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
-import { HELIX, TANK_H, TOOL_NAMES, Tool, mouthBelow, tankX, type Mouth } from './tools';
+import { HELIX, TANK_H, TOOL_NAMES, Tool, mouthBelow, tankX, type Mouth, type ToolKind } from './tools';
 
 /** What the god-mode panel needs to show for one vessel. */
 export interface Inspection {
@@ -31,6 +31,8 @@ export interface EngineCallbacks {
   onInspect(info: Inspection | null): void;
   /** A vessel was double-clicked in god mode; look it up with GameEngine.vessel(id). */
   onEdit(id: string): void;
+  /** Whether letting go of something at this point (in client coordinates) puts it away. */
+  isDiscard(clientX: number, clientY: number): boolean;
 }
 
 /** Where a carried flask is: pouring zones tilt it, and a scale stands it on its platform. */
@@ -106,6 +108,7 @@ export class GameEngine {
   private raf = 0;
   private resizeObserver: ResizeObserver;
   private cleanups: (() => void)[] = [];
+  private nextToolId = 0;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -164,6 +167,7 @@ export class GameEngine {
     });
     this.scales = (preset.scales ?? []).map(([fx, fy]) => new Scale(fx, fy));
     this.settle();
+    this.nextToolId = preset.tools?.length ?? 0;
     this.tools = (preset.tools ?? []).map((spec, i) => {
       const t = new Tool(spec.kind, i, spec.at[0], spec.at[1], spec.valves);
       spec.tanks?.forEach((fill, k) => t.tanks[k] && applyFill(t.tanks[k], fill));
@@ -174,6 +178,28 @@ export class GameEngine {
     this.drag = this.toolDrag = this.valveDrag = this.scaleDrag = null;
     this.hover = this.hoverTool = this.hoverTank = null;
     this.lastProgress = -1;
+  }
+
+  /** Make a new flask, scale or tool under the pointer (in client coordinates) and start carrying it. */
+  spawn(kind: 'flask' | 'scale' | ToolKind, clientX: number, clientY: number): void {
+    const r = this.canvas.getBoundingClientRect();
+    const p = (this.pointer = { x: clientX - r.left, y: clientY - r.top });
+    const { S, W, H } = this;
+    if (kind === 'flask') {
+      const f = new Flask({ x: p.x, y: p.y - 35 * S }, CAP);
+      f.glass = glassGrams(this.flasks.length);
+      this.flasks.push(f);
+      this.drag = { flask: f, zone: null, off: { x: 0, y: 35 * S } };
+    } else if (kind === 'scale') {
+      const sc = new Scale(p.x / W, p.y / H);
+      this.scales.push(sc);
+      this.scaleDrag = { scale: sc, off: { x: 0, y: 0 } };
+    } else {
+      const t = new Tool(kind, this.nextToolId++, p.x / W, (p.y - 40 * S) / H);
+      this.tools.push(t);
+      this.toolDrag = { tool: t, off: { x: 0, y: 40 * S } };
+    }
+    this.updateHover();
   }
 
   private vessels(): Vessel[] {
@@ -400,7 +426,12 @@ export class GameEngine {
       this.updateHover();
       e.preventDefault();
     });
-    on('pointermove', (e) => {
+    // moves and releases are heard on the whole window, so a drag can start on the palette
+    const onWindow = <K extends keyof WindowEventMap>(type: K, fn: (e: WindowEventMap[K]) => void) => {
+      window.addEventListener(type, fn);
+      this.cleanups.push(() => window.removeEventListener(type, fn));
+    };
+    onWindow('pointermove', (e) => {
       const p = (this.pointer = this.ptr(e));
       if (this.valveDrag) {
         const { tool, k, v0, p0 } = this.valveDrag;
@@ -416,7 +447,21 @@ export class GameEngine {
       }
       this.updateHover();
     });
-    const endDrag = () => {
+    const endDrag = (e: PointerEvent) => {
+      this.pointer = this.ptr(e);
+      if (this.cb.isDiscard(e.clientX, e.clientY)) {
+        // dropped back on the palette: put it away
+        const t = this.toolDrag?.tool;
+        const sc = this.scaleDrag?.scale;
+        const f = this.drag?.flask;
+        if (t) this.tools.splice(this.tools.indexOf(t), 1);
+        if (sc) this.scales.splice(this.scales.indexOf(sc), 1);
+        if (f) {
+          this.flasks.splice(this.flasks.indexOf(f), 1);
+          for (const s of this.scales) s.remove(f);
+          this.drag = null;
+        }
+      }
       this.toolDrag = this.valveDrag = this.scaleDrag = null;
       if (this.drag) {
         // a flask stays where it's let go; one tilted to pour stands back up where it's held
@@ -430,9 +475,10 @@ export class GameEngine {
       }
       this.updateHover();
     };
-    on('pointerup', endDrag);
-    on('pointercancel', endDrag);
+    onWindow('pointerup', endDrag);
+    onWindow('pointercancel', endDrag);
     on('pointerleave', () => {
+      if (this.drag || this.toolDrag || this.scaleDrag || this.valveDrag) return;
       this.pointer = { x: -1, y: -1 };
       this.updateHover();
     });
