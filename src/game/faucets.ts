@@ -10,6 +10,8 @@ export interface Faucet {
    * dispenses those atoms at chemical equilibrium, which may be mostly bonded.
    */
   atoms: Partial<Record<Atom, number>>;
+  /** The temperature it comes out at; room temperature if left out. */
+  T?: number;
 }
 
 /**
@@ -18,30 +20,36 @@ export interface Faucet {
  * much about how the world's chemistry works.
  */
 export const FAUCETS: readonly Faucet[] = [
-  { atoms: { R: 1 / 2, G: 1 / 2 } }, // R–G
-  { atoms: { B: 1 } },
-  { atoms: { R: 1 / 3, M: 1 / 3, B: 1 / 3 } }, // R–M–B
-  { atoms: { C: 1 / 2, Y: 1 / 2 } }, // C–Y
-  { atoms: { G: 1 / 2, B: 1 / 2 } }, // G–B
+  // R–G, with a little of everything else
+  { atoms: { R: 0.49, G: 0.49, C: 0.005, M: 0.005, B: 0.005, Y: 0.005 } },
+  // nearly pure blue, very cold
+  { atoms: { B: 0.9999, R: 0.00005, G: 0.00005 }, T: 0.2 },
+  // R–M–B, with the other colors as contaminants
+  { atoms: { R: 0.95 / 3, M: 0.95 / 3, B: 0.95 / 3, G: 0.05 / 3, C: 0.05 / 3, Y: 0.05 / 3 } },
+  { atoms: { R: 0.4, G: 0.4, B: 0.2 } },
+  // C–Y, with a trace of magenta, hot
+  { atoms: { C: 0.666, Y: 0.333, M: 0.001 }, T: 10 },
   { atoms: { R: 0.95, G: 0.05 } },
   { atoms: { G: 0.98, R: 0.02 } },
 ];
 
-/** A faucet's recipe as text, e.g. "95% R, 5% G". */
+/** A faucet's recipe as text, e.g. "95% R, 5% G" or "66.6% C, 33.3% Y, 0.1% M at T = 10". */
 export function describeFaucet(fa: Faucet): string {
-  return Object.entries(fa.atoms)
-    .map(([a, share]) => `${+(100 * share!).toPrecision(3)}% ${a}`)
+  const recipe = Object.entries(fa.atoms)
+    .map(([a, share]) => `${+(100 * share!).toPrecision(4)}% ${a}`)
     .join(', ');
+  return fa.T === undefined ? recipe : `${recipe} at T = ${fa.T}`;
 }
 
 /**
  * One atom's worth of what a faucet dispenses, given the current species
- * energies U. Faucet output is always at room temperature and in chemical
- * equilibrium with itself (enforced by faucets.test.ts), so a flask filled
- * from a single faucet just sits there.
+ * energies U. Faucet output is at the faucet's temperature and in chemical
+ * equilibrium with itself there (enforced by faucets.test.ts), so a flask
+ * filled from a single faucet just sits there until it's warmed or cooled.
  */
 export function faucetOutput(fa: Faucet, U: Float64Array): Fluid {
+  const T = fa.T ?? T_ROOM;
   const atoms = ATOMS.map((a) => fa.atoms[a] ?? 0);
   const total = atoms.reduce((t, v) => t + v, 0);
-  return { n: equilibrium(atoms.map((v) => v / total), U, T_ROOM), N: 1, Q: T_ROOM * THERMO.heatCap };
+  return { n: equilibrium(atoms.map((v) => v / total), U, T), N: 1, Q: T * THERMO.heatCap };
 }

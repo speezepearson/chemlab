@@ -60,7 +60,7 @@ The reaction types are:
 
 - **Reaction heat:** exotherms heat the fluid through a per-atom heat capacity.
 - **Mixing:** heat adds, so temperatures average, weighted by atom count.
-- **Cooling:** none in v1, so flasks stay hot forever. Faucets only give room-temperature fluid, so the ways to lower a temperature are diluting with faucet fluid, running endothermic reactions, or passing it through the heat exchanger against something cooler.
+- **Cooling:** none in v1, so flasks stay hot forever. Most faucets give room-temperature fluid, and the blue one gives very cold fluid (T = 0.2), so the ways to lower a temperature are diluting with cooler faucet fluid, running endothermic reactions, or passing it through the heat exchanger against something cooler.
 
 ### Appearance
 
@@ -85,22 +85,28 @@ Detailed balance means the tiny prefactor slows breaking as much as forming. Onc
 
 The current target is the **△RGB triangle**. The intended route is R + G → R–G, then + Y → mostly △RGY, then wash with B. The test suite checks that this route works from free atoms.
 
-**This needs rework for the current faucets**, which don't give free atoms. Mixing faucet fluids at room temperature reaches the target far too easily:
-
-- R–M–B + R–G gives about 45% △RGB (by atoms) within a minute. The R–M–B faucet is already mostly the ring △RMB, and a fast swap trades its M for G.
-- R–M–B + G–B gives about 32% within a minute.
-- R–G + G–B gives about 42% after an hour, because ring closure through a blue bond isn't really frozen: at A = 0.002 and Ea = 1 it runs at about 7×10⁻⁴/s.
+**This needs rework for the current faucets**, which don't give free atoms. With the current chemistry the target comes too easily: the 40% R / 40% G / 20% B faucet pours out 60% △RGB (by atoms), so two flasks of it win. The R–G and R–M–B faucets also carry a few percent of it at equilibrium. The planned chemistry redesign (blue bonds with E < 0 and A = 0, so they only form by swapping) is meant to fix this.
 
 ## What's playable now (v1)
 
-- **Filling:** drag a flask under a faucet to fill it. The seven faucets are scrounged mixes rather than pure atoms, so that the atoms and their chemistry aren't handed to the player. Each is a recipe of atoms by share: R–G, B, R–M–B, C–Y and G–B in their compounds' proportions, plus 95% R / 5% G and 98% G / 2% R. A faucet dispenses its atoms at chemical equilibrium at room temperature. The equilibrium is solved exactly in `src/chem/equilibrium.ts` and follows live edits to the chemistry, so the output can be mostly something else:
-  - R–G is 93% R–G, with 3.4% each of free R and G.
-  - C–Y is only 44% C–Y, since the bond is weak. The rest is free C and Y.
-  - R–M–B is 93% the ring △RMB.
-  - G–B is 98% G–B, and B is pure.
+- **Filling:** drag a flask under a faucet to fill it. The seven faucets are scrounged mixes rather than pure atoms, so that the atoms and their chemistry aren't handed to the player. Each is a recipe of atoms by share, at room temperature unless noted:
+  - 49% R, 49% G, and 0.5% each of C, M, B and Y;
+  - 99.99% B and 0.005% each of R and G, at T = 0.2;
+  - 95% R, M and B in equal parts, and 5% G, C and Y in equal parts;
+  - 40% R, 40% G, 20% B;
+  - 66.6% C, 33.3% Y, 0.1% M, at T = 10;
+  - 95% R, 5% G;
+  - 98% G, 2% R.
+
+  A faucet dispenses its atoms at chemical equilibrium at its temperature. The equilibrium is solved exactly in `src/chem/equilibrium.ts` and follows live edits to the chemistry, so the output can be mostly something else:
+  - The R–G faucet is 96% R–G, 1.5% △RGB and 1.5% △RGY (by atoms), plus traces.
+  - The cold blue one is pure B apart from 0.015% △RGB.
+  - The R–M–B one is 80% the ring △RMB and 5% △RGB, with a long tail.
+  - The 40/40/20 one is 60% △RGB, the target itself, and 40% R–G.
+  - The hot C–Y one is only 25% C–Y, since the bond is weak and it's hot. The rest is mostly free C and Y.
   - 95% R / 5% G is 90% free R and 10% R–G. 98% G / 2% R is 96% free G and 4% R–G.
 
-  Faucet output is always at room temperature and in chemical equilibrium with itself, so a flask filled from one faucet just sits there. `src/game/faucets.test.ts` enforces both. A faucet fills anything held or parked right under it, including a tool's tank.
+  Faucet output is in chemical equilibrium with itself at the faucet's temperature, so a flask filled from one faucet just sits there. `src/game/faucets.test.ts` enforces this. A faucet fills anything held or parked right under it, including a tool's tank.
 - **Pouring:** drag a flask over another flask or a tool's tank to pour gradually, or down to the sink along the bottom of the screen to dump it.
 - **Placing:** a flask stays wherever you let go of it. One tilted to pour stands back up where you're holding it. Left under a faucet or spout, it keeps filling.
 - **Tools** (`src/game/tools.ts`) can be dragged anywhere and stay where you drop them. Each has tanks on top that hold four flasks' worth. Each tank drains through its own valve, and fluid leaves through one or more spouts on the bottom. Right-click a tool near a valve and point: the lever follows the pointer, fully open (1 flask/s) straight up from the valve, closed straight right, and partly open in between. Valves start closed.
