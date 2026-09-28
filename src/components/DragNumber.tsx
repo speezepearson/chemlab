@@ -2,6 +2,7 @@ import { useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } 
 
 function fmt(v: number): string {
   const a = Math.abs(v);
+  if (a >= 1e5) return v.toExponential(2).replace('e+', 'e');
   if (a >= 100) return v.toFixed(0);
   if (a >= 10) return v.toFixed(1);
   if (a >= 1) return v.toFixed(2);

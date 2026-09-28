@@ -5,10 +5,17 @@ import { AppearancePanel } from './components/AppearancePanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
 import { FlaskEditor } from './components/FlaskEditor';
 import { InfoPanel } from './components/InfoPanel';
+import { Palette } from './components/Palette';
 import { SpeedControl } from './components/SpeedControl';
-import { GOAL_ATOMS } from './game/config';
+import { GOAL_ATOMS, GOAL_PURITY } from './game/config';
+import { fmtCount } from './game/format';
 import { GameEngine, type Inspection } from './game/engine';
 import { DEFAULT_PRESET, PRESETS } from './game/presets';
+import { decodeSave, encodeSave, storeSave, storedSave, type SaveState } from './game/save';
+
+const presetOf = (s: SaveState | null) => PRESETS.find((p) => p.id === s?.preset) ?? DEFAULT_PRESET;
+/** How often the bench is saved to local storage, in ms (and on leaving the page). */
+const AUTOSAVE_MS = 2000;
 
 export function App() {
   const [network] = useState(() => new ReactionNetwork(defaultChemParams()));
@@ -18,8 +25,11 @@ export function App() {
   const [progress, setProgress] = useState(0);
   const [won, setWon] = useState(false);
   const [inspection, setInspection] = useState<Inspection | null>(null);
-  const [preset, setPreset] = useState(DEFAULT_PRESET);
-  const [editing, setEditing] = useState<number | null>(null);
+  const [saved] = useState(storedSave);
+  const [preset, setPreset] = useState(() => presetOf(saved));
+  const [chemVersion, setChemVersion] = useState(0);
+  const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
   const presetRef = useRef(preset);
   presetRef.current = preset;
   const stageRef = useRef<HTMLDivElement>(null);
@@ -30,11 +40,21 @@ export function App() {
       onProgress: setProgress,
       onWin: () => setWon(true),
       onInspect: setInspection,
-      onEditFlask: setEditing,
+      onEdit: setEditing,
+      isDiscard: (x, y) => !!document.elementFromPoint(x, y)?.closest('.palette'),
     }, presetRef.current);
+    if (saved) e.restore(saved, presetRef.current);
     setEngine(e);
-    return () => e.destroy();
-  }, [network]);
+    const save = () => storeSave(e.snapshot());
+    const timer = setInterval(save, AUTOSAVE_MS);
+    window.addEventListener('pagehide', save);
+    return () => {
+      save();
+      clearInterval(timer);
+      window.removeEventListener('pagehide', save);
+      e.destroy();
+    };
+  }, [network, saved]);
 
   useEffect(() => {
     if (engine) engine.speed = speed;
@@ -57,13 +77,44 @@ export function App() {
     setWon(false);
   };
 
+  const exportSave = async () => {
+    if (!engine) return;
+    const text = encodeSave(engine.snapshot());
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      window.prompt('Copy this save string:', text);
+    }
+  };
+
+  const importSave = () => {
+    if (!engine) return;
+    const text = window.prompt('Paste a save string:');
+    if (!text) return;
+    let s: SaveState;
+    try {
+      s = decodeSave(text);
+    } catch {
+      window.alert("That doesn't look like a Slurry Lab save string.");
+      return;
+    }
+    const p = presetOf(s);
+    setPreset(p);
+    engine.restore(s, p);
+    storeSave(engine.snapshot());
+    setChemVersion((v) => v + 1);
+    setWon(false);
+  };
+
   return (
     <>
       <header>
         <h1>Slurry Lab</h1>
         <div className="goal">
           <span>
-            Sustenance {progress} / {GOAL_ATOMS}
+            {Math.round(100 * GOAL_PURITY)}+% pure sustenance {fmtCount(progress)} / {fmtCount(GOAL_ATOMS)}
           </span>
           <div className="bar">
             <i style={{ width: `${Math.min(100, (100 * progress) / GOAL_ATOMS)}%` }} />
@@ -82,16 +133,25 @@ export function App() {
             ))}
           </select>
           <button onClick={reset}>Reset</button>
-          <ChemistryPanel network={network} />
+          <button onClick={exportSave} title="Copy a string holding this whole setup">
+            {copied ? 'Copied!' : 'Export'}
+          </button>
+          <button onClick={importSave} title="Load a setup from an exported string">
+            Import
+          </button>
+          <ChemistryPanel key={chemVersion} network={network} />
           <AppearancePanel />
         </div>
         <p className="hint">{preset.description}</p>
       </header>
-      <div id="stage" ref={stageRef}>
-        <canvas ref={canvasRef} />
-        {inspection && <InfoPanel info={inspection} />}
-        {engine && editing !== null && <FlaskEditor engine={engine} index={editing} onClose={() => setEditing(null)} />}
-        {won && <div id="win">Enough sustenance to last until relief arrives.</div>}
+      <div className="main">
+        {engine && <Palette engine={engine} />}
+        <div id="stage" ref={stageRef}>
+          <canvas ref={canvasRef} />
+          {inspection && <InfoPanel info={inspection} />}
+          {engine && editing !== null && <FlaskEditor engine={engine} id={editing} onClose={() => setEditing(null)} />}
+          {won && <div id="win">Enough sustenance to last until relief arrives.</div>}
+        </div>
       </div>
     </>
   );

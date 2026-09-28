@@ -1,7 +1,8 @@
 import { ATOMS, ATOM_RGB } from '../chem/atoms';
-import { T_ROOM } from '../chem/params';
-import { atomCounts, type Fluid } from '../chem/reactions';
-import { NS, SPECIES } from '../chem/species';
+import { atomCounts, heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
+import { NS, SPECIES, TARGET } from '../chem/species';
+import { GOAL_PURITY, TRACE } from './config';
+import { GLASS_GRAMS } from './scale';
 import { css, glowWhiteHeat, heatValue, whiteHeat, whiten, type RGB } from './appearance';
 
 export interface Point {
@@ -9,64 +10,110 @@ export interface Point {
   y: number;
 }
 
-export class Flask implements Fluid {
+/** A container of fluid with a fixed capacity, in atoms. Its counts and heat are always whole numbers. */
+export class Vessel implements Fluid {
   n = new Float64Array(NS);
   N = 0;
-  T = T_ROOM;
-  x: number;
-  y: number;
-  ang = 0;
+  Q = 0;
 
   constructor(
-    public home: Point,
     readonly cap: number,
     public label = '',
-  ) {
-    this.x = home.x;
-    this.y = home.y;
-  }
+  ) {}
 
-  /** Set one species' molecule count, clamped to [0, what fits]; returns the count actually set. */
+  /**
+   * Set one species' molecule count, rounded and clamped to [0, what fits], keeping the temperature;
+   * returns the count actually set.
+   */
   setMolecules(s: number, molecules: number): number {
     const size = SPECIES[s].size;
-    const m = Math.max(0, Math.min(molecules, this.n[s] + (this.cap - this.N) / size));
-    this.N = Math.max(0, this.N + (m - this.n[s]) * size);
+    const T = temperature(this);
+    const m = Math.max(0, Math.min(Math.round(molecules), Math.floor(this.n[s] + (this.cap - this.N) / size)));
+    this.N += (m - this.n[s]) * size;
     this.n[s] = m;
+    this.Q = heatAt(T, this.N);
     return m;
   }
 
-  /** Add `amount` atoms' worth of a fluid without depleting it; returns the amount actually added. */
+  /** Set the temperature, by setting the heat to match. */
+  setTemperature(T: number): void {
+    this.Q = heatAt(Math.max(0, T), this.N);
+  }
+
+  /**
+   * Add about `amount` atoms' worth of a fluid, in whole molecules, without depleting it (a faucet's
+   * recipe, or a packet already sent on its way); returns the atoms actually added.
+   */
   addFrom(src: Fluid, amount: number): number {
     amount = Math.min(amount, this.cap - this.N);
-    if (amount <= 0) return 0;
+    if (amount <= 0 || src.N <= 0) return 0;
     const f = amount / src.N;
-    for (let s = 0; s < NS; s++) this.n[s] += src.n[s] * f;
-    this.T = (this.N * this.T + amount * src.T) / (this.N + amount);
-    this.N += amount;
-    return amount;
+    let added = 0;
+    for (let s = 0; s < NS; s++) {
+      const m = roundRandom(src.n[s] * f);
+      this.n[s] += m;
+      added += m * SPECIES[s].size;
+    }
+    this.Q += roundRandom((src.Q * added) / src.N);
+    this.N += added;
+    return added;
   }
 }
 
-/** Move `atoms` atoms' worth of src's contents into dst (or down the sink if dst is null). */
+/** Atoms of the target in a fluid that counts toward the goal: all of them if it's at least GOAL_PURITY target, else none. */
+export function sustenance(f: Fluid): number {
+  const t = f.n[TARGET] * SPECIES[TARGET].size;
+  return f.N > 0 && t >= GOAL_PURITY * f.N ? t : 0;
+}
+
+/** A flask on the shelf. It lives in a slot (`home`) and can be picked up and carried. */
+export class Flask extends Vessel {
+  x: number;
+  y: number;
+  ang = 0;
+  /** Weight of the empty flask, in grams. */
+  glass = GLASS_GRAMS;
+
+  constructor(
+    public home: Point,
+    cap: number,
+    label = '',
+  ) {
+    super(cap, label);
+    this.x = home.x;
+    this.y = home.y;
+  }
+}
+
+/**
+ * Move about `atoms` atoms' worth of src's contents, in whole molecules, into dst (or down the sink if dst
+ * is null), with heat in proportion; returns the atoms actually moved.
+ */
 export function transfer(src: Fluid, dst: (Fluid & { cap: number }) | null, atoms: number): number {
   atoms = Math.min(atoms, src.N, dst ? dst.cap - dst.N : Infinity);
-  if (atoms <= 1e-9) return 0;
+  if (atoms <= 0) return 0;
   const f = atoms / src.N;
+  let moved = 0;
   for (let s = 0; s < NS; s++) {
-    const m = src.n[s] * f;
+    const m = Math.min(src.n[s], roundRandom(src.n[s] * f));
+    if (!m) continue;
     src.n[s] -= m;
     if (dst) dst.n[s] += m;
+    moved += m * SPECIES[s].size;
   }
+  const q = moved >= src.N ? src.Q : Math.min(src.Q, roundRandom((src.Q * moved) / src.N));
+  src.Q -= q;
+  src.N -= moved;
   if (dst) {
-    dst.T = (dst.N * dst.T + atoms * src.T) / (dst.N + atoms);
-    dst.N += atoms;
+    dst.Q += q;
+    dst.N += moved;
   }
-  src.N -= atoms;
-  if (src.N < 1e-6) {
+  if (src.N < TRACE) {
     src.N = 0;
     src.n.fill(0);
+    src.Q = 0;
   }
-  return atoms;
+  return moved;
 }
 
 /** Atom-weighted mix of the six colors (bond structure is invisible); null if empty. */
@@ -88,12 +135,13 @@ export function fluidHue(f: Fluid): RGB | null {
 export function fluidColor(f: Fluid): string {
   const hue = fluidHue(f);
   if (!hue) return 'transparent';
-  const v = heatValue(f.T);
-  return css(whiten(hue.map((x) => x * v), whiteHeat(f.T)));
+  const T = temperature(f);
+  const v = heatValue(T);
+  return css(whiten(hue.map((x) => x * v), whiteHeat(T)));
 }
 
 /** Color of the light a hot fluid gives off. */
 export function glowColor(f: Fluid): RGB | null {
   const hue = fluidHue(f);
-  return hue && whiten(hue, glowWhiteHeat(f.T));
+  return hue && whiten(hue, glowWhiteHeat(temperature(f)));
 }

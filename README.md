@@ -17,7 +17,9 @@ A packet of fluid, such as the contents of a flask, is fully described by:
 
 There is **no solvent**. Reaction rates depend on mole fractions, so only ratios matter, not absolute amounts. Adding fluid gradually still matters, because it keeps one reagent scarce while it goes in. There is no "add water" lever.
 
-Volume is measured in atoms, so a flask's capacity is a number of atoms.
+Volume is measured in atoms, so a flask's capacity is a number of atoms: a billion.
+
+Every count in a vessel is a whole number of molecules, and its heat is a whole number of energy quanta (one unit of bond energy each). Temperature is derived as heat / (heat capacity × atoms), so mixing simply adds heat, and energy is conserved exactly. Whenever the expected result is fractional, such as reaction events in a step, one species' share of a pour, or the separator's split, it's rounded at random: up with probability equal to the fraction. That keeps averages exact, so slow reactions still happen. JavaScript numbers hold whole numbers exactly up to 2⁵³ ≈ 9×10¹⁵, so plain numbers are enough and BigInt isn't needed. Faucet recipes are the one fractional thing: one atom's worth, poured out as whole molecules. Counts that large behave like continuous quantities, so no small-number artifacts show up. The chemistry doesn't care about the scale, since everything in it depends on ratios.
 
 ### Atoms and molecules
 
@@ -57,8 +59,8 @@ The reaction types are:
 ### Heat
 
 - **Reaction heat:** exotherms heat the fluid through a per-atom heat capacity.
-- **Mixing:** temperatures average, weighted by atom count.
-- **Cooling:** none in v1, so flasks stay hot forever. Faucets only give room-temperature fluid, so the only ways to lower a temperature are diluting with faucet fluid or running endothermic reactions.
+- **Mixing:** heat adds, so temperatures average, weighted by atom count.
+- **Cooling:** none in v1, so flasks stay hot forever. Most faucets give room-temperature fluid, and the blue one gives very cold fluid (T = 0.2), so the ways to lower a temperature are diluting with cooler faucet fluid, running endothermic reactions, or passing it through the heat exchanger against something cooler.
 
 ### Appearance
 
@@ -81,17 +83,46 @@ To get blue into a molecule:
 
 Detailed balance means the tiny prefactor slows breaking as much as forming. Once blue is in, it's kinetically locked, and the product is stable in a way its yellow precursor isn't.
 
-The current target is the **△RGB triangle**. The intended route is R + G → R–G, then + Y → mostly △RGY, then wash with B. The test suite checks that this route works.
+The current target is the **△RGB triangle**. The intended route is R + G → R–G, then + Y → mostly △RGY, then wash with B. The test suite checks that this route works from free atoms.
+
+**This needs rework for the current faucets**, which don't give free atoms. With the current chemistry the target comes too easily: the 40% R / 40% G / 20% B faucet pours out 60% △RGB (by atoms), so two flasks of it win. The R–G and R–M–B faucets also carry a few percent of it at equilibrium. The planned chemistry redesign (blue bonds with E < 0 and A = 0, so they only form by swapping) is meant to fix this.
 
 ## What's playable now (v1)
 
-- **Filling:** drag a flask under a faucet to fill it. There are six faucets, one per atom. Faucet output is always at room temperature and in chemical equilibrium with itself, so a flask filled from one faucet just sits there. `src/game/faucets.test.ts` enforces both.
-- **Pouring:** drag a flask over another flask to pour gradually, or over the sink to dump it.
-- **Supply:** the supply flask starts with 40 molecules of the target. The goal bar counts target atoms across all flasks, and 600 wins.
-- **God mode:** hovering or dragging a flask shows its temperature, fill level, a species pie chart and the top species. Double-clicking a flask opens an editor for its temperature and composition. You can drag or type each number, add or remove any of the 50 species, or empty the flask. It updates live while the flask reacts.
+- **Filling:** drag a flask under a faucet to fill it. The seven faucets are scrounged mixes rather than pure atoms, so that the atoms and their chemistry aren't handed to the player. Each is a recipe of atoms by share, at room temperature unless noted:
+  - 49% R, 49% G, and 0.5% each of C, M, B and Y;
+  - 99.99% B and 0.005% each of R and G, at T = 0.2;
+  - 95% R, M and B in equal parts, and 5% G, C and Y in equal parts;
+  - 40% R, 40% G, 20% B;
+  - 66.6% C, 33.3% Y, 0.1% M, at T = 10;
+  - 95% R, 5% G;
+  - 98% G, 2% R.
+
+  A faucet dispenses its atoms at chemical equilibrium at its temperature. The equilibrium is solved exactly in `src/chem/equilibrium.ts` and follows live edits to the chemistry, so the output can be mostly something else:
+  - The R–G faucet is 96% R–G, 1.5% △RGB and 1.5% △RGY (by atoms), plus traces.
+  - The cold blue one is pure B apart from 0.015% △RGB.
+  - The R–M–B one is 80% the ring △RMB and 5% △RGB, with a long tail.
+  - The 40/40/20 one is 60% △RGB, the target itself, and 40% R–G.
+  - The hot C–Y one is only 25% C–Y, since the bond is weak and it's hot. The rest is mostly free C and Y.
+  - 95% R / 5% G is 90% free R and 10% R–G. 98% G / 2% R is 96% free G and 4% R–G.
+
+  Faucet output is in chemical equilibrium with itself at the faucet's temperature, so a flask filled from one faucet just sits there. `src/game/faucets.test.ts` enforces this. A faucet fills anything held or parked right under it, including a tool's tank.
+- **Pouring:** drag a flask over another flask or a tool's tank to pour gradually, or down to the sink along the bottom of the screen to dump it.
+- **Placing:** a flask stays wherever you let go of it. One tilted to pour stands back up where you're holding it. Left under a faucet or spout, it keeps filling.
+- **Tools** (`src/game/tools.ts`) can be dragged anywhere and stay where you drop them. Each has tanks on top that hold four flasks' worth. Each tank drains through its own valve, and fluid leaves through one or more spouts on the bottom. Right-click a tool near a valve and point: the lever follows the pointer, fully open (1 flask/s) straight up from the valve, closed straight right, and partly open in between. Valves start closed.
+  - **Spouts** pour into the first open top below them: a flask, including one you're holding under the spout, or another tool's tank. If there isn't one, the fluid falls into the sink. Whatever doesn't fit overflows to the sink. A tool whose spout is close to lined up over a mouth snaps the rest of the way.
+  - **Dispenser:** one tank, drained through one spout.
+  - **Separator:** one tank, drained through two spouts. Each molecule leaves left : right in the ratio e^p : e^s, where p is its number of primary-color atoms (R, G, B) and s its secondary ones (C, M, Y). So △RGB goes 20 : 1 left, △RGY 2.7 : 1 left, and free Y 1 : 2.7 right. One pass only enriches, so purer cuts take a cascade. The spouts are far enough apart for a flask, or a tool's tank, under each.
+  - **Heat exchanger:** two tanks, A and B, whose streams pass each other in counterflow through two hoses wound into a double helix. Each stream crosses over and leaves from the spout under the *other* tank, and the hoses show each stream's color. They trade heat but never mix, and heat is conserved. It uses the standard effectiveness–NTU model with a fixed exchange capacity (`EXCHANGE_RATE`, 2 flasks/s): the slower stream gets a fraction ε of the way to the other's inlet temperature. Two equal streams at 0.25 flask/s nearly swap temperatures (ε = 8/9). At 1 flask/s they get ε = 2/3. If one valve is shut, the other stream passes through unchanged.
+  - **Hose:** a funnel inlet and a spout outlet, each dragged anywhere on its own, with a magic pump between them (up to 2 flasks/s). Whatever falls or is poured into the funnel comes out of the outlet, and anything arriving faster overflows the quarter-flask funnel to the sink. You can loop one back, for example from a separator's outlet into its own tank.
+  - Tools run on **sim time**, interleaved with the chemistry, so a slow drip into a reacting flask comes out the same at any sim speed, and pausing freezes them. Faucets and your own pouring stay in real time.
+- **Scale** (`src/game/scale.ts`): stand flasks anywhere along its platform to weigh them. They move with the scale, and a spout above one pours into it, so you can dispense by weight. It reads whole grams up to 5 kg (OVER beyond that), and *tare* zeroes it. Fluid weighs 1 µg per atom, so a full flask of fluid is 1 kg. Each empty flask weighs about 100 g, off by up to 6 g. The error is fixed per shelf slot, so weighing fluid means taring with its flask first.
+- **Supply:** the supply flask starts with 0.4 billion atoms of the target. The goal bar counts target atoms in every flask, tank and hose funnel that is at least 99% target by atoms (vessels less pure count for nothing), and 2 billion wins.
+- **God mode:** hovering or dragging a flask, or hovering a tank, shows its temperature, fill level, a species pie chart and the top species. The pie keeps a fixed order (singles, then pairs, then triples, counterclockwise from north), so its sectors don't jump around as amounts shift. The list is sorted by amount. Double-clicking one opens an editor for its temperature and composition. You can drag or type each number, add or remove any of the 50 species, or empty it. It updates live while the contents react.
 - **Sim speed:** pause, 1×, 4× or 16×, since Arrhenius waiting is boring.
-- **Presets:** the dropdown next to Reset loads a starting layout, and Reset restarts the current one. *Stranded* is the game. *Temperature range* shows flasks from T = 0 to T = 100, to show how temperature looks. Presets are defined in `src/game/presets.ts`.
+- **Presets:** the dropdown next to Reset loads a starting layout, and Reset restarts the current one. *Stranded* is the game. *Temperature range* shows flasks from T = 0 to T = 100, to show how temperature looks. *Heat exchanger demo* passes hot red and room-temperature green through the exchanger. *Separator demo* splits red from cyan. Presets are defined in `src/game/presets.ts`.
 - **Chemistry table:** every parameter is live-editable. Drag a number sideways to scale it by 1% per pixel (100 px ≈ ×e), and double-click a bond energy `E` to flip its sign. All reaction rates rebuild on every change.
+- **Saving** (`src/game/save.ts`): the bench (every flask, tool, scale and hose, their contents, valves and tares) and the chemistry parameters are saved to local storage every 2 seconds and when you leave the page, and restored on load. *Export* copies the whole setup as a string (base64 of JSON), and *Import* loads one. Contents are stored by species name, so saves survive reordering the species list.
 
 ## Open questions / next steps
 
@@ -102,7 +133,12 @@ The current target is the **△RGB triangle**. The intended route is R + G → R
 
   The choice affects what shape the target should be.
 - **Temperature control.** A burner or ice bath, and possibly Newtonian cooling toward ambient, so that "the target sits behind a kinetic barrier that needs heat" works as a puzzle.
-- **More glassware and tools.** Graduated cylinders, pipettes and scales.
+- **More glassware and tools.** Graduated cylinders and pipettes.
+- **Tool follow-ups.**
+  - A tank can only be emptied through its spout.
+  - The valve needs a right mouse button, so there's no touch equivalent yet.
+  - Tools can't stand on the scale, so a dispenser's contents can't be weighed.
+  - Every atom weighs the same. Giving colors different masses would make the scale reveal something about composition.
 - **Tuning.**
   - The swap prefactor: if it's too high, recoloring is trivial and the whole puzzle is getting the topology right.
   - Heat capacity: R + G alone heats up noticeably.
@@ -120,7 +156,7 @@ npm run build      # typecheck + production build into dist/
 Code layout:
 
 - `src/chem/`: the chemistry model, pure TypeScript with no DOM. It covers atoms, species enumeration, parameters, and the reaction network with its integrator.
-- `src/game/`: flasks, pouring, fluid color, and `GameEngine`, which owns the canvas. It handles layout, pointer input, the simulation loop and drawing.
+- `src/game/`: flasks, tools, the scale, pouring, fluid color, and `GameEngine`, which owns the canvas. It handles layout, pointer input, the simulation loop and drawing.
 - `src/components/`: the React UI around the canvas: speed control, the chemistry table and the god-mode panel.
 
 ### Deploys and PR previews
