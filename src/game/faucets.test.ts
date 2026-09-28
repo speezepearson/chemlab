@@ -1,28 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { defaultChemParams, T_ROOM } from '../chem/params';
 import { ReactionNetwork, atomCounts, type Fluid } from '../chem/reactions';
+import { ATOMS } from '../chem/atoms';
 import { NS, SPECIES } from '../chem/species';
 import { CAP } from './config';
-import { FAUCETS, faucetOutput } from './faucets';
+import { FAUCETS, describeFaucet, faucetOutput } from './faucets';
 
 describe('faucets', () => {
   const net = new ReactionNetwork(defaultChemParams());
 
   for (const fa of FAUCETS) {
-    describe(`${fa.name} faucet`, () => {
+    describe(`${describeFaucet(fa)} faucet`, () => {
       const out = faucetOutput(fa, net.U);
 
       it('outputs fluid at room temperature', () => {
         expect(out.T).toBe(T_ROOM);
       });
 
-      it(`outputs ${fa.name}'s atoms, in its proportions`, () => {
-        const want = SPECIES.find((s) => s.name === fa.name)!;
+      it('outputs its recipe of atoms', () => {
         const total = atomCounts(out).reduce((t, v) => t + v, 0);
         expect(total).toBeCloseTo(out.N, 12);
-        atomCounts(out).forEach((v, a) =>
-          expect(v).toBeCloseTo(want.atomIdx.filter((x) => x === a).length / want.size, 12),
-        );
+        atomCounts(out).forEach((v, a) => expect(v).toBeCloseTo(fa.atoms[ATOMS[a]] ?? 0, 12));
       });
 
       it('outputs fluid in chemical equilibrium with itself', () => {

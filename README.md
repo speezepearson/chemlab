@@ -91,11 +91,12 @@ The current target is the **△RGB triangle**. The intended route is R + G → R
 
 ## What's playable now (v1)
 
-- **Filling:** drag a flask under a faucet to fill it. The five faucets are scrounged mixes rather than pure atoms, so that the atoms and their chemistry aren't handed to the player. Each is named for a compound (R–G, B, R–M–B, C–Y, G–B), and it dispenses that compound's atoms at chemical equilibrium at room temperature. The equilibrium is solved exactly in `src/chem/equilibrium.ts` and follows live edits to the chemistry, so the output can be mostly something else:
+- **Filling:** drag a flask under a faucet to fill it. The seven faucets are scrounged mixes rather than pure atoms, so that the atoms and their chemistry aren't handed to the player. Each is a recipe of atoms by share: R–G, B, R–M–B, C–Y and G–B in their compounds' proportions, plus 95% R / 5% G and 98% G / 2% R. A faucet dispenses its atoms at chemical equilibrium at room temperature. The equilibrium is solved exactly in `src/chem/equilibrium.ts` and follows live edits to the chemistry, so the output can be mostly something else:
   - R–G is 93% R–G, with 3.4% each of free R and G.
   - C–Y is only 44% C–Y, since the bond is weak. The rest is free C and Y.
   - R–M–B is 93% the ring △RMB.
   - G–B is 98% G–B, and B is pure.
+  - 95% R / 5% G is 90% free R and 10% R–G. 98% G / 2% R is 96% free G and 4% R–G.
 
   Faucet output is always at room temperature and in chemical equilibrium with itself, so a flask filled from one faucet just sits there. `src/game/faucets.test.ts` enforces both. A faucet fills anything held or parked right under it, including a tool's tank.
 - **Pouring:** drag a flask over another flask or a tool's tank to pour gradually, or down to the sink along the bottom of the screen to dump it.
