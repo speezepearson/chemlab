@@ -33,20 +33,17 @@ export interface EngineCallbacks {
   onEdit(id: string): void;
 }
 
-/** Where a carried flask is. Pouring zones tilt it; filling zones hold it upright under a stream. */
+/** Where a carried flask is: pouring zones tilt it, and a scale stands it on its platform. */
 type Zone =
   | { kind: 'flask'; f: Flask }
   | { kind: 'tank'; v: Vessel; x: number; y: number }
-  | { kind: 'spout'; p: Point }
   | { kind: 'scale'; scale: Scale; dx: number; p: Point }
-  | { kind: 'faucet'; fa: FaucetLayout }
   | { kind: 'sink' };
 type FaucetLayout = Faucet & { x: number; output: Fluid };
 
 interface Layout {
   pipeY: number;
   spoutY: number;
-  fillMouthY: number;
   faucets: FaucetLayout[];
   /** Top of the lowest shelf. */
   benchY: number;
@@ -85,7 +82,7 @@ export class GameEngine {
   private H = 0;
   private S = 1;
   private dpr = 1;
-  private L: Layout = { pipeY: 0, spoutY: 0, fillMouthY: 0, faucets: [], benchY: 0, floorY: 0, homes: [] };
+  private L: Layout = { pipeY: 0, spoutY: 0, faucets: [], benchY: 0, floorY: 0, homes: [] };
   private flasks: Flask[] = [];
   /** Back to front. */
   private tools: Tool[] = [];
@@ -197,7 +194,6 @@ export class GameEngine {
     const nF = FAUCETS.length;
     L.pipeY = 30 * S;
     L.spoutY = 62 * S;
-    L.fillMouthY = L.spoutY + 16 * S;
     L.faucets = FAUCETS.map((fa, i) => ({
       ...fa, output: faucetOutput(fa, this.chem.U), x: W * 0.06 + W * 0.72 * (i / (nF - 1)),
     }));
@@ -527,14 +523,6 @@ export class GameEngine {
       const x = Math.max(o.x + (pl.x0 + 24) * S, Math.min(o.x + (pl.x1 - 24) * S, held));
       return { kind: 'scale', scale: sc, dx: (x - o.x) / S, p: { x, y: o.y - 70 * S } };
     }
-    for (const t of this.tools)
-      for (let j = 0; j < t.shape.spouts.length; j++) {
-        const sp = this.spoutAt(t, j);
-        if (Math.abs(p.x - sp.x) < 30 * S && p.y > sp.y && p.y < sp.y + 130 * S) return { kind: 'spout', p: sp };
-      }
-    for (const fa of L.faucets) {
-      if (Math.abs(p.x - fa.x) < 38 * S && p.y > L.pipeY && p.y < L.spoutY + 150 * S) return { kind: 'faucet', fa };
-    }
     if (p.y > L.benchY + 8 * S) return { kind: 'sink' };
     return null;
   }
@@ -554,12 +542,6 @@ export class GameEngine {
       if (!z) {
         D.x = pointer.x - drag.off.x;
         D.y = pointer.y - drag.off.y;
-      } else if (z.kind === 'faucet') {
-        D.x = z.fa.x;
-        D.y = L.fillMouthY;
-      } else if (z.kind === 'spout') {
-        D.x = z.p.x;
-        D.y = z.p.y + 16 * S;
       } else if (z.kind === 'scale') {
         D.x = z.p.x;
         D.y = z.p.y;
