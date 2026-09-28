@@ -1,7 +1,7 @@
 import { temperature, type Fluid, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
 import { CAP, FILL_RATE, GOAL_ATOMS, N_FLASKS, POUR_RATE, TRACE } from './config';
-import { FAUCETS, faucetOutput, type Faucet } from './faucets';
+import { FAUCETS, faucetOutput, faucetTarget, type Faucet } from './faucets';
 import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
 import { FLASK_PATH_DATA, fillLevel, tiltedOutline } from './flaskShape';
 import { Flask, Vessel, fluidColor, glowColor, sustenance, transfer, type Point } from './flask';
@@ -103,7 +103,7 @@ export class GameEngine {
   private hover: Flask | null = null;
   private hoverTool: Tool | null = null;
   private hoverTank: Vessel | null = null;
-  /** Whether the right mouse button is held: a carried flask pours, and takes from faucets, only while it is. */
+  /** Whether the right mouse button is held: a carried flask pours, and anything carried takes from faucets, only while it is. */
   private rightHeld = false;
   private faucetFlows: { fa: FaucetLayout; m: Mouth }[] = [];
   private pointer: Point = { x: -1, y: -1 };
@@ -625,7 +625,7 @@ export class GameEngine {
     on('contextmenu', (e) => e.preventDefault());
     // the right button pours while carrying, which shouldn't open a menu wherever it's clicked
     onWindow('contextmenu', (e) => {
-      if (this.drag) e.preventDefault();
+      if (this.drag || this.toolDrag || this.scaleDrag || this.hoseDrag) e.preventDefault();
     });
     on('dblclick', (e) => {
       if (!this.god) return;
@@ -722,6 +722,15 @@ export class GameEngine {
     return null;
   }
 
+  /** The vessels being carried: they catch a faucet's stream only while the right button is held. */
+  private carried(): Set<Vessel> {
+    const out = new Set<Vessel>();
+    if (this.drag) out.add(this.drag.flask);
+    if (this.toolDrag) for (const v of this.toolDrag.tool.tanks) out.add(v);
+    if (this.hoseDrag && this.hoseDrag.end !== 'outlet') out.add(this.hoseDrag.hose.funnel);
+    return out;
+  }
+
   /* ---------------- main loop ---------------- */
 
   private frame = (now: number): void => {
@@ -763,12 +772,12 @@ export class GameEngine {
 
     // faucets also run in real time: each fills whatever is parked right under it, or held there with the right button
     const mouths = this.mouths();
-    const faucetMouths = drag && !this.rightHeld ? mouths.filter((m) => m.v !== drag.flask) : mouths;
+    const carried = this.carried();
     this.faucetFlows = [];
     for (const fa of L.faucets) {
       fa.output = faucetOutput(fa, this.chem.U); // cheap, and follows edits to the chemistry
-      const m = mouthBelow(faucetMouths, { x: fa.x, y: L.spoutY });
-      if (!m || m.y - L.spoutY > FAUCET_REACH * S || m.v.N > m.v.cap - TRACE) continue;
+      const m = faucetTarget(mouths, { x: fa.x, y: L.spoutY }, FAUCET_REACH * S, carried, this.rightHeld);
+      if (!m) continue;
       m.v.addFrom(fa.output, FILL_RATE * dt);
       this.faucetFlows.push({ fa, m });
     }
