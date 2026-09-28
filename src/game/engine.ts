@@ -3,6 +3,7 @@ import { NS, SPECIES } from '../chem/species';
 import { CAP, FILL_RATE, GOAL_ATOMS, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { FAUCETS, faucetOutput, type Faucet } from './faucets';
 import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
+import { FLASK_PATH_DATA, fillLevel, tiltedOutline } from './flaskShape';
 import { Flask, Vessel, fluidColor, glowColor, sustenance, transfer, type Point } from './flask';
 import { DEFAULT_PRESET, applyFill, type Preset } from './presets';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
@@ -74,7 +75,7 @@ const SINK_H = 16;
 /** The separator's splitter, below its valve, in local units. */
 const SEP_BODY = { x0: -42, x1: 42, y0: 100, y1: 112 };
 
-const FLASK_PATH = new Path2D('M-11 0 L11 0 L9 22 L26 64 Q28 70 22 70 L-22 70 Q-28 70 -26 64 L-9 22 Z');
+const FLASK_PATH = new Path2D(FLASK_PATH_DATA);
 
 /** Owns the canvas: layout, pointer input, the simulation loop and drawing. */
 export class GameEngine {
@@ -869,21 +870,16 @@ export class GameEngine {
     ctx.rotate(ang);
     ctx.scale(S, S);
     if (f.N > TRACE) {
-      // fill level is horizontal in screen space, even when the flask is tilted
+      // fill level is horizontal in screen space, even when the flask is tilted, and
+      // high enough that the colored area is in proportion to the amount of fluid
       ctx.save();
       ctx.clip(FLASK_PATH);
-      const c = Math.cos(ang);
-      const s = Math.sin(ang);
-      let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
-      for (const [lx, ly] of [[-28, 0], [28, 0], [-28, 70], [28, 70]]) {
-        const wx = mx + S * (lx * c - ly * s);
-        const wy = my + S * (lx * s + ly * c);
-        minX = Math.min(minX, wx); maxX = Math.max(maxX, wx);
-        minY = Math.min(minY, wy); maxY = Math.max(maxY, wy);
-      }
+      const pts = tiltedOutline(ang);
+      const minX = mx + S * Math.min(...pts.map((p) => p.x));
+      const maxX = mx + S * Math.max(...pts.map((p) => p.x));
+      const maxY = my + S * Math.max(...pts.map((p) => p.y));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      const lvl = Math.min(1, f.N / f.cap);
-      const top = maxY - lvl * (maxY - minY);
+      const top = my + S * fillLevel(ang, f.N / f.cap);
       ctx.fillStyle = fluidColor(f);
       ctx.fillRect(minX - 2, top, maxX - minX + 4, maxY - top + 2);
       ctx.restore();
