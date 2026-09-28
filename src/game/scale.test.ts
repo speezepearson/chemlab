@@ -29,17 +29,20 @@ describe('Scale', () => {
   it('reads whole grams of everything on it', () => {
     const sc = new Scale(0, 0);
     expect(sc.reading()).toBe(0);
-    sc.spots[0] = flask(0, CAP / 4);
-    sc.spots[2] = flask(1);
+    const a = flask(0, CAP / 4);
+    sc.put(a, -40);
+    sc.put(flask(1), 40);
     expect(sc.reading()).toBe(Math.round(glassGrams(0) + 250 + glassGrams(1)));
-    sc.remove(sc.spots[0]!);
+    sc.put(a, 10); // moving a flask along the platform doesn't weigh it twice
+    expect(sc.reading()).toBe(Math.round(glassGrams(0) + 250 + glassGrams(1)));
+    sc.remove(a);
     expect(sc.reading()).toBe(Math.round(glassGrams(1)));
   });
 
   it('tares to weigh just the fluid', () => {
     const sc = new Scale(0, 0);
     const f = flask(5);
-    sc.spots[1] = f;
+    sc.put(f, 0);
     sc.zero();
     expect(sc.reading()).toBe(0);
     f.setMolecules(singleOf('R'), CAP * 0.123);
@@ -51,7 +54,7 @@ describe('Scale', () => {
   it('reads OVER past its capacity, and will not tare there', () => {
     const sc = new Scale(0, 0);
     const heavy = { ...flask(0, CAP), glass: SCALE_MAX } as Flask;
-    sc.spots[0] = heavy;
+    sc.put(heavy, 0);
     expect(sc.reading()).toBeNull();
     sc.zero();
     expect(sc.tare).toBe(0);

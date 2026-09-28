@@ -6,7 +6,7 @@ import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadiu
 import { Flask, Vessel, fluidColor, glowColor, transfer, type Point } from './flask';
 import { DEFAULT_PRESET, applyFill, type Preset } from './presets';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
-import { HELIX, TANK_H, TOOL_NAMES, Tool, mouthBelow, spoutX, tankX, type Mouth } from './tools';
+import { HELIX, TANK_H, TOOL_NAMES, Tool, mouthBelow, tankX, type Mouth } from './tools';
 
 /** What the god-mode panel needs to show for one vessel. */
 export interface Inspection {
@@ -38,7 +38,7 @@ type Zone =
   | { kind: 'flask'; f: Flask }
   | { kind: 'tank'; v: Vessel; x: number; y: number }
   | { kind: 'spout'; p: Point }
-  | { kind: 'scale'; scale: Scale; k: number; p: Point }
+  | { kind: 'scale'; scale: Scale; dx: number; p: Point }
   | { kind: 'faucet'; fa: FaucetLayout }
   | { kind: 'sink' };
 type FaucetLayout = Faucet & { x: number; output: Fluid };
@@ -70,6 +70,8 @@ const SNAP = 24;
 /** Pixels of right-click drag (right or up opens) to turn a valve from closed to fully open. */
 const VALVE_PX = 150;
 const SINK_H = 16;
+/** The separator's splitter, below its valve, in local units. */
+const SEP_BODY = { x0: -42, x1: 42, y0: 100, y1: 112 };
 
 const FLASK_PATH = new Path2D('M-11 0 L11 0 L9 22 L26 64 Q28 70 22 70 L-22 70 Q-28 70 -26 64 L-9 22 Z');
 
@@ -87,7 +89,8 @@ export class GameEngine {
   private flasks: Flask[] = [];
   /** Back to front. */
   private tools: Tool[] = [];
-  private drag: { flask: Flask; zone: Zone | null } | null = null;
+  /** The carried flask; `off` is where it was grabbed, relative to its mouth. */
+  private drag: { flask: Flask; zone: Zone | null; off: Point } | null = null;
   private toolDrag: { tool: Tool; off: Point } | null = null;
   private scales: Scale[] = [];
   private scaleDrag: { scale: Scale; off: Point } | null = null;
@@ -157,13 +160,13 @@ export class GameEngine {
   load(preset: Preset): void {
     this.preset = preset;
     this.flasks = this.L.homes.map((h, i) => {
-      const f = new Flask(h, CAP);
+      const f = new Flask({ ...h }, CAP);
       f.glass = glassGrams(i);
       applyFill(f, preset.flasks[i] ?? null);
       return f;
     });
     this.scales = (preset.scales ?? []).map(([fx, fy]) => new Scale(fx, fy));
-    this.syncHomes();
+    this.settle();
     this.tools = (preset.tools ?? []).map((spec, i) => {
       const t = new Tool(spec.kind, i, spec.at[0], spec.at[1], spec.valves);
       spec.tanks?.forEach((fill, k) => t.tanks[k] && applyFill(t.tanks[k], fill));
@@ -184,6 +187,7 @@ export class GameEngine {
 
   private layout(): void {
     const { stage, canvas, L } = this;
+    const prev = { W: this.W, S: this.S, floorY: L.floorY };
     const W = (this.W = stage.clientWidth);
     const H = (this.H = stage.clientHeight);
     const dpr = (this.dpr = window.devicePixelRatio || 1);
@@ -208,28 +212,34 @@ export class GameEngine {
       L.homes.push({ x: (W * (c + 0.5)) / inRow, y: L.floorY - 22 * S - (rows - 1 - r) * 106 * S - 70 * S });
     }
     L.benchY = Math.max(...L.homes.map((h) => h.y)) + 70 * S;
+    // keep resting flasks in proportion: across by width, and up from the floor by scale, which keeps shelves full
+    if (prev.W > 0)
+      for (const f of this.flasks)
+        f.home = this.clampRest({ x: (f.home.x * W) / prev.W, y: L.floorY - ((prev.floorY - f.home.y) * S) / prev.S });
     for (const t of this.tools) this.place(t, this.toolXY(t));
     for (const sc of this.scales) this.placeScale(sc, this.scaleXY(sc));
-    this.syncHomes();
+    this.settle();
     this.snapAll();
   }
 
-  /** Point each flask's home at its spot on a scale, or else its shelf slot. */
-  private syncHomes(): void {
+  /** A flask's resting place (its mouth), kept on the stage and above the sink. */
+  private clampRest(p: Point): Point {
+    const { S, W } = this;
+    return { x: Math.max(28 * S, Math.min(W - 28 * S, p.x)), y: Math.max(6 * S, Math.min(this.L.floorY - 70 * S, p.y)) };
+  }
+
+  /** Stand each flask on a scale where the scale now is, and put every flask not being carried at rest. */
+  private settle(): void {
     const { S } = this;
-    this.flasks.forEach((f, i) => {
-      f.home = this.L.homes[i];
-      for (const sc of this.scales) {
-        const k = sc.spots.indexOf(f);
-        if (k < 0) continue;
-        const o = this.scaleXY(sc);
-        f.home = { x: o.x + SCALE_SHAPE.spots[k] * S, y: o.y - 70 * S };
-      }
+    for (const sc of this.scales) {
+      const o = this.scaleXY(sc);
+      for (const { f, dx } of sc.load) f.home = { x: o.x + dx * S, y: o.y - 70 * S };
+    }
+    for (const f of this.flasks)
       if (this.drag?.flask !== f) {
         f.x = f.home.x;
         f.y = f.home.y;
       }
-    });
   }
 
   /* ---------------- scale geometry ---------------- */
@@ -273,9 +283,9 @@ export class GameEngine {
     return { x: o.x + p.x * this.S, y: o.y + p.y * this.S };
   }
 
-  /** Where tank k's fluid leaves the tool, in stage coordinates. */
-  private spoutAt(t: Tool, k: number): Point {
-    return this.onTool(t, { x: spoutX(t.shape.tanks[k]), y: t.shape.spoutY });
+  /** The tip of spout j, where fluid leaves the tool, in stage coordinates. */
+  private spoutAt(t: Tool, j: number): Point {
+    return this.onTool(t, { x: t.shape.spouts[j], y: t.shape.spoutY });
   }
 
   private valveAt(t: Tool, k: number): Point {
@@ -326,8 +336,8 @@ export class GameEngine {
   private snap(t: Tool): void {
     const mouths = this.mouths(t);
     let shift: number | null = null;
-    t.tanks.forEach((_, k) => {
-      const sp = this.spoutAt(t, k);
+    t.shape.spouts.forEach((_, j) => {
+      const sp = this.spoutAt(t, j);
       let best: Mouth | null = null;
       for (const m of mouths) {
         const cx = (m.x0 + m.x1) / 2;
@@ -385,7 +395,7 @@ export class GameEngine {
         } else {
           const f = this.hitFlask(p);
           if (f) {
-            this.drag = { flask: f, zone: null };
+            this.drag = { flask: f, zone: null, off: { x: p.x - f.home.x, y: p.y - f.home.y } };
             for (const sc of this.scales) sc.remove(f);
             c.setPointerCapture(e.pointerId);
           }
@@ -406,18 +416,21 @@ export class GameEngine {
       } else if (this.scaleDrag) {
         const { scale, off } = this.scaleDrag;
         this.placeScale(scale, { x: p.x - off.x, y: p.y - off.y });
-        this.syncHomes();
+        this.settle();
       }
       this.updateHover();
     });
     const endDrag = () => {
       this.toolDrag = this.valveDrag = this.scaleDrag = null;
       if (this.drag) {
-        const { flask: f, zone } = this.drag;
-        if (zone?.kind === 'scale') zone.scale.spots[zone.k] = f;
+        // a flask stays where it's let go; one tilted to pour stands back up where it's held
+        const { flask: f, zone, off } = this.drag;
+        if (zone?.kind === 'scale') zone.scale.put(f, zone.dx);
+        else if (f.ang !== 0) f.home = this.clampRest({ x: this.pointer.x - off.x, y: this.pointer.y - off.y });
+        else f.home = this.clampRest({ x: f.x, y: f.y });
         f.ang = 0;
         this.drag = null;
-        this.syncHomes();
+        this.settle();
       }
       this.updateHover();
     };
@@ -506,19 +519,17 @@ export class GameEngine {
     }
     for (const sc of this.scales) {
       const o = this.scaleXY(sc);
-      const { platform: pl, spots } = SCALE_SHAPE;
+      const pl = SCALE_SHAPE.platform;
       if (p.x < o.x + (pl.x0 - 10) * S || p.x > o.x + (pl.x1 + 10) * S || p.y < o.y - 80 * S || p.y > o.y + 20 * S)
         continue;
-      let best = -1;
-      spots.forEach((x, k) => {
-        if (sc.spots[k] || (best >= 0 && Math.abs(p.x - o.x - x * S) > Math.abs(p.x - o.x - spots[best] * S))) return;
-        best = k;
-      });
-      if (best >= 0) return { kind: 'scale', scale: sc, k: best, p: { x: o.x + spots[best] * S, y: o.y - 70 * S } };
+      // stand it on the platform right under where it's held
+      const held = p.x - (this.drag?.off.x ?? 0);
+      const x = Math.max(o.x + (pl.x0 + 24) * S, Math.min(o.x + (pl.x1 - 24) * S, held));
+      return { kind: 'scale', scale: sc, dx: (x - o.x) / S, p: { x, y: o.y - 70 * S } };
     }
     for (const t of this.tools)
-      for (let k = 0; k < t.tanks.length; k++) {
-        const sp = this.spoutAt(t, k);
+      for (let j = 0; j < t.shape.spouts.length; j++) {
+        const sp = this.spoutAt(t, j);
         if (Math.abs(p.x - sp.x) < 30 * S && p.y > sp.y && p.y < sp.y + 130 * S) return { kind: 'spout', p: sp };
       }
     for (const fa of L.faucets) {
@@ -541,8 +552,8 @@ export class GameEngine {
       const z = (drag.zone = this.zoneAt(pointer, D));
       D.ang = 0;
       if (!z) {
-        D.x = pointer.x;
-        D.y = pointer.y - 45 * S;
+        D.x = pointer.x - drag.off.x;
+        D.y = pointer.y - drag.off.y;
       } else if (z.kind === 'faucet') {
         D.x = z.fa.x;
         D.y = L.fillMouthY;
@@ -587,7 +598,7 @@ export class GameEngine {
     if (simDt > 0) {
       const sub = Math.ceil(simDt / 0.02);
       const h = simDt / sub;
-      const targets = this.tools.map((t) => t.tanks.map((_, k) => mouthBelow(mouths, this.spoutAt(t, k))));
+      const targets = this.tools.map((t) => t.shape.spouts.map((_, j) => mouthBelow(mouths, this.spoutAt(t, j))));
       for (let i = 0; i < sub; i++) {
         this.tools.forEach((t, j) =>
           t.step(h).forEach((out, k) => {
@@ -761,19 +772,37 @@ export class GameEngine {
 
     // drain pipes and spouts, behind the tanks
     ctx.fillStyle = theme.pipe;
-    for (const tk of sh.tanks) {
-      if (t.kind === 'exchanger') {
+    if (t.kind === 'exchanger')
+      sh.tanks.forEach((tk, k) => {
         // down into the helix at one end, and out of it at the other
         pipes([[tankX(tk), TANK_H], [tankX(tk), HELIX.y - HELIX.r]], 4);
-        pipes([[spoutX(tk), HELIX.y + HELIX.r], [spoutX(tk), sh.spoutY - 4]], 4);
-      } else pipes([[tankX(tk), TANK_H], [spoutX(tk), sh.spoutY - 4]], 4);
-      ctx.fillRect(o.x + (spoutX(tk) - 4) * S, o.y + (sh.spoutY - 6) * S, 8 * S, 6 * S);
-    }
+        pipes([[sh.spouts[k], HELIX.y + HELIX.r], [sh.spouts[k], sh.spoutY - 4]], 4);
+      });
+    else if (t.kind === 'separator') {
+      pipes([[0, TANK_H], [0, SEP_BODY.y0]], 4);
+      for (const x of sh.spouts) pipes([[x, SEP_BODY.y1], [x, sh.spoutY - 4]], 4);
+    } else pipes([[0, TANK_H], [0, sh.spoutY - 4]], 4);
+    for (const x of sh.spouts) ctx.fillRect(o.x + (x - 4) * S, o.y + (sh.spoutY - 6) * S, 8 * S, 6 * S);
     t.tanks.forEach((v, k) => {
       const r = this.tankRect(t, k);
       this.drawTank(v, r.x0, r.y0, r.x1, r.y1);
     });
     if (t.kind === 'exchanger') this.drawHelix(t);
+    if (t.kind === 'separator') {
+      // the splitter: one pipe in, two out, with a divider between the outlets
+      const { x0, x1, y0, y1 } = SEP_BODY;
+      ctx.fillStyle = theme.bench;
+      ctx.strokeStyle = theme.pipe;
+      ctx.lineWidth = 2 * S;
+      ctx.beginPath();
+      ctx.roundRect(o.x + x0 * S, o.y + y0 * S, (x1 - x0) * S, (y1 - y0) * S, 5 * S);
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(o.x, o.y + (y0 + 5) * S);
+      ctx.lineTo(o.x, o.y + y1 * S);
+      ctx.stroke();
+    }
 
     // the rate, while turning a valve or hovering the tool (but not a tank, which shows the god-mode panel)
     const showRates = this.valveDrag?.tool === t || (this.hoverTool === t && !(this.god && this.hoverTank));
@@ -962,7 +991,7 @@ export class GameEngine {
         if (!out) return;
         const sp = this.spoutAt(t, k);
         const m = mouthBelow(mouths, sp);
-        this.drawStream(sp.x, sp.y, sp.x, m ? m.y + 2 * S : H, fluidColor(out), 1.5 + 3 * t.valves[k]);
+        this.drawStream(sp.x, sp.y, sp.x, m ? m.y + 2 * S : H, fluidColor(out), 1.5 + 3 * Math.min(1, t.flow[k]));
       });
     for (const { fa, m } of this.faucetFlows) this.drawStream(fa.x, L.spoutY, fa.x, m.y + 2 * S, fluidColor(fa.output));
     if (drag && drag.flask.N > TRACE) {
@@ -1006,11 +1035,11 @@ export class GameEngine {
     }
 
     // flasks at rest
-    this.flasks.forEach((f, i) => {
-      if (drag?.flask === f) return;
+    for (const f of this.flasks) {
+      if (drag?.flask === f) continue;
       this.drawFlask(f, f.home.x, f.home.y, 0);
-      // labels sit on the shelf, so a flask on a scale leaves its label behind
-      if (f.label && f.home === L.homes[i]) {
+      // a label would cover a scale's display
+      if (f.label && !this.scales.some((sc) => sc.load.some((l) => l.f === f))) {
         ctx.fillStyle = theme.muted;
         ctx.textAlign = 'center';
         ctx.fillText(f.label, f.home.x, f.home.y + 86 * S);
@@ -1020,7 +1049,7 @@ export class GameEngine {
         ctx.lineWidth = 1.5;
         ctx.strokeRect(f.home.x - 30 * S, f.home.y - 6 * S, 60 * S, 80 * S);
       }
-    });
+    }
 
     for (const t of this.tools) this.drawTool(t);
     if (drag) this.drawFlask(drag.flask, drag.flask.x, drag.flask.y, drag.flask.ang);

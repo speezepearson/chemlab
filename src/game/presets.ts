@@ -53,6 +53,7 @@ export const PRESETS: readonly Preset[] = [
       'Drag tools anywhere, and right-click-drag a tool to turn its valve.',
     flasks: [{ contents: [atomsOf(TARGET, 0.4 * CAP)], T: T_ROOM, label: 'supply' }],
     tools: [
+      { kind: 'separator', at: [0.1, 0.3] },
       { kind: 'dispenser', at: [0.3, 0.3] },
       { kind: 'exchanger', at: [0.62, 0.3] },
     ],
@@ -69,6 +70,22 @@ export const PRESETS: readonly Preset[] = [
       { kind: 'dispenser', at: [0.5625, 0.22], valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('R'), 4 * CAP)], T: 10 }] },
       { kind: 'dispenser', at: [0.6545, 0.22], valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('G'), 4 * CAP)], T: T_ROOM }] },
       { kind: 'exchanger', at: [0.5625 + 0.046, 0.48], valves: [0.25, 0.25] },
+    ],
+  },
+  {
+    id: 'separator',
+    name: 'Separator demo',
+    description:
+      'A separator splits red and cyan into two dispensers below: each molecule leaves left : right as ' +
+      'e^(primary atoms) : e^(secondary atoms). Pour a result back through for a purer cut.',
+    flasks: [],
+    tools: [
+      {
+        kind: 'separator', at: [0.3, 0.2], valves: [0.3],
+        tanks: [{ contents: [atomsOf(singleOf('R'), 2 * CAP), atomsOf(singleOf('C'), 2 * CAP)], T: T_ROOM }],
+      },
+      { kind: 'dispenser', at: [0.3 - 0.047, 0.5] },
+      { kind: 'dispenser', at: [0.3 + 0.047, 0.5] },
     ],
   },
   {

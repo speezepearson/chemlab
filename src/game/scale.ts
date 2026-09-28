@@ -29,8 +29,6 @@ export function flaskGrams(f: Flask): number {
 
 /** Scale geometry in local units, origin at the top center of the platform. */
 export const SCALE_SHAPE = {
-  /** Where flasks stand on the platform. */
-  spots: [-58, 0, 58],
   platform: { x0: -92, x1: 92 },
   body: { x0: -84, x1: 84, y1: 40 },
   display: { x0: -62, x1: 22, y0: 12, y1: 32 },
@@ -39,9 +37,10 @@ export const SCALE_SHAPE = {
   box: { x0: -92, x1: 92, y0: -74, y1: 42 },
 };
 
-/** A bench scale with gram resolution. Flasks stand on its platform, one per spot. */
+/** A bench scale with gram resolution. Flasks stand anywhere along its platform. */
 export class Scale {
-  readonly spots: (Flask | null)[] = SCALE_SHAPE.spots.map(() => null);
+  /** What's standing on the platform, and where: dx is the flask's offset from its center, in local units. */
+  readonly load: { f: Flask; dx: number }[] = [];
   /** Subtracted from the reading, in whole grams. */
   tare = 0;
 
@@ -54,7 +53,7 @@ export class Scale {
   /** The true weight of everything on the platform, in grams. */
   gross(): number {
     let g = 0;
-    for (const f of this.spots) if (f) g += flaskGrams(f);
+    for (const { f } of this.load) g += flaskGrams(f);
     return g;
   }
 
@@ -70,9 +69,15 @@ export class Scale {
     if (g <= SCALE_MAX) this.tare = Math.round(g);
   }
 
+  /** Stand a flask on the platform, dx local units from its center. */
+  put(f: Flask, dx: number): void {
+    this.remove(f);
+    this.load.push({ f, dx });
+  }
+
   /** Take a flask off, if it's on. */
   remove(f: Flask): void {
-    const k = this.spots.indexOf(f);
-    if (k >= 0) this.spots[k] = null;
+    const k = this.load.findIndex((l) => l.f === f);
+    if (k >= 0) this.load.splice(k, 1);
   }
 }

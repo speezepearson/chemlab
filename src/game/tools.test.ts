@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SPECIES, singleOf } from '../chem/species';
 import { CAP } from './config';
 import { Vessel } from './flask';
-import { EXCHANGE_RATE, MAX_FLOW, TANK_CAP, Tool, counterflow, mouthBelow, type Mouth } from './tools';
+import { EXCHANGE_RATE, MAX_FLOW, TANK_CAP, Tool, counterflow, mouthBelow, separate, type Mouth } from './tools';
 
 const R = singleOf('R');
 const G = singleOf('G');
@@ -120,5 +120,38 @@ describe('mouthBelow', () => {
   it('ignores mouths above or to the side', () => {
     expect(mouthBelow(mouths, { x: 5, y: 120 })).toBeNull();
     expect(mouthBelow(mouths, { x: 15, y: 0 })).toBeNull();
+  });
+});
+
+describe('separator', () => {
+  const B = singleOf('B');
+  const Y = singleOf('Y');
+  const tri = (name: string) => SPECIES.find((s) => s.name === name)!.i;
+
+  it('splits each species left : right as e^primaries : e^secondaries', () => {
+    const f = new Vessel(Infinity);
+    for (const s of [R, singleOf('C'), tri('△RGB'), tri('△RGY'), tri('R–M–B')]) f.n[s] = 1;
+    f.N = atomTotal(f);
+    const [l, r] = separate(f);
+    expect(l.n[R] / r.n[R]).toBeCloseTo(Math.E);
+    expect(l.n[singleOf('C')] / r.n[singleOf('C')]).toBeCloseTo(1 / Math.E);
+    expect(l.n[tri('△RGB')] / r.n[tri('△RGB')]).toBeCloseTo(Math.exp(3));
+    expect(l.n[tri('△RGY')] / r.n[tri('△RGY')]).toBeCloseTo(Math.exp(2 - 1));
+    expect(l.n[tri('R–M–B')] / r.n[tri('R–M–B')]).toBeCloseTo(Math.exp(2 - 1));
+    expect(l.N + r.N).toBeCloseTo(f.N);
+    expect(l.N).toBeCloseTo(atomTotal(l));
+  });
+
+  it('drains its tank at the valve rate, out of both spouts, keeping the temperature', () => {
+    const x = new Tool('separator', 0, 0, 0, [0.5]);
+    filled(x.tanks[0], B, CAP, 3);
+    x.tanks[0].setMolecules(Y, CAP);
+    const [l, r] = x.step(0.1);
+    expect(l!.N + r!.N).toBeCloseTo(0.5 * MAX_FLOW * 0.1);
+    expect(l!.T).toBe(3);
+    // B leaves left e : 1, Y leaves left 1 : e, so from equal amounts the left outlet is e : 1 B to Y
+    expect(l!.n[B] / l!.n[Y]).toBeCloseTo(Math.E);
+    expect(r!.n[Y] / r!.n[B]).toBeCloseTo(Math.E);
+    expect(x.flow[0] + x.flow[1]).toBeCloseTo(0.5);
   });
 });

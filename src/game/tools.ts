@@ -1,4 +1,6 @@
+import { GROUP_PRIMARY } from '../chem/atoms';
 import type { Fluid } from '../chem/reactions';
+import { NS, SPECIES } from '../chem/species';
 import { CAP } from './config';
 import { Vessel, transfer, type Point } from './flask';
 
@@ -16,18 +18,19 @@ export const TANK_H = 84;
  */
 export const EXCHANGE_RATE = 2 * MAX_FLOW;
 
-export type ToolKind = 'dispenser' | 'exchanger';
+export type ToolKind = 'dispenser' | 'exchanger' | 'separator';
 
 /**
  * A tool's geometry in local units: multiply by the stage scale and offset by
  * the tool's position, which is the top center of its bounding box.
  * Every tank is open at y = 0 and has its floor at y = TANK_H, and drains
- * through its own valve, straight below its center, and out its own spout.
+ * through its own valve, straight below its center.
  */
 export interface ToolShape {
-  /** `spoutX` is where the tank's stream leaves the tool, if not straight below the tank. */
-  tanks: { name: string; x0: number; x1: number; spoutX?: number }[];
-  /** Height of each tank's valve and of the tip of its spout, where fluid leaves the tool. */
+  tanks: { name: string; x0: number; x1: number }[];
+  /** Where fluid leaves the tool, in the order Tool.step returns it. */
+  spouts: number[];
+  /** Height of the valves, and of the tips of the spouts. */
   valveY: number;
   spoutY: number;
   box: { x0: number; x1: number; y0: number; y1: number };
@@ -36,27 +39,34 @@ export interface ToolShape {
 export const SHAPES: Record<ToolKind, ToolShape> = {
   dispenser: {
     tanks: [{ name: 'tank', x0: -30, x1: 30 }],
+    spouts: [0],
     valveY: 98,
     spoutY: 114,
     box: { x0: -34, x1: 34, y0: -6, y1: 116 },
   },
   exchanger: {
-    // the streams cross over in the exchanger, so each leaves on the other side
     tanks: [
-      { name: 'A', x0: -64, x1: -6, spoutX: 35 },
-      { name: 'B', x0: 6, x1: 64, spoutX: -35 },
+      { name: 'A', x0: -64, x1: -6 },
+      { name: 'B', x0: 6, x1: 64 },
     ],
+    // the streams cross over in the exchanger, so each leaves on the other side
+    spouts: [35, -35],
     valveY: 94,
     spoutY: 136,
     box: { x0: -68, x1: 68, y0: -6, y1: 138 },
+  },
+  separator: {
+    tanks: [{ name: 'tank', x0: -30, x1: 30 }],
+    // far enough apart for a flask, or a tool's tank, under each
+    spouts: [-36, 36],
+    valveY: 93,
+    spoutY: 126,
+    box: { x0: -44, x1: 44, y0: -6, y1: 128 },
   },
 };
 
 /** Horizontal center of a tank, which is also where its valve is. */
 export const tankX = (tk: { x0: number; x1: number }) => (tk.x0 + tk.x1) / 2;
-
-/** Where a tank's stream leaves the tool. */
-export const spoutX = (tk: { x0: number; x1: number; spoutX?: number }) => tk.spoutX ?? tankX(tk);
 
 /**
  * The exchanger's two hoses, wound around each other along the axis between
@@ -66,14 +76,31 @@ export const spoutX = (tk: { x0: number; x1: number; spoutX?: number }) => tk.sp
  */
 export const HELIX = { x0: -35, x1: 35, y: 110, r: 6, halfTwists: 3 };
 
-export const TOOL_NAMES: Record<ToolKind, string> = { dispenser: 'Dispenser', exchanger: 'Heat exchanger' };
+export const TOOL_NAMES: Record<ToolKind, string> = {
+  dispenser: 'Dispenser',
+  exchanger: 'Heat exchanger',
+  separator: 'Separator',
+};
 
 /**
- * Something with tanks on top, each draining through its own valved spout.
+ * The separator splits each species between its outlets by color: a molecule
+ * with p primary atoms (R, G, B) and s secondary ones (C, M, Y) leaves
+ * left : right in the ratio e^p : e^s. LEFT_SHARE[species] is its left fraction.
+ */
+export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
+  const p = sp.atoms.filter((a) => a && GROUP_PRIMARY.includes(a)).length;
+  return Math.exp(p) / (Math.exp(p) + Math.exp(sp.size - p));
+});
+
+/**
+ * Something with tanks on top, each draining through its own valve, and
+ * spouts on the bottom.
  *
- * - A **dispenser** has one tank.
- * - A **heat exchanger** has two, whose streams pass each other in
+ * - A **dispenser** has one tank and one spout.
+ * - A **heat exchanger** has two tanks, whose streams pass each other in
  *   counterflow on the way to their spouts, trading heat but never mixing.
+ * - A **separator** has one tank and two spouts, and splits what drains
+ *   between them by color (see LEFT_SHARE).
  *
  * Tools run on sim time, so a slow drip into a reacting flask gives the same
  * result at any sim speed.
@@ -82,8 +109,10 @@ export class Tool {
   readonly tanks: Vessel[];
   /** Per tank: 0 (closed) to 1 (MAX_FLOW). Closed by default, so a tool doesn't drip on everything it's carried over. */
   readonly valves: number[];
-  /** Per tank, what left its spout on the last step, for drawing the stream; null if nothing did. */
+  /** Per spout, what left it on the last step, for drawing the stream; null if nothing did. */
   out: (Fluid | null)[];
+  /** Per spout, the flow on the last step, in flasks per second. */
+  flow: number[];
 
   constructor(
     readonly kind: ToolKind,
@@ -96,24 +125,41 @@ export class Tool {
   ) {
     this.tanks = SHAPES[kind].tanks.map(() => new Vessel(TANK_CAP));
     this.valves = this.tanks.map((_, k) => valves[k] ?? 0);
-    this.out = this.tanks.map(() => null);
+    this.out = this.shape.spouts.map(() => null);
+    this.flow = this.shape.spouts.map(() => 0);
   }
 
   get shape(): ToolShape {
     return SHAPES[this.kind];
   }
 
-  /** Run for `h` sim seconds. Returns, per tank, the fluid that left its spout, or null if none did. */
+  /** Run for `h` sim seconds. Returns, per spout, the fluid that left it, or null if none did. */
   step(h: number): (Fluid | null)[] {
-    const packets = this.tanks.map((tank, k) => {
+    let packets = this.tanks.map((tank, k) => {
       const p = new Vessel(Infinity);
       transfer(tank, p, this.valves[k] * MAX_FLOW * h);
       return p;
     });
     if (this.kind === 'exchanger') counterflow(packets[0], packets[1], EXCHANGE_RATE * h);
+    if (this.kind === 'separator') packets = separate(packets[0]);
     this.out = packets.map((p) => (p.N > 0 ? p : null));
+    this.flow = packets.map((p) => p.N / (MAX_FLOW * h));
     return this.out;
   }
+}
+
+/** Split a fluid between the separator's left and right outlets, by LEFT_SHARE. */
+export function separate(f: Fluid): [Vessel, Vessel] {
+  const out: [Vessel, Vessel] = [new Vessel(Infinity), new Vessel(Infinity)];
+  for (let s = 0; s < NS; s++) {
+    const left = f.n[s] * LEFT_SHARE[s];
+    out[0].n[s] = left;
+    out[1].n[s] = f.n[s] - left;
+    out[0].N += left * SPECIES[s].size;
+    out[1].N += (f.n[s] - left) * SPECIES[s].size;
+  }
+  out[0].T = out[1].T = f.T;
+  return out;
 }
 
 /**
