@@ -77,16 +77,21 @@ details .actions{display:flex;gap:8px;margin-top:8px}
 #stage{flex:1;position:relative;min-height:0;min-width:0}
 .main{flex:1;display:flex;min-height:0}
 .palette{
-  width:92px;flex:none;display:flex;flex-direction:column;gap:6px;padding:10px 8px;
+  width:64px;flex:none;display:flex;flex-direction:column;gap:6px;padding:10px 8px;
   border-right:1px solid var(--line);touch-action:none;user-select:none;-webkit-user-select:none;
 }
-.palette button{font-size:12px;padding:6px 4px;cursor:grab;line-height:1.2}
-.palette p{margin:4px 0 0;color:var(--muted);font-size:11px;line-height:1.3}
+.palette button{padding:4px;cursor:grab;display:flex;justify-content:center}
+.palette svg{width:40px;height:40px;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.palette .glass{fill:var(--glasshi);stroke:var(--glass)}
+.palette .pipe{stroke:var(--pipe);stroke-width:3}
+.palette .valve{fill:var(--bench);stroke:var(--pipe)}
+.palette .lcd{fill:#26302b;stroke:none}
+.palette .digits{stroke:#9fe0b8;stroke-width:1.5}
 @media (max-width:560px){
   .main{flex-direction:column}
   .palette{width:auto;flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line);padding:6px 8px}
   .palette button{flex:1;min-width:0}
-  .palette p{display:none}
+  .palette svg{width:32px;height:32px}
 }
 canvas{display:block;width:100%;height:100%;touch-action:none}
 #info{
