@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SPECIES, singleOf } from '../chem/species';
 import { CAP } from './config';
 import { Vessel } from './flask';
-import { EXCHANGE_RATE, MAX_FLOW, TANK_CAP, Tool, counterflow, mouthBelow, separate, type Mouth } from './tools';
+import { EXCHANGE_RATE, HOSE_CAP, Hose, MAX_FLOW, PUMP_RATE, TANK_CAP, Tool, counterflow, mouthBelow, separate, type Mouth } from './tools';
 
 const R = singleOf('R');
 const G = singleOf('G');
@@ -153,5 +153,19 @@ describe('separator', () => {
     expect(l!.n[B] / l!.n[Y]).toBeCloseTo(Math.E);
     expect(r!.n[Y] / r!.n[B]).toBeCloseTo(Math.E);
     expect(x.flow[0] + x.flow[1]).toBeCloseTo(0.5);
+  });
+});
+
+describe('hose', () => {
+  it('pumps what falls in its funnel out of its outlet, up to PUMP_RATE', () => {
+    const hose = new Hose({ x: 0, y: 0 }, { x: 1, y: 1 });
+    const src = filled(new Vessel(CAP), R, CAP, 2);
+    hose.funnel.addFrom(src, HOSE_CAP * 2); // more than it holds: the rest overflows
+    expect(hose.funnel.N).toBe(HOSE_CAP);
+    const out = hose.step(0.01)!;
+    expect(out.N).toBeCloseTo(PUMP_RATE * 0.01);
+    expect(out.T).toBe(2);
+    expect(hose.funnel.N).toBeCloseTo(HOSE_CAP - PUMP_RATE * 0.01);
+    expect(PUMP_RATE).toBeGreaterThan(MAX_FLOW);
   });
 });

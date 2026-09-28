@@ -6,6 +6,7 @@ const ITEMS = [
   ['exchanger', 'Heat exchanger'],
   ['separator', 'Separator'],
   ['scale', 'Scale'],
+  ['hose', 'Hose'],
 ] as const;
 
 /** Prototypes to drag onto the bench to make more of them. Dropping anything back here puts it away. */

@@ -6,7 +6,7 @@ import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadiu
 import { Flask, Vessel, fluidColor, glowColor, transfer, type Point } from './flask';
 import { DEFAULT_PRESET, applyFill, type Preset } from './presets';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
-import { HELIX, TANK_H, TOOL_NAMES, Tool, mouthBelow, tankX, type Mouth, type ToolKind } from './tools';
+import { HELIX, Hose, TANK_H, TOOL_NAMES, Tool, mouthBelow, tankX, type Mouth, type ToolKind } from './tools';
 
 /** What the god-mode panel needs to show for one vessel. */
 export interface Inspection {
@@ -93,6 +93,9 @@ export class GameEngine {
   private toolDrag: { tool: Tool; off: Point } | null = null;
   private scales: Scale[] = [];
   private scaleDrag: { scale: Scale; off: Point } | null = null;
+  private hoses: Hose[] = [];
+  /** A hose end being carried, or (just out of the palette) the whole hose, with its outlet this far from the inlet. */
+  private hoseDrag: { hose: Hose; end: 'inlet' | 'outlet' | 'both'; gap?: Point } | null = null;
   private valveDrag: { tool: Tool; k: number; v0: number; p0: Point } | null = null;
   private hover: Flask | null = null;
   private hoverTool: Tool | null = null;
@@ -175,17 +178,22 @@ export class GameEngine {
     });
     this.snapAll();
     this.won = false;
-    this.drag = this.toolDrag = this.valveDrag = this.scaleDrag = null;
+    this.hoses = [];
+    this.drag = this.toolDrag = this.valveDrag = this.scaleDrag = this.hoseDrag = null;
     this.hover = this.hoverTool = this.hoverTank = null;
     this.lastProgress = -1;
   }
 
   /** Make a new flask, scale or tool under the pointer (in client coordinates) and start carrying it. */
-  spawn(kind: 'flask' | 'scale' | ToolKind, clientX: number, clientY: number): void {
+  spawn(kind: 'flask' | 'scale' | 'hose' | ToolKind, clientX: number, clientY: number): void {
     const r = this.canvas.getBoundingClientRect();
     const p = (this.pointer = { x: clientX - r.left, y: clientY - r.top });
     const { S, W, H } = this;
-    if (kind === 'flask') {
+    if (kind === 'hose') {
+      const h = new Hose({ x: p.x / W, y: p.y / H }, { x: (p.x + 60 * S) / W, y: (p.y + 30 * S) / H });
+      this.hoses.push(h);
+      this.hoseDrag = { hose: h, end: 'both', gap: { x: 60 * S, y: 30 * S } };
+    } else if (kind === 'flask') {
       const f = new Flask({ x: p.x, y: p.y - 35 * S }, CAP);
       f.glass = glassGrams(this.flasks.length);
       this.flasks.push(f);
@@ -203,7 +211,7 @@ export class GameEngine {
   }
 
   private vessels(): Vessel[] {
-    return [...this.flasks, ...this.tools.flatMap((t) => t.tanks)];
+    return [...this.flasks, ...this.tools.flatMap((t) => t.tanks), ...this.hoses.map((h) => h.funnel)];
   }
 
   /* ---------------- layout ---------------- */
@@ -331,6 +339,34 @@ export class GameEngine {
     t.fy = y / H;
   }
 
+  /* ---------------- hose geometry ---------------- */
+
+  /** A hose end's point in stage coordinates: the funnel's mouth, or the outlet's tip. */
+  private hoseEnd(h: Hose, end: 'inlet' | 'outlet'): Point {
+    const e = h[end];
+    return { x: e.x * this.W, y: e.y * this.H };
+  }
+
+  private moveHoseEnd(h: Hose, end: 'inlet' | 'outlet', p: Point): void {
+    const { S, W } = this;
+    const x = Math.max(16 * S, Math.min(W - 16 * S, p.x));
+    const y = Math.max(4 * S, Math.min(this.L.floorY - 16 * S, p.y));
+    h[end] = { x: x / W, y: y / this.H };
+  }
+
+  /** The hose end under p, frontmost first. */
+  private hitHoseEnd(p: Point): { hose: Hose; end: 'inlet' | 'outlet' } | null {
+    const { S } = this;
+    for (let i = this.hoses.length - 1; i >= 0; i--)
+      for (const end of ['outlet', 'inlet'] as const) {
+        const e = this.hoseEnd(this.hoses[i], end);
+        // the funnel hangs below its mouth, and the nozzle above its tip
+        const cy = end === 'inlet' ? e.y + 6 * S : e.y - 6 * S;
+        if (Math.hypot(p.x - e.x, p.y - cy) < 16 * S) return { hose: this.hoses[i], end };
+      }
+    return null;
+  }
+
   /** Every open top that falling fluid can land in. */
   private mouths(except?: Tool): Mouth[] {
     const { S, drag } = this;
@@ -347,6 +383,10 @@ export class GameEngine {
         const r = this.tankRect(t, k);
         out.push({ v, x0: r.x0, x1: r.x1, y: r.y0 });
       });
+    }
+    for (const h of this.hoses) {
+      const e = this.hoseEnd(h, 'inlet');
+      out.push({ v: h.funnel, x0: e.x - 14 * S, x1: e.x + 14 * S, y: e.y });
     }
     return out;
   }
@@ -389,7 +429,13 @@ export class GameEngine {
       const p = this.ptr(e);
       this.pointer = p;
       const t = this.hitTool(p);
-      if (e.button === 2) {
+      const hoseEnd = e.button === 0 ? this.hitHoseEnd(p) : null;
+      if (hoseEnd) {
+        this.hoseDrag = hoseEnd;
+        const hs = this.hoses;
+        hs.push(...hs.splice(hs.indexOf(hoseEnd.hose), 1)); // bring to front
+        c.setPointerCapture(e.pointerId);
+      } else if (e.button === 2) {
         if (t) {
           // the valve nearest the pointer, left to right
           const o = this.toolXY(t);
@@ -444,6 +490,12 @@ export class GameEngine {
         const { scale, off } = this.scaleDrag;
         this.placeScale(scale, { x: p.x - off.x, y: p.y - off.y });
         this.settle();
+      } else if (this.hoseDrag) {
+        const { hose, end, gap } = this.hoseDrag;
+        if (end === 'both') {
+          this.moveHoseEnd(hose, 'inlet', p);
+          this.moveHoseEnd(hose, 'outlet', { x: p.x + gap!.x, y: p.y + gap!.y });
+        } else this.moveHoseEnd(hose, end, p);
       }
       this.updateHover();
     });
@@ -456,13 +508,15 @@ export class GameEngine {
         const f = this.drag?.flask;
         if (t) this.tools.splice(this.tools.indexOf(t), 1);
         if (sc) this.scales.splice(this.scales.indexOf(sc), 1);
+        const hose = this.hoseDrag?.hose;
+        if (hose) this.hoses.splice(this.hoses.indexOf(hose), 1);
         if (f) {
           this.flasks.splice(this.flasks.indexOf(f), 1);
           for (const s of this.scales) s.remove(f);
           this.drag = null;
         }
       }
-      this.toolDrag = this.valveDrag = this.scaleDrag = null;
+      this.toolDrag = this.valveDrag = this.scaleDrag = this.hoseDrag = null;
       if (this.drag) {
         // a flask stays where it's let go; one tilted to pour stands back up where it's held
         const { flask: f, zone, off } = this.drag;
@@ -478,7 +532,7 @@ export class GameEngine {
     onWindow('pointerup', endDrag);
     onWindow('pointercancel', endDrag);
     on('pointerleave', () => {
-      if (this.drag || this.toolDrag || this.scaleDrag || this.valveDrag) return;
+      if (this.drag || this.toolDrag || this.scaleDrag || this.valveDrag || this.hoseDrag) return;
       this.pointer = { x: -1, y: -1 };
       this.updateHover();
     });
@@ -498,7 +552,7 @@ export class GameEngine {
 
   private updateHover(): void {
     const p = this.pointer;
-    const busy = this.drag || this.toolDrag || this.valveDrag || this.scaleDrag;
+    const busy = this.drag || this.toolDrag || this.valveDrag || this.scaleDrag || this.hoseDrag;
     this.hoverTool = busy ? null : this.hitTool(p);
     const hit = busy ? null : this.tankAt(p);
     this.hoverTank = hit ? hit.tool.tanks[hit.k] : null;
@@ -558,6 +612,11 @@ export class GameEngine {
         if (p.x > r.x0 - 8 * S && p.x < r.x1 + 8 * S && p.y > r.y0 - 40 * S && p.y < r.y1)
           return { kind: 'tank', v: t.tanks[k], x: (r.x0 + r.x1) / 2, y: r.y0 };
       }
+    }
+    for (const h of this.hoses) {
+      const e = this.hoseEnd(h, 'inlet');
+      if (Math.abs(p.x - e.x) < 24 * S && p.y > e.y - 40 * S && p.y < e.y + 20 * S)
+        return { kind: 'tank', v: h.funnel, x: e.x, y: e.y };
     }
     for (const sc of this.scales) {
       const o = this.scaleXY(sc);
@@ -627,6 +686,7 @@ export class GameEngine {
       const sub = Math.ceil(simDt / 0.02);
       const h = simDt / sub;
       const targets = this.tools.map((t) => t.shape.spouts.map((_, j) => mouthBelow(mouths, this.spoutAt(t, j))));
+      const hoseTargets = this.hoses.map((hose) => mouthBelow(mouths, this.hoseEnd(hose, 'outlet')));
       for (let i = 0; i < sub; i++) {
         this.tools.forEach((t, j) =>
           t.step(h).forEach((out, k) => {
@@ -634,6 +694,10 @@ export class GameEngine {
             if (out) targets[j][k]?.v.addFrom(out, out.N);
           }),
         );
+        this.hoses.forEach((hose, j) => {
+          const out = hose.step(h);
+          if (out) hoseTargets[j]?.v.addFrom(out, out.N);
+        });
         for (const v of vessels) this.chem.step(v, h);
       }
     }
@@ -971,6 +1035,43 @@ export class GameEngine {
     ctx.restore();
   }
 
+  /** A hose: a funnel at the inlet, a nozzle at the outlet, and a drooping tube between, showing what's flowing. */
+  private drawHose(hose: Hose): void {
+    const { ctx, S, theme } = this;
+    const i = this.hoseEnd(hose, 'inlet');
+    const o = this.hoseEnd(hose, 'outlet');
+    const a = { x: i.x, y: i.y + 12 * S };
+    const b = { x: o.x, y: o.y - 10 * S };
+    const droop = 70 * S;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.bezierCurveTo(a.x, a.y + droop, b.x, b.y - droop, b.x, b.y);
+    ctx.strokeStyle = theme.pipe;
+    ctx.lineWidth = 7 * S;
+    ctx.stroke();
+    ctx.strokeStyle = hose.out ? fluidColor(hose.out) : theme.bench;
+    ctx.lineWidth = 4 * S;
+    ctx.stroke();
+    // funnel
+    ctx.beginPath();
+    ctx.moveTo(i.x - 14 * S, i.y);
+    ctx.lineTo(i.x + 14 * S, i.y);
+    ctx.lineTo(i.x + 4 * S, i.y + 12 * S);
+    ctx.lineTo(i.x - 4 * S, i.y + 12 * S);
+    ctx.closePath();
+    ctx.fillStyle = hose.funnel.N > TRACE ? fluidColor(hose.funnel) : theme.glasshi;
+    ctx.fill();
+    ctx.strokeStyle = theme.glass;
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    // nozzle
+    ctx.fillStyle = theme.pipe;
+    ctx.fillRect(o.x - 4 * S, o.y - 10 * S, 8 * S, 10 * S);
+    ctx.restore();
+  }
+
   private drawStream(x1: number, y1: number, x2: number, y2: number, color: string, width = 4): void {
     const { ctx } = this;
     ctx.save();
@@ -1021,6 +1122,12 @@ export class GameEngine {
         const m = mouthBelow(mouths, sp);
         this.drawStream(sp.x, sp.y, sp.x, m ? m.y + 2 * S : H, fluidColor(out), 1.5 + 3 * Math.min(1, t.flow[k]));
       });
+    for (const hose of this.hoses) {
+      if (!hose.out) continue;
+      const sp = this.hoseEnd(hose, 'outlet');
+      const m = mouthBelow(mouths, sp);
+      this.drawStream(sp.x, sp.y, sp.x, m ? m.y + 2 * S : H, fluidColor(hose.out), 1.5 + 3 * Math.min(1, hose.flow));
+    }
     for (const { fa, m } of this.faucetFlows) this.drawStream(fa.x, L.spoutY, fa.x, m.y + 2 * S, fluidColor(fa.output));
     if (drag && drag.flask.N > TRACE) {
       const D = drag.flask;
@@ -1080,6 +1187,7 @@ export class GameEngine {
     }
 
     for (const t of this.tools) this.drawTool(t);
+    for (const h of this.hoses) this.drawHose(h);
     if (drag) this.drawFlask(drag.flask, drag.flask.x, drag.flask.y, drag.flask.ang);
 
     // glow goes on top of everything, so a very hot flask washes out its surroundings

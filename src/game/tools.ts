@@ -200,3 +200,36 @@ export function mouthBelow(mouths: readonly Mouth[], p: Point): Mouth | null {
   for (const m of mouths) if (m.y > p.y && p.x >= m.x0 && p.x <= m.x1 && (!best || m.y < best.y)) best = m;
   return best;
 }
+
+/** How much a hose's funnel holds, in atoms: just a buffer, so a loop can't spin forever in one step. */
+export const HOSE_CAP = CAP / 4;
+/** How fast a hose's pump moves fluid from its inlet to its outlet, in atoms per sim second. */
+export const PUMP_RATE = 2 * MAX_FLOW;
+
+/**
+ * A hose: a funnel inlet anywhere, a spout outlet anywhere, and a magic pump
+ * between them. Whatever falls into the funnel comes out of the outlet, up to
+ * PUMP_RATE; anything arriving faster overflows the funnel to the sink.
+ */
+export class Hose {
+  readonly funnel = new Vessel(HOSE_CAP);
+  /** What left the outlet on the last step, for drawing; null if nothing did. */
+  out: Fluid | null = null;
+  /** The flow on the last step, in flasks per second. */
+  flow = 0;
+
+  constructor(
+    /** The funnel's mouth and the outlet's tip, as fractions of the stage's width and height. */
+    public inlet: Point,
+    public outlet: Point,
+  ) {}
+
+  /** Run for `h` sim seconds. Returns what left the outlet, or null if nothing did. */
+  step(h: number): Fluid | null {
+    const p = new Vessel(Infinity);
+    transfer(this.funnel, p, PUMP_RATE * h);
+    this.out = p.N > 0 ? p : null;
+    this.flow = p.N / (MAX_FLOW * h);
+    return this.out;
+  }
+}
