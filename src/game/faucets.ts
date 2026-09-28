@@ -1,6 +1,6 @@
 import { ATOMS, type Atom } from '../chem/atoms';
 import { equilibrium } from '../chem/equilibrium';
-import { T_ROOM } from '../chem/params';
+import { THERMO, T_ROOM } from '../chem/params';
 import type { Fluid } from '../chem/reactions';
 
 /** A faucet dispenses an unlimited supply of one fixed fluid. */
@@ -43,5 +43,5 @@ export function describeFaucet(fa: Faucet): string {
 export function faucetOutput(fa: Faucet, U: Float64Array): Fluid {
   const atoms = ATOMS.map((a) => fa.atoms[a] ?? 0);
   const total = atoms.reduce((t, v) => t + v, 0);
-  return { n: equilibrium(atoms.map((v) => v / total), U, T_ROOM), N: 1, T: T_ROOM };
+  return { n: equilibrium(atoms.map((v) => v / total), U, T_ROOM), N: 1, Q: T_ROOM * THERMO.heatCap };
 }

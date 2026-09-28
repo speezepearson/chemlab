@@ -1,4 +1,4 @@
-import type { Fluid, ReactionNetwork } from '../chem/reactions';
+import { temperature, type Fluid, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP, FILL_RATE, GOAL_ATOMS, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { FAUCETS, faucetOutput, type Faucet } from './faucets';
@@ -756,7 +756,7 @@ export class GameEngine {
     }
     rows.sort((a, b) => b.atoms - a.atoms);
     this.cb.onInspect({
-      T: f.T, N: f.N, cap: f.cap, rows,
+      T: temperature(f), N: f.N, cap: f.cap, rows,
       x0: target.x0, x1: target.x1, y: target.y,
       stageW: this.W, stageH: this.H,
     });
@@ -1210,8 +1210,9 @@ export class GameEngine {
     // a trace of hot fluid shouldn't blaze like a full flask
     const amount = Math.sqrt(Math.min(1, (4 * f.N) / cap));
     const { S } = this;
-    this.radialGlow(cx, cy, haloRadius(f.T) * S, color, haloAlpha(f.T) * amount, LOOK.haloSharpness);
-    this.radialGlow(cx, cy, coronaRadius(f.T) * S, color, coronaAlpha(f.T) * amount, LOOK.coronaSharpness);
+    const T = temperature(f);
+    this.radialGlow(cx, cy, haloRadius(T) * S, color, haloAlpha(T) * amount, LOOK.haloSharpness);
+    this.radialGlow(cx, cy, coronaRadius(T) * S, color, coronaAlpha(T) * amount, LOOK.coronaSharpness);
   }
 
   private radialGlow(cx: number, cy: number, R: number, color: RGB, alpha: number, sharpness: number): void {

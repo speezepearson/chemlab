@@ -1,4 +1,5 @@
 import { useEffect, useReducer } from 'react';
+import { temperature } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP } from '../game/config';
 import type { GameEngine } from '../game/engine';
@@ -44,7 +45,7 @@ export function FlaskEditor({ engine, id, onClose }: { engine: GameEngine; id: s
       </div>
       <div className="line">
         <span>T</span>
-        <DragNumber typeable min={0} value={f.T} onChange={(v) => edit(() => (f.T = Math.max(0, v)))} />
+        <DragNumber typeable min={0} value={temperature(f)} onChange={(v) => edit(() => f.setTemperature(v))} />
         <span className="muted">
           {fmtCount(f.N)} / {fmtCount(f.cap)} atoms
         </span>

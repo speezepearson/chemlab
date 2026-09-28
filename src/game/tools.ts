@@ -1,5 +1,6 @@
 import { GROUP_PRIMARY } from '../chem/atoms';
-import type { Fluid } from '../chem/reactions';
+import { THERMO } from '../chem/params';
+import { roundRandom, temperature, type Fluid } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
 import { CAP } from './config';
 import { Vessel, transfer, type Point } from './flask';
@@ -148,17 +149,18 @@ export class Tool {
   }
 }
 
-/** Split a fluid between the separator's left and right outlets, by LEFT_SHARE. */
+/** Split a fluid between the separator's left and right outlets by LEFT_SHARE, in whole molecules, heat in proportion. */
 export function separate(f: Fluid): [Vessel, Vessel] {
   const out: [Vessel, Vessel] = [new Vessel(Infinity), new Vessel(Infinity)];
   for (let s = 0; s < NS; s++) {
-    const left = f.n[s] * LEFT_SHARE[s];
+    const left = Math.min(f.n[s], roundRandom(f.n[s] * LEFT_SHARE[s]));
     out[0].n[s] = left;
     out[1].n[s] = f.n[s] - left;
     out[0].N += left * SPECIES[s].size;
     out[1].N += (f.n[s] - left) * SPECIES[s].size;
   }
-  out[0].T = out[1].T = f.T;
+  out[0].Q = f.N > 0 ? Math.min(f.Q, roundRandom((f.Q * out[0].N) / f.N)) : 0;
+  out[1].Q = f.Q - out[0].Q;
   return out;
 }
 
@@ -167,9 +169,11 @@ export function separate(f: Fluid): [Vessel, Vessel] {
  * `ua` atoms' worth of heat capacity, without mixing them. Uses the standard
  * effectiveness–NTU result: the slower stream (fewer atoms) gets a fraction ε
  * of the way to the other's inlet temperature, and the faster stream takes up
- * the heat. Heat capacity is per atom, so heat is conserved as ΣN·T.
+ * the heat, which is conserved exactly.
  */
 export function counterflow(a: Fluid, b: Fluid, ua: number): void {
+  const Ta = temperature(a);
+  const Tb = temperature(b);
   const cMin = Math.min(a.N, b.N);
   const cMax = Math.max(a.N, b.N);
   if (cMin <= 0) return;
@@ -181,9 +185,11 @@ export function counterflow(a: Fluid, b: Fluid, ua: number): void {
     const e = Math.exp(-ntu * (1 - cr));
     eff = (1 - e) / (1 - cr * e);
   }
-  const q = eff * cMin * (a.T - b.T); // heat from a to b
-  a.T -= q / a.N;
-  b.T += q / b.N;
+  // heat from a to b, in whole quanta, never more than the giver holds
+  const q = roundRandom(THERMO.heatCap * eff * cMin * (Ta - Tb));
+  const moved = q >= 0 ? Math.min(q, a.Q) : -Math.min(-q, b.Q);
+  a.Q -= moved;
+  b.Q += moved;
 }
 
 /** The open top of a vessel, in stage coordinates: anything falling onto [x0, x1] at height y goes in. */

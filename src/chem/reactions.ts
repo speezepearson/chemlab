@@ -1,14 +1,41 @@
 import { ATOMS, BIT_PAIRS, GROUP_PRIMARY, OPPOSITE, bitOf, popcount3, type Atom, type Group } from './atoms';
-import type { ChemParams } from './params';
+import { THERMO, T_ROOM, type ChemParams } from './params';
 import { NS, SPECIES, bondParam, singleOf, speciesEnergies, speciesIndex } from './species';
 
-/** A well-mixed packet of fluid: species counts plus a temperature. */
+/**
+ * A well-mixed packet of fluid: species counts plus its heat. In a vessel the
+ * counts and the heat are always whole numbers (see roundRandom), which
+ * JavaScript numbers hold exactly up to 2^53 ≈ 9×10^15. A faucet's recipe is
+ * a Fluid too, but a fractional one: one atom's worth, poured out in whole
+ * molecules.
+ */
 export interface Fluid {
   /** Molecule count per species. */
   n: Float64Array;
   /** Total atom count. */
   N: number;
-  T: number;
+  /** Thermal energy, in quanta of one unit of bond energy. */
+  Q: number;
+}
+
+/** A fluid's temperature, from its heat: Q / (heat capacity · atoms). An empty fluid reads as room temperature. */
+export function temperature(f: Fluid): number {
+  return f.N > 0 ? f.Q / (THERMO.heatCap * f.N) : T_ROOM;
+}
+
+/** The heat, in whole quanta, that puts N atoms at temperature T. */
+export function heatAt(T: number, N: number): number {
+  return Math.round(T * THERMO.heatCap * N);
+}
+
+/**
+ * x rounded to a whole number at random: up with probability equal to its
+ * fractional part. The result is right on average, so a trickle of 0.3
+ * molecules a step still adds up, where plain rounding would lose it.
+ */
+export function roundRandom(x: number): number {
+  const lo = Math.floor(x);
+  return lo + (Math.random() < x - lo ? 1 : 0);
 }
 
 interface Reaction {
@@ -150,15 +177,17 @@ export class ReactionNetwork {
 
   /**
    * Advance a fluid by dt (explicit Euler, mass action on mole fractions).
-   * Fluxes are scaled down where they would drive a species negative.
-   * Reaction heat goes into temperature; there is no cooling.
+   * Expected fluxes are scaled down where they would drive a species
+   * negative, then each becomes a whole number of events by roundRandom.
+   * Reaction heat goes into the fluid's heat, also in whole quanta; there is
+   * no cooling.
    */
   step(f: Fluid, dt: number): void {
     const N = f.N;
     if (N <= 0) return;
     const { n } = f;
     const { ra, rb, p1, p2, k, bar, dU, flux, cons, count } = this;
-    const invT = 1 / Math.max(f.T, 0.05);
+    const invT = 1 / Math.max(temperature(f), 0.05);
 
     for (let i = 0; i < count; i++) {
       const a = n[ra[i]];
@@ -195,16 +224,19 @@ export class ReactionNetwork {
 
     let heat = 0;
     for (let i = 0; i < count; i++) {
-      const v = flux[i];
+      if (!flux[i]) continue;
+      // whole events, never more than the reactants left after the reactions before this one
+      const a = ra[i];
+      const b = rb[i];
+      const v = Math.min(roundRandom(flux[i]), n[a], b >= 0 ? n[b] : Infinity);
       if (!v) continue;
-      n[ra[i]] -= v;
-      if (rb[i] >= 0) n[rb[i]] -= v;
+      n[a] -= v;
+      if (b >= 0) n[b] -= v;
       n[p1[i]] += v;
       if (p2[i] >= 0) n[p2[i]] += v;
       heat -= dU[i] * v;
     }
-    for (let s = 0; s < NS; s++) if (n[s] < 0) n[s] = 0;
-    f.T += heat / (this.params.heatCap * N);
+    f.Q = Math.max(0, f.Q + roundRandom(heat));
   }
 }
 

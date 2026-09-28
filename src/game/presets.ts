@@ -107,9 +107,13 @@ export function fillAtoms(fill: FlaskFill): number {
 export function applyFill(f: Vessel, fill: FlaskFill | null): void {
   f.n.fill(0);
   f.N = 0;
-  f.T = fill?.T ?? T_ROOM;
+  f.Q = 0;
   f.label = fill?.label ?? '';
   if (!fill) return;
-  for (const { species, molecules } of fill.contents) f.n[species] += molecules;
-  f.N = fillAtoms(fill);
+  for (const { species, molecules } of fill.contents) {
+    const m = Math.round(molecules); // whole molecules only
+    f.n[species] += m;
+    f.N += m * SPECIES[species].size;
+  }
+  f.setTemperature(fill.T);
 }

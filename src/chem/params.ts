@@ -23,9 +23,14 @@ export interface ChemParams {
   bonds: Record<string, BondParams>;
   /** Prefactor for swaps (Ea = 0). */
   swapA: number;
-  /** Heat capacity per atom. */
-  heatCap: number;
 }
+
+/**
+ * Heat capacity per atom, in energy per unit temperature. A fluid stores heat
+ * as whole quanta of energy (Fluid.Q), and its temperature is derived from
+ * that, so this one number turns every fluid's heat into a temperature.
+ */
+export const THERMO = { heatCap: 3.0 };
 
 export function defaultChemParams(): ChemParams {
   const bonds: Record<string, Omit<BondParams, 'A'> & { A?: number }> = {
@@ -40,6 +45,5 @@ export function defaultChemParams(): ChemParams {
       Object.entries(bonds).map(([k, b]) => [k, { E: b.E, Ea: b.Ea, A: b.A ?? A_DEFAULT }]),
     ),
     swapA: 1.0,
-    heatCap: 3.0,
   };
 }

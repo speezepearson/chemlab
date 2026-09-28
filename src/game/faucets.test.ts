@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultChemParams, T_ROOM } from '../chem/params';
-import { ReactionNetwork, atomCounts, type Fluid } from '../chem/reactions';
+import { ReactionNetwork, atomCounts, heatAt, temperature, type Fluid } from '../chem/reactions';
 import { ATOMS } from '../chem/atoms';
 import { NS, SPECIES } from '../chem/species';
 import { CAP } from './config';
@@ -14,7 +14,7 @@ describe('faucets', () => {
       const out = faucetOutput(fa, net.U);
 
       it('outputs fluid at room temperature', () => {
-        expect(out.T).toBe(T_ROOM);
+        expect(temperature(out)).toBeCloseTo(T_ROOM, 12);
       });
 
       it('outputs its recipe of atoms', () => {
@@ -24,11 +24,15 @@ describe('faucets', () => {
       });
 
       it('outputs fluid in chemical equilibrium with itself', () => {
-        const f: Fluid = { n: out.n.map((v) => v * CAP), N: CAP, T: out.T };
+        // a flask's worth, in whole molecules
+        const n = out.n.map((v) => Math.round(v * CAP));
+        const N = SPECIES.reduce((t, s) => t + n[s.i] * s.size, 0);
+        const f: Fluid = { n, N, Q: heatAt(T_ROOM, N) };
         const before = f.n.slice();
         for (let t = 0; t < 100; t += 0.02) net.step(f, 0.02);
-        for (let s = 0; s < NS; s++) expect((f.n[s] - before[s]) / CAP, SPECIES[s].name).toBeCloseTo(0, 9);
-        expect(f.T).toBeCloseTo(out.T, 9);
+        // whole-molecule events jitter by about one per reaction per step, so allow parts per million
+        for (let s = 0; s < NS; s++) expect((f.n[s] - before[s]) / CAP, SPECIES[s].name).toBeCloseTo(0, 5);
+        expect(temperature(f)).toBeCloseTo(T_ROOM, 5);
       });
     });
   }

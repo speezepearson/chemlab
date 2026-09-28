@@ -1,5 +1,5 @@
 import { useReducer } from 'react';
-import { T_ROOM, type BondParams } from '../chem/params';
+import { THERMO, T_ROOM, type BondParams } from '../chem/params';
 import type { ReactionNetwork } from '../chem/reactions';
 import { SPECIES, TARGET } from '../chem/species';
 import { DragNumber } from './DragNumber';
@@ -57,7 +57,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
             <tr>
               <td>heat capacity</td>
               <td>
-                <DragNumber value={p.heatCap} onChange={(v) => edit(() => (p.heatCap = v))} />
+                <DragNumber value={THERMO.heatCap} onChange={(v) => edit(() => (THERMO.heatCap = v))} />
               </td>
               <td />
               <td />

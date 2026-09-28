@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { temperature } from '../chem/reactions';
 import { NS, TARGET } from '../chem/species';
 import { CAP, N_FLASKS } from './config';
 import { Flask } from './flask';
@@ -41,19 +42,21 @@ describe('presets', () => {
   it('starts the default game with the supply of target', () => {
     const f = new Flask({ x: 0, y: 0 }, CAP);
     applyFill(f, DEFAULT_PRESET.flasks[0]);
-    expect(f.n[TARGET]).toBeCloseTo((0.4 * CAP) / 3);
-    expect(f.N).toBeCloseTo(0.4 * CAP);
+    // whole molecules only
+    expect(f.n[TARGET]).toBe(Math.round((0.4 * CAP) / 3));
+    expect(f.N).toBe(3 * Math.round((0.4 * CAP) / 3));
     expect(f.label).toBe('supply');
   });
 
   it('applyFill replaces whatever was in the flask', () => {
     const f = new Flask({ x: 0, y: 0 }, CAP);
     applyFill(f, DEFAULT_PRESET.flasks[0]);
-    f.T = 7;
+    f.setTemperature(7);
     applyFill(f, null);
     expect(f.N).toBe(0);
+    expect(f.Q).toBe(0);
     expect(f.n.every((v) => v === 0)).toBe(true);
-    expect(f.T).toBe(1);
+    expect(temperature(f)).toBe(1);
     expect(f.label).toBe('');
   });
 });

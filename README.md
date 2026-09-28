@@ -17,7 +17,9 @@ A packet of fluid, such as the contents of a flask, is fully described by:
 
 There is **no solvent**. Reaction rates depend on mole fractions, so only ratios matter, not absolute amounts. Adding fluid gradually still matters, because it keeps one reagent scarce while it goes in. There is no "add water" lever.
 
-Volume is measured in atoms, so a flask's capacity is a number of atoms: a billion. Counts that large behave like continuous quantities, so no small-number artifacts show up. The chemistry doesn't care about the scale, since everything in it depends on ratios.
+Volume is measured in atoms, so a flask's capacity is a number of atoms: a billion.
+
+Every count in a vessel is a whole number of molecules, and its heat is a whole number of energy quanta (one unit of bond energy each). Temperature is derived as heat / (heat capacity × atoms), so mixing simply adds heat, and energy is conserved exactly. Whenever the expected result is fractional, such as reaction events in a step, one species' share of a pour, or the separator's split, it's rounded at random: up with probability equal to the fraction. That keeps averages exact, so slow reactions still happen. JavaScript numbers hold whole numbers exactly up to 2⁵³ ≈ 9×10¹⁵, so plain numbers are enough and BigInt isn't needed. Faucet recipes are the one fractional thing: one atom's worth, poured out as whole molecules. Counts that large behave like continuous quantities, so no small-number artifacts show up. The chemistry doesn't care about the scale, since everything in it depends on ratios.
 
 ### Atoms and molecules
 
@@ -57,7 +59,7 @@ The reaction types are:
 ### Heat
 
 - **Reaction heat:** exotherms heat the fluid through a per-atom heat capacity.
-- **Mixing:** temperatures average, weighted by atom count.
+- **Mixing:** heat adds, so temperatures average, weighted by atom count.
 - **Cooling:** none in v1, so flasks stay hot forever. Faucets only give room-temperature fluid, so the ways to lower a temperature are diluting with faucet fluid, running endothermic reactions, or passing it through the heat exchanger against something cooler.
 
 ### Appearance
