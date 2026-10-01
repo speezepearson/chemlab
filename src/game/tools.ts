@@ -417,6 +417,8 @@ export interface Mouth {
   x0: number;
   x1: number;
   y: number;
+  /** Where whatever overflows the vessel spills over its lip, to fall onto whatever's below; the sink if left out. */
+  rim?: Point;
 }
 
 /** The first mouth that something falling from `p` lands in, or null if it falls to the floor. */

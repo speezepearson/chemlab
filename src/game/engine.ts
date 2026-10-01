@@ -5,12 +5,12 @@ import { FAUCETS, faucetOutput, faucetTarget, type Faucet } from './faucets';
 import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
 import { FLASK_PATH_DATA, fillLevel, tiltedOutline } from './flaskShape';
 import { Flask, Vessel, fluidColor, glowColor, sustenance, transfer, volume, volumeUnit, type Point } from './flask';
-import { DEFAULT_PRESET, applyFill, type Preset } from './presets';
+import { DEFAULT_PRESET, SPECTROMETER_AT, applyFill, type Preset } from './presets';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
 import { rumble } from './rumble';
 import {
-  HELIX, Hose, SCAN_LIGHTS, SCAN_PHASES, SHAPES, SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, drip,
+  HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SCAN_PHASES, SHAPES, SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, drip,
   mouthBelow, scanLevel, tankX, type Mouth, type ToolKind,
 } from './tools';
 
@@ -73,6 +73,8 @@ const FAUCET_DROP = 32;
 const FAUCET_REACH = 24;
 /** Half-width of the part of a flask's mouth that catches a falling stream, in local units. */
 const FLASK_CATCH = 14;
+/** Where an overflowing flask spills, right of its mouth's center, in local units: just outside its lip. */
+const FLASK_LIP = 12;
 /** How close to a valve, in world units, the pointer can be before it stops turning the lever. */
 const VALVE_DEADZONE = 20;
 const SINK_H = 16;
@@ -127,15 +129,24 @@ export class GameEngine {
   private tools: Tool[] = [];
   /** The carried flask; `off` is where it was grabbed, relative to its mouth. */
   private drag: { flask: Flask; zone: Zone | null; off: Point } | null = null;
-  private toolDrag: { tool: Tool; off: Point } | null = null;
+  /** A tool being carried, and where it was picked up (as fractions, see fromFrac). */
+  private toolDrag: { tool: Tool; off: Point; from?: Point } | null = null;
   private scales: Scale[] = [];
   private scaleDrag: { scale: Scale; off: Point } | null = null;
   private hoses: Hose[] = [];
+  /** Open tops, as of the latest look this frame (see mouths). */
+  private open: Mouth[] = [];
+  /** What overflowed each vessel this frame, and where it spilled from, for drawing (see fill). */
+  private spills = new Map<Vessel, { at: Point; v: Vessel }>();
+  /** How long this frame's spills took, in seconds: sim or real time, whichever is longer. */
+  private spillTime = 1;
   /** Drops that have let go of an outlet and are on their way down. */
   private falling: { v: Vessel; x: number; y: number; vy: number }[] = [];
   /** A hose end being carried, or (just out of the palette) the whole hose, with its outlet this far from the inlet. */
   private hoseDrag: { hose: Hose; end: 'inlet' | 'outlet' | 'both'; gap?: Point } | null = null;
   private faucetDrag: { fa: FaucetLayout; off: Point } | null = null;
+  /** The scale whose tare key is held down, to draw it pressed. */
+  private tarePress: Scale | null = null;
   private valveDrag: { tool: Tool; k: number } | null = null;
   private hover: Flask | null = null;
   private hoverTool: Tool | null = null;
@@ -222,6 +233,7 @@ export class GameEngine {
       spec.tanks?.forEach((fill, k) => t.tanks[k] && applyFill(t.tanks[k], fill));
       return t;
     });
+    this.oneSpectrometer();
     for (const t of this.tools) this.place(t, this.toolXY(t));
     const { S } = this;
     this.hoses = (preset.hoses ?? []).map(({ from, to }) => {
@@ -284,6 +296,7 @@ export class GameEngine {
         return t;
       });
     this.nextToolId = Math.max(-1, ...this.tools.map((t) => t.id)) + 1;
+    this.oneSpectrometer();
     this.scales = s.scales.map((ss) => {
       const sc = new Scale(ss.fx, ss.fy);
       sc.tare = ss.tare ?? 0;
@@ -305,6 +318,13 @@ export class GameEngine {
     this.drag = this.toolDrag = this.valveDrag = this.scaleDrag = this.hoseDrag = this.faucetDrag = null;
     this.hover = this.hoverTool = this.hoverTank = null;
     this.lastProgress = -1;
+  }
+
+  /** There's exactly one mass spectrometer: keep the first, or add one where it starts if there's none. */
+  private oneSpectrometer(): void {
+    const first = this.tools.find((t) => t.kind === 'spectrometer');
+    this.tools = this.tools.filter((t) => t.kind !== 'spectrometer' || t === first);
+    if (!first) this.tools.push(new Tool('spectrometer', this.nextToolId++, ...SPECTROMETER_AT));
   }
 
   /** Make a new flask, scale or tool under the pointer (in client coordinates) and start carrying it. */
@@ -580,17 +600,18 @@ export class GameEngine {
       const carried = drag?.flask === f;
       if (carried && f.ang !== 0) continue; // tilted to pour
       const p = carried ? f : f.home;
-      out.push({ v: f, x0: p.x - FLASK_CATCH * S, x1: p.x + FLASK_CATCH * S, y: p.y });
+      // it overflows down the right side of its neck
+      out.push({ v: f, x0: p.x - FLASK_CATCH * S, x1: p.x + FLASK_CATCH * S, y: p.y, rim: { x: p.x + FLASK_LIP * S, y: p.y } });
     }
     for (const t of this.tools) {
       t.tanks.forEach((v, k) => {
         const r = this.tankRect(t, k);
-        out.push({ v, x0: r.x0, x1: r.x1, y: r.y0 });
+        out.push({ v, x0: r.x0, x1: r.x1, y: r.y0, rim: { x: r.x1 + 3 * S, y: r.y0 } });
       });
     }
     for (const h of this.hoses) {
       const e = this.hoseEnd(h, 'inlet');
-      out.push({ v: h.funnel, x0: e.x - 14 * S, x1: e.x + 14 * S, y: e.y });
+      out.push({ v: h.funnel, x0: e.x - 14 * S, x1: e.x + 14 * S, y: e.y, rim: { x: e.x + 15 * S, y: e.y } });
     }
     return out;
   }
@@ -641,13 +662,16 @@ export class GameEngine {
           if (t.scan()) this.rumbles.set(t, rumble(SCAN_PHASES));
         } else if (t) {
           const o = this.toolXY(t);
-          this.toolDrag = { tool: t, off: { x: p.x - o.x, y: p.y - o.y } };
+          this.toolDrag = { tool: t, off: { x: p.x - o.x, y: p.y - o.y }, from: { x: t.fx, y: t.fy } };
           this.tools.splice(this.tools.indexOf(t), 1);
           this.tools.push(t); // bring to front
           c.setPointerCapture(e.pointerId);
         } else if (this.hitScale(p)) {
           const sc = this.hitScale(p)!;
-          if (this.onScale(sc, p, SCALE_SHAPE.tare)) sc.zero();
+          if (this.onScale(sc, p, SCALE_SHAPE.tare)) {
+            sc.zero();
+            this.tarePress = sc;
+          }
           else {
             const o = this.scaleXY(sc);
             this.scaleDrag = { scale: sc, off: { x: p.x - o.x, y: p.y - o.y } };
@@ -746,7 +770,12 @@ export class GameEngine {
         const t = this.toolDrag?.tool;
         const sc = this.scaleDrag?.scale;
         const f = this.drag?.flask;
-        if (t) this.tools.splice(this.tools.indexOf(t), 1);
+        const from = this.toolDrag?.from;
+        if (t?.kind === 'spectrometer' && from) {
+          // the one spectrometer can't be put away: it goes back where it was picked up
+          t.fx = from.x;
+          t.fy = from.y;
+        } else if (t) this.tools.splice(this.tools.indexOf(t), 1);
         if (sc) this.scales.splice(this.scales.indexOf(sc), 1);
         const hose = this.hoseDrag?.hose;
         if (hose) this.hoses.splice(this.hoses.indexOf(hose), 1);
@@ -756,7 +785,7 @@ export class GameEngine {
           this.drag = null;
         }
       }
-      this.toolDrag = this.valveDrag = this.scaleDrag = this.hoseDrag = this.faucetDrag = null;
+      this.toolDrag = this.valveDrag = this.scaleDrag = this.hoseDrag = this.faucetDrag = this.tarePress = null;
       if (this.drag) {
         // a flask stays where it's let go; one tilted to pour stands back up where it's held
         const { flask: f, zone, off } = this.drag;
@@ -905,6 +934,8 @@ export class GameEngine {
       if (!this.tools.includes(t) || !t.scanning) this.rumbles.delete(t);
     }
     const { S, L, drag, pointer } = this;
+    this.open = this.mouths();
+    this.spills.clear();
 
     // player actions, real time
     if (drag) {
@@ -925,11 +956,11 @@ export class GameEngine {
         if (z.kind === 'flask') {
           D.x = z.f.home.x + 16 * S;
           D.y = z.f.home.y - 32 * S;
-          transfer(D, z.f, POUR_RATE * dt);
+          this.pourFrom(D, z.f, POUR_RATE * dt);
         } else if (z.kind === 'tank') {
           D.x = z.x + 16 * S;
           D.y = z.y - 32 * S;
-          transfer(D, z.v, POUR_RATE * dt);
+          this.pourFrom(D, z.v, POUR_RATE * dt);
         } else {
           D.x = pointer.x;
           D.y = L.floorY - 8 * S;
@@ -939,14 +970,14 @@ export class GameEngine {
     }
 
     // faucets also run in real time: each fills whatever is parked right under it, or held there with the right button
-    const mouths = this.mouths();
+    const mouths = (this.open = this.mouths());
     const carried = this.carried();
     this.faucetFlows = [];
     for (const fa of L.faucets) {
       fa.output = faucetOutput(fa, this.chem.U); // cheap, and follows edits to the chemistry
       const m = faucetTarget(mouths, this.faucetXY(fa).spout, FAUCET_REACH * S, carried, this.rightHeld);
       if (!m) continue;
-      m.v.addFrom(fa.output, FILL_RATE * dt);
+      this.fill(m.v, fa.output, FILL_RATE * dt);
       this.faucetFlows.push({ fa, m });
     }
 
@@ -960,36 +991,66 @@ export class GameEngine {
       const targets = spouts.map((sps) => sps.map((sp) => mouthBelow(mouths, sp)));
       const outlets = this.hoses.map((hose) => this.hoseEnd(hose, 'outlet'));
       const hoseTargets = outlets.map((sp) => mouthBelow(mouths, sp));
-      // a fast flow streams straight into what's below (whatever doesn't fit overflows to the sink);
-      // a slow one gathers in a drop, which falls on its own time
+      // a fast flow streams straight into what's below (overflowing it if it's full); a slow one gathers
+      // in a drop, which falls on its own time
       const pour = (drop: Vessel, out: Vessel | null, sp: Point, target: Mouth | null): boolean => {
         const down = drip(drop, out, h);
-        if (down && down === out) target?.v.addFrom(out, volume(out));
-        else if (down) this.falling.push({ v: down, x: sp.x, y: sp.y, vy: 0 });
+        if (down && down === out) {
+          if (target) this.fill(target.v, out);
+        } else if (down) this.falling.push({ v: down, x: sp.x, y: sp.y, vy: 0 });
         return !!down && down === out;
+      };
+      // what leaves each outlet over the whole frame, for drawing: a single substep's can be nothing, as when a
+      // wide-open valve drains its tank in the first one
+      const total = () => ({ v: new Vessel(Infinity), streamed: false });
+      const toolTotals = this.tools.map((t) => t.shape.spouts.map(total));
+      const hoseTotals = this.hoses.map(total);
+      const tally = (tot: { v: Vessel; streamed: boolean }, out: Vessel | null, streamed: boolean) => {
+        if (out) tot.v.addFrom(out, volume(out), true);
+        tot.streamed ||= streamed;
       };
       for (let i = 0; i < sub; i++) {
         this.tools.forEach((t, j) =>
-          t.step(h).forEach((out, k) => (t.streaming[k] = pour(t.drops[k], out, spouts[j][k], targets[j][k]))),
+          t.step(h).forEach((out, k) => {
+            tally(toolTotals[j][k], out, false); // before pouring, which can gather it into a drop
+            tally(toolTotals[j][k], null, pour(t.drops[k], out, spouts[j][k], targets[j][k]));
+          }),
         );
-        this.hoses.forEach((hose, j) => (hose.streaming = pour(hose.drop, hose.step(h), outlets[j], hoseTargets[j])));
+        this.hoses.forEach((hose, j) => {
+          const out = hose.step(h);
+          tally(hoseTotals[j], out, false);
+          tally(hoseTotals[j], null, pour(hose.drop, out, outlets[j], hoseTargets[j]));
+        });
         // falling drops land in the first open top they pass, or go down the sink
         this.falling = this.falling.filter((d) => {
           const from = d.y;
           d.vy += GRAVITY * h;
           d.y += d.vy * h;
           const m = mouthBelow(mouths, { x: d.x, y: from });
-          if (m && m.y <= d.y) m.v.addFrom(d.v, volume(d.v));
+          if (m && m.y <= d.y) this.fill(m.v, d.v);
           return !(m && m.y <= d.y) && d.y < this.H;
         });
         for (const v of vessels) {
           this.chem.step(v, h);
           // by molecules, breaking bonds swells a fluid, and whatever no longer fits spills
-          const over = volume(v) - v.cap;
-          if (over > 0) transfer(v, null, over);
+          this.overflow(v);
         }
       }
+      this.tools.forEach((t, j) =>
+        toolTotals[j].forEach(({ v, streamed }, k) => {
+          t.out[k] = v.N > 0 ? v : null;
+          t.flow[k] = volume(v) / (MAX_FLOW * simDt);
+          t.streaming[k] = streamed;
+        }),
+      );
+      this.hoses.forEach((hose, j) => {
+        const { v, streamed } = hoseTotals[j];
+        hose.out = v.N > 0 ? v : null;
+        hose.flow = volume(v) / (MAX_FLOW * simDt);
+        hose.streaming = streamed;
+      });
     }
+    this.spillTime = Math.max(dt, simDt);
 
     // goal
     let tgt = 0;
@@ -1009,6 +1070,41 @@ export class GameEngine {
     this.inspect(now);
     this.raf = requestAnimationFrame(this.frame);
   };
+
+  /**
+   * Pour `amount` of src (by volume) into v, without depleting src, however full v is. Whatever no longer
+   * fits overflows (see overflow).
+   */
+  private fill(v: Vessel, src: Fluid, amount = volume(src)): void {
+    v.addFrom(src, amount, true);
+    this.overflow(v);
+  }
+
+  /** Pour `amount` out of a carried flask into v (see fill). */
+  private pourFrom(D: Flask, v: Vessel, amount: number): void {
+    const poured = new Vessel(Infinity);
+    transfer(D, poured, amount);
+    this.fill(v, poured);
+  }
+
+  /**
+   * Whatever of v's contents, mixed, no longer fits spills over its rim, falling into the first open top
+   * below (which may overflow in turn), or down the sink. A vessel with no rim (a flask tilted to pour)
+   * spills straight down the sink.
+   */
+  private overflow(v: Vessel): void {
+    const over = volume(v) - v.cap;
+    if (over <= 0) return;
+    const out = new Vessel(Infinity);
+    transfer(v, out, over);
+    const rim = this.open.find((m) => m.v === v)?.rim;
+    if (!rim || out.N <= 0) return;
+    let spill = this.spills.get(v);
+    if (!spill) this.spills.set(v, (spill = { at: rim, v: new Vessel(Infinity) }));
+    spill.v.addFrom(out, volume(out), true);
+    const below = mouthBelow(this.open, rim);
+    if (below) this.fill(below.v, out);
+  }
 
   /** The vessel god mode is showing, with its extent for placing the panel. */
   private inspectTarget(): { v: Vessel; x0: number; x1: number; y: number } | null {
@@ -1377,28 +1473,80 @@ export class GameEngine {
     ctx.fill();
     const busy = this.drag || this.toolDrag || this.valveDrag || this.scaleDrag || this.hoseDrag;
     const hot = !busy && !t.scanning && this.inToolRect(t, this.pointer, button);
-    // a red key standing on its shadow; pushed, it sits down flush and darker
-    const pressed = t.scanning;
-    const bw = button.x1 - button.x0;
-    const bh = button.y1 - button.y0;
-    const key = (x: number, y: number, w: number, h: number, r: number) => {
+    this.drawKey(button, t.scanning, hot);
+    ctx.restore();
+  }
+
+  /**
+   * A red push key filling r, in the current (local) units: standing on its shadow with a highlight along
+   * its top, brighter under the pointer, and when pressed sitting down flush and darker.
+   */
+  private drawKey(r: { x0: number; x1: number; y0: number; y1: number }, pressed: boolean, hot: boolean): void {
+    const { ctx } = this;
+    const w = r.x1 - r.x0;
+    const h = r.y1 - r.y0;
+    const slab = (x: number, y: number, w: number, h: number, rad: number) => {
       ctx.beginPath();
-      ctx.roundRect(x, y, w, h, r);
+      ctx.roundRect(x, y, w, h, rad);
       ctx.fill();
     };
     if (!pressed) {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-      key(button.x0 + 0.8, button.y0 + 2.2, bw, bh, 4);
+      slab(r.x0 + 0.8, r.y0 + 2.2, w, h, 4);
     }
-    const top = button.y0 + (pressed ? 1.8 : 0);
+    const top = r.y0 + (pressed ? 1.8 : 0);
     ctx.fillStyle = pressed ? '#9c2d28' : hot ? '#ec5a50' : '#d8443b';
-    key(button.x0, top, bw, bh, 4);
+    slab(r.x0, top, w, h, 4);
     ctx.strokeStyle = '#7a221e';
     ctx.lineWidth = 1;
     ctx.stroke();
     if (!pressed) {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.28)';
-      key(button.x0 + 3, top + 1.6, bw - 6, 3, 1.5);
+      slab(r.x0 + 3, top + 1.6, w - 6, 3, 1.5);
+    }
+  }
+
+  /**
+   * Text on a seven-segment display, right-aligned in `cells` digit cells ending at x, with its digits' tops at
+   * y, in the current (local) units: lit segments glow, and unlit ones show faintly, as on a real display.
+   * Shows digits, '-', and the letters of "OUEr".
+   */
+  private drawSevenSeg(text: string, x: number, y: number, cells: number, color: string, ghost: string): void {
+    const { ctx } = this;
+    const W = 7; // digit width
+    const H = 13; // digit height
+    const T = 1.7; // segment thickness
+    const PITCH = 11;
+    // segments as [x0, y0, x1, y1] in the digit's box: a, b, c, d, e, f, g
+    const SEG = [
+      [0, 0, W, 0], [W, 0, W, H / 2], [W, H / 2, W, H], [0, H, W, H], [0, H / 2, 0, H], [0, 0, 0, H / 2], [0, H / 2, W, H / 2],
+    ];
+    const LIT: Record<string, string> = {
+      '0': 'abcdef', '1': 'bc', '2': 'abdeg', '3': 'abcdg', '4': 'bcfg', '5': 'acdfg', '6': 'acdefg', '7': 'abc',
+      '8': 'abcdefg', '9': 'abcdfg', '-': 'g', O: 'abcdef', U: 'bcdef', E: 'adefg', r: 'eg', ' ': '',
+    };
+    const chars = text.padStart(cells, ' ').slice(-cells);
+    ctx.save();
+    ctx.lineCap = 'butt';
+    ctx.lineWidth = T;
+    for (let i = 0; i < cells; i++) {
+      const lit = LIT[chars[i]] ?? '';
+      const left = x - (cells - i) * PITCH + (PITCH - W) / 2;
+      for (let k = 0; k < 7; k++) {
+        const on = lit.includes('abcdefg'[k]);
+        const [ax, ay, bx, by] = SEG[k];
+        // a little slant, and a gap where segments meet
+        const sl = (yy: number) => (H - yy) * 0.12;
+        const gx = ax === bx ? 0 : 1.1;
+        const gy = ay === by ? 0 : 1.1;
+        ctx.strokeStyle = on ? color : ghost;
+        ctx.shadowColor = on ? color : 'transparent';
+        ctx.shadowBlur = on ? 3 * this.S * this.zoom * this.dpr : 0;
+        ctx.beginPath();
+        ctx.moveTo(left + ax + gx + sl(ay + gy), y + ay + gy);
+        ctx.lineTo(left + bx - gx + sl(by - gy), y + by - gy);
+        ctx.stroke();
+      }
     }
     ctx.restore();
   }
@@ -1420,30 +1568,19 @@ export class GameEngine {
     ctx.fillStyle = theme.pipe;
     ctx.fillRect(X(pl.x0), Y(0), (pl.x1 - pl.x0) * S, 5 * S);
 
-    // an LCD looks the same in either theme
-    ctx.fillStyle = '#26302b';
+    // a seven-segment readout in whole grams, yellow-green on black in either theme ("OUEr" when overloaded)
+    ctx.translate(o.x, o.y);
+    ctx.scale(S, S);
+    ctx.fillStyle = '#050603';
     ctx.beginPath();
-    ctx.roundRect(X(d.x0), Y(d.y0), (d.x1 - d.x0) * S, (d.y1 - d.y0) * S, 3 * S);
+    ctx.roundRect(d.x0, d.y0, d.x1 - d.x0, d.y1 - d.y0, 3);
     ctx.fill();
     const g = sc.reading();
-    ctx.fillStyle = '#9fe0b8';
-    ctx.font = `${Math.round(13 * S)}px ui-monospace, "SF Mono", Menlo, Consolas, monospace`;
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(g === null ? 'OVER' : `${g} g`, X(d.x1 - 5), Y((d.y0 + d.y1) / 2 + 1));
+    this.drawSevenSeg(g === null ? 'OUEr' : String(g), d.x1 - 4, d.y0 + 3.5, 6, 'yellowgreen', 'rgba(154, 205, 50, 0.08)');
 
+    // the tare key: no label, like the spectrometer's
     const hot = !this.drag && !this.scaleDrag && this.onScale(sc, this.pointer, tare);
-    ctx.fillStyle = theme.line;
-    ctx.strokeStyle = hot ? theme.accent : theme.pipe;
-    ctx.lineWidth = 1.5 * S;
-    ctx.beginPath();
-    ctx.roundRect(X(tare.x0), Y(tare.y0), (tare.x1 - tare.x0) * S, (tare.y1 - tare.y0) * S, 4 * S);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = theme.ink;
-    ctx.font = `${Math.round(10 * Math.max(S, 0.85))}px "Schibsted Grotesk", sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.fillText('tare', X((tare.x0 + tare.x1) / 2), Y((tare.y0 + tare.y1) / 2 + 0.5));
+    this.drawKey(tare, this.tarePress === sc, hot && this.tarePress !== sc);
     ctx.restore();
   }
 
@@ -1626,6 +1763,11 @@ export class GameEngine {
       const m = mouthBelow(mouths, sp);
       this.drawStream(sp.x, sp.y, sp.x, m ? m.y + 2 * S : H, fluidColor(hose.out), hose.flow);
     }
+    for (const { at, v } of this.spills.values()) {
+      if (v.N <= TRACE) continue;
+      const m = mouthBelow(mouths, at);
+      this.drawStream(at.x, at.y, at.x, m ? m.y + 2 * S : H, fluidColor(v), volume(v) / (MAX_FLOW * this.spillTime));
+    }
     for (const { fa, m } of this.faucetFlows) {
       const { spout } = this.faucetXY(fa);
       this.drawStream(spout.x, spout.y, spout.x, m.y + 2 * S, fluidColor(fa.output), FILL_RATE / CAP);
@@ -1633,9 +1775,8 @@ export class GameEngine {
     if (drag && drag.flask.N > TRACE) {
       const D = drag.flask;
       const z = drag.zone;
-      if (z?.kind === 'flask' && volume(z.f) < z.f.cap - TRACE)
-        this.drawStream(D.x, D.y, z.f.home.x, z.f.home.y + 4 * S, fluidColor(D), POUR_RATE / CAP);
-      if (z?.kind === 'tank' && volume(z.v) < z.v.cap - TRACE) this.drawStream(D.x, D.y, z.x, z.y + 4 * S, fluidColor(D), POUR_RATE / CAP);
+      if (z?.kind === 'flask') this.drawStream(D.x, D.y, z.f.home.x, z.f.home.y + 4 * S, fluidColor(D), POUR_RATE / CAP);
+      if (z?.kind === 'tank') this.drawStream(D.x, D.y, z.x, z.y + 4 * S, fluidColor(D), POUR_RATE / CAP);
       if (z?.kind === 'sink') this.drawStream(D.x, D.y, D.x - 4 * S, H, fluidColor(D), POUR_RATE / CAP);
     }
 

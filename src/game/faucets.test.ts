@@ -55,11 +55,11 @@ describe('faucetTarget', () => {
     expect(faucetTarget([mouth(tank, 70)], spout, reach, new Set(), false)?.v).toBe(tank);
   });
 
-  it('fills nothing out of reach, or already full', () => {
+  it('fills nothing out of reach, but keeps filling something full (which overflows)', () => {
     const tank = new Vessel(CAP);
     expect(faucetTarget([mouth(tank, 90)], spout, reach, new Set(), false)).toBeNull();
     tank.N = CAP;
-    expect(faucetTarget([mouth(tank, 70)], spout, reach, new Set(), false)).toBeNull();
+    expect(faucetTarget([mouth(tank, 70)], spout, reach, new Set(), false)?.v).toBe(tank);
   });
 
   it("passes by anything carried unless the right button is held, whether it's a flask, a tank or a funnel", () => {

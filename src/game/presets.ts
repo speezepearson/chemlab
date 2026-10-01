@@ -15,6 +15,12 @@ export interface FlaskFill {
   label?: string;
 }
 
+/**
+ * Where the one and only mass spectrometer starts, as fractions of the home area (see HOME_W), unless a preset
+ * places it itself: there's always exactly one.
+ */
+export const SPECTROMETER_AT: [number, number] = [0.88, 0.3];
+
 /** A tool on the bench at the start. */
 export interface ToolSpec {
   kind: ToolKind;

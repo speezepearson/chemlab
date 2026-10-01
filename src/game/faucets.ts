@@ -2,8 +2,7 @@ import { ATOMS, type Atom } from '../chem/atoms';
 import { equilibrium } from '../chem/equilibrium';
 import { THERMO, T_ROOM } from '../chem/params';
 import type { Fluid } from '../chem/reactions';
-import { TRACE } from './config';
-import { volume, type Point, type Vessel } from './flask';
+import type { Point, Vessel } from './flask';
 import { mouthBelow, type Mouth } from './tools';
 
 /** A faucet dispenses an unlimited supply of one fixed fluid. */
@@ -59,10 +58,9 @@ export function faucetOutput(fa: Faucet, U: Float64Array): Fluid {
 }
 
 /**
- * What a faucet whose spout is at `spout` fills: the first open top below it,
- * if that's within `reach` and not already full. Something being carried (a
- * flask, a tool's tanks, a hose's funnel) only catches the stream while the
- * right button is held; otherwise the stream passes it by.
+ * What a faucet whose spout is at `spout` fills: the first open top below it, if that's within `reach`. A
+ * full one keeps filling, and overflows. Something being carried (a flask, a tool's tanks, a hose's funnel)
+ * only catches the stream while the right button is held; otherwise the stream passes it by.
  */
 export function faucetTarget(
   mouths: readonly Mouth[],
@@ -72,5 +70,5 @@ export function faucetTarget(
   rightHeld: boolean,
 ): Mouth | null {
   const m = mouthBelow(rightHeld ? mouths : mouths.filter((mo) => !carried.has(mo.v)), spout);
-  return m && m.y - spout.y <= reach && volume(m.v) <= m.v.cap - TRACE ? m : null;
+  return m && m.y - spout.y <= reach ? m : null;
 }

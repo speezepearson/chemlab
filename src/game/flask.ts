@@ -63,10 +63,11 @@ export class Vessel implements Fluid {
 
   /**
    * Add about `amount` worth (by volume) of a fluid, in whole molecules, without depleting it (a faucet's
-   * recipe, or a packet already sent on its way); returns the atoms actually added.
+   * recipe, or a packet already sent on its way); returns the atoms actually added. Only what fits is
+   * added, unless `overfill`, which leaves it to the caller to deal with the excess.
    */
-  addFrom(src: Fluid, amount: number): number {
-    amount = Math.min(amount, this.cap - volume(this));
+  addFrom(src: Fluid, amount: number, overfill = false): number {
+    if (!overfill) amount = Math.min(amount, this.cap - volume(this));
     const vs = volume(src);
     if (amount <= 0 || vs <= 0) return 0;
     const f = amount / vs;
