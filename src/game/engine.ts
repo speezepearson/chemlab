@@ -67,6 +67,8 @@ const FAUCET_REACH = 24;
 const FLASK_CATCH = 14;
 /** A tool's spout snaps to line up with a mouth this close below it, in local units. */
 const SNAP = 24;
+/** How close to a valve, in pixels, the pointer can be before it stops turning the lever. */
+const VALVE_DEADZONE = 20;
 /** Pixels of right-click drag (right or up opens) to turn a valve from closed to fully open. */
 const SINK_H = 16;
 /** The separator's splitter, below its valve, in local units. */
@@ -396,10 +398,12 @@ export class GameEngine {
   /**
    * Point a valve's lever at p: straight up from the valve is fully open, straight right is closed,
    * and in between is partly open. Below the valve it closes, and left of it (past the down-left
-   * diagonal) it opens, so a wild swing lands at the nearer end.
+   * diagonal) it opens, so a wild swing lands at the nearer end. Within VALVE_DEADZONE of the valve the
+   * angle is too jumpy to mean anything, so the lever stays put.
    */
   private aimValve(t: Tool, k: number, p: Point): void {
     const vc = this.valveAt(t, k);
+    if (Math.hypot(p.x - vc.x, p.y - vc.y) < VALVE_DEADZONE) return;
     const a = Math.atan2(vc.y - p.y, p.x - vc.x); // counterclockwise from right
     const open = a < -0.75 * Math.PI ? 1 : a / (Math.PI / 2);
     t.valves[k] = Math.max(0, Math.min(1, open));
@@ -979,12 +983,9 @@ export class GameEngine {
       ctx.stroke();
     }
 
-    // the rate, while turning a valve or hovering the tool (but not a tank, which shows the god-mode panel)
-    const showRates = this.valveDrag?.tool === t || (this.hoverTool === t && !(this.god && this.hoverTank));
     t.tanks.forEach((_, k) => {
       // valve: the lever points right when closed and up when open, toward where the pointer turned it
       const vc = this.valveAt(t, k);
-      const side = vc.x < this.toolXY(t).x - 1 ? -1 : 1; // labels point away from the middle
       const a = -t.valves[k] * (Math.PI / 2);
       ctx.strokeStyle = theme.ink;
       ctx.lineWidth = 3 * S;
@@ -1000,11 +1001,6 @@ export class GameEngine {
       ctx.arc(vc.x, vc.y, 5 * S, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-      if (showRates && (this.valveDrag?.tool !== t || this.valveDrag.k === k)) {
-        ctx.fillStyle = theme.ink;
-        ctx.textAlign = side < 0 ? 'right' : 'left';
-        ctx.fillText(`${t.valves[k].toFixed(2)} flask/s`, vc.x + side * 16 * S, vc.y + 12 * S);
-      }
     });
 
     ctx.fillStyle = theme.muted;
