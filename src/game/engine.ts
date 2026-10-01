@@ -10,7 +10,7 @@ import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './sa
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
 import { rumble } from './rumble';
 import {
-  HELIX, Hose, SCAN_LIGHTS, SCAN_RAMP, SHAPES, SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, drip,
+  HELIX, Hose, SCAN_LIGHTS, SCAN_PHASES, SHAPES, SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, drip,
   mouthBelow, scanLevel, tankX, type Mouth, type ToolKind,
 } from './tools';
 
@@ -638,7 +638,7 @@ export class GameEngine {
         }
       } else if (e.button === 0) {
         if (t?.kind === 'spectrometer' && this.inToolRect(t, p, SPECTROMETER.button)) {
-          if (t.scan()) this.rumbles.set(t, rumble(SCAN_RAMP));
+          if (t.scan()) this.rumbles.set(t, rumble(SCAN_PHASES));
         } else if (t) {
           const o = this.toolXY(t);
           this.toolDrag = { tool: t, off: { x: p.x - o.x, y: p.y - o.y } };
@@ -1304,7 +1304,8 @@ export class GameEngine {
   /**
    * A mass spectrometer's cabinet: an old green-on-black screen with a hexagon per molecule size (1, 2, 3
    * atoms), each cut into sextants by color (see SEXTANT_ATOMS) that glow as bright as their share of the
-   * last sample (see spectrum), lighting up one hexagon at a time as a run goes on; and the run button.
+   * last sample (see spectrum), lighting up one hexagon at a time as a run goes on; and the run button. No
+   * words anywhere: reading it is part of the game.
    */
   private drawSpectrometer(t: Tool): void {
     const { ctx, S, theme } = this;
@@ -1331,7 +1332,6 @@ export class GameEngine {
     ctx.fill(glass);
     ctx.save();
     ctx.clip(glass);
-    const scanningHex = t.scanning ? SCAN_LIGHTS.findIndex((at) => t.scanAge < at) : -1;
     hexes.xs.forEach((cx, w) => {
       const { y: cy, r } = hexes;
       // flat-topped, so sextant j runs clockwise from the corner at −120° + 60j°
@@ -1352,29 +1352,14 @@ export class GameEngine {
           ctx.closePath();
           ctx.fill();
         }
-      // the one being read flickers
-      const a = w === scanningHex ? 0.5 + 0.35 * Math.sin(performance.now() / 40) : 0.85;
-      ctx.shadowColor = green(a);
+      ctx.shadowColor = green(0.85);
       ctx.shadowBlur = blur(2);
-      ctx.strokeStyle = green(a);
+      ctx.strokeStyle = green(0.85);
       ctx.lineWidth = 0.9;
       ctx.beginPath();
       for (let j = 0; j < 6; j++) ctx.lineTo(...corner(j));
       ctx.closePath();
       ctx.stroke();
-      ctx.strokeStyle = green(a * 0.3);
-      ctx.lineWidth = 0.5;
-      ctx.beginPath();
-      for (let j = 0; j < 3; j++) {
-        ctx.moveTo(...corner(j));
-        ctx.lineTo(...corner(j + 3));
-      }
-      ctx.stroke();
-      ctx.fillStyle = green(0.7);
-      ctx.font = '7px ui-monospace, "SF Mono", Menlo, Consolas, monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(String(w + 1), cx, sc.y1 - 5);
     });
     // scanlines
     ctx.shadowBlur = 0;
@@ -1385,25 +1370,20 @@ export class GameEngine {
     ctx.lineWidth = 1.5;
     ctx.stroke(glass);
 
-    // a lamp that blinks through a run, and the run button
+    // a lamp that blinks through a run, and the run button, sunk in while it runs
     ctx.fillStyle = t.scanning && Math.floor(t.scanAge * 3) % 2 === 0 ? '#ffb43a' : theme.pipe;
     ctx.beginPath();
     ctx.arc(sc.x0 + 6, (button.y0 + button.y1) / 2, 3, 0, Math.PI * 2);
     ctx.fill();
     const busy = this.drag || this.toolDrag || this.valveDrag || this.scaleDrag || this.hoseDrag;
     const hot = !busy && !t.scanning && this.inToolRect(t, this.pointer, button);
-    ctx.fillStyle = theme.line;
+    ctx.fillStyle = t.scanning ? theme.bench : theme.line;
     ctx.strokeStyle = hot ? theme.accent : theme.pipe;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.roundRect(button.x0, button.y0, button.x1 - button.x0, button.y1 - button.y0, 4);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = t.scanning ? theme.muted : theme.ink;
-    ctx.font = '10px "Schibsted Grotesk", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(t.scanning ? 'busy' : 'run', (button.x0 + button.x1) / 2, (button.y0 + button.y1) / 2 + 0.5);
     ctx.restore();
   }
 

@@ -81,22 +81,20 @@ export const SORTER_SCREENS: readonly (readonly number[])[] = [
 export const SAMPLE_CAP = CAP / 20;
 /** Seconds into a spectrometer run, in real time, at which each of its three hexagons lights up; the run ends with the last. */
 export const SCAN_LIGHTS = [3, 9, 21] as const;
-/** How hard a running spectrometer rumbles and shakes, from 0 to 1, at points in its run; it ramps between them. */
-export const SCAN_RAMP = [
-  { t: 0, level: 0.15 },
-  { t: SCAN_LIGHTS[0], level: 0.35 },
-  { t: SCAN_LIGHTS[1], level: 0.6 },
-  { t: SCAN_LIGHTS[2], level: 1 },
+/**
+ * A spectrometer run's phases: each lasts until its hexagon lights (see SCAN_LIGHTS), rumbling and shaking at
+ * its own level, from 0 to 1, a step up from the last.
+ */
+export const SCAN_PHASES = [
+  { end: SCAN_LIGHTS[0], level: 0.3 },
+  { end: SCAN_LIGHTS[1], level: 0.6 },
+  { end: SCAN_LIGHTS[2], level: 1 },
 ] as const;
 
-/** How hard a spectrometer `age` seconds into its run rumbles and shakes (see SCAN_RAMP): 0 outside a run. */
+/** How hard a spectrometer `age` seconds into its run rumbles and shakes (see SCAN_PHASES): 0 outside a run. */
 export function scanLevel(age: number): number {
-  for (let i = 1; i < SCAN_RAMP.length; i++) {
-    const a = SCAN_RAMP[i - 1];
-    const b = SCAN_RAMP[i];
-    if (age >= a.t && age < b.t) return a.level + ((age - a.t) / (b.t - a.t)) * (b.level - a.level);
-  }
-  return 0;
+  if (age < 0) return 0;
+  return SCAN_PHASES.find((ph) => age < ph.end)?.level ?? 0;
 }
 
 /** The order of a spectrometer hexagon's sextants, clockwise from the top. */
@@ -203,7 +201,7 @@ export const chuteY = (x: number) =>
 export const SPECTROMETER = {
   body: { x0: -70, x1: 70, y0: 26, y1: 104 },
   screen: { x0: -62, x1: 62, y0: 32, y1: 80 },
-  hexes: { xs: [-40, 0, 40], y: 53, r: 17 },
+  hexes: { xs: [-40, 0, 40], y: 56, r: 17 },
   button: { x0: 28, x1: 62, y0: 84, y1: 98 },
 };
 

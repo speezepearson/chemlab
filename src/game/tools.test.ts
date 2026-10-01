@@ -172,9 +172,13 @@ describe('mass spectrometer', () => {
     expect(sp.reading!.every((x) => x === 0)).toBe(true);
   });
 
-  it('rumbles harder as the run goes on, then stops', () => {
-    const levels = [0, 2, 3, 8, 9, 20].map(scanLevel);
-    for (let i = 1; i < levels.length; i++) expect(levels[i]).toBeGreaterThan(levels[i - 1]);
+  it('rumbles a step harder each phase, steady within one, then stops', () => {
+    const levels = [0, 2.9, 3, 8.9, 9, 20.9].map(scanLevel);
+    expect(levels[1]).toBe(levels[0]);
+    expect(levels[3]).toBe(levels[2]);
+    expect(levels[5]).toBe(levels[4]);
+    expect(levels[2]).toBeGreaterThan(levels[1]);
+    expect(levels[4]).toBeGreaterThan(levels[3]);
     expect(scanLevel(SCAN_LIGHTS[2])).toBe(0);
     expect(scanLevel(Infinity)).toBe(0);
   });

@@ -1,15 +1,16 @@
 /**
- * A machine's rumble, synthesized: low-passed brown noise with a buzzing sawtooth under it. Its loudness and
- * pitch follow a level from 0 to 1 that ramps linearly between the given points, and it falls silent after
- * the last one. Starting it needs a user gesture (browsers keep audio off until one); without audio it's
- * silent. Returns a function that stops it early.
+ * A machine working through phases: a rumble, synthesized from low-passed brown noise with a buzzing sawtooth
+ * under it, whose loudness and pitch step up to each phase's level (from 0 to 1) and hold there, with a short,
+ * quiet, high major chord as each phase ends. It falls silent after the last. Starting it needs a user
+ * gesture (browsers keep audio off until one); without audio it's silent. Returns a function that stops it
+ * early.
  */
-export function rumble(points: readonly { t: number; level: number }[]): () => void {
+export function rumble(phases: readonly { end: number; level: number }[]): () => void {
   const ac = audio();
   if (!ac) return () => {};
   void ac.resume();
   const t0 = ac.currentTime;
-  const end = t0 + points[points.length - 1].t;
+  const end = t0 + phases[phases.length - 1].end;
 
   const noise = ac.createBufferSource();
   noise.buffer = brownNoise(ac);
@@ -27,18 +28,24 @@ export function rumble(points: readonly { t: number; level: number }[]): () => v
   filter.connect(out).connect(ac.destination);
 
   const pitch = (level: number) => 22 + 60 * level; // Hz
-  for (const [i, { t, level }] of points.entries()) {
-    const at = t0 + t;
-    const ramp = (p: AudioParam, v: number) => (i ? p.linearRampToValueAtTime(v, at) : p.setValueAtTime(v, at));
-    ramp(buzz.frequency, pitch(level));
-    ramp(filter.frequency, 4 * pitch(level));
-    ramp(out.gain, 0.05 + 0.3 * level);
+  buzz.frequency.value = pitch(phases[0].level);
+  filter.frequency.value = 4 * pitch(phases[0].level);
+  out.gain.value = 0;
+  const chimes: GainNode[] = [];
+  let start = t0;
+  for (const { end: phaseEnd, level } of phases) {
+    // a quick step, not a click
+    buzz.frequency.setTargetAtTime(pitch(level), start, 0.03);
+    filter.frequency.setTargetAtTime(4 * pitch(level), start, 0.03);
+    out.gain.setTargetAtTime(0.05 + 0.3 * level, start, 0.03);
+    start = t0 + phaseEnd;
+    chimes.push(chord(ac, start));
   }
-  out.gain.linearRampToValueAtTime(0, end + 0.3);
+  out.gain.setTargetAtTime(0, end, 0.08);
   noise.start(t0);
   buzz.start(t0);
-  noise.stop(end + 0.4);
-  buzz.stop(end + 0.4);
+  noise.stop(end + 0.5);
+  buzz.stop(end + 0.5);
   return () => {
     const now = ac.currentTime;
     out.gain.cancelScheduledValues(now);
@@ -46,7 +53,30 @@ export function rumble(points: readonly { t: number; level: number }[]): () => v
     out.gain.linearRampToValueAtTime(0, now + 0.1);
     noise.stop(now + 0.15);
     buzz.stop(now + 0.15);
+    for (const g of chimes) {
+      g.gain.cancelScheduledValues(now);
+      g.gain.setValueAtTime(0, now);
+    }
   };
+}
+
+/** A short, quiet C major chord high up (C6, E6, G6), starting at `at`. Returns its volume, to silence it. */
+function chord(ac: AudioContext, at: number): GainNode {
+  const g = ac.createGain();
+  g.gain.value = 0;
+  g.gain.setValueAtTime(0, at);
+  g.gain.linearRampToValueAtTime(0.05, at + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0005, at + 0.35);
+  g.connect(ac.destination);
+  for (const f of [1046.5, 1318.5, 1568]) {
+    const o = ac.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = f;
+    o.connect(g);
+    o.start(at);
+    o.stop(at + 0.4);
+  }
+  return g;
 }
 
 let ctx: AudioContext | null | undefined;
