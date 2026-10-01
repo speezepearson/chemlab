@@ -8,9 +8,9 @@ import { Flask, Vessel, fluidColor, glowColor, sustenance, transfer, volume, vol
 import { DEFAULT_PRESET, SPECTROMETER_AT, applyFill, type Preset } from './presets';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
-import { rumble } from './rumble';
+import { rumble, type Rumble } from './rumble';
 import {
-  HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SCAN_PHASES, SHAPES, SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, drip,
+  HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SHAPES, SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, drip,
   mouthBelow, scanLevel, tankX, type Mouth, type ToolKind,
 } from './tools';
 
@@ -167,8 +167,8 @@ export class GameEngine {
   private resizeObserver: ResizeObserver;
   private cleanups: (() => void)[] = [];
   private nextToolId = 0;
-  /** Running spectrometers' rumbles, each with what stops it. */
-  private rumbles = new Map<Tool, () => void>();
+  /** Running spectrometers' sounds. */
+  private rumbles = new Map<Tool, Rumble>();
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -191,7 +191,7 @@ export class GameEngine {
     cancelAnimationFrame(this.raf);
     this.resizeObserver.disconnect();
     for (const c of this.cleanups) c();
-    for (const stop of this.rumbles.values()) stop();
+    for (const r of this.rumbles.values()) r.stop();
   }
 
   /**
@@ -661,7 +661,7 @@ export class GameEngine {
         }
       } else if (e.button === 0) {
         if (t?.kind === 'spectrometer' && this.inToolRect(t, p, SPECTROMETER.button)) {
-          if (t.scan()) this.rumbles.set(t, rumble(SCAN_PHASES));
+          if (t.scan()) this.rumbles.set(t, rumble());
         } else if (t) {
           const o = this.toolXY(t);
           this.toolDrag = { tool: t, off: { x: p.x - o.x, y: p.y - o.y }, from: { x: t.fx, y: t.fy } };
@@ -925,16 +925,8 @@ export class GameEngine {
   /* ---------------- main loop ---------------- */
 
   private frame = (now: number): void => {
-    const elapsed = (now - this.last) / 1000;
-    const dt = Math.min(0.1, elapsed);
+    const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
-
-    // spectrometer runs go by the clock, like their rumble, even while the tab is hidden
-    for (const t of this.tools) if (t.scanning) t.scanAge += elapsed;
-    for (const [t, stop] of this.rumbles) {
-      if (!this.tools.includes(t)) stop(); // put away, or the bench was replaced
-      if (!this.tools.includes(t) || !t.scanning) this.rumbles.delete(t);
-    }
     const { S, L, drag, pointer } = this;
     this.open = this.mouths();
     this.spills.clear();
@@ -983,6 +975,21 @@ export class GameEngine {
       if (m && simDt > 0) this.faucetFlows.push({ fa, m });
     }
     this.pouring = simDt > 0 && pourInto !== undefined;
+
+    // spectrometer runs go by sim time too: a step louder each phase, a chime as each ends, silent while paused
+    for (const t of this.tools) {
+      if (!t.scanning) continue;
+      const before = t.scanAge;
+      t.scanAge += simDt;
+      const r = this.rumbles.get(t);
+      for (const at of SCAN_LIGHTS) if (before < at && t.scanAge >= at) r?.chime();
+      r?.level(simDt > 0 ? scanLevel(t.scanAge) : 0);
+    }
+    for (const [t, r] of this.rumbles)
+      if (!this.tools.includes(t) || !t.scanning) {
+        r.stop(); // done, put away, or the bench was replaced
+        this.rumbles.delete(t);
+      }
 
     // everything that moves fluid, and chemistry, on sim time, interleaved so a drip meets the reaction it
     // feeds, and a faucet keeps up with the valve draining what it fills
@@ -1825,7 +1832,7 @@ export class GameEngine {
 
     for (const t of this.tools) {
       // a running spectrometer shakes, harder as its run goes on
-      const shake = scanLevel(t.scanAge) * SHAKE * S;
+      const shake = this.speed > 0 ? scanLevel(t.scanAge) * SHAKE * S : 0;
       ctx.save();
       if (shake) ctx.translate(shake * (2 * Math.random() - 1), shake * (2 * Math.random() - 1));
       this.drawTool(t);

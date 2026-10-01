@@ -79,7 +79,7 @@ export const SORTER_SCREENS: readonly (readonly number[])[] = [
 
 /** How much a spectrometer's sample cup holds, in atoms: a twentieth of a flask. */
 export const SAMPLE_CAP = CAP / 20;
-/** Seconds into a spectrometer run, in real time, at which each of its three hexagons lights up; the run ends with the last. */
+/** Sim seconds into a spectrometer run at which each of its three hexagons lights up; the run ends with the last. */
 export const SCAN_LIGHTS = [3, 9, 21] as const;
 /**
  * A spectrometer run's phases: each lasts until its hexagon lights (see SCAN_LIGHTS), rumbling and shaking at
@@ -272,7 +272,7 @@ export class Tool {
   flow: number[];
   /** A spectrometer's last reading (see spectrum), shown on its screen; null until it's first run. */
   reading: number[] | null = null;
-  /** Seconds, in real time, since the spectrometer was last run (see SCAN_LIGHTS); Infinity if it isn't running. */
+  /** Sim seconds since the spectrometer was last run (see SCAN_LIGHTS); Infinity if it isn't running. */
   scanAge = Infinity;
 
   constructor(

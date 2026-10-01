@@ -1,16 +1,25 @@
 /**
- * A machine working through phases: a rumble, synthesized from low-passed brown noise with a buzzing sawtooth
- * under it, whose loudness and pitch step up to each phase's level (from 0 to 1) and hold there, with a short,
- * quiet, high major chord as each phase ends. It falls silent after the last. Starting it needs a user
- * gesture (browsers keep audio off until one); without audio it's silent. Returns a function that stops it
- * early.
+ * A machine's sounds, driven live by whoever runs it (so they follow sim time, pauses included): a rumble,
+ * synthesized from low-passed brown noise with a buzzing sawtooth under it, whose loudness and pitch follow a
+ * level from 0 (silent) to 1; and a short, quiet, high major chord on cue. Starting it needs a user gesture
+ * (browsers keep audio off until one); without audio it's silent.
  */
-export function rumble(phases: readonly { end: number; level: number }[]): () => void {
+export interface Rumble {
+  /** Rumble at this level from now on, 0 to 1; 0 is silent. */
+  level(level: number): void;
+  /** Play the chime now. */
+  chime(): void;
+  /** Fade the rumble out for good (a chime already playing finishes). */
+  stop(): void;
+}
+
+const SILENT: Rumble = { level() {}, chime() {}, stop() {} };
+
+export function rumble(): Rumble {
   const ac = audio();
-  if (!ac) return () => {};
+  if (!ac) return SILENT;
   void ac.resume();
   const t0 = ac.currentTime;
-  const end = t0 + phases[phases.length - 1].end;
 
   const noise = ac.createBufferSource();
   noise.buffer = brownNoise(ac);
@@ -23,45 +32,45 @@ export function rumble(phases: readonly { end: number; level: number }[]): () =>
   filter.type = 'lowpass';
   filter.Q.value = 4;
   const out = ac.createGain();
+  out.gain.value = 0;
   noise.connect(filter);
   buzz.connect(buzzGain).connect(filter);
   filter.connect(out).connect(ac.destination);
-
-  const pitch = (level: number) => 22 + 60 * level; // Hz
-  buzz.frequency.value = pitch(phases[0].level);
-  filter.frequency.value = 4 * pitch(phases[0].level);
-  out.gain.value = 0;
-  const chimes: GainNode[] = [];
-  let start = t0;
-  for (const { end: phaseEnd, level } of phases) {
-    // a quick step, not a click
-    buzz.frequency.setTargetAtTime(pitch(level), start, 0.03);
-    filter.frequency.setTargetAtTime(4 * pitch(level), start, 0.03);
-    out.gain.setTargetAtTime(0.05 + 0.3 * level, start, 0.03);
-    start = t0 + phaseEnd;
-    chimes.push(chord(ac, start));
-  }
-  out.gain.setTargetAtTime(0, end, 0.08);
   noise.start(t0);
   buzz.start(t0);
-  noise.stop(end + 0.5);
-  buzz.stop(end + 0.5);
-  return () => {
-    const now = ac.currentTime;
-    out.gain.cancelScheduledValues(now);
-    out.gain.setValueAtTime(out.gain.value, now);
-    out.gain.linearRampToValueAtTime(0, now + 0.1);
-    noise.stop(now + 0.15);
-    buzz.stop(now + 0.15);
-    for (const g of chimes) {
-      g.gain.cancelScheduledValues(now);
-      g.gain.setValueAtTime(0, now);
-    }
+
+  const pitch = (level: number) => 22 + 60 * level; // Hz
+  let current = -1;
+  let stopped = false;
+  return {
+    level(level) {
+      if (stopped || level === current) return;
+      current = level;
+      // a quick step, not a click
+      const now = ac.currentTime;
+      if (level > 0) {
+        buzz.frequency.setTargetAtTime(pitch(level), now, 0.03);
+        filter.frequency.setTargetAtTime(4 * pitch(level), now, 0.03);
+      }
+      out.gain.setTargetAtTime(level > 0 ? 0.05 + 0.3 * level : 0, now, 0.03);
+    },
+    chime() {
+      chord(ac, ac.currentTime);
+    },
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      const now = ac.currentTime;
+      out.gain.cancelScheduledValues(now);
+      out.gain.setTargetAtTime(0, now, 0.08);
+      noise.stop(now + 0.5);
+      buzz.stop(now + 0.5);
+    },
   };
 }
 
-/** A short, quiet C major chord high up (C6, E6, G6), starting at `at`. Returns its volume, to silence it. */
-function chord(ac: AudioContext, at: number): GainNode {
+/** A short, quiet C major chord high up (C6, E6, G6), starting at `at`. */
+function chord(ac: AudioContext, at: number): void {
   const g = ac.createGain();
   g.gain.value = 0;
   g.gain.setValueAtTime(0, at);
@@ -76,7 +85,6 @@ function chord(ac: AudioContext, at: number): GainNode {
     o.start(at);
     o.stop(at + 0.4);
   }
-  return g;
 }
 
 let ctx: AudioContext | null | undefined;
@@ -85,6 +93,9 @@ function audio(): AudioContext | null {
   if (ctx === undefined) {
     try {
       ctx = new AudioContext();
+      // the sim stops while the page is hidden, so its sounds should too
+      const c = ctx;
+      document.addEventListener('visibilitychange', () => void (document.hidden ? c.suspend() : c.resume()));
     } catch {
       ctx = null;
     }
