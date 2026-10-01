@@ -87,15 +87,16 @@ function Notice({ onOk }: { onOk(): void }) {
     </>,
     <>
       <p>
-        Congratulations, our intelligent automated systems have identified you as the most competent currently-capable
-        passenger in the fields of CHEMISTRY, BIOLOGY!
+        Congratulations! On the basis of the incomparable expertise demonstrated by your career as a ELEMENTARY SCHOOL
+        GEOLOGY TEACHER, our intelligent automated systems have identified you as the most competent
+        currently-capable passenger in the fields of CHEMISTRY, BIOLOGY!
         <br />
         In the absence of any more capable crew members or passengers, you have been selected (per Passenger Agreement
         Sec. 041 - Understaffing) to be proactively depreserved to assist in solving the following problem:
       </p>
       <pre>
         {'Cryostabilizer required to complete journey: (32,210 passengers) x (0.1 mL nut/pass/day) x (4,456 days) =\n' +
-          '  22,878.896 L\n' +
+          '  14,352.776 L\n' +
           'Cryostabilizer present:\n' +
           '       2.811 L'}
       </pre>

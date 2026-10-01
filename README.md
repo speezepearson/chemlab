@@ -2,7 +2,7 @@
 
 A chemistry-lab puzzle game set in a world with much simpler chemistry than ours. You handle fluids in glassware, and the goal is to work out how to synthesize more of a scarce target fluid.
 
-**Premise** (placeholder, not final): you're stranded far from civilization. Your supply of nutrient slurry won't last until relief arrives, so you have to figure out how to make more.
+**Premise** (see the intro): you're Nadia Hassan, a passenger on a Celestia Starlines colony ship to Mu Ceti, woken from cryosleep after something hit the ship and took out the bridge, the crew and nearly all the cryostabilizer. The 32,210 passengers still asleep need 14,352.776 L of it to last the 12.2 years left; there are 2.811 L. The target species is the cryostabilizer, so you have to figure out how to make more.
 
 The faucets are unlimited, so the target is scarce because you don't know how to make it, not because you lack raw material. The puzzle is discovering a synthesis route.
 

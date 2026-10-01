@@ -46,8 +46,8 @@ export interface HoseSpec {
 export interface Preset {
   id: string;
   name: string;
-  /** Shown under the title bar while the preset is loaded. */
-  description: string;
+  /** Shown under the title bar while the preset is loaded, if given. */
+  description?: string;
   flasks: (FlaskFill | null)[];
   tools?: ToolSpec[];
   /** Top center of each scale's platform, as fractions of the home area's width and height (see HOME_W). */
@@ -108,11 +108,6 @@ export const PRESETS: readonly Preset[] = [
   {
     id: 'stranded',
     name: 'Stranded',
-    description:
-      "You're stranded. The supply flask holds the last of your nutrient slurry. Drag a flask under a spout to fill it, " +
-      'or onto the scale to weigh it. Hold the right button too while dragging to fill from a faucet, pour into a flask ' +
-      'or tank, or dump in the sink. ' +
-      'Drag tools anywhere, and right-click a tool and point up (open) or right (closed) to set its valve.',
     flasks: [{ contents: [atomsOf(TARGET, 0.4 * CAP)], T: T_ROOM, label: 'supply' }],
     tools: [
       { kind: 'separator', at: [0.1, 0.3] },

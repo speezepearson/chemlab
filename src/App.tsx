@@ -143,7 +143,7 @@ export function App() {
         <h1>Slurry Lab</h1>
         <div className="goal">
           <span>
-            {Math.round(100 * GOAL_PURITY)}+% pure sustenance {fmtCount(progress)} / {fmtCount(GOAL_ATOMS)}
+            {Math.round(100 * GOAL_PURITY)}+% pure cryostabilizer {fmtCount(progress)} / {fmtCount(GOAL_ATOMS)}
           </span>
           <div className="bar">
             <i style={{ width: `${Math.min(100, (100 * progress) / GOAL_ATOMS)}%` }} />
@@ -174,7 +174,7 @@ export function App() {
             Replay intro
           </button>
         </div>
-        <p className="hint">{preset.description}</p>
+        {preset.description && <p className="hint">{preset.description}</p>}
       </header>
       <div className="main">
         {engine && <Palette engine={engine} />}
@@ -182,7 +182,7 @@ export function App() {
           <canvas ref={canvasRef} />
           {inspection && <InfoPanel info={inspection} />}
           {engine && editing !== null && <FlaskEditor engine={engine} id={editing} onClose={() => setEditing(null)} />}
-          {won && <div id="win">Enough sustenance to last until relief arrives.</div>}
+          {won && <div id="win">Enough cryostabilizer to reach Mu Ceti.</div>}
         </div>
       </div>
       {intro && <Intro skipStart={intro === 'replay'} onDone={endIntro} />}
