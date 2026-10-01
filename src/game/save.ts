@@ -16,6 +16,8 @@ export interface SaveState {
   tools: SavedTool[];
   scales: SavedScale[];
   hoses: SavedHose[];
+  /** Where each faucet joins its pipe, as fractions of the home area (see HOME_W); where they start if left out. */
+  faucets?: { x: number; y: number }[];
   chem?: { bonds: ChemParams['bonds']; swapA: number; heatCap: number };
 }
 
