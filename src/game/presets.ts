@@ -103,8 +103,9 @@ export const PRESETS: readonly Preset[] = [
     id: 'stranded',
     name: 'Stranded',
     description:
-      "You're stranded. The supply flask holds the last of your nutrient slurry. Drag a flask under a faucet or " +
-      'spout to fill it, over a flask or tank to pour, onto the scale to weigh it, or down to the sink to dump it. ' +
+      "You're stranded. The supply flask holds the last of your nutrient slurry. Drag a flask under a spout to fill it, " +
+      'or onto the scale to weigh it. Hold the right button too while dragging to fill from a faucet, pour into a flask ' +
+      'or tank, or dump in the sink. ' +
       'Drag tools anywhere, and right-click a tool and point up (open) or right (closed) to set its valve.',
     flasks: [{ contents: [atomsOf(TARGET, 0.4 * CAP)], T: T_ROOM, label: 'supply' }],
     tools: [

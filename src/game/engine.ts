@@ -1,8 +1,9 @@
 import { temperature, type Fluid, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
 import { CAP, FILL_RATE, GOAL_ATOMS, N_FLASKS, POUR_RATE, TRACE } from './config';
-import { FAUCETS, faucetOutput, type Faucet } from './faucets';
+import { FAUCETS, faucetOutput, faucetTarget, type Faucet } from './faucets';
 import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
+import { FLASK_PATH_DATA, fillLevel, tiltedOutline } from './flaskShape';
 import { Flask, Vessel, fluidColor, glowColor, sustenance, transfer, volume, volumeUnit, type Point } from './flask';
 import { DEFAULT_PRESET, applyFill, type Preset } from './presets';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
@@ -65,6 +66,8 @@ const GLOW_STOPS = 32;
 const POUR_ANG = Math.PI * 0.61;
 /** How far below a faucet something can be and still get filled, in local units. */
 const FAUCET_REACH = 24;
+/** Distance between neighboring faucets, as a fraction of the stage's width. */
+const FAUCET_SPACING = 0.12;
 /** Half-width of the part of a flask's mouth that catches a falling stream, in local units. */
 const FLASK_CATCH = 14;
 /** A tool's spout snaps to line up with a mouth this close below it, in local units. */
@@ -76,7 +79,7 @@ const SINK_H = 16;
 /** The separator's splitter, below its valve, in local units. */
 const SEP_BODY = { x0: -42, x1: 42, y0: 100, y1: 112 };
 
-const FLASK_PATH = new Path2D('M-11 0 L11 0 L9 22 L26 64 Q28 70 22 70 L-22 70 Q-28 70 -26 64 L-9 22 Z');
+const FLASK_PATH = new Path2D(FLASK_PATH_DATA);
 
 /** Owns the canvas: layout, pointer input, the simulation loop and drawing. */
 export class GameEngine {
@@ -104,6 +107,8 @@ export class GameEngine {
   private hover: Flask | null = null;
   private hoverTool: Tool | null = null;
   private hoverTank: Vessel | null = null;
+  /** Whether the right mouse button is held: a carried flask pours, and anything carried takes from faucets, only while it is. */
+  private rightHeld = false;
   private faucetFlows: { fa: FaucetLayout; m: Mouth }[] = [];
   private pointer: Point = { x: -1, y: -1 };
   private won = false;
@@ -300,11 +305,10 @@ export class GameEngine {
     canvas.width = Math.round(W * dpr);
     canvas.height = Math.round(H * dpr);
     const S = (this.S = Math.max(0.55, Math.min(1.1, W / 760)));
-    const nF = FAUCETS.length;
     L.pipeY = 30 * S;
     L.spoutY = 62 * S;
     L.faucets = FAUCETS.map((fa, i) => ({
-      ...fa, output: faucetOutput(fa, this.chem.U), x: W * 0.06 + W * 0.72 * (i / (nF - 1)),
+      ...fa, output: faucetOutput(fa, this.chem.U), x: W * (0.06 + FAUCET_SPACING * i),
     }));
     L.floorY = H - SINK_H * S;
     const cols = W < 560 ? 4 : 8;
@@ -523,6 +527,7 @@ export class GameEngine {
     on('pointerdown', (e) => {
       const p = this.ptr(e);
       this.pointer = p;
+      this.rightHeld = (e.buttons & 2) !== 0;
       const t = this.hitTool(p);
       const hoseEnd = e.button === 0 ? this.hitHoseEnd(p) : null;
       if (hoseEnd) {
@@ -575,6 +580,13 @@ export class GameEngine {
     };
     onWindow('pointermove', (e) => {
       const p = (this.pointer = this.ptr(e));
+      // pressing or releasing a second button while one is held is a move, not a down or up
+      this.rightHeld = (e.buttons & 2) !== 0;
+      if ((this.drag || this.toolDrag || this.scaleDrag || this.hoseDrag) && !(e.buttons & 1)) {
+        // let go of the left button while holding the right: drop what's carried
+        endDrag(e);
+        return;
+      }
       if (this.valveDrag) {
         this.aimValve(this.valveDrag.tool, this.valveDrag.k, p);
       } else if (this.toolDrag) {
@@ -596,6 +608,7 @@ export class GameEngine {
     });
     const endDrag = (e: PointerEvent) => {
       this.pointer = this.ptr(e);
+      this.rightHeld = (e.buttons & 2) !== 0;
       if (this.cb.isDiscard(e.clientX, e.clientY)) {
         // dropped back on the palette: put it away
         const t = this.toolDrag?.tool;
@@ -632,6 +645,10 @@ export class GameEngine {
       this.updateHover();
     });
     on('contextmenu', (e) => e.preventDefault());
+    // the right button pours while carrying, which shouldn't open a menu wherever it's clicked
+    onWindow('contextmenu', (e) => {
+      if (this.drag || this.toolDrag || this.scaleDrag || this.hoseDrag) e.preventDefault();
+    });
     on('dblclick', (e) => {
       if (!this.god) return;
       const p = this.ptr(e);
@@ -727,6 +744,15 @@ export class GameEngine {
     return null;
   }
 
+  /** The vessels being carried: they catch a faucet's stream only while the right button is held. */
+  private carried(): Set<Vessel> {
+    const out = new Set<Vessel>();
+    if (this.drag) out.add(this.drag.flask);
+    if (this.toolDrag) for (const v of this.toolDrag.tool.tanks) out.add(v);
+    if (this.hoseDrag && this.hoseDrag.end !== 'outlet') out.add(this.hoseDrag.hose.funnel);
+    return out;
+  }
+
   /* ---------------- main loop ---------------- */
 
   private frame = (now: number): void => {
@@ -737,7 +763,10 @@ export class GameEngine {
     // player actions, real time
     if (drag) {
       const D = drag.flask;
-      const z = (drag.zone = this.zoneAt(pointer, D));
+      // a scale takes a flask whenever it's held over one, but pouring needs the right button
+      let z = this.zoneAt(pointer, D);
+      if (z && z.kind !== 'scale' && !this.rightHeld) z = null;
+      drag.zone = z;
       D.ang = 0;
       if (!z) {
         D.x = pointer.x - drag.off.x;
@@ -763,13 +792,14 @@ export class GameEngine {
       }
     }
 
-    // faucets also run in real time: each fills whatever is held right under it
+    // faucets also run in real time: each fills whatever is parked right under it, or held there with the right button
     const mouths = this.mouths();
+    const carried = this.carried();
     this.faucetFlows = [];
     for (const fa of L.faucets) {
       fa.output = faucetOutput(fa, this.chem.U); // cheap, and follows edits to the chemistry
-      const m = mouthBelow(mouths, { x: fa.x, y: L.spoutY });
-      if (!m || m.y - L.spoutY > FAUCET_REACH * S || volume(m.v) > m.v.cap - TRACE) continue;
+      const m = faucetTarget(mouths, { x: fa.x, y: L.spoutY }, FAUCET_REACH * S, carried, this.rightHeld);
+      if (!m) continue;
       m.v.addFrom(fa.output, FILL_RATE * dt);
       this.faucetFlows.push({ fa, m });
     }
@@ -876,21 +906,16 @@ export class GameEngine {
     ctx.rotate(ang);
     ctx.scale(S, S);
     if (f.N > TRACE) {
-      // fill level is horizontal in screen space, even when the flask is tilted
+      // fill level is horizontal in screen space, even when the flask is tilted, and
+      // high enough that the colored area is in proportion to the amount of fluid
       ctx.save();
       ctx.clip(FLASK_PATH);
-      const c = Math.cos(ang);
-      const s = Math.sin(ang);
-      let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
-      for (const [lx, ly] of [[-28, 0], [28, 0], [-28, 70], [28, 70]]) {
-        const wx = mx + S * (lx * c - ly * s);
-        const wy = my + S * (lx * s + ly * c);
-        minX = Math.min(minX, wx); maxX = Math.max(maxX, wx);
-        minY = Math.min(minY, wy); maxY = Math.max(maxY, wy);
-      }
+      const pts = tiltedOutline(ang);
+      const minX = mx + S * Math.min(...pts.map((p) => p.x));
+      const maxX = mx + S * Math.max(...pts.map((p) => p.x));
+      const maxY = my + S * Math.max(...pts.map((p) => p.y));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      const lvl = Math.min(1, volume(f) / f.cap);
-      const top = maxY - lvl * (maxY - minY);
+      const top = my + S * fillLevel(ang, volume(f) / f.cap);
       ctx.fillStyle = fluidColor(f);
       ctx.fillRect(minX - 2, top, maxX - minX + 4, maxY - top + 2);
       ctx.restore();
