@@ -95,7 +95,7 @@ function Notice({ onOk }: { onOk(): void }) {
         Sec. 041 - Understaffing) to be proactively depreserved to assist in solving the following problem:
       </p>
       <pre>
-        {'Cryostabilizer required to complete journey: (32,210 passengers) x (0.1 mL nut/pass/day) x (4,456 days) =\n' +
+        {'Cryostabilizer required to complete journey: (32,210 passengers) x (0.1 mL/pass/day) x (4,456 days) =\n' +
           '  14,352.776 L\n' +
           'Cryostabilizer present:\n' +
           '       2.811 L'}
@@ -105,7 +105,7 @@ function Notice({ onOk }: { onOk(): void }) {
     </>,
     <>
       <p>In absence of your assistance, the predicted effects are:</p>
-      <pre>{'F003 - passenger fatality - total\nF003 - crew fatality - total'}</pre>
+      <pre>{'F003 - crew fatality - total\nF004 - passenger fatality - total'}</pre>
     </>,
     <p>
       Your cryo pod has been transported to R046 - Emergency Chemistry Lab. Please select OK to meet your teammates and
