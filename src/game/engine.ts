@@ -138,8 +138,10 @@ export class GameEngine {
   private open: Mouth[] = [];
   /** What overflowed each vessel this frame, and where it spilled from, for drawing (see fill). */
   private spills = new Map<Vessel, { at: Point; v: Vessel }>();
-  /** How long this frame's spills took, in seconds: sim or real time, whichever is longer. */
+  /** How long this frame's spills took, in sim seconds. */
   private spillTime = 1;
+  /** Whether the carried flask poured this frame (it doesn't while the sim is paused). */
+  private pouring = false;
   /** Drops that have let go of an outlet and are on their way down. */
   private falling: { v: Vessel; x: number; y: number; vy: number }[] = [];
   /** A hose end being carried, or (just out of the palette) the whole hose, with its outlet this far from the inlet. */
@@ -937,7 +939,8 @@ export class GameEngine {
     this.open = this.mouths();
     this.spills.clear();
 
-    // player actions, real time
+    // where the carried flask is, and what it's pouring into (null: the sink), if anything
+    let pourInto: Vessel | null | undefined;
     if (drag) {
       const D = drag.flask;
       // a scale takes a flask whenever it's held over one, but pouring needs the right button
@@ -956,33 +959,33 @@ export class GameEngine {
         if (z.kind === 'flask') {
           D.x = z.f.home.x + 16 * S;
           D.y = z.f.home.y - 32 * S;
-          this.pourFrom(D, z.f, POUR_RATE * dt);
+          pourInto = z.f;
         } else if (z.kind === 'tank') {
           D.x = z.x + 16 * S;
           D.y = z.y - 32 * S;
-          this.pourFrom(D, z.v, POUR_RATE * dt);
+          pourInto = z.v;
         } else {
           D.x = pointer.x;
           D.y = L.floorY - 8 * S;
-          transfer(D, null, POUR_RATE * dt);
+          pourInto = null;
         }
       }
     }
 
-    // faucets also run in real time: each fills whatever is parked right under it, or held there with the right button
+    // each faucet fills whatever is parked right under it, or held there with the right button
+    const simDt = dt * this.speed;
     const mouths = (this.open = this.mouths());
     const carried = this.carried();
     this.faucetFlows = [];
     for (const fa of L.faucets) {
       fa.output = faucetOutput(fa, this.chem.U); // cheap, and follows edits to the chemistry
       const m = faucetTarget(mouths, this.faucetXY(fa).spout, FAUCET_REACH * S, carried, this.rightHeld);
-      if (!m) continue;
-      this.fill(m.v, fa.output, FILL_RATE * dt);
-      this.faucetFlows.push({ fa, m });
+      if (m && simDt > 0) this.faucetFlows.push({ fa, m });
     }
+    this.pouring = simDt > 0 && pourInto !== undefined;
 
-    // tools and chemistry, sim time, interleaved so a drip meets the reaction it feeds
-    const simDt = dt * this.speed;
+    // everything that moves fluid, and chemistry, on sim time, interleaved so a drip meets the reaction it
+    // feeds, and a faucet keeps up with the valve draining what it fills
     const vessels = this.vessels();
     if (simDt > 0) {
       const sub = Math.ceil(simDt / 0.02);
@@ -1010,6 +1013,9 @@ export class GameEngine {
         tot.streamed ||= streamed;
       };
       for (let i = 0; i < sub; i++) {
+        if (drag && pourInto) this.pourFrom(drag.flask, pourInto, POUR_RATE * h);
+        else if (drag && pourInto === null) transfer(drag.flask, null, POUR_RATE * h);
+        for (const { fa, m } of this.faucetFlows) this.fill(m.v, fa.output, FILL_RATE * h);
         this.tools.forEach((t, j) =>
           t.step(h).forEach((out, k) => {
             tally(toolTotals[j][k], out, false); // before pouring, which can gather it into a drop
@@ -1050,7 +1056,7 @@ export class GameEngine {
         hose.streaming = streamed;
       });
     }
-    this.spillTime = Math.max(dt, simDt);
+    this.spillTime = simDt;
 
     // goal
     let tgt = 0;
@@ -1761,7 +1767,7 @@ export class GameEngine {
       const { spout } = this.faucetXY(fa);
       this.drawStream(spout.x, spout.y, spout.x, m.y + 2 * S, fluidColor(fa.output), FILL_RATE / CAP);
     }
-    if (drag && drag.flask.N > TRACE) {
+    if (drag && this.pouring && drag.flask.N > TRACE) {
       const D = drag.flask;
       const z = drag.zone;
       if (z?.kind === 'flask') this.drawStream(D.x, D.y, z.f.home.x, z.f.home.y + 4 * S, fluidColor(D), POUR_RATE / CAP);
