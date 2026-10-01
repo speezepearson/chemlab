@@ -70,8 +70,6 @@ const FAUCET_REACH = 24;
 const FAUCET_SPACING = 0.12;
 /** Half-width of the part of a flask's mouth that catches a falling stream, in local units. */
 const FLASK_CATCH = 14;
-/** A tool's spout snaps to line up with a mouth this close below it, in local units. */
-const SNAP = 24;
 /** How close to a valve, in pixels, the pointer can be before it stops turning the lever. */
 const VALVE_DEADZONE = 20;
 /** Pixels of right-click drag (right or up opens) to turn a valve from closed to fully open. */
@@ -186,7 +184,6 @@ export class GameEngine {
       return t;
     });
     for (const t of this.tools) this.place(t, this.toolXY(t));
-    // hoses first, so a spout above a funnel snaps onto it
     const { S } = this;
     this.hoses = (preset.hoses ?? []).map(({ from, to }) => {
       const h = new Hose({ x: 0, y: 0 }, { x: 0, y: 0 });
@@ -196,7 +193,6 @@ export class GameEngine {
       this.moveHoseEnd(h, 'outlet', { x: (r.x0 + r.x1) / 2 + (to.dx ?? 0) * S, y: r.y0 - 24 * S });
       return h;
     });
-    this.snapAll();
     this.won = false;
     this.drag = this.toolDrag = this.valveDrag = this.scaleDrag = this.hoseDrag = null;
     this.hover = this.hoverTool = this.hoverTank = null;
@@ -257,7 +253,6 @@ export class GameEngine {
     for (const t of this.tools) this.place(t, this.toolXY(t));
     for (const sc of this.scales) this.placeScale(sc, this.scaleXY(sc));
     this.settle();
-    this.snapAll();
     this.won = false;
     this.drag = this.toolDrag = this.valveDrag = this.scaleDrag = this.hoseDrag = null;
     this.hover = this.hoverTool = this.hoverTank = null;
@@ -328,7 +323,6 @@ export class GameEngine {
     for (const t of this.tools) this.place(t, this.toolXY(t));
     for (const sc of this.scales) this.placeScale(sc, this.scaleXY(sc));
     this.settle();
-    this.snapAll();
   }
 
   /** A flask's resting place (its mouth), kept on the stage and above the sink. */
@@ -467,7 +461,7 @@ export class GameEngine {
   }
 
   /** Every open top that falling fluid can land in. */
-  private mouths(except?: Tool): Mouth[] {
+  private mouths(): Mouth[] {
     const { S, drag } = this;
     const out: Mouth[] = [];
     for (const f of this.flasks) {
@@ -477,7 +471,6 @@ export class GameEngine {
       out.push({ v: f, x0: p.x - FLASK_CATCH * S, x1: p.x + FLASK_CATCH * S, y: p.y });
     }
     for (const t of this.tools) {
-      if (t === except) continue;
       t.tanks.forEach((v, k) => {
         const r = this.tankRect(t, k);
         out.push({ v, x0: r.x0, x1: r.x1, y: r.y0 });
@@ -488,32 +481,6 @@ export class GameEngine {
       out.push({ v: h.funnel, x0: e.x - 14 * S, x1: e.x + 14 * S, y: e.y });
     }
     return out;
-  }
-
-  /**
-   * Line a spout up with the mouth below it, if one is close, so the stream goes in.
-   * With several spouts, the one closest to lined up wins.
-   */
-  private snap(t: Tool): void {
-    const mouths = this.mouths(t);
-    let shift: number | null = null;
-    t.shape.spouts.forEach((_, j) => {
-      const sp = this.spoutAt(t, j);
-      let best: Mouth | null = null;
-      for (const m of mouths) {
-        const cx = (m.x0 + m.x1) / 2;
-        const near = (sp.x >= m.x0 && sp.x <= m.x1) || Math.abs(sp.x - cx) < SNAP * this.S;
-        if (near && m.y > sp.y && (!best || m.y < best.y)) best = m;
-      }
-      const d = best && (best.x0 + best.x1) / 2 - sp.x;
-      if (d !== null && (shift === null || Math.abs(d) < Math.abs(shift))) shift = d;
-    });
-    if (shift !== null) t.fx += shift / this.W;
-  }
-
-  /** Snap every tool, lowest first, so a tool stacked above another lines up with where it ended up. */
-  private snapAll(): void {
-    for (const t of [...this.tools].sort((a, b) => b.fy - a.fy)) this.snap(t);
   }
 
   /* ---------------- input ---------------- */
@@ -592,7 +559,6 @@ export class GameEngine {
       } else if (this.toolDrag) {
         const { tool, off } = this.toolDrag;
         this.place(tool, { x: p.x - off.x, y: p.y - off.y });
-        this.snap(tool);
       } else if (this.scaleDrag) {
         const { scale, off } = this.scaleDrag;
         this.placeScale(scale, { x: p.x - off.x, y: p.y - off.y });
