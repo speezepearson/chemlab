@@ -1377,13 +1377,29 @@ export class GameEngine {
     ctx.fill();
     const busy = this.drag || this.toolDrag || this.valveDrag || this.scaleDrag || this.hoseDrag;
     const hot = !busy && !t.scanning && this.inToolRect(t, this.pointer, button);
-    ctx.fillStyle = t.scanning ? theme.bench : theme.line;
-    ctx.strokeStyle = hot ? theme.accent : theme.pipe;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.roundRect(button.x0, button.y0, button.x1 - button.x0, button.y1 - button.y0, 4);
-    ctx.fill();
+    // a red key standing on its shadow; pushed, it sits down flush and darker
+    const pressed = t.scanning;
+    const bw = button.x1 - button.x0;
+    const bh = button.y1 - button.y0;
+    const key = (x: number, y: number, w: number, h: number, r: number) => {
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, r);
+      ctx.fill();
+    };
+    if (!pressed) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      key(button.x0 + 0.8, button.y0 + 2.2, bw, bh, 4);
+    }
+    const top = button.y0 + (pressed ? 1.8 : 0);
+    ctx.fillStyle = pressed ? '#9c2d28' : hot ? '#ec5a50' : '#d8443b';
+    key(button.x0, top, bw, bh, 4);
+    ctx.strokeStyle = '#7a221e';
+    ctx.lineWidth = 1;
     ctx.stroke();
+    if (!pressed) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.28)';
+      key(button.x0 + 3, top + 1.6, bw - 6, 3, 1.5);
+    }
     ctx.restore();
   }
 
