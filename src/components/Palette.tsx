@@ -37,7 +37,6 @@ const ICONS: Record<string, ReactNode> = {
     <>
       <path className="pipe" d="M7 12 V16 M15 20 V37 M26 24 V37 M36 27 V37" />
       <path className="pipe" d="M3 15 L36 27" />
-      <path className="valve" d="M12 19 L18 21 M23 23 L29 25" strokeDasharray="1.5 1.5" />
       <path className="glass" d="M1 3 H13 L8 11 H6 Z" />
     </>
   ),

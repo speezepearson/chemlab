@@ -1333,8 +1333,8 @@ export class GameEngine {
   }
 
   /**
-   * The size sorter's chute: a sloping floor with two screens in it, fine then coarse, each over a hopper
-   * into its drop pipe, and a film of what's flowing down it.
+   * The size sorter's chute: a plain sloping floor with a hopper under each of its two screens, into its drop
+   * pipe, and a film of what's flowing down it.
    */
   private drawChute(t: Tool): void {
     const { ctx, S, theme } = this;
@@ -1357,24 +1357,13 @@ export class GameEngine {
       ctx.closePath();
       ctx.fill();
     }
-    // the floor, solid between the screens and open-meshed over them (finer over the first)
-    const floor = (x0: number, x1: number, dash: number[]) => {
-      ctx.setLineDash(dash);
-      ctx.beginPath();
-      ctx.moveTo(x0, chuteY(x0));
-      ctx.lineTo(x1, chuteY(x1));
-      ctx.stroke();
-    };
+    // the floor: plain all the way, so it doesn't give away what the screens let through
     ctx.strokeStyle = theme.pipe;
     ctx.lineWidth = 4;
-    let x = c.x0;
-    sp.slice(0, -1).forEach((h, k) => {
-      floor(x, h - HALF, []);
-      floor(h - HALF, h + HALF, k ? [3, 3] : [1.5, 1.5]);
-      x = h + HALF;
-    });
-    floor(x, c.x1, []);
-    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(c.x0, c.y0);
+    ctx.lineTo(c.x1, c.y1);
+    ctx.stroke();
     // the end of the chute turns down into the last spout
     ctx.lineCap = 'round';
     ctx.beginPath();
