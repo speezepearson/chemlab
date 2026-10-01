@@ -9,7 +9,7 @@ import { DEFAULT_PRESET, applyFill, type Preset } from './presets';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
 import {
-  DROP_ATOMS, HELIX, Hose, SHAPES, TANK_H, TOOL_NAMES, Tool, drip, mouthBelow, tankX, type Mouth, type ToolKind,
+  HELIX, Hose, SHAPES, TANK_H, TOOL_NAMES, Tool, drip, mouthBelow, tankX, type Mouth, type ToolKind,
 } from './tools';
 
 /** What the god-mode panel needs to show for one vessel. */
@@ -77,8 +77,9 @@ const SINK_H = 16;
 const STREAM_WIDTH = 4.5;
 /** How fast a falling drop speeds up, in world units per sim second squared: a 500-unit fall takes 0.7 s. */
 const GRAVITY = 2000;
-/** Drawn radius of a DROP_ATOMS drop, in world units; it goes as the cube root of the drop's size. */
+/** Drawn radius of a DROP_R_ATOMS drop, in world units; it goes as the cube root of the drop's size. */
 const DROP_R = 3;
+const DROP_R_ATOMS = 1.5e6;
 /** The most the camera zooms in, in screen pixels per world unit. */
 const MAX_ZOOM = 4;
 /** How much a pixel of scroll zooms: the zoom is multiplied by e^(−this·Δy). */
@@ -1313,7 +1314,7 @@ export class GameEngine {
     const { ctx, S } = this;
     const bead = (v: Vessel, x: number, y: number, hanging: boolean) => {
       if (v.N <= 0) return;
-      const r = DROP_R * Math.cbrt(v.N / DROP_ATOMS) * S;
+      const r = DROP_R * Math.cbrt(v.N / DROP_R_ATOMS) * S;
       ctx.fillStyle = fluidColor(v);
       ctx.beginPath();
       // a hanging drop swells from the outlet's tip; a falling one is centered where it is

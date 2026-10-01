@@ -3,6 +3,7 @@ import { THERMO, T_ROOM, restoreDefaultChem, type BondParams } from '../chem/par
 import type { ReactionNetwork } from '../chem/reactions';
 import { SPECIES, TARGET } from '../chem/species';
 import { VOLUME } from '../game/flask';
+import { DRIP, restoreDefaultDrip } from '../game/tools';
 import { DragNumber } from './DragNumber';
 
 const FIELDS: (keyof BondParams)[] = ['E', 'Ea', 'A'];
@@ -77,6 +78,27 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
                 </label>
               </td>
             </tr>
+            <tr className="group">
+              <td colSpan={4}>
+                <b>Dripping</b> <span>a hanging drop falls at 1 / (1 + e^(−(atoms − size) / spread)) per second</span>
+              </td>
+            </tr>
+            <tr>
+              <td>drop size</td>
+              <td>
+                <DragNumber typeable min={0} value={DRIP.atoms} onChange={(v) => edit(() => (DRIP.atoms = v))} />
+              </td>
+              <td />
+              <td />
+            </tr>
+            <tr>
+              <td>spread</td>
+              <td>
+                <DragNumber typeable min={1} value={DRIP.spread} onChange={(v) => edit(() => (DRIP.spread = v))} />
+              </td>
+              <td />
+              <td />
+            </tr>
           </tbody>
         </table>
         <p>
@@ -89,6 +111,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
               edit(() => {
                 restoreDefaultChem(p);
                 VOLUME.molecules = false;
+                restoreDefaultDrip();
               })
             }
           >

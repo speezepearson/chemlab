@@ -24,17 +24,25 @@ export const EXCHANGE_RATE = 2 * MAX_FLOW;
  * a second.
  */
 export const DRIP_FLOW = 0.005 * CAP;
-/** The size, in atoms, at which a hanging drop is as likely as not to have fallen within a second or so. */
-export const DROP_ATOMS = 1.5e6;
-/** How sharply the fall rate rises with size around DROP_ATOMS, in atoms. */
-const DROP_SPREAD = 0.12e6;
+/**
+ * How hanging drops fall (see dropRate), editable from the Chemistry panel:
+ * - atoms: the size at which a drop falls at half a drop per second;
+ * - spread: how gradually the rate rises with size around that, in atoms.
+ */
+export const DRIP = { atoms: 1.5e6, spread: 0.12e6 };
+const DEFAULT_DRIP = { ...DRIP };
+
+export function restoreDefaultDrip(): void {
+  Object.assign(DRIP, DEFAULT_DRIP);
+}
 
 /**
  * How often a hanging drop of `atoms` atoms falls, per sim second: a Poisson process whose rate rises
- * smoothly from about 0 below 1M atoms (0.015) to about 1 above 2M (0.985).
+ * smoothly with size, 1 / (1 + e^(−(atoms − DRIP.atoms) / DRIP.spread)). By default that's about 0 below
+ * 1M atoms (0.015) and about 1 above 2M (0.985).
  */
 export function dropRate(atoms: number): number {
-  return 1 / (1 + Math.exp(-(atoms - DROP_ATOMS) / DROP_SPREAD));
+  return 1 / (1 + Math.exp(-(atoms - DRIP.atoms) / DRIP.spread));
 }
 
 /**

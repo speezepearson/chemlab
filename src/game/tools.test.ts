@@ -246,7 +246,7 @@ describe('dripping', () => {
     expect(drip(drop, null, h, () => 0)).toBeNull();
   });
 
-  it('drops about DROP_ATOMS-sized drops from a slow steady flow, conserving atoms', () => {
+  it('drops about DRIP.atoms-sized drops from a slow steady flow, conserving atoms', () => {
     const drop = new Vessel(Infinity);
     const flow = 1e6; // atoms per second: a drop takes a second or two to grow
     let fallen = 0;
