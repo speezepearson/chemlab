@@ -60,7 +60,7 @@ The reaction types are:
 
 - **Reaction heat:** exotherms heat the fluid through a per-atom heat capacity.
 - **Mixing:** heat adds, so temperatures average, weighted by atom count.
-- **Cooling:** none in v1, so flasks stay hot forever. Most faucets give room-temperature fluid, and the blue one gives very cold fluid (T = 0.2), so the ways to lower a temperature are diluting with cooler faucet fluid, running endothermic reactions, or passing it through the heat exchanger against something cooler.
+- **Cooling:** none in v1, so flasks stay hot forever. Most faucets give room-temperature fluid; the R–G one gives hot fluid (T = 20), and the blue one very cold fluid (T = 0.2), so the ways to lower a temperature are diluting with cooler faucet fluid, running endothermic reactions, or passing it through the heat exchanger against something cooler.
 
 ### Appearance
 
@@ -97,21 +97,21 @@ With no yellow around, the product stays put hot or cold. Any yellow it meets un
 ## What's playable now (v1)
 
 - **Filling:** hold a flask under a faucet with the right mouse button to fill it. The eight faucets are scrounged mixes rather than pure atoms, so that the atoms and their chemistry aren't handed to the player. Each is a recipe of atoms by share, at room temperature unless noted:
-  - 49% R, 49% G, and 0.5% each of C, M, B and Y;
+  - 49% R, 49% G, and 0.5% each of C, M, B and Y, at T = 20;
   - 99.99% B and 0.005% each of R and G, at T = 0.2;
   - 95% R, M and B in equal parts, and 5% G, C and Y in equal parts;
   - 40% R, 40% G, 20% B;
-  - 66.6% C, 33.3% Y, 0.1% M, at T = 10;
+  - 66.6% C, 33.3% Y, 0.1% M;
   - 95% R, 5% G;
   - 98% G, 2% R;
   - 50% R, 50% C.
 
   A faucet dispenses its atoms at chemical equilibrium at its temperature. The equilibrium is solved exactly in `src/chem/equilibrium.ts` and follows live edits to the chemistry, so the output can be mostly something else:
-  - The R–G faucet is 97% R–G and 1.5% △RGY (by atoms), plus traces, including 0.4% blue chains.
+  - The hot R–G faucet is 86% R–G (by atoms), with 5.4% each of free R and G, and traces, including 0.6% △RGY and 0.5% blue chains.
   - The cold blue one is pure B: blue bonds are uphill, so the traces of R and G stay all but free.
   - The R–M–B one is 31% R–M and 26% free B, with a long tail: 9% blue chains of R, M and B, 1.7% △RMB, and 0.1% △RGB.
   - The 40/40/20 one is 71% R–G and 15% free B, with 12% blue chains (R–G–B and G–R–B) and 2.2% △RGB.
-  - The hot C–Y one is only 25% C–Y, since the bond is weak and it's hot. The rest is mostly free C and Y.
+  - The C–Y one is only 38% C–Y, since the bond is weak and C is in excess: the rest is 48% free C and 14% free Y.
   - 95% R / 5% G is 90% free R and 10% R–G. 98% G / 2% R is 96% free G and 4% R–G.
   - The R–C one is just free R and free C, since opposite colors never bond.
 

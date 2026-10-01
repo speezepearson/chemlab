@@ -23,21 +23,21 @@ export interface Faucet {
  * much about how the world's chemistry works.
  */
 export const FAUCETS: readonly Faucet[] = [
-  // R–G, with a little of everything else
-  { atoms: { R: 0.49, G: 0.49, C: 0.005, M: 0.005, B: 0.005, Y: 0.005 } },
+  // R–G, with a little of everything else, hot
+  { atoms: { R: 0.49, G: 0.49, C: 0.005, M: 0.005, B: 0.005, Y: 0.005 }, T: 20 },
   // nearly pure blue, very cold
   { atoms: { B: 0.9999, R: 0.00005, G: 0.00005 }, T: 0.2 },
   // R–M–B, with the other colors as contaminants
   { atoms: { R: 0.95 / 3, M: 0.95 / 3, B: 0.95 / 3, G: 0.05 / 3, C: 0.05 / 3, Y: 0.05 / 3 } },
   { atoms: { R: 0.4, G: 0.4, B: 0.2 } },
-  // C–Y, with a trace of magenta, hot
-  { atoms: { C: 0.666, Y: 0.333, M: 0.001 }, T: 10 },
+  // C–Y, with a trace of magenta
+  { atoms: { C: 0.666, Y: 0.333, M: 0.001 } },
   { atoms: { R: 0.95, G: 0.05 } },
   { atoms: { G: 0.98, R: 0.02 } },
   { atoms: { R: 0.5, C: 0.5 } },
 ];
 
-/** A faucet's recipe as text, e.g. "95% R, 5% G" or "66.6% C, 33.3% Y, 0.1% M at T = 10". */
+/** A faucet's recipe as text, e.g. "95% R, 5% G" or "49% R, 49% G, 0.5% C, 0.5% M, 0.5% B, 0.5% Y at T = 20". */
 export function describeFaucet(fa: Faucet): string {
   const recipe = Object.entries(fa.atoms)
     .map(([a, share]) => `${+(100 * share!).toPrecision(4)}% ${a}`)

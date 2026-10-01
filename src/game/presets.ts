@@ -74,7 +74,7 @@ export const WASH_PRESET: Preset = {
   name: 'Wash route (sandbox)',
   description:
     'Midway through the intended route, to tinker with: the separator holds △RGY (from ½ flask of the R–G faucet ' +
-    'and 1½ of the hot C–Y one, settled at T = 1) plus 1½ flasks of blue, heated to T = 12. Its left spout is ' +
+    'and 1½ of the C–Y one, settled at T = 1) plus 1½ flasks of blue, heated to T = 12. Its left spout is ' +
     'hosed back into its own tank, so each pass strips out yellow, and hot blue drips in from the tank above. ' +
     'Whatever goes right collects in the catch tank below. Picking this preset also restores the default chemistry.',
   flasks: [],
