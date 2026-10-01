@@ -74,6 +74,13 @@ details tr.group b{font-weight:500}
 details tr.group span{color:var(--muted);font-size:11px}
 details > div.wide{width:320px}
 details .actions{display:flex;gap:8px;margin-top:8px}
+details fieldset.dist{border:1px solid var(--line);border-radius:6px;margin:8px 0 0;padding:4px 8px 6px}
+details fieldset.dist legend{padding:0 4px}
+details fieldset.dist select{padding:1px 4px}
+details label.slider{display:flex;align-items:center;gap:6px}
+details label.slider span{width:64px;color:var(--muted)}
+details label.slider input{flex:1;min-width:0}
+details label.slider output{width:40px;text-align:right;font-variant-numeric:tabular-nums}
 .hint{width:100%;margin:0;color:var(--muted);font-size:12px}
 #stage{flex:1;position:relative;min-height:0;min-width:0}
 .main{flex:1;display:flex;min-height:0}
