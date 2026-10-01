@@ -398,13 +398,19 @@ export class GameEngine {
   /**
    * Point a valve's lever at p: straight up from the valve is fully open, straight right is closed,
    * and in between is partly open. Below the valve it closes, and left of it (past the down-left
-   * diagonal) it opens, so a wild swing lands at the nearer end. Within VALVE_DEADZONE of the valve the
-   * angle is too jumpy to mean anything, so the lever stays put.
+   * diagonal) it opens, so a wild swing lands at the nearer end. A splitter's lever instead sweeps the
+   * upper half: straight left sends everything left, straight right everything right, and below the
+   * valve it goes to the nearer side. Within VALVE_DEADZONE of the valve the angle is too jumpy to mean
+   * anything, so the lever stays put.
    */
   private aimValve(t: Tool, k: number, p: Point): void {
     const vc = this.valveAt(t, k);
     if (Math.hypot(p.x - vc.x, p.y - vc.y) < VALVE_DEADZONE) return;
     const a = Math.atan2(vc.y - p.y, p.x - vc.x); // counterclockwise from right
+    if (t.kind === 'splitter') {
+      t.valves[k] = a >= 0 ? 1 - a / Math.PI : a > -Math.PI / 2 ? 1 : 0;
+      return;
+    }
     const open = a < -0.75 * Math.PI ? 1 : a / (Math.PI / 2);
     t.valves[k] = Math.max(0, Math.min(1, open));
   }
@@ -413,7 +419,7 @@ export class GameEngine {
     const o = this.toolXY(t);
     const { S } = this;
     const tk = t.shape.tanks[k];
-    return { x0: o.x + tk.x0 * S, x1: o.x + tk.x1 * S, y0: o.y, y1: o.y + TANK_H * S };
+    return { x0: o.x + tk.x0 * S, x1: o.x + tk.x1 * S, y0: o.y, y1: o.y + (t.shape.tankH ?? TANK_H) * S };
   }
 
   /** Move a tool, keeping it on the stage and above the sink. */
@@ -897,16 +903,22 @@ export class GameEngine {
     ctx.restore();
   }
 
-  /** An open-topped glass tank with a rounded floor. */
-  private drawTank(v: Vessel, x0: number, y0: number, x1: number, y1: number): void {
+  /** An open-topped glass tank with a rounded floor, or a funnel narrowing to a stem. */
+  private drawTank(v: Vessel, x0: number, y0: number, x1: number, y1: number, funnel = false): void {
     const { ctx, S, theme } = this;
     const r = 6 * S;
     const wall = new Path2D();
     wall.moveTo(x0, y0);
-    wall.lineTo(x0, y1 - r);
-    wall.quadraticCurveTo(x0, y1, x0 + r, y1);
-    wall.lineTo(x1 - r, y1);
-    wall.quadraticCurveTo(x1, y1, x1, y1 - r);
+    if (funnel) {
+      const cx = (x0 + x1) / 2;
+      wall.lineTo(cx - 3 * S, y1);
+      wall.lineTo(cx + 3 * S, y1);
+    } else {
+      wall.lineTo(x0, y1 - r);
+      wall.quadraticCurveTo(x0, y1, x0 + r, y1);
+      wall.lineTo(x1 - r, y1);
+      wall.quadraticCurveTo(x1, y1, x1, y1 - r);
+    }
     wall.lineTo(x1, y0);
     const inside = new Path2D(wall);
     inside.closePath();
@@ -960,11 +972,16 @@ export class GameEngine {
     else if (t.kind === 'separator') {
       pipes([[0, TANK_H], [0, SEP_BODY.y0]], 4);
       for (const x of sh.spouts) pipes([[x, SEP_BODY.y1], [x, sh.spoutY - 4]], 4);
+    } else if (t.kind === 'splitter') {
+      // the stem down through the valve, then a fork out to the two spouts
+      const fork = sh.valveY + 10;
+      pipes([[0, sh.tankH!], [0, fork]], 4);
+      for (const x of sh.spouts) pipes([[0, fork], [x, fork + 16], [x, sh.spoutY - 4]], 4);
     } else pipes([[0, TANK_H], [0, sh.spoutY - 4]], 4);
     for (const x of sh.spouts) ctx.fillRect(o.x + (x - 4) * S, o.y + (sh.spoutY - 6) * S, 8 * S, 6 * S);
     t.tanks.forEach((v, k) => {
       const r = this.tankRect(t, k);
-      this.drawTank(v, r.x0, r.y0, r.x1, r.y1);
+      this.drawTank(v, r.x0, r.y0, r.x1, r.y1, sh.funnel);
     });
     if (t.kind === 'exchanger') this.drawHelix(t);
     if (t.kind === 'separator') {
@@ -984,9 +1001,10 @@ export class GameEngine {
     }
 
     t.tanks.forEach((_, k) => {
-      // valve: the lever points right when closed and up when open, toward where the pointer turned it
+      // valve: the lever points right when closed and up when open, toward where the pointer turned it;
+      // a splitter's points toward the side that gets more, straight up for an even split
       const vc = this.valveAt(t, k);
-      const a = -t.valves[k] * (Math.PI / 2);
+      const a = t.kind === 'splitter' ? -Math.PI * (1 - t.valves[k]) : -t.valves[k] * (Math.PI / 2);
       ctx.strokeStyle = theme.ink;
       ctx.lineWidth = 3 * S;
       ctx.lineCap = 'round';

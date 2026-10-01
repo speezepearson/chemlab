@@ -3,7 +3,10 @@ import { SPECIES, singleOf } from '../chem/species';
 import { CAP } from './config';
 import { heatAt, temperature } from '../chem/reactions';
 import { Vessel } from './flask';
-import { EXCHANGE_RATE, HOSE_CAP, Hose, MAX_FLOW, PUMP_RATE, TANK_CAP, Tool, counterflow, mouthBelow, separate, type Mouth } from './tools';
+import {
+  EXCHANGE_RATE, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PUMP_RATE, TANK_CAP, Tool, counterflow, mouthBelow,
+  separate, type Mouth,
+} from './tools';
 
 const R = singleOf('R');
 const G = singleOf('G');
@@ -48,6 +51,43 @@ describe('dispenser', () => {
 
   it('holds several flasks', () => {
     expect(TANK_CAP).toBeGreaterThanOrEqual(3 * CAP);
+  });
+});
+
+describe('splitter', () => {
+  function run(valve: number | undefined) {
+    const sp = new Tool('splitter', 0, 0, 0, valve === undefined ? [] : [valve]);
+    filled(sp.tanks[0], R, FUNNEL_CAP, 4);
+    const [l, r] = sp.step(0.05);
+    return { sp, l, r };
+  }
+
+  it('drains its funnel at FUNNEL_RATE, whatever the valve says', () => {
+    for (const v of [0, 0.3, 1]) {
+      const { sp, l, r } = run(v);
+      const out = (l?.N ?? 0) + (r?.N ?? 0);
+      expect(out / (FUNNEL_RATE * 0.05)).toBeCloseTo(1, 6);
+      expect(out + sp.tanks[0].N).toBe(FUNNEL_CAP);
+    }
+  });
+
+  it('sends everything left with the valve at 0, and everything right at 1', () => {
+    expect(run(0).r).toBeNull();
+    expect(run(1).l).toBeNull();
+  });
+
+  it('starts split evenly, and splits in proportion to the valve, heat with it', () => {
+    const even = run(undefined);
+    expect(even.sp.valves[0]).toBe(0.5);
+    expect(even.l!.N / even.r!.N).toBeCloseTo(1, 3);
+    const { l, r } = run(0.25);
+    expect(r!.N / (l!.N + r!.N)).toBeCloseTo(0.25, 3);
+    expect(temperature(l!)).toBeCloseTo(4, 3);
+    expect(temperature(r!)).toBeCloseTo(4, 3);
+  });
+
+  it('holds only a little', () => {
+    expect(new Tool('splitter', 0, 0, 0).tanks[0].cap).toBe(FUNNEL_CAP);
   });
 });
 

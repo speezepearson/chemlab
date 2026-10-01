@@ -74,7 +74,9 @@ The reaction types are:
 
 ## The intended puzzle
 
-Blue bonds are uphill (E = −10) and have no prefactor (A = 0), so they never form or break on their own, at any temperature. Blue gets into a molecule, or out of one, only by swapping places with yellow, its opposite color. The target, the **△RGB triangle**, sits above R–G + B, so nothing settles into it by accident, and the faucets pour essentially none (`src/game/faucets.test.ts` checks for under a part in 10⁸).
+Blue bonds are uphill (E = −1 for now) and have no prefactor (A = 0), so they never form or break on their own, at any temperature. Blue gets into a molecule, or out of one, only by swapping places with yellow, its opposite color. The target, the **△RGB triangle**, sits above R–G + B, so it never dominates an equilibrium.
+
+At E = −1 the faucets that hold blue still pour a little bonded blue, and since A = 0 it never comes apart: the 40/40/20 faucet is 2.2% △RGB, and the R–M–B one 1.7% △RMB. At E = −10 they pour under a part in 10⁸, which is what keeps a separator cascade from collecting the target straight from a faucet.
 
 The intended route:
 
@@ -84,7 +86,7 @@ The intended route:
 
 With no yellow around, the product stays put hot or cold. Any yellow it meets undoes it, downhill and fast, and the heat that releases can free more yellow.
 
-**This doesn't work yet.** The wash also turns open chains (R–G–Y, and R–G + Y) into blue chains, R–G–B and G–R–B. These are dead ends that no separator tells from the target, and with the default chemistry they come out ahead of it by 3–10 times. `npm run route` prints the route stage by stage, and the *Wash route (sandbox)* preset sets up the wash step to tinker with.
+**This doesn't work yet.** The wash also turns open chains (R–G–Y, and R–G + Y) into blue chains, R–G–B and G–R–B. These are dead ends that no separator tells from the target, and with the default chemistry they come out ahead of it by 2 times or more. `npm run route` prints the route stage by stage, and the *Wash route (sandbox)* preset sets up the wash step to tinker with.
 
 ## What's playable now (v1)
 
@@ -98,21 +100,22 @@ With no yellow around, the product stays put hot or cold. Any yellow it meets un
   - 98% G, 2% R.
 
   A faucet dispenses its atoms at chemical equilibrium at its temperature. The equilibrium is solved exactly in `src/chem/equilibrium.ts` and follows live edits to the chemistry, so the output can be mostly something else:
-  - The R–G faucet is 97% R–G and 1.5% △RGY (by atoms), plus traces.
-  - The cold blue one is pure B: blue bonds are uphill, so the traces of R and G stay free.
-  - The R–M–B one is 38% R–M and 32% free B, with a long tail of R, M and yellow-bearing rings.
-  - The 40/40/20 one is 80% R–G and 20% free B.
+  - The R–G faucet is 97% R–G and 1.5% △RGY (by atoms), plus traces, including 0.4% blue chains.
+  - The cold blue one is pure B: blue bonds are uphill, so the traces of R and G stay all but free.
+  - The R–M–B one is 31% R–M and 26% free B, with a long tail: 9% blue chains of R, M and B, 1.7% △RMB, and 0.1% △RGB.
+  - The 40/40/20 one is 71% R–G and 15% free B, with 12% blue chains (R–G–B and G–R–B) and 2.2% △RGB.
   - The hot C–Y one is only 25% C–Y, since the bond is weak and it's hot. The rest is mostly free C and Y.
   - 95% R / 5% G is 90% free R and 10% R–G. 98% G / 2% R is 96% free G and 4% R–G.
 
   Faucet output is in chemical equilibrium with itself at the faucet's temperature, so a flask filled from one faucet just sits there. `src/game/faucets.test.ts` enforces this. A faucet fills anything held or parked right under it, including a tool's tank.
 - **Pouring:** drag a flask over another flask or a tool's tank to pour gradually, or down to the sink along the bottom of the screen to dump it.
 - **Placing:** a flask stays wherever you let go of it. One tilted to pour stands back up where you're holding it. Left under a faucet or spout, it keeps filling.
-- **Tools** (`src/game/tools.ts`) can be dragged anywhere and stay where you drop them. Each has tanks on top that hold four flasks' worth. Each tank drains through its own valve, and fluid leaves through one or more spouts on the bottom. Right-click a tool near a valve and point: the lever follows the pointer, fully open (1 flask/s) straight up from the valve, closed straight right, and partly open in between. Within 20 px of the valve the lever stays put, since the angle there is too jumpy to aim with. Valves start closed.
+- **Tools** (`src/game/tools.ts`) can be dragged anywhere and stay where you drop them. Each has tanks on top that hold four flasks' worth (the splitter's funnel is smaller). Each tank drains through its own valve, and fluid leaves through one or more spouts on the bottom. Right-click a tool near a valve and point: the lever follows the pointer, fully open (1 flask/s) straight up from the valve, closed straight right, and partly open in between. Within 20 px of the valve the lever stays put, since the angle there is too jumpy to aim with. Valves start closed.
   - **Spouts** pour into the first open top below them: a flask, including one you're holding under the spout, or another tool's tank. If there isn't one, the fluid falls into the sink. Whatever doesn't fit overflows to the sink. A tool whose spout is close to lined up over a mouth snaps the rest of the way.
   - **Dispenser:** one tank, drained through one spout.
   - **Separator:** one tank, drained through two spouts. Each molecule leaves left : right in the ratio e^p : e^s, where p is its number of primary-color atoms (R, G, B) and s its secondary ones (C, M, Y). So △RGB goes 20 : 1 left, △RGY 2.7 : 1 left, and free Y 1 : 2.7 right. One pass only enriches, so purer cuts take a cascade. The spouts are far enough apart for a flask, or a tool's tank, under each.
   - **Heat exchanger:** two tanks, A and B, whose streams pass each other in counterflow through two hoses wound into a double helix. Each stream crosses over and leaves from the spout under the *other* tank, and the hoses show each stream's color. They trade heat but never mix, and heat is conserved. It uses the standard effectiveness–NTU model with a fixed exchange capacity (`EXCHANGE_RATE`, 2 flasks/s): the slower stream gets a fraction ε of the way to the other's inlet temperature. Two equal streams at 0.25 flask/s nearly swap temperatures (ε = 8/9). At 1 flask/s they get ε = 2/3. If one valve is shut, the other stream passes through unchanged.
+  - **Splitter:** a quarter-flask funnel that drains straight through (2 flasks/s) into a fork with two spouts, as far apart as the separator's. Its valve doesn't open or close: it sets the split. Point the lever left to send everything left, right for everything right, and anywhere in between for a share in between, straight up being even. Below the valve it goes to the nearer side. It starts even, and anything arriving faster than it drains overflows to the sink.
   - **Hose:** a funnel inlet and a spout outlet, each dragged anywhere on its own, with a magic pump between them (up to 2 flasks/s). Whatever falls or is poured into the funnel comes out of the outlet, and anything arriving faster overflows the quarter-flask funnel to the sink. You can loop one back, for example from a separator's outlet into its own tank.
   - Tools run on **sim time**, interleaved with the chemistry, so a slow drip into a reacting flask comes out the same at any sim speed, and pausing freezes them. Faucets and your own pouring stay in real time.
 - **Scale** (`src/game/scale.ts`): stand flasks anywhere along its platform to weigh them. They move with the scale, and a spout above one pours into it, so you can dispense by weight. It reads whole grams up to 5 kg (OVER beyond that), and *tare* zeroes it. Fluid weighs 1 µg per atom, so a full flask of fluid is 1 kg. Each empty flask weighs about 100 g, off by up to 6 g. The error is fixed per shelf slot, so weighing fluid means taring with its flask first.
@@ -125,7 +128,7 @@ With no yellow around, the product stays put hot or cold. Any yellow it meets un
 
 ## Open questions / next steps
 
-- **Blue chains beat the target in the wash.** The route harness (`npm run route`, `src/game/route.test.ts`) shows the wash preset peaking at about 0.04 flasks of △RGB at 1–2% purity, with 3–6 times as much R–G–B and G–R–B. Two things feed the chains:
+- **Blue chains beat the target in the wash.** The route harness (`npm run route`, `src/game/route.test.ts`) shows the wash preset peaking at about 0.1 flasks of △RGB at 4% purity, with twice as much R–G–B and G–R–B (at blue E = −1; at E = −10 it was 0.04 flasks at 1–2%, with 3–6 times as much chain). Two things feed the chains:
   - An open chain R–G–Y washes with one uphill blue bond instead of the ring's two, so it's favored by about e^(|E(R–B)|/T).
   - The default yellow bonds are weak (E = 4), so at wash temperature most △RGY falls apart into R–G + Y, and G–R–Y from those washes into G–R–B.
 

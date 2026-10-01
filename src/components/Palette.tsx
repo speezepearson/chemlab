@@ -5,6 +5,7 @@ const ITEMS = [
   ['dispenser', 'Dispenser'],
   ['exchanger', 'Heat exchanger'],
   ['separator', 'Separator'],
+  ['splitter', 'Splitter'],
   ['scale', 'Scale'],
   ['hose', 'Hose'],
 ] as const;

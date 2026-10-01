@@ -39,8 +39,8 @@ export function defaultChemParams(): ChemParams {
     RY: { E: 4, Ea: 1 }, CY: { E: 1, Ea: 2 }, GY: { E: 4, Ea: 1 }, MY: { E: 2, Ea: 2 },
     // blue: uphill (E < 0), and never formed or broken directly (A = 0), so
     // blue only enters or leaves a molecule by swapping places with yellow
-    RB: { E: -10, Ea: 1, A: 0 }, CB: { E: -10, Ea: 1, A: 0 },
-    GB: { E: -10, Ea: 1, A: 0 }, MB: { E: -10, Ea: 1, A: 0 },
+    RB: { E: -1, Ea: 1, A: 0 }, CB: { E: -1, Ea: 1, A: 0 },
+    GB: { E: -1, Ea: 1, A: 0 }, MB: { E: -1, Ea: 1, A: 0 },
   };
   return {
     bonds: Object.fromEntries(

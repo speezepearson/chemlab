@@ -18,17 +18,27 @@ export const TANK_H = 84;
  * each get ε = 2/3, and at 0.25 flask/s each, ε = 8/9.
  */
 export const EXCHANGE_RATE = 2 * MAX_FLOW;
+/** How much a splitter's funnel holds, in atoms: just a buffer, like a hose's. */
+export const FUNNEL_CAP = CAP / 4;
+/** How fast a splitter's funnel drains, in atoms per sim second, whatever its valve is set to. */
+export const FUNNEL_RATE = 2 * MAX_FLOW;
 
-export type ToolKind = 'dispenser' | 'exchanger' | 'separator';
+export type ToolKind = 'dispenser' | 'exchanger' | 'separator' | 'splitter';
 
 /**
  * A tool's geometry in local units: multiply by the stage scale and offset by
  * the tool's position, which is the top center of its bounding box.
- * Every tank is open at y = 0 and has its floor at y = TANK_H, and drains
- * through its own valve, straight below its center.
+ * Every tank is open at y = 0 and has its floor at y = tankH (TANK_H unless
+ * set), and drains through its own valve, straight below its center.
  */
 export interface ToolShape {
   tanks: { name: string; x0: number; x1: number }[];
+  /** Depth of the tanks, if not TANK_H. */
+  tankH?: number;
+  /** Capacity of each tank, in atoms, if not TANK_CAP. */
+  tankCap?: number;
+  /** Whether the tanks are funnels, narrowing to a stem, rather than flat-bottomed. */
+  funnel?: boolean;
   /** Where fluid leaves the tool, in the order Tool.step returns it. */
   spouts: number[];
   /** Height of the valves, and of the tips of the spouts. */
@@ -64,6 +74,17 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: 126,
     box: { x0: -44, x1: 44, y0: -6, y1: 128 },
   },
+  splitter: {
+    tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
+    tankH: 30,
+    tankCap: FUNNEL_CAP,
+    funnel: true,
+    // as far apart as the separator's
+    spouts: [-36, 36],
+    valveY: 42,
+    spoutY: 84,
+    box: { x0: -40, x1: 40, y0: -6, y1: 86 },
+  },
 };
 
 /** Horizontal center of a tank, which is also where its valve is. */
@@ -81,6 +102,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   dispenser: 'Dispenser',
   exchanger: 'Heat exchanger',
   separator: 'Separator',
+  splitter: 'Splitter',
 };
 
 /**
@@ -102,13 +124,19 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
  *   counterflow on the way to their spouts, trading heat but never mixing.
  * - A **separator** has one tank and two spouts, and splits what drains
  *   between them by color (see LEFT_SHARE).
+ * - A **splitter** has a small funnel that drains straight through (at
+ *   FUNNEL_RATE) to two spouts. Its valve doesn't open or close: it sets the
+ *   share that goes right, from 0 (all left) to 1 (all right).
  *
  * Tools run on sim time, so a slow drip into a reacting flask gives the same
  * result at any sim speed.
  */
 export class Tool {
   readonly tanks: Vessel[];
-  /** Per tank: 0 (closed) to 1 (MAX_FLOW). Closed by default, so a tool doesn't drip on everything it's carried over. */
+  /**
+   * Per tank: 0 (closed) to 1 (MAX_FLOW). Closed by default, so a tool doesn't drip on everything it's carried
+   * over. A splitter's one valve is instead the share going right, half by default.
+   */
   readonly valves: number[];
   /** Per spout, what left it on the last step, for drawing the stream; null if nothing did. */
   out: (Fluid | null)[];
@@ -124,8 +152,8 @@ export class Tool {
     public fy: number,
     valves: readonly number[] = [],
   ) {
-    this.tanks = SHAPES[kind].tanks.map(() => new Vessel(TANK_CAP));
-    this.valves = this.tanks.map((_, k) => valves[k] ?? 0);
+    this.tanks = SHAPES[kind].tanks.map(() => new Vessel(SHAPES[kind].tankCap ?? TANK_CAP));
+    this.valves = this.tanks.map((_, k) => valves[k] ?? (kind === 'splitter' ? 0.5 : 0));
     this.out = this.shape.spouts.map(() => null);
     this.flow = this.shape.spouts.map(() => 0);
   }
@@ -136,13 +164,15 @@ export class Tool {
 
   /** Run for `h` sim seconds. Returns, per spout, the fluid that left it, or null if none did. */
   step(h: number): (Fluid | null)[] {
+    const splitter = this.kind === 'splitter';
     let packets = this.tanks.map((tank, k) => {
       const p = new Vessel(Infinity);
-      transfer(tank, p, this.valves[k] * MAX_FLOW * h);
+      transfer(tank, p, splitter ? FUNNEL_RATE * h : this.valves[k] * MAX_FLOW * h);
       return p;
     });
     if (this.kind === 'exchanger') counterflow(packets[0], packets[1], EXCHANGE_RATE * h);
     if (this.kind === 'separator') packets = separate(packets[0]);
+    if (splitter) packets = divide(packets[0], () => 1 - this.valves[0]);
     this.out = packets.map((p) => (p.N > 0 ? p : null));
     this.flow = packets.map((p) => p.N / (MAX_FLOW * h));
     return this.out;
@@ -151,9 +181,14 @@ export class Tool {
 
 /** Split a fluid between the separator's left and right outlets by LEFT_SHARE, in whole molecules, heat in proportion. */
 export function separate(f: Fluid): [Vessel, Vessel] {
+  return divide(f, (s) => LEFT_SHARE[s]);
+}
+
+/** Split a fluid into left and right, sending `leftShare(s)` of species s left, in whole molecules, heat in proportion. */
+export function divide(f: Fluid, leftShare: (s: number) => number): [Vessel, Vessel] {
   const out: [Vessel, Vessel] = [new Vessel(Infinity), new Vessel(Infinity)];
   for (let s = 0; s < NS; s++) {
-    const left = Math.min(f.n[s], roundRandom(f.n[s] * LEFT_SHARE[s]));
+    const left = Math.min(f.n[s], roundRandom(f.n[s] * leftShare(s)));
     out[0].n[s] = left;
     out[1].n[s] = f.n[s] - left;
     out[0].N += left * SPECIES[s].size;
