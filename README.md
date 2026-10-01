@@ -96,6 +96,7 @@ With no yellow around, the product stays put hot or cold. Any yellow it meets un
 
 ## What's playable now (v1)
 
+- **Intro** (`src/intro/log.ts`, `src/components/Intro.tsx`): the first time the page opens, it shows only a *start* button. Pressing it shows the ship's console: four routine lines, and a few seconds later the incident, each line printed when its timestamp comes around. Stars drop out of the forward camera by the dozen, then the hundreds. Then comes a lidar trip and a burst of chaos, generated from a fixed seed: hull strain, depressurizing decks, sealing bulkheads, ruptured cryostabilizer reservoirs. The bridge and crew quarters stop answering, cryo drops to zero, and the computer checks 48 passengers ranked by chemistry and biology expertise until NADIA HASSAN's pod is the first to defrost. Five seconds later the log fades into a cheerful notice from Celestia Starlines, and its OK fades into the game. The bench sits paused underneath until then. Once finished, the intro doesn't play again on load (`slurry-lab.introSeen` in local storage), but *Replay intro* at the top right plays it again from the log.
 - **Filling:** hold a flask under a faucet with the right mouse button to fill it. The eight faucets are scrounged mixes rather than pure atoms, so that the atoms and their chemistry aren't handed to the player. Each is a recipe of atoms by share, at room temperature unless noted:
   - 49% R, 49% G, and 0.5% each of C, M, B and Y, at T = 20;
   - 99.99% B and 0.005% each of R and G, at T = 0.2;

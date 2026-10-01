@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { defaultChemParams, restoreDefaultChem } from './chem/params';
 import { ReactionNetwork } from './chem/reactions';
 import { AppearancePanel } from './components/AppearancePanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
 import { FlaskEditor } from './components/FlaskEditor';
+import { Intro } from './components/Intro';
 import { InfoPanel } from './components/InfoPanel';
 import { Palette } from './components/Palette';
 import { SpeedControl } from './components/SpeedControl';
@@ -12,6 +13,22 @@ import { fmtCount } from './game/format';
 import { GameEngine, type Inspection } from './game/engine';
 import { DEFAULT_PRESET, PRESETS } from './game/presets';
 import { decodeSave, encodeSave, storeSave, storedSave, type SaveState } from './game/save';
+
+const INTRO_KEY = 'slurry-lab.introSeen';
+const introSeen = () => {
+  try {
+    return localStorage.getItem(INTRO_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+const markIntroSeen = () => {
+  try {
+    localStorage.setItem(INTRO_KEY, '1');
+  } catch {
+    // storage blocked: the intro just plays again next time
+  }
+};
 
 const presetOf = (s: SaveState | null) => PRESETS.find((p) => p.id === s?.preset) ?? DEFAULT_PRESET;
 /** How often the bench is saved to local storage, in ms (and on leaving the page). */
@@ -30,6 +47,12 @@ export function App() {
   const [chemVersion, setChemVersion] = useState(0);
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
+  /** The intro, if it's showing: from its start button the first time, straight into the log on a replay. */
+  const [intro, setIntro] = useState<'first' | 'replay' | null>(() => (introSeen() ? null : 'first'));
+  const endIntro = useCallback(() => {
+    markIntroSeen();
+    setIntro(null);
+  }, []);
   const presetRef = useRef(preset);
   presetRef.current = preset;
   const stageRef = useRef<HTMLDivElement>(null);
@@ -56,9 +79,10 @@ export function App() {
     };
   }, [network, saved]);
 
+  // the bench waits, paused, while the intro plays
   useEffect(() => {
-    if (engine) engine.speed = speed;
-  }, [engine, speed]);
+    if (engine) engine.speed = intro ? 0 : speed;
+  }, [engine, speed, intro]);
 
   useEffect(() => {
     if (engine) engine.god = god;
@@ -146,6 +170,9 @@ export function App() {
           </button>
           <ChemistryPanel key={chemVersion} network={network} />
           <AppearancePanel />
+          <button className="replay" onClick={() => setIntro('replay')}>
+            Replay intro
+          </button>
         </div>
         <p className="hint">{preset.description}</p>
       </header>
@@ -158,6 +185,7 @@ export function App() {
           {won && <div id="win">Enough sustenance to last until relief arrives.</div>}
         </div>
       </div>
+      {intro && <Intro skipStart={intro === 'replay'} onDone={endIntro} />}
     </>
   );
 }
