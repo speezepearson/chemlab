@@ -91,6 +91,19 @@ describe('splitter', () => {
   });
 });
 
+describe('cryostabilizer reference', () => {
+  it('holds a flask, and lets out at most 0.02 flask/s through its valve', () => {
+    const ref = new Tool('reference', 0, 0, 0, [1]);
+    expect(ref.tanks[0].cap).toBe(CAP);
+    expect(ref.shape.sealed).toBe(true);
+    filled(ref.tanks[0], TARGET, 0.4 * CAP, 1);
+    const out = ref.step(0.5)[0]!;
+    expect(out.N / (0.02 * MAX_FLOW * 0.5)).toBeCloseTo(1, 3);
+    ref.valves[0] = 0.5;
+    expect(ref.step(0.5)[0]!.N / (0.01 * MAX_FLOW * 0.5)).toBeCloseTo(1, 3);
+  });
+});
+
 describe('size sorter', () => {
   const RG = speciesIndex(['R', 'G', null], 1);
 

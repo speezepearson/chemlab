@@ -100,7 +100,10 @@ export function scanLevel(age: number): number {
 /** The order of a spectrometer hexagon's sextants, clockwise from the top. */
 export const SEXTANT_ATOMS: readonly Atom[] = ['G', 'C', 'B', 'M', 'R', 'Y'];
 
-export type ToolKind = 'dispenser' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'spectrometer';
+export type ToolKind = 'dispenser' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'spectrometer' | 'reference';
+
+/** Tools there's only ever one of: not in the palette, and never put away. */
+export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectrometer', 'reference'];
 
 /**
  * A tool's geometry in local units: multiply by the stage scale and offset by
@@ -118,6 +121,12 @@ export interface ToolShape {
   funnel?: boolean;
   /** Whether the tool has no valves to turn. */
   noValve?: boolean;
+  /** Whether the tanks are sealed on top, so nothing can be poured or fall into them. */
+  sealed?: boolean;
+  /** Spout flow with a valve fully open, in atoms per sim second, if not MAX_FLOW. */
+  maxFlow?: number;
+  /** Text shown above the tool, one entry per line. */
+  label?: string[];
   /** Where fluid leaves the tool, in the order Tool.step returns it. */
   spouts: number[];
   /** Height of the valves, and of the tips of the spouts. */
@@ -177,6 +186,19 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: 104,
     box: { x0: -94, x1: 126, y0: -6, y1: 106 },
   },
+  reference: {
+    // a flask's worth, sealed, draining a trickle through its valve
+    tanks: [{ name: 'reference', x0: -20, x1: 20 }],
+    tankH: 70,
+    tankCap: CAP,
+    sealed: true,
+    maxFlow: 0.02 * MAX_FLOW,
+    label: ['cryostabilizer', 'reference'],
+    spouts: [0],
+    valveY: 84,
+    spoutY: 100,
+    box: { x0: -40, x1: 40, y0: -26, y1: 102 },
+  },
   spectrometer: {
     // a sample cup on a cabinet with a screen and a run button (see SPECTROMETER)
     tanks: [{ name: 'sample', x0: -12, x1: 12 }],
@@ -223,6 +245,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   splitter: 'Splitter',
   sorter: 'Size sorter',
   spectrometer: 'Mass spectrometer',
+  reference: 'Cryostabilizer reference',
 };
 
 /**
@@ -249,6 +272,8 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
  *   share that goes right, from 0 (all left) to 1 (all right).
  * - A **size sorter** has a funnel like the splitter's, with no valve, draining down a chute through two
  *   screens and off its end, each with a spout under it (see SORTER_SCREENS).
+ * - A **cryostabilizer reference** is a sealed flask's worth of the target with a valve that lets out at most
+ *   0.02 flask/s.
  * - A **mass spectrometer** has a small sample cup and no spouts. Running it (see scan) destroys the sample
  *   and shows its spectrum on a screen.
  *
@@ -302,7 +327,7 @@ export class Tool {
     const funnel = this.kind === 'splitter' || this.kind === 'sorter';
     let packets = this.tanks.map((tank, k) => {
       const p = new Vessel(Infinity);
-      transfer(tank, p, funnel ? FUNNEL_RATE * h : this.valves[k] * MAX_FLOW * h);
+      transfer(tank, p, funnel ? FUNNEL_RATE * h : this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW) * h);
       return p;
     });
     if (this.kind === 'exchanger') counterflow(packets[0], packets[1], EXCHANGE_RATE * h);

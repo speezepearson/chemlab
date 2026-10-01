@@ -108,8 +108,10 @@ export const PRESETS: readonly Preset[] = [
   {
     id: 'stranded',
     name: 'Stranded',
-    flasks: [{ contents: [atomsOf(TARGET, 0.4 * CAP)], T: T_ROOM, label: 'supply' }],
+    flasks: [],
     tools: [
+      // over the fourth flask, so opening its valve drips into it
+      { kind: 'reference', at: [0.44, 0.55], tanks: [{ contents: [atomsOf(TARGET, 0.4 * CAP)], T: T_ROOM }] },
       { kind: 'separator', at: [0.1, 0.3] },
       { kind: 'dispenser', at: [0.3, 0.3] },
       { kind: 'exchanger', at: [0.62, 0.3] },

@@ -11,7 +11,7 @@ import { SCALE_SHAPE, Scale, glassGrams } from './scale';
 import { rumble, type Rumble } from './rumble';
 import {
   HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SHAPES, SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, drip,
-  mouthBelow, scanLevel, tankX, type Mouth, type ToolKind,
+  UNIQUE_TOOLS, mouthBelow, scanLevel, tankX, type Mouth, type ToolKind,
 } from './tools';
 
 /** What the god-mode panel needs to show for one vessel. */
@@ -235,7 +235,7 @@ export class GameEngine {
       spec.tanks?.forEach((fill, k) => t.tanks[k] && applyFill(t.tanks[k], fill));
       return t;
     });
-    this.oneSpectrometer();
+    this.uniqueTools();
     for (const t of this.tools) this.place(t, this.toolXY(t));
     const { S } = this;
     this.hoses = (preset.hoses ?? []).map(({ from, to }) => {
@@ -298,7 +298,7 @@ export class GameEngine {
         return t;
       });
     this.nextToolId = Math.max(-1, ...this.tools.map((t) => t.id)) + 1;
-    this.oneSpectrometer();
+    this.uniqueTools();
     this.scales = s.scales.map((ss) => {
       const sc = new Scale(ss.fx, ss.fy);
       sc.tare = ss.tare ?? 0;
@@ -322,11 +322,17 @@ export class GameEngine {
     this.lastProgress = -1;
   }
 
-  /** There's exactly one mass spectrometer: keep the first, or add one where it starts if there's none. */
-  private oneSpectrometer(): void {
-    const first = this.tools.find((t) => t.kind === 'spectrometer');
-    this.tools = this.tools.filter((t) => t.kind !== 'spectrometer' || t === first);
-    if (!first) this.tools.push(new Tool('spectrometer', this.nextToolId++, ...SPECTROMETER_AT));
+  /**
+   * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a mass spectrometer:
+   * if there's none, one is added where it starts.
+   */
+  private uniqueTools(): void {
+    for (const kind of UNIQUE_TOOLS) {
+      const first = this.tools.find((t) => t.kind === kind);
+      this.tools = this.tools.filter((t) => t.kind !== kind || t === first);
+    }
+    if (!this.tools.some((t) => t.kind === 'spectrometer'))
+      this.tools.push(new Tool('spectrometer', this.nextToolId++, ...SPECTROMETER_AT));
   }
 
   /** Make a new flask, scale or tool under the pointer (in client coordinates) and start carrying it. */
@@ -606,6 +612,7 @@ export class GameEngine {
       out.push({ v: f, x0: p.x - FLASK_CATCH * S, x1: p.x + FLASK_CATCH * S, y: p.y, rim: { x: p.x + FLASK_LIP * S, y: p.y } });
     }
     for (const t of this.tools) {
+      if (t.shape.sealed) continue;
       t.tanks.forEach((v, k) => {
         const r = this.tankRect(t, k);
         out.push({ v, x0: r.x0, x1: r.x1, y: r.y0, rim: { x: r.x1 + 3 * S, y: r.y0 } });
@@ -773,8 +780,8 @@ export class GameEngine {
         const sc = this.scaleDrag?.scale;
         const f = this.drag?.flask;
         const from = this.toolDrag?.from;
-        if (t?.kind === 'spectrometer' && from) {
-          // the one spectrometer can't be put away: it goes back where it was picked up
+        if (t && UNIQUE_TOOLS.includes(t.kind) && from) {
+          // a one-of-a-kind tool can't be put away: it goes back where it was picked up
           t.fx = from.x;
           t.fy = from.y;
         } else if (t) this.tools.splice(this.tools.indexOf(t), 1);
@@ -888,6 +895,7 @@ export class GameEngine {
     }
     for (let i = this.tools.length - 1; i >= 0; i--) {
       const t = this.tools[i];
+      if (t.shape.sealed) continue;
       for (let k = 0; k < t.tanks.length; k++) {
         const r = this.tankRect(t, k);
         if (p.x > r.x0 - 8 * S && p.x < r.x1 + 8 * S && p.y > r.y0 - 40 * S && p.y < r.y1)
@@ -1286,12 +1294,25 @@ export class GameEngine {
       pipes([[x, sh.tankH!], [x, chuteY(x)]], 4);
       sh.spouts.forEach((x, k) => pipes([[x, k < sh.spouts.length - 1 ? chuteY(x) + 8 : SORTER_CHUTE.y1], [x, sh.spoutY - 4]], 4));
     } else if (t.kind === 'spectrometer') pipes([[0, sh.tankH!], [0, SPECTROMETER.body.y0]], 4);
-    else pipes([[0, TANK_H], [0, sh.spoutY - 4]], 4);
+    else pipes([[0, sh.tankH ?? TANK_H], [0, sh.spoutY - 4]], 4);
     for (const x of sh.spouts) ctx.fillRect(o.x + (x - 4) * S, o.y + (sh.spoutY - 6) * S, 8 * S, 6 * S);
     t.tanks.forEach((v, k) => {
       const r = this.tankRect(t, k);
       this.drawTank(v, r.x0, r.y0, r.x1, r.y1, sh.funnel);
+      if (sh.sealed) {
+        // a lid, and nothing gets in
+        ctx.fillStyle = theme.pipe;
+        ctx.beginPath();
+        ctx.roundRect(r.x0 - 4 * S, r.y0 - 5 * S, r.x1 - r.x0 + 8 * S, 6 * S, 2 * S);
+        ctx.fill();
+      }
     });
+    if (sh.label) {
+      ctx.fillStyle = theme.muted;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      sh.label.forEach((line, i) => ctx.fillText(line, o.x, o.y + (-21 + 11 * i) * S));
+    }
     if (t.kind === 'exchanger') this.drawHelix(t);
     if (t.kind === 'sorter') this.drawChute(t);
     if (t.kind === 'spectrometer') this.drawSpectrometer(t);

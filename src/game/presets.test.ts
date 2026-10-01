@@ -3,7 +3,7 @@ import { temperature } from '../chem/reactions';
 import { NS, TARGET } from '../chem/species';
 import { CAP, N_FLASKS } from './config';
 import { Flask } from './flask';
-import { SHAPES, TANK_CAP } from './tools';
+import { SHAPES, TANK_CAP, Tool } from './tools';
 import { DEFAULT_PRESET, PRESETS, applyFill, fillAtoms } from './presets';
 
 describe('presets', () => {
@@ -39,18 +39,19 @@ describe('presets', () => {
     });
   }
 
-  it('starts the default game with the supply of target', () => {
-    const f = new Flask({ x: 0, y: 0 }, CAP);
-    applyFill(f, DEFAULT_PRESET.flasks[0]);
+  it('starts the default game with the cryostabilizer reference holding the target, and no supply flask', () => {
+    const spec = DEFAULT_PRESET.tools!.find((t) => t.kind === 'reference')!;
+    const ref = new Tool('reference', 0, ...spec.at);
+    applyFill(ref.tanks[0], spec.tanks![0]);
     // whole molecules only
-    expect(f.n[TARGET]).toBe(Math.round((0.4 * CAP) / 3));
-    expect(f.N).toBe(3 * Math.round((0.4 * CAP) / 3));
-    expect(f.label).toBe('supply');
+    expect(ref.tanks[0].n[TARGET]).toBe(Math.round((0.4 * CAP) / 3));
+    expect(ref.tanks[0].N).toBe(3 * Math.round((0.4 * CAP) / 3));
+    expect(DEFAULT_PRESET.flasks.filter(Boolean)).toHaveLength(0);
   });
 
   it('applyFill replaces whatever was in the flask', () => {
     const f = new Flask({ x: 0, y: 0 }, CAP);
-    applyFill(f, DEFAULT_PRESET.flasks[0]);
+    applyFill(f, { contents: [{ species: TARGET, molecules: 1000 }], T: 1, label: 'x' });
     f.setTemperature(7);
     applyFill(f, null);
     expect(f.N).toBe(0);
