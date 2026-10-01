@@ -3,7 +3,7 @@ import { THERMO } from '../chem/params';
 import { roundRandom, temperature, type Fluid } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
 import { CAP } from './config';
-import { Vessel, transfer, volume, type Point } from './flask';
+import { Vessel, roomFor, transfer, volume, type Point } from './flask';
 
 /** Capacity of each tank on a tool, in atoms. */
 export const TANK_CAP = 4 * CAP;
@@ -351,7 +351,7 @@ export class Tool {
   scan(): boolean {
     if (this.kind !== 'spectrometer' || this.scanning) return false;
     const cup = this.tanks[0];
-    this.reading = spectrum(cup);
+    this.reading = spectrum(cup, cup.cap);
     cup.n.fill(0);
     cup.N = 0;
     cup.Q = 0;
@@ -361,17 +361,17 @@ export class Tool {
 }
 
 /**
- * What a spectrometer shows for a fluid: for each molecule size w (1–3 atoms) and atom color c, in
- * SEXTANT_ATOMS order, the share of all the fluid's atoms that are c atoms in molecules of size w, at index
- * (w − 1)·6 + c. So the 18 add up to 1 (or all are 0, for nothing).
+ * What a spectrometer shows for a sample in a cup holding `cap`: for each molecule size w (1–3 atoms) and
+ * atom color c, in SEXTANT_ATOMS order, at index (w − 1)·6 + c, the share of the cup that molecules of size
+ * w with a c atom in them fill (by volume, see VOLUME). So a full cup of R lights 1R fully, and of R–G both
+ * 2R and 2G fully; a half-full cup reads half as bright.
  */
-export function spectrum(f: Fluid): number[] {
+export function spectrum(f: Fluid, cap: number): number[] {
   const out = new Array<number>(18).fill(0);
-  if (f.N <= 0) return out;
   for (let s = 0; s < NS; s++) {
     if (!f.n[s]) continue;
     const sp = SPECIES[s];
-    for (const a of sp.atoms) if (a) out[(sp.size - 1) * 6 + SEXTANT_ATOMS.indexOf(a)] += f.n[s] / f.N;
+    for (const a of sp.atoms) if (a) out[(sp.size - 1) * 6 + SEXTANT_ATOMS.indexOf(a)] += (f.n[s] * roomFor(s)) / cap;
   }
   return out;
 }

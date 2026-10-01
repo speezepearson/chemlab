@@ -145,28 +145,37 @@ describe('mass spectrometer', () => {
   const B = singleOf('B');
   const at = (size: number, atom: 'R' | 'G' | 'B' | 'C' | 'M' | 'Y') => (size - 1) * 6 + SEXTANT_ATOMS.indexOf(atom);
 
-  it('reads the share of atoms of each color in molecules of each size', () => {
-    // 20% R, 20% G, 30% B and 30% R–G, by atoms
-    const v = new Vessel(Infinity);
-    v.setMolecules(R, 2e6);
-    v.setMolecules(G, 2e6);
-    v.setMolecules(B, 3e6);
-    v.setMolecules(RG, 1.5e6);
-    const r = spectrum(v);
+  const CUP = 1e7;
+  const read = (fill: [number, number][]) => {
+    const v = new Vessel(CUP);
+    for (const [s, atoms] of fill) v.setMolecules(s, atoms / SPECIES[s].size);
+    return spectrum(v, CUP);
+  };
+
+  it("reads the share of the cup each size's molecules with each color fill", () => {
+    // a full cup: 20% R, 20% G, 30% B and 30% R–G
+    const r = read([[R, 0.2 * CUP], [G, 0.2 * CUP], [B, 0.3 * CUP], [RG, 0.3 * CUP]]);
     const want = new Array(18).fill(0);
     want[at(1, 'R')] = 0.2;
     want[at(1, 'G')] = 0.2;
     want[at(1, 'B')] = 0.3;
-    want[at(2, 'R')] = 0.15;
-    want[at(2, 'G')] = 0.15;
+    want[at(2, 'R')] = 0.3;
+    want[at(2, 'G')] = 0.3;
     r.forEach((x, i) => expect(x).toBeCloseTo(want[i], 9));
   });
 
-  it('lights one sextant fully for a pure single, and nothing for nothing', () => {
-    const v = new Vessel(Infinity);
-    v.setMolecules(R, 1e6);
-    expect(spectrum(v)[at(1, 'R')]).toBe(1);
-    expect(spectrum(new Vessel(Infinity)).every((x) => x === 0)).toBe(true);
+  it('lights a full cup of one species fully in each of its sextants', () => {
+    expect(read([[R, CUP]])[at(1, 'R')]).toBe(1);
+    const rg = read([[RG, CUP]]);
+    expect([rg[at(2, 'R')], rg[at(2, 'G')]]).toEqual([1, 1]);
+    const t = read([[TARGET, CUP]]);
+    // as near full as whole triangles get
+    for (const a of ['R', 'G', 'B'] as const) expect(t[at(3, a)]).toBeCloseTo(1, 6);
+  });
+
+  it('reads a half-full cup half as bright, and an empty one dark', () => {
+    expect(read([[R, CUP]])[at(1, 'R')]).toBe(2 * read([[R, 0.5 * CUP], [G, 0.1 * CUP]])[at(1, 'R')]);
+    expect(spectrum(new Vessel(CUP), CUP).every((x) => x === 0)).toBe(true);
   });
 
   it('destroys its sample when run, and ignores the button until the run is over', () => {
@@ -176,7 +185,8 @@ describe('mass spectrometer', () => {
     filled(sp.tanks[0], TARGET, SAMPLE_CAP / 2, 5);
     expect(sp.scan()).toBe(true);
     expect([sp.tanks[0].N, sp.tanks[0].Q]).toEqual([0, 0]);
-    expect(sp.reading![2 * 6 + SEXTANT_ATOMS.indexOf('R')]).toBeCloseTo(1 / 3, 9);
+    // half full of the triangle
+    expect(sp.reading![2 * 6 + SEXTANT_ATOMS.indexOf('R')]).toBeCloseTo(0.5, 6);
     sp.scanAge = SCAN_LIGHTS[2] - 0.01;
     expect(sp.scan()).toBe(false);
     sp.scanAge = SCAN_LIGHTS[2];
