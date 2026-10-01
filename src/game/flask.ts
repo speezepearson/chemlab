@@ -10,7 +10,28 @@ export interface Point {
   y: number;
 }
 
-/** A container of fluid with a fixed capacity, in atoms. Its counts and heat are always whole numbers. */
+/**
+ * What takes up room in a vessel: atoms (the default), or molecules. With molecules, bonding shrinks a fluid
+ * and breaking bonds swells it, so a full vessel can overflow as it reacts. Toggled from the Chemistry panel.
+ * Mass, heat capacity and reaction rates stay per atom either way.
+ */
+export const VOLUME = { molecules: false };
+
+/** A fluid's volume: its atoms, or its molecules if VOLUME.molecules. */
+export function volume(f: Fluid): number {
+  if (!VOLUME.molecules) return f.N;
+  let m = 0;
+  for (let s = 0; s < NS; s++) m += f.n[s];
+  return m;
+}
+
+/** The units volume is counted in, for display. */
+export const volumeUnit = () => (VOLUME.molecules ? 'molecules' : 'atoms');
+
+/** How much room one molecule of species s takes: its atoms, or 1 if VOLUME.molecules. */
+export const roomFor = (s: number) => (VOLUME.molecules ? 1 : SPECIES[s].size);
+
+/** A container of fluid with a fixed capacity, by volume (see VOLUME). Its counts and heat are always whole numbers. */
 export class Vessel implements Fluid {
   n = new Float64Array(NS);
   N = 0;
@@ -28,7 +49,7 @@ export class Vessel implements Fluid {
   setMolecules(s: number, molecules: number): number {
     const size = SPECIES[s].size;
     const T = temperature(this);
-    const m = Math.max(0, Math.min(Math.round(molecules), Math.floor(this.n[s] + (this.cap - this.N) / size)));
+    const m = Math.max(0, Math.min(Math.round(molecules), Math.floor(this.n[s] + (this.cap - volume(this)) / roomFor(s))));
     this.N += (m - this.n[s]) * size;
     this.n[s] = m;
     this.Q = heatAt(T, this.N);
@@ -41,13 +62,14 @@ export class Vessel implements Fluid {
   }
 
   /**
-   * Add about `amount` atoms' worth of a fluid, in whole molecules, without depleting it (a faucet's
+   * Add about `amount` worth (by volume) of a fluid, in whole molecules, without depleting it (a faucet's
    * recipe, or a packet already sent on its way); returns the atoms actually added.
    */
   addFrom(src: Fluid, amount: number): number {
-    amount = Math.min(amount, this.cap - this.N);
-    if (amount <= 0 || src.N <= 0) return 0;
-    const f = amount / src.N;
+    amount = Math.min(amount, this.cap - volume(this));
+    const vs = volume(src);
+    if (amount <= 0 || vs <= 0) return 0;
+    const f = amount / vs;
     let added = 0;
     for (let s = 0; s < NS; s++) {
       const m = roundRandom(src.n[s] * f);
@@ -86,13 +108,14 @@ export class Flask extends Vessel {
 }
 
 /**
- * Move about `atoms` atoms' worth of src's contents, in whole molecules, into dst (or down the sink if dst
- * is null), with heat in proportion; returns the atoms actually moved.
+ * Move about `amount` worth (by volume, see VOLUME) of src's contents, in whole molecules, into dst (or down
+ * the sink if dst is null), with heat in proportion; returns the atoms actually moved.
  */
-export function transfer(src: Fluid, dst: (Fluid & { cap: number }) | null, atoms: number): number {
-  atoms = Math.min(atoms, src.N, dst ? dst.cap - dst.N : Infinity);
-  if (atoms <= 0) return 0;
-  const f = atoms / src.N;
+export function transfer(src: Fluid, dst: (Fluid & { cap: number }) | null, amount: number): number {
+  const vs = volume(src);
+  amount = Math.min(amount, vs, dst ? dst.cap - volume(dst) : Infinity);
+  if (amount <= 0) return 0;
+  const f = amount / vs;
   let moved = 0;
   for (let s = 0; s < NS; s++) {
     const m = Math.min(src.n[s], roundRandom(src.n[s] * f));

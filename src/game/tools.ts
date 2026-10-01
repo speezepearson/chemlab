@@ -3,7 +3,7 @@ import { THERMO } from '../chem/params';
 import { roundRandom, temperature, type Fluid } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
 import { CAP } from './config';
-import { Vessel, transfer, type Point } from './flask';
+import { Vessel, transfer, volume, type Point } from './flask';
 
 /** Capacity of each tank on a tool, in atoms. */
 export const TANK_CAP = 4 * CAP;
@@ -174,7 +174,7 @@ export class Tool {
     if (this.kind === 'separator') packets = separate(packets[0]);
     if (splitter) packets = divide(packets[0], () => 1 - this.valves[0]);
     this.out = packets.map((p) => (p.N > 0 ? p : null));
-    this.flow = packets.map((p) => p.N / (MAX_FLOW * h));
+    this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
     return this.out;
   }
 }
@@ -270,7 +270,7 @@ export class Hose {
     const p = new Vessel(Infinity);
     transfer(this.funnel, p, PUMP_RATE * h);
     this.out = p.N > 0 ? p : null;
-    this.flow = p.N / (MAX_FLOW * h);
+    this.flow = volume(p) / (MAX_FLOW * h);
     return this.out;
   }
 }

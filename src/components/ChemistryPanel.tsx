@@ -2,6 +2,7 @@ import { useReducer } from 'react';
 import { THERMO, T_ROOM, restoreDefaultChem, type BondParams } from '../chem/params';
 import type { ReactionNetwork } from '../chem/reactions';
 import { SPECIES, TARGET } from '../chem/species';
+import { VOLUME } from '../game/flask';
 import { DragNumber } from './DragNumber';
 
 const FIELDS: (keyof BondParams)[] = ['E', 'Ea', 'A'];
@@ -64,6 +65,18 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
               <td />
               <td />
             </tr>
+            <tr>
+              <td colSpan={4}>
+                <label className="tog" title="Capacity, fill level, pouring and flow count molecules instead of atoms">
+                  <input
+                    type="checkbox"
+                    checked={VOLUME.molecules}
+                    onChange={(e) => edit(() => (VOLUME.molecules = e.target.checked))}
+                  />{' '}
+                  volume counts molecules, not atoms
+                </label>
+              </td>
+            </tr>
           </tbody>
         </table>
         <p>
@@ -71,7 +84,16 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
           it (0 included). Target: {SPECIES[TARGET].name}, T_room = {T_ROOM}.
         </p>
         <div className="actions">
-          <button onClick={() => edit(() => restoreDefaultChem(p))}>Restore defaults</button>
+          <button
+            onClick={() =>
+              edit(() => {
+                restoreDefaultChem(p);
+                VOLUME.molecules = false;
+              })
+            }
+          >
+            Restore defaults
+          </button>
         </div>
       </div>
     </details>

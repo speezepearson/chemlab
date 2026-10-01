@@ -1,6 +1,6 @@
 import { THERMO, type ChemParams } from '../chem/params';
 import { NS, SPECIES } from '../chem/species';
-import type { Vessel } from './flask';
+import { roomFor, volume, type Vessel } from './flask';
 import type { ToolKind } from './tools';
 
 /**
@@ -71,10 +71,9 @@ export function loadVessel(v: Vessel, saved: SavedVessel): void {
   for (const [name, count] of Object.entries(saved.n ?? {})) {
     const s = BY_NAME.get(name);
     if (s === undefined) continue;
-    const size = SPECIES[s].size;
-    const m = Math.max(0, Math.min(Math.round(Number(count) || 0), Math.floor((v.cap - v.N) / size)));
+    const m = Math.max(0, Math.min(Math.round(Number(count) || 0), Math.floor((v.cap - volume(v)) / roomFor(s))));
     v.n[s] = m;
-    v.N += m * size;
+    v.N += m * SPECIES[s].size;
   }
   v.Q = v.N > 0 ? Math.max(0, Math.round(Number(saved.Q) || 0)) : 0;
   v.label = typeof saved.label === 'string' ? saved.label : '';

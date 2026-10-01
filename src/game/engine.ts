@@ -3,7 +3,7 @@ import { NS, SPECIES } from '../chem/species';
 import { CAP, FILL_RATE, GOAL_ATOMS, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { FAUCETS, faucetOutput, type Faucet } from './faucets';
 import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
-import { Flask, Vessel, fluidColor, glowColor, sustenance, transfer, type Point } from './flask';
+import { Flask, Vessel, fluidColor, glowColor, sustenance, transfer, volume, volumeUnit, type Point } from './flask';
 import { DEFAULT_PRESET, applyFill, type Preset } from './presets';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
@@ -12,8 +12,10 @@ import { HELIX, Hose, SHAPES, TANK_H, TOOL_NAMES, Tool, mouthBelow, tankX, type 
 /** What the god-mode panel needs to show for one vessel. */
 export interface Inspection {
   T: number;
-  N: number;
+  /** How full it is, out of cap, in `unit` (atoms or molecules, see VOLUME). */
+  volume: number;
   cap: number;
+  unit: string;
   /** Species present, by atom count, largest first. */
   rows: { species: number; atoms: number }[];
   /** The vessel's horizontal extent and top, in stage coordinates, for placing the panel beside it. */
@@ -767,7 +769,7 @@ export class GameEngine {
     for (const fa of L.faucets) {
       fa.output = faucetOutput(fa, this.chem.U); // cheap, and follows edits to the chemistry
       const m = mouthBelow(mouths, { x: fa.x, y: L.spoutY });
-      if (!m || m.y - L.spoutY > FAUCET_REACH * S || m.v.N > m.v.cap - TRACE) continue;
+      if (!m || m.y - L.spoutY > FAUCET_REACH * S || volume(m.v) > m.v.cap - TRACE) continue;
       m.v.addFrom(fa.output, FILL_RATE * dt);
       this.faucetFlows.push({ fa, m });
     }
@@ -784,14 +786,19 @@ export class GameEngine {
         this.tools.forEach((t, j) =>
           t.step(h).forEach((out, k) => {
             // whatever doesn't fit overflows to the sink
-            if (out) targets[j][k]?.v.addFrom(out, out.N);
+            if (out) targets[j][k]?.v.addFrom(out, volume(out));
           }),
         );
         this.hoses.forEach((hose, j) => {
           const out = hose.step(h);
-          if (out) hoseTargets[j]?.v.addFrom(out, out.N);
+          if (out) hoseTargets[j]?.v.addFrom(out, volume(out));
         });
-        for (const v of vessels) this.chem.step(v, h);
+        for (const v of vessels) {
+          this.chem.step(v, h);
+          // by molecules, breaking bonds swells a fluid, and whatever no longer fits spills
+          const over = volume(v) - v.cap;
+          if (over > 0) transfer(v, null, over);
+        }
       }
     }
 
@@ -849,7 +856,7 @@ export class GameEngine {
     }
     rows.sort((a, b) => b.atoms - a.atoms);
     this.cb.onInspect({
-      T: temperature(f), N: f.N, cap: f.cap, rows,
+      T: temperature(f), volume: volume(f), cap: f.cap, unit: volumeUnit(), rows,
       x0: target.x0, x1: target.x1, y: target.y,
       stageW: this.W, stageH: this.H,
     });
@@ -882,7 +889,7 @@ export class GameEngine {
         minY = Math.min(minY, wy); maxY = Math.max(maxY, wy);
       }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      const lvl = Math.min(1, f.N / f.cap);
+      const lvl = Math.min(1, volume(f) / f.cap);
       const top = maxY - lvl * (maxY - minY);
       ctx.fillStyle = fluidColor(f);
       ctx.fillRect(minX - 2, top, maxX - minX + 4, maxY - top + 2);
@@ -925,7 +932,7 @@ export class GameEngine {
     if (v.N > TRACE) {
       ctx.save();
       ctx.clip(inside);
-      const top = y1 - Math.min(1, v.N / v.cap) * (y1 - y0);
+      const top = y1 - Math.min(1, volume(v) / v.cap) * (y1 - y0);
       ctx.fillStyle = fluidColor(v);
       ctx.fillRect(x0, top, x1 - x0, y1 - top + 1);
       ctx.restore();
@@ -1229,9 +1236,9 @@ export class GameEngine {
     if (drag && drag.flask.N > TRACE) {
       const D = drag.flask;
       const z = drag.zone;
-      if (z?.kind === 'flask' && z.f.N < z.f.cap - TRACE)
+      if (z?.kind === 'flask' && volume(z.f) < z.f.cap - TRACE)
         this.drawStream(D.x, D.y, z.f.home.x, z.f.home.y + 4 * S, fluidColor(D));
-      if (z?.kind === 'tank' && z.v.N < z.v.cap - TRACE) this.drawStream(D.x, D.y, z.x, z.y + 4 * S, fluidColor(D));
+      if (z?.kind === 'tank' && volume(z.v) < z.v.cap - TRACE) this.drawStream(D.x, D.y, z.x, z.y + 4 * S, fluidColor(D));
       if (z?.kind === 'sink') this.drawStream(D.x, D.y, D.x - 4 * S, H, fluidColor(D));
     }
 
@@ -1305,7 +1312,7 @@ export class GameEngine {
     const color = glowColor(f);
     if (!color) return;
     // a trace of hot fluid shouldn't blaze like a full flask
-    const amount = Math.sqrt(Math.min(1, (4 * f.N) / cap));
+    const amount = Math.sqrt(Math.min(1, (4 * volume(f)) / cap));
     const { S } = this;
     const T = temperature(f);
     this.radialGlow(cx, cy, haloRadius(T) * S, color, haloAlpha(T) * amount, LOOK.haloSharpness);
