@@ -84,7 +84,7 @@ export const WASH_PRESET: Preset = {
       tanks: [{ contents: [...settled({ 0: 0.5, 4: 1.5 }, 1), atomsOf(singleOf('B'), 1.5 * CAP)], T: WASH_T }],
     },
     {
-      kind: 'dispenser', at: [WASH_AT[0], 0.14], valves: [0.005],
+      kind: 'dispenser', at: [WASH_AT[0], 0.14], valves: [0.003],
       tanks: [{ contents: [atomsOf(singleOf('B'), 4 * CAP)], T: WASH_T }],
     },
     // under the separator's right spout, 36 local units right of its center

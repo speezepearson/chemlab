@@ -18,6 +18,43 @@ export const TANK_H = 84;
  * each get ε = 2/3, and at 0.25 flask/s each, ε = 8/9.
  */
 export const EXCHANGE_RATE = 2 * MAX_FLOW;
+/**
+ * Below this flow, in atoms per sim second, an outlet drips instead of streaming: what leaves it gathers
+ * in a hanging drop, which falls at random (see dropRate). 0.005 flask/s is about three 1.5M-atom drops
+ * a second.
+ */
+export const DRIP_FLOW = 0.005 * CAP;
+/** The size, in atoms, at which a hanging drop is as likely as not to have fallen within a second or so. */
+export const DROP_ATOMS = 1.5e6;
+/** How sharply the fall rate rises with size around DROP_ATOMS, in atoms. */
+const DROP_SPREAD = 0.12e6;
+
+/**
+ * How often a hanging drop of `atoms` atoms falls, per sim second: a Poisson process whose rate rises
+ * smoothly from about 0 below 1M atoms (0.015) to about 1 above 2M (0.985).
+ */
+export function dropRate(atoms: number): number {
+  return 1 / (1 + Math.exp(-(atoms - DROP_ATOMS) / DROP_SPREAD));
+}
+
+/**
+ * One sim step of `h` seconds at an outlet, given what left it this step (`out`) and the drop hanging
+ * there. A fast enough flow streams: it carries off any drop still hanging and is returned as is.
+ * Otherwise it gathers in the drop, which falls with probability 1 − e^(−dropRate·h); then the fallen
+ * drop is returned. Returns null if nothing leaves the outlet this step.
+ */
+export function drip(drop: Vessel, out: Vessel | null, h: number, rand = Math.random): Vessel | null {
+  if (out && out.N >= DRIP_FLOW * h) {
+    transfer(drop, out, volume(drop));
+    return out;
+  }
+  if (out) transfer(out, drop, volume(out));
+  if (drop.N <= 0 || rand() >= 1 - Math.exp(-dropRate(drop.N) * h)) return null;
+  const fell = new Vessel(Infinity);
+  transfer(drop, fell, volume(drop));
+  return fell;
+}
+
 /** How much a splitter's funnel holds, in atoms: just a buffer, like a hose's. */
 export const FUNNEL_CAP = CAP / 4;
 /** How fast a splitter's funnel drains, in atoms per sim second, whatever its valve is set to. */
@@ -139,7 +176,11 @@ export class Tool {
    */
   readonly valves: number[];
   /** Per spout, what left it on the last step, for drawing the stream; null if nothing did. */
-  out: (Fluid | null)[];
+  out: (Vessel | null)[];
+  /** Per spout, the drop hanging there, gathering a flow too slow to stream (see drip). */
+  readonly drops: Vessel[];
+  /** Per spout, whether it streamed on the last step, rather than dripped. Set by whoever runs drip. */
+  streaming: boolean[];
   /** Per spout, the flow on the last step, in flasks per second. */
   flow: number[];
 
@@ -156,6 +197,8 @@ export class Tool {
     this.valves = this.tanks.map((_, k) => valves[k] ?? (kind === 'splitter' ? 0.5 : 0));
     this.out = this.shape.spouts.map(() => null);
     this.flow = this.shape.spouts.map(() => 0);
+    this.drops = this.shape.spouts.map(() => new Vessel(Infinity));
+    this.streaming = this.shape.spouts.map(() => false);
   }
 
   get shape(): ToolShape {
@@ -163,7 +206,7 @@ export class Tool {
   }
 
   /** Run for `h` sim seconds. Returns, per spout, the fluid that left it, or null if none did. */
-  step(h: number): (Fluid | null)[] {
+  step(h: number): (Vessel | null)[] {
     const splitter = this.kind === 'splitter';
     let packets = this.tanks.map((tank, k) => {
       const p = new Vessel(Infinity);
@@ -255,7 +298,11 @@ export const PUMP_RATE = 2 * MAX_FLOW;
 export class Hose {
   readonly funnel = new Vessel(HOSE_CAP);
   /** What left the outlet on the last step, for drawing; null if nothing did. */
-  out: Fluid | null = null;
+  out: Vessel | null = null;
+  /** The drop hanging at the outlet, gathering a flow too slow to stream (see drip). */
+  readonly drop = new Vessel(Infinity);
+  /** Whether the outlet streamed on the last step, rather than dripped. Set by whoever runs drip. */
+  streaming = false;
   /** The flow on the last step, in flasks per second. */
   flow = 0;
 
@@ -266,7 +313,7 @@ export class Hose {
   ) {}
 
   /** Run for `h` sim seconds. Returns what left the outlet, or null if nothing did. */
-  step(h: number): Fluid | null {
+  step(h: number): Vessel | null {
     const p = new Vessel(Infinity);
     transfer(this.funnel, p, PUMP_RATE * h);
     this.out = p.N > 0 ? p : null;

@@ -8,7 +8,9 @@ import { Flask, Vessel, fluidColor, glowColor, sustenance, transfer, volume, vol
 import { DEFAULT_PRESET, applyFill, type Preset } from './presets';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
-import { HELIX, Hose, SHAPES, TANK_H, TOOL_NAMES, Tool, mouthBelow, tankX, type Mouth, type ToolKind } from './tools';
+import {
+  DROP_ATOMS, HELIX, Hose, SHAPES, TANK_H, TOOL_NAMES, Tool, drip, mouthBelow, tankX, type Mouth, type ToolKind,
+} from './tools';
 
 /** What the god-mode panel needs to show for one vessel. */
 export interface Inspection {
@@ -66,8 +68,6 @@ const GLOW_STOPS = 32;
 const POUR_ANG = Math.PI * 0.61;
 /** How far below a faucet something can be and still get filled, in local units. */
 const FAUCET_REACH = 24;
-/** Distance between neighboring faucets, as a fraction of the home area's width. */
-const FAUCET_SPACING = 0.12;
 /** Half-width of the part of a flask's mouth that catches a falling stream, in local units. */
 const FLASK_CATCH = 14;
 /** How close to a valve, in world units, the pointer can be before it stops turning the lever. */
@@ -75,6 +75,10 @@ const VALVE_DEADZONE = 20;
 const SINK_H = 16;
 /** Width of a stream flowing one flask per second, in world units; it goes as the square root of the flow. */
 const STREAM_WIDTH = 4.5;
+/** How fast a falling drop speeds up, in world units per sim second squared: a 500-unit fall takes 0.7 s. */
+const GRAVITY = 2000;
+/** Drawn radius of a DROP_ATOMS drop, in world units; it goes as the cube root of the drop's size. */
+const DROP_R = 3;
 /** The most the camera zooms in, in screen pixels per world unit. */
 const MAX_ZOOM = 4;
 /** How much a pixel of scroll zooms: the zoom is multiplied by e^(−this·Δy). */
@@ -118,6 +122,8 @@ export class GameEngine {
   private scales: Scale[] = [];
   private scaleDrag: { scale: Scale; off: Point } | null = null;
   private hoses: Hose[] = [];
+  /** Drops that have let go of an outlet and are on their way down. */
+  private falling: { v: Vessel; x: number; y: number; vy: number }[] = [];
   /** A hose end being carried, or (just out of the palette) the whole hose, with its outlet this far from the inlet. */
   private hoseDrag: { hose: Hose; end: 'inlet' | 'outlet' | 'both'; gap?: Point } | null = null;
   private valveDrag: { tool: Tool; k: number } | null = null;
@@ -214,6 +220,7 @@ export class GameEngine {
       return h;
     });
     this.won = false;
+    this.falling = [];
     this.drag = this.toolDrag = this.valveDrag = this.scaleDrag = this.hoseDrag = null;
     this.hover = this.hoverTool = this.hoverTank = null;
     this.lastProgress = -1;
@@ -227,13 +234,13 @@ export class GameEngine {
       preset: this.preset.id,
       flasks: this.flasks.map((f) => ({ ...saveVessel(f), x: f.home.x / HOME_W, up: (L.floorY - f.home.y) / S, glass: f.glass })),
       tools: this.tools.map((t) => ({
-        kind: t.kind, id: t.id, fx: t.fx, fy: t.fy, valves: [...t.valves], tanks: t.tanks.map(saveVessel),
+        kind: t.kind, id: t.id, fx: t.fx, fy: t.fy, valves: [...t.valves], tanks: t.tanks.map(saveVessel), drops: t.drops.map(saveVessel),
       })),
       scales: this.scales.map((sc) => ({
         fx: sc.fx, fy: sc.fy, tare: sc.tare,
         load: sc.load.map(({ f, dx }) => ({ f: this.flasks.indexOf(f), dx })).filter((l) => l.f >= 0),
       })),
-      hoses: this.hoses.map((h) => ({ inlet: { ...h.inlet }, outlet: { ...h.outlet }, funnel: saveVessel(h.funnel) })),
+      hoses: this.hoses.map((h) => ({ inlet: { ...h.inlet }, outlet: { ...h.outlet }, funnel: saveVessel(h.funnel), drop: saveVessel(h.drop) })),
       chem: saveChem(this.chem.params),
     };
   }
@@ -256,6 +263,7 @@ export class GameEngine {
       .map((st) => {
         const t = new Tool(st.kind, st.id, st.fx, st.fy, st.valves ?? []);
         t.tanks.forEach((v, k) => st.tanks?.[k] && loadVessel(v, st.tanks[k]));
+        t.drops.forEach((v, k) => st.drops?.[k] && loadVessel(v, st.drops[k]));
         return t;
       });
     this.nextToolId = Math.max(-1, ...this.tools.map((t) => t.id)) + 1;
@@ -268,12 +276,14 @@ export class GameEngine {
     this.hoses = s.hoses.map((sh) => {
       const h = new Hose({ ...sh.inlet }, { ...sh.outlet });
       if (sh.funnel) loadVessel(h.funnel, sh.funnel);
+      if (sh.drop) loadVessel(h.drop, sh.drop);
       return h;
     });
     for (const t of this.tools) this.place(t, this.toolXY(t));
     for (const sc of this.scales) this.placeScale(sc, this.scaleXY(sc));
     this.settle();
     this.won = false;
+    this.falling = [];
     this.drag = this.toolDrag = this.valveDrag = this.scaleDrag = this.hoseDrag = null;
     this.hover = this.hoverTool = this.hoverTank = null;
     this.lastProgress = -1;
@@ -313,14 +323,13 @@ export class GameEngine {
 
   /* ---------------- layout ---------------- */
 
-  /** Lay out the world, once: the faucets, shelf and sink, in the home area at the bottom left. */
+  /** Lay out the world, once: the faucets evenly along its top, and the shelf in the home area at the bottom left. */
   private layoutWorld(): void {
-    const { L, S, H } = this;
-    const top = H - HOME_H;
-    L.pipeY = top + 30 * S;
-    L.spoutY = top + 62 * S;
+    const { L, S, W, H } = this;
+    L.pipeY = 30 * S;
+    L.spoutY = 62 * S;
     L.faucets = FAUCETS.map((fa, i) => ({
-      ...fa, output: faucetOutput(fa, this.chem.U), x: HOME_W * (0.06 + FAUCET_SPACING * i),
+      ...fa, output: faucetOutput(fa, this.chem.U), x: (W * (i + 0.5)) / FAUCETS.length,
     }));
     L.floorY = H - SINK_H * S;
     L.homes = [];
@@ -892,18 +901,31 @@ export class GameEngine {
     if (simDt > 0) {
       const sub = Math.ceil(simDt / 0.02);
       const h = simDt / sub;
-      const targets = this.tools.map((t) => t.shape.spouts.map((_, j) => mouthBelow(mouths, this.spoutAt(t, j))));
-      const hoseTargets = this.hoses.map((hose) => mouthBelow(mouths, this.hoseEnd(hose, 'outlet')));
+      const spouts = this.tools.map((t) => t.shape.spouts.map((_, j) => this.spoutAt(t, j)));
+      const targets = spouts.map((sps) => sps.map((sp) => mouthBelow(mouths, sp)));
+      const outlets = this.hoses.map((hose) => this.hoseEnd(hose, 'outlet'));
+      const hoseTargets = outlets.map((sp) => mouthBelow(mouths, sp));
+      // a fast flow streams straight into what's below (whatever doesn't fit overflows to the sink);
+      // a slow one gathers in a drop, which falls on its own time
+      const pour = (drop: Vessel, out: Vessel | null, sp: Point, target: Mouth | null): boolean => {
+        const down = drip(drop, out, h);
+        if (down && down === out) target?.v.addFrom(out, volume(out));
+        else if (down) this.falling.push({ v: down, x: sp.x, y: sp.y, vy: 0 });
+        return !!down && down === out;
+      };
       for (let i = 0; i < sub; i++) {
         this.tools.forEach((t, j) =>
-          t.step(h).forEach((out, k) => {
-            // whatever doesn't fit overflows to the sink
-            if (out) targets[j][k]?.v.addFrom(out, volume(out));
-          }),
+          t.step(h).forEach((out, k) => (t.streaming[k] = pour(t.drops[k], out, spouts[j][k], targets[j][k]))),
         );
-        this.hoses.forEach((hose, j) => {
-          const out = hose.step(h);
-          if (out) hoseTargets[j]?.v.addFrom(out, volume(out));
+        this.hoses.forEach((hose, j) => (hose.streaming = pour(hose.drop, hose.step(h), outlets[j], hoseTargets[j])));
+        // falling drops land in the first open top they pass, or go down the sink
+        this.falling = this.falling.filter((d) => {
+          const from = d.y;
+          d.vy += GRAVITY * h;
+          d.y += d.vy * h;
+          const m = mouthBelow(mouths, { x: d.x, y: from });
+          if (m && m.y <= d.y) m.v.addFrom(d.v, volume(d.v));
+          return !(m && m.y <= d.y) && d.y < this.H;
         });
         for (const v of vessels) {
           this.chem.step(v, h);
@@ -1286,6 +1308,30 @@ export class GameEngine {
     ctx.restore();
   }
 
+  /** The drops hanging from slow outlets, and those on their way down. */
+  private drawDrops(): void {
+    const { ctx, S } = this;
+    const bead = (v: Vessel, x: number, y: number, hanging: boolean) => {
+      if (v.N <= 0) return;
+      const r = DROP_R * Math.cbrt(v.N / DROP_ATOMS) * S;
+      ctx.fillStyle = fluidColor(v);
+      ctx.beginPath();
+      // a hanging drop swells from the outlet's tip; a falling one is centered where it is
+      ctx.arc(x, hanging ? y + r : y, r, 0, Math.PI * 2);
+      ctx.fill();
+    };
+    for (const t of this.tools)
+      t.drops.forEach((v, k) => {
+        const sp = this.spoutAt(t, k);
+        bead(v, sp.x, sp.y, true);
+      });
+    for (const hose of this.hoses) {
+      const sp = this.hoseEnd(hose, 'outlet');
+      bead(hose.drop, sp.x, sp.y, true);
+    }
+    for (const d of this.falling) bead(d.v, d.x, d.y, false);
+  }
+
   /** A stream falling from (x1, y1) to (x2, y2), `flow` flasks per second wide (see STREAM_WIDTH). */
   private drawStream(x1: number, y1: number, x2: number, y2: number, color: string, flow: number): void {
     const { ctx } = this;
@@ -1337,13 +1383,13 @@ export class GameEngine {
     const mouths = this.mouths();
     for (const t of this.tools)
       t.out.forEach((out, k) => {
-        if (!out) return;
+        if (!out || !t.streaming[k]) return;
         const sp = this.spoutAt(t, k);
         const m = mouthBelow(mouths, sp);
         this.drawStream(sp.x, sp.y, sp.x, m ? m.y + 2 * S : H, fluidColor(out), t.flow[k]);
       });
     for (const hose of this.hoses) {
-      if (!hose.out) continue;
+      if (!hose.out || !hose.streaming) continue;
       const sp = this.hoseEnd(hose, 'outlet');
       const m = mouthBelow(mouths, sp);
       this.drawStream(sp.x, sp.y, sp.x, m ? m.y + 2 * S : H, fluidColor(hose.out), hose.flow);
@@ -1408,6 +1454,7 @@ export class GameEngine {
 
     for (const t of this.tools) this.drawTool(t);
     for (const h of this.hoses) this.drawHose(h);
+    this.drawDrops();
     if (drag) this.drawFlask(drag.flask, drag.flask.x, drag.flask.y, drag.flask.ang);
 
     // glow goes on top of everything, so a very hot flask washes out its surroundings

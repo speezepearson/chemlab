@@ -40,6 +40,8 @@ export interface SavedTool {
   fy: number;
   valves: number[];
   tanks: SavedVessel[];
+  /** Per spout, the drop hanging there, if any. */
+  drops?: SavedVessel[];
 }
 
 export interface SavedScale {
@@ -54,6 +56,8 @@ export interface SavedHose {
   inlet: { x: number; y: number };
   outlet: { x: number; y: number };
   funnel: SavedVessel;
+  /** The drop hanging at the outlet, if any. */
+  drop?: SavedVessel;
 }
 
 const BY_NAME = new Map(SPECIES.map((s) => [s.name, s.i]));

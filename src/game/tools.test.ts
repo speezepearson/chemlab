@@ -4,8 +4,8 @@ import { CAP } from './config';
 import { heatAt, temperature } from '../chem/reactions';
 import { Vessel } from './flask';
 import {
-  EXCHANGE_RATE, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PUMP_RATE, TANK_CAP, Tool, counterflow, mouthBelow,
-  separate, type Mouth,
+  DRIP_FLOW, EXCHANGE_RATE, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PUMP_RATE, TANK_CAP, Tool, counterflow,
+  drip, dropRate, mouthBelow, separate, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -209,5 +209,58 @@ describe('hose', () => {
     expect(temperature(out)).toBe(2);
     expect(hose.funnel.N / (HOSE_CAP - PUMP_RATE * 0.01)).toBeCloseTo(1, 6);
     expect(PUMP_RATE).toBeGreaterThan(MAX_FLOW);
+  });
+});
+
+describe('dripping', () => {
+  const packet = (atoms: number) => filled(new Vessel(Infinity), R, atoms, 2);
+  const h = 0.02;
+
+  it('falls at about 0 per second below 1M atoms, and about 1 above 2M', () => {
+    expect(dropRate(1e6)).toBeLessThan(0.02);
+    expect(dropRate(1.5e6)).toBeCloseTo(0.5);
+    expect(dropRate(2e6)).toBeGreaterThan(0.98);
+    expect(dropRate(5e6)).toBeGreaterThan(0.99);
+  });
+
+  it('streams a fast flow straight through, taking any hanging drop along', () => {
+    const drop = packet(1e5);
+    const out = packet(DRIP_FLOW * h);
+    expect(drip(drop, out, h)).toBe(out);
+    expect(out.N).toBe(DRIP_FLOW * h + 1e5);
+    expect(drop.N).toBe(0);
+  });
+
+  it('gathers a slow flow in the drop, which falls whole when its luck runs out', () => {
+    const drop = new Vessel(Infinity);
+    // never falls: the drop just grows (by less than DRIP_FLOW·h a step, so it drips)
+    expect(drip(drop, packet(5e4), h, () => 0.999999)).toBeNull();
+    expect(drip(drop, packet(5e4), h, () => 0.999999)).toBeNull();
+    expect(drop.N).toBe(1e5);
+    expect(temperature(drop)).toBeCloseTo(2, 6);
+    // always falls: out comes everything, this step's flow included
+    const fell = drip(drop, packet(5e4), h, () => 0)!;
+    expect(fell.N).toBe(1.5e5);
+    expect(drop.N).toBe(0);
+    // nothing hanging, nothing arriving: nothing falls
+    expect(drip(drop, null, h, () => 0)).toBeNull();
+  });
+
+  it('drops about DROP_ATOMS-sized drops from a slow steady flow, conserving atoms', () => {
+    const drop = new Vessel(Infinity);
+    const flow = 1e6; // atoms per second: a drop takes a second or two to grow
+    let fallen = 0;
+    let n = 0;
+    for (let i = 0; i < 20000; i++) {
+      const d = drip(drop, packet(flow * h), h);
+      if (d) {
+        fallen += d.N;
+        n++;
+      }
+    }
+    expect(fallen + drop.N).toBe(20000 * flow * h);
+    // almost none fall before 1M atoms, and past 2M they fall within a second or so: 1M more, at this flow
+    expect(fallen / n).toBeGreaterThan(1.5e6);
+    expect(fallen / n).toBeLessThan(3.5e6);
   });
 });
