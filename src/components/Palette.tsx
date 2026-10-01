@@ -33,6 +33,28 @@ const ICONS: Record<string, ReactNode> = {
       <circle className="valve" cx="20" cy="19" r="2.5" />
     </>
   ),
+  sorter: (
+    <>
+      <path className="pipe" d="M7 12 V16 M15 20 V37 M26 24 V37 M36 27 V37" />
+      <path className="pipe" d="M3 15 L36 27" />
+      <path className="valve" d="M12 19 L18 21 M23 23 L29 25" strokeDasharray="1.5 1.5" />
+      <path className="glass" d="M1 3 H13 L8 11 H6 Z" />
+    </>
+  ),
+  spectrometer: (
+    <>
+      <path className="pipe" d="M20 8 V12" />
+      <path className="glass" d="M14 2 H26 L21 8 H19 Z" />
+      <rect className="valve" x="3" y="12" width="34" height="25" rx="3" />
+      <rect className="lcd" x="5" y="15" width="30" height="13" rx="1.5" style={{ fill: '#040a06' }} />
+      <path
+        className="digits"
+        style={{ stroke: 'rgb(64, 255, 110)', strokeWidth: 0.9 }}
+        d="M7.5 21.5 l2 -3.5 h4 l2 3.5 l-2 3.5 h-4 Z M16 21.5 l2 -3.5 h4 l2 3.5 l-2 3.5 h-4 Z M24.5 21.5 l2 -3.5 h4 l2 3.5 l-2 3.5 h-4 Z"
+      />
+      <rect className="valve" x="26" y="30" width="9" height="5" rx="1.5" />
+    </>
+  ),
   scale: (
     <>
       <path className="pipe" d="M4 20 H36" />
@@ -56,6 +78,8 @@ const ITEMS = [
   ['exchanger', 'Heat exchanger'],
   ['separator', 'Separator'],
   ['splitter', 'Splitter'],
+  ['sorter', 'Size sorter'],
+  ['spectrometer', 'Mass spectrometer'],
   ['scale', 'Scale'],
   ['hose', 'Hose'],
 ] as const;

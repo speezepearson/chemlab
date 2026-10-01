@@ -8,8 +8,10 @@ import { Flask, Vessel, fluidColor, glowColor, sustenance, transfer, volume, vol
 import { DEFAULT_PRESET, applyFill, type Preset } from './presets';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
+import { rumble } from './rumble';
 import {
-  HELIX, Hose, SHAPES, TANK_H, TOOL_NAMES, Tool, drip, mouthBelow, tankX, type Mouth, type ToolKind,
+  HELIX, Hose, SCAN_LIGHTS, SCAN_RAMP, SHAPES, SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, drip,
+  mouthBelow, scanLevel, tankX, type Mouth, type ToolKind,
 } from './tools';
 
 /** What the god-mode panel needs to show for one vessel. */
@@ -86,6 +88,10 @@ const MAX_ZOOM = 4;
 const ZOOM_PER_PX = 0.0015;
 /** The separator's splitter, below its valve, in local units. */
 const SEP_BODY = { x0: -42, x1: 42, y0: 100, y1: 112 };
+/** How far a spectrometer shakes at the height of its run, in world units. */
+const SHAKE = 2.5;
+/** A CRT's phosphor green. */
+const PHOSPHOR = '64, 255, 110';
 
 const FLASK_PATH = new Path2D(FLASK_PATH_DATA);
 
@@ -145,6 +151,8 @@ export class GameEngine {
   private resizeObserver: ResizeObserver;
   private cleanups: (() => void)[] = [];
   private nextToolId = 0;
+  /** Running spectrometers' rumbles, each with what stops it. */
+  private rumbles = new Map<Tool, () => void>();
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -167,6 +175,7 @@ export class GameEngine {
     cancelAnimationFrame(this.raf);
     this.resizeObserver.disconnect();
     for (const c of this.cleanups) c();
+    for (const stop of this.rumbles.values()) stop();
   }
 
   /**
@@ -236,6 +245,7 @@ export class GameEngine {
       flasks: this.flasks.map((f) => ({ ...saveVessel(f), x: f.home.x / HOME_W, up: (L.floorY - f.home.y) / S, glass: f.glass })),
       tools: this.tools.map((t) => ({
         kind: t.kind, id: t.id, fx: t.fx, fy: t.fy, valves: [...t.valves], tanks: t.tanks.map(saveVessel), drops: t.drops.map(saveVessel),
+        ...(t.reading ? { reading: [...t.reading] } : {}),
       })),
       scales: this.scales.map((sc) => ({
         fx: sc.fx, fy: sc.fy, tare: sc.tare,
@@ -265,6 +275,7 @@ export class GameEngine {
         const t = new Tool(st.kind, st.id, st.fx, st.fy, st.valves ?? []);
         t.tanks.forEach((v, k) => st.tanks?.[k] && loadVessel(v, st.tanks[k]));
         t.drops.forEach((v, k) => st.drops?.[k] && loadVessel(v, st.drops[k]));
+        if (Array.isArray(st.reading) && st.reading.length === 18) t.reading = st.reading.map((x) => Math.max(0, Number(x) || 0));
         return t;
       });
     this.nextToolId = Math.max(-1, ...this.tools.map((t) => t.id)) + 1;
@@ -466,6 +477,13 @@ export class GameEngine {
     return this.onTool(t, { x: t.shape.spouts[j], y: t.shape.spoutY });
   }
 
+  /** Whether p is inside a rectangle given in a tool's local units. */
+  private inToolRect(t: Tool, p: Point, r: { x0: number; x1: number; y0: number; y1: number }): boolean {
+    const a = this.onTool(t, { x: r.x0, y: r.y0 });
+    const b = this.onTool(t, { x: r.x1, y: r.y1 });
+    return p.x > a.x && p.x < b.x && p.y > a.y && p.y < b.y;
+  }
+
   private valveAt(t: Tool, k: number): Point {
     return this.onTool(t, { x: tankX(t.shape.tanks[k]), y: t.shape.valveY });
   }
@@ -590,7 +608,7 @@ export class GameEngine {
         hs.push(...hs.splice(hs.indexOf(hoseEnd.hose), 1)); // bring to front
         c.setPointerCapture(e.pointerId);
       } else if (e.button === 2) {
-        if (t) {
+        if (t && !t.shape.noValve) {
           // the valve nearest the pointer, left to right
           const o = this.toolXY(t);
           const dist = (j: number) => Math.abs(p.x - o.x - tankX(t.shape.tanks[j]) * this.S);
@@ -601,7 +619,9 @@ export class GameEngine {
           c.setPointerCapture(e.pointerId);
         }
       } else if (e.button === 0) {
-        if (t) {
+        if (t?.kind === 'spectrometer' && this.inToolRect(t, p, SPECTROMETER.button)) {
+          if (t.scan()) this.rumbles.set(t, rumble(SCAN_RAMP));
+        } else if (t) {
           const o = this.toolXY(t);
           this.toolDrag = { tool: t, off: { x: p.x - o.x, y: p.y - o.y } };
           this.tools.splice(this.tools.indexOf(t), 1);
@@ -848,8 +868,16 @@ export class GameEngine {
   /* ---------------- main loop ---------------- */
 
   private frame = (now: number): void => {
-    const dt = Math.min(0.1, (now - this.last) / 1000);
+    const elapsed = (now - this.last) / 1000;
+    const dt = Math.min(0.1, elapsed);
     this.last = now;
+
+    // spectrometer runs go by the clock, like their rumble, even while the tab is hidden
+    for (const t of this.tools) if (t.scanning) t.scanAge += elapsed;
+    for (const [t, stop] of this.rumbles) {
+      if (!this.tools.includes(t)) stop(); // put away, or the bench was replaced
+      if (!this.tools.includes(t) || !t.scanning) this.rumbles.delete(t);
+    }
     const { S, L, drag, pointer } = this;
 
     // player actions, real time
@@ -1117,13 +1145,21 @@ export class GameEngine {
       const fork = sh.valveY + 10;
       pipes([[0, sh.tankH!], [0, fork]], 4);
       for (const x of sh.spouts) pipes([[0, fork], [x, fork + 16], [x, sh.spoutY - 4]], 4);
-    } else pipes([[0, TANK_H], [0, sh.spoutY - 4]], 4);
+    } else if (t.kind === 'sorter') {
+      // the stem down to the chute, a drop pipe under each screen, and the chute's end turning down
+      const x = tankX(sh.tanks[0]);
+      pipes([[x, sh.tankH!], [x, chuteY(x)]], 4);
+      sh.spouts.forEach((x, k) => pipes([[x, k < sh.spouts.length - 1 ? chuteY(x) + 8 : SORTER_CHUTE.y1], [x, sh.spoutY - 4]], 4));
+    } else if (t.kind === 'spectrometer') pipes([[0, sh.tankH!], [0, SPECTROMETER.body.y0]], 4);
+    else pipes([[0, TANK_H], [0, sh.spoutY - 4]], 4);
     for (const x of sh.spouts) ctx.fillRect(o.x + (x - 4) * S, o.y + (sh.spoutY - 6) * S, 8 * S, 6 * S);
     t.tanks.forEach((v, k) => {
       const r = this.tankRect(t, k);
       this.drawTank(v, r.x0, r.y0, r.x1, r.y1, sh.funnel);
     });
     if (t.kind === 'exchanger') this.drawHelix(t);
+    if (t.kind === 'sorter') this.drawChute(t);
+    if (t.kind === 'spectrometer') this.drawSpectrometer(t);
     if (t.kind === 'separator') {
       // the splitter: one pipe in, two out, with a divider between the outlets
       const { x0, x1, y0, y1 } = SEP_BODY;
@@ -1140,7 +1176,7 @@ export class GameEngine {
       ctx.stroke();
     }
 
-    t.tanks.forEach((_, k) => {
+    if (!sh.noValve) t.tanks.forEach((_, k) => {
       // valve: the lever points right when closed and up when open, toward where the pointer turned it;
       // a splitter's points toward the side that gets more, straight up for an even split
       const vc = this.valveAt(t, k);
@@ -1172,6 +1208,177 @@ export class GameEngine {
       ctx.lineWidth = 1.5;
       ctx.strokeRect(r.x0 - 5 * S, r.y0 - 5 * S, r.x1 - r.x0 + 10 * S, r.y1 - r.y0 + 10 * S);
     }
+  }
+
+  /**
+   * The size sorter's chute: a sloping floor with two screens in it, fine then coarse, each over a hopper
+   * into its drop pipe, and a film of what's flowing down it.
+   */
+  private drawChute(t: Tool): void {
+    const { ctx, S, theme } = this;
+    const o = this.toolXY(t);
+    const c = SORTER_CHUTE;
+    const sp = t.shape.spouts;
+    const HALF = 12; // half a screen's length
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.scale(S, S);
+    ctx.lineCap = 'butt';
+    // hoppers under the screens
+    ctx.fillStyle = theme.pipe;
+    for (const x of sp.slice(0, -1)) {
+      ctx.beginPath();
+      ctx.moveTo(x - HALF, chuteY(x - HALF) + 2);
+      ctx.lineTo(x + HALF, chuteY(x + HALF) + 2);
+      ctx.lineTo(x + 3, chuteY(x) + 10);
+      ctx.lineTo(x - 3, chuteY(x) + 10);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // the floor, solid between the screens and open-meshed over them (finer over the first)
+    const floor = (x0: number, x1: number, dash: number[]) => {
+      ctx.setLineDash(dash);
+      ctx.beginPath();
+      ctx.moveTo(x0, chuteY(x0));
+      ctx.lineTo(x1, chuteY(x1));
+      ctx.stroke();
+    };
+    ctx.strokeStyle = theme.pipe;
+    ctx.lineWidth = 4;
+    let x = c.x0;
+    sp.slice(0, -1).forEach((h, k) => {
+      floor(x, h - HALF, []);
+      floor(h - HALF, h + HALF, k ? [3, 3] : [1.5, 1.5]);
+      x = h + HALF;
+    });
+    floor(x, c.x1, []);
+    ctx.setLineDash([]);
+    // the end of the chute turns down into the last spout
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(c.x1 - 2, c.y1);
+    ctx.quadraticCurveTo(c.x1 + 4, c.y1, c.x1 + 4, c.y1 + 8);
+    ctx.stroke();
+    // what's sliding down: before each screen, everything that hasn't fallen through one yet
+    const stops = [tankX(t.shape.tanks[0]), ...sp.slice(0, -1), c.x1];
+    ctx.lineWidth = 2;
+    for (let k = 0; k < sp.length; k++) {
+      const on = new Vessel(Infinity);
+      for (const v of t.out.slice(k)) if (v) on.addFrom(v, volume(v));
+      if (on.N <= 0) continue;
+      ctx.strokeStyle = fluidColor(on);
+      ctx.beginPath();
+      ctx.moveTo(stops[k], chuteY(stops[k]) - 3);
+      ctx.lineTo(stops[k + 1], chuteY(stops[k + 1]) - 3);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /**
+   * A mass spectrometer's cabinet: an old green-on-black screen with a hexagon per molecule size (1, 2, 3
+   * atoms), each cut into sextants by color (see SEXTANT_ATOMS) that glow as bright as their share of the
+   * last sample (see spectrum), lighting up one hexagon at a time as a run goes on; and the run button.
+   */
+  private drawSpectrometer(t: Tool): void {
+    const { ctx, S, theme } = this;
+    const o = this.toolXY(t);
+    const { body, screen: sc, hexes, button } = SPECTROMETER;
+    const green = (a: number) => `rgba(${PHOSPHOR}, ${a})`;
+    /** Canvas shadows are in device pixels, whatever the transform. */
+    const blur = (local: number) => local * S * this.zoom * this.dpr;
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.scale(S, S);
+    ctx.fillStyle = theme.bench;
+    ctx.strokeStyle = theme.pipe;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(body.x0, body.y0, body.x1 - body.x0, body.y1 - body.y0, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    // the screen, black in either theme
+    const glass = new Path2D();
+    glass.roundRect(sc.x0, sc.y0, sc.x1 - sc.x0, sc.y1 - sc.y0, 5);
+    ctx.fillStyle = '#040a06';
+    ctx.fill(glass);
+    ctx.save();
+    ctx.clip(glass);
+    const scanningHex = t.scanning ? SCAN_LIGHTS.findIndex((at) => t.scanAge < at) : -1;
+    hexes.xs.forEach((cx, w) => {
+      const { y: cy, r } = hexes;
+      // flat-topped, so sextant j runs clockwise from the corner at −120° + 60j°
+      const corner = (j: number) => {
+        const a = ((-120 + 60 * j) * Math.PI) / 180;
+        return [cx + r * Math.cos(a), cy + r * Math.sin(a)] as const;
+      };
+      if (t.reading && t.scanAge >= SCAN_LIGHTS[w])
+        for (let j = 0; j < 6; j++) {
+          const b = Math.min(1, t.reading[w * 6 + j]);
+          if (b <= 0) continue;
+          ctx.fillStyle = ctx.shadowColor = green(b);
+          ctx.shadowBlur = blur(5);
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.lineTo(...corner(j));
+          ctx.lineTo(...corner(j + 1));
+          ctx.closePath();
+          ctx.fill();
+        }
+      // the one being read flickers
+      const a = w === scanningHex ? 0.5 + 0.35 * Math.sin(performance.now() / 40) : 0.85;
+      ctx.shadowColor = green(a);
+      ctx.shadowBlur = blur(2);
+      ctx.strokeStyle = green(a);
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      for (let j = 0; j < 6; j++) ctx.lineTo(...corner(j));
+      ctx.closePath();
+      ctx.stroke();
+      ctx.strokeStyle = green(a * 0.3);
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      for (let j = 0; j < 3; j++) {
+        ctx.moveTo(...corner(j));
+        ctx.lineTo(...corner(j + 3));
+      }
+      ctx.stroke();
+      ctx.fillStyle = green(0.7);
+      ctx.font = '7px ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(w + 1), cx, sc.y1 - 5);
+    });
+    // scanlines
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+    for (let y = sc.y0; y < sc.y1; y += 1.5) ctx.fillRect(sc.x0, y, sc.x1 - sc.x0, 0.6);
+    ctx.restore();
+    ctx.strokeStyle = theme.pipe;
+    ctx.lineWidth = 1.5;
+    ctx.stroke(glass);
+
+    // a lamp that blinks through a run, and the run button
+    ctx.fillStyle = t.scanning && Math.floor(t.scanAge * 3) % 2 === 0 ? '#ffb43a' : theme.pipe;
+    ctx.beginPath();
+    ctx.arc(sc.x0 + 6, (button.y0 + button.y1) / 2, 3, 0, Math.PI * 2);
+    ctx.fill();
+    const busy = this.drag || this.toolDrag || this.valveDrag || this.scaleDrag || this.hoseDrag;
+    const hot = !busy && !t.scanning && this.inToolRect(t, this.pointer, button);
+    ctx.fillStyle = theme.line;
+    ctx.strokeStyle = hot ? theme.accent : theme.pipe;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(button.x0, button.y0, button.x1 - button.x0, button.y1 - button.y0, 4);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = t.scanning ? theme.muted : theme.ink;
+    ctx.font = '10px "Schibsted Grotesk", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(t.scanning ? 'busy' : 'run', (button.x0 + button.x1) / 2, (button.y0 + button.y1) / 2 + 0.5);
+    ctx.restore();
   }
 
   private drawScale(sc: Scale): void {
@@ -1453,7 +1660,14 @@ export class GameEngine {
       }
     }
 
-    for (const t of this.tools) this.drawTool(t);
+    for (const t of this.tools) {
+      // a running spectrometer shakes, harder as its run goes on
+      const shake = scanLevel(t.scanAge) * SHAKE * S;
+      ctx.save();
+      if (shake) ctx.translate(shake * (2 * Math.random() - 1), shake * (2 * Math.random() - 1));
+      this.drawTool(t);
+      ctx.restore();
+    }
     for (const h of this.hoses) this.drawHose(h);
     this.drawDrops();
     if (drag) this.drawFlask(drag.flask, drag.flask.x, drag.flask.y, drag.flask.ang);

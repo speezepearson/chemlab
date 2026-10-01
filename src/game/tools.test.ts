@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { SPECIES, singleOf } from '../chem/species';
+import { SPECIES, TARGET, singleOf, speciesIndex } from '../chem/species';
 import { CAP } from './config';
 import { heatAt, temperature } from '../chem/reactions';
 import { Vessel } from './flask';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PUMP_RATE, TANK_CAP, Tool, counterflow,
-  drip, dropRate, mouthBelow, separate, type Mouth,
+  DRIP_FLOW, EXCHANGE_RATE, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
+  SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -88,6 +88,95 @@ describe('splitter', () => {
 
   it('holds only a little', () => {
     expect(new Tool('splitter', 0, 0, 0).tanks[0].cap).toBe(FUNNEL_CAP);
+  });
+});
+
+describe('size sorter', () => {
+  const RG = speciesIndex(['R', 'G', null], 1);
+
+  it('takes 70% of singles through the first screen, 95% of the rest and 70% of pairs through the second', () => {
+    const so = new Tool('sorter', 0, 0, 0);
+    const f = so.tanks[0];
+    f.setMolecules(R, 6e7);
+    f.setMolecules(RG, 3e7);
+    f.setMolecules(TARGET, 2e7);
+    f.setTemperature(3);
+    const before = { N: f.N, Q: f.Q };
+    const outs = so.step(0.02);
+    expect(outs).toHaveLength(3);
+    const [a, b, c] = outs.map((v) => v!);
+    const drained = { R: a.n[R] + b.n[R] + c.n[R], RG: a.n[RG] + b.n[RG] + c.n[RG] };
+    expect(a.n[R] / drained.R).toBeCloseTo(0.7, 3);
+    expect(b.n[R] / drained.R).toBeCloseTo(0.3 * 0.95, 3);
+    expect(c.n[R] / drained.R).toBeCloseTo(0.3 * 0.05, 3);
+    expect([a.n[RG], b.n[RG] / drained.RG, c.n[RG] / drained.RG].map((x) => +x.toFixed(3))).toEqual([0, 0.7, 0.3]);
+    expect([a.n[TARGET], b.n[TARGET]]).toEqual([0, 0]);
+    expect(c.n[TARGET]).toBeGreaterThan(0);
+    // nothing made or lost, and the heat goes with the atoms
+    expect(a.N + b.N + c.N + f.N).toBe(before.N);
+    expect(a.Q + b.Q + c.Q + f.Q).toBe(before.Q);
+    for (const v of [a, b, c]) expect(temperature(v)).toBeCloseTo(3, 2);
+  });
+
+  it('drains its funnel at FUNNEL_RATE, with no valve', () => {
+    const so = new Tool('sorter', 0, 0, 0);
+    filled(so.tanks[0], R, FUNNEL_CAP, 4);
+    const out = so.step(0.05).reduce((t, v) => t + (v?.N ?? 0), 0);
+    expect(out / (FUNNEL_RATE * 0.05)).toBeCloseTo(1, 6);
+    expect(so.shape.noValve).toBe(true);
+  });
+});
+
+describe('mass spectrometer', () => {
+  const RG = speciesIndex(['R', 'G', null], 1);
+  const B = singleOf('B');
+  const at = (size: number, atom: 'R' | 'G' | 'B' | 'C' | 'M' | 'Y') => (size - 1) * 6 + SEXTANT_ATOMS.indexOf(atom);
+
+  it('reads the share of atoms of each color in molecules of each size', () => {
+    // 20% R, 20% G, 30% B and 30% R–G, by atoms
+    const v = new Vessel(Infinity);
+    v.setMolecules(R, 2e6);
+    v.setMolecules(G, 2e6);
+    v.setMolecules(B, 3e6);
+    v.setMolecules(RG, 1.5e6);
+    const r = spectrum(v);
+    const want = new Array(18).fill(0);
+    want[at(1, 'R')] = 0.2;
+    want[at(1, 'G')] = 0.2;
+    want[at(1, 'B')] = 0.3;
+    want[at(2, 'R')] = 0.15;
+    want[at(2, 'G')] = 0.15;
+    r.forEach((x, i) => expect(x).toBeCloseTo(want[i], 9));
+  });
+
+  it('lights one sextant fully for a pure single, and nothing for nothing', () => {
+    const v = new Vessel(Infinity);
+    v.setMolecules(R, 1e6);
+    expect(spectrum(v)[at(1, 'R')]).toBe(1);
+    expect(spectrum(new Vessel(Infinity)).every((x) => x === 0)).toBe(true);
+  });
+
+  it('destroys its sample when run, and ignores the button until the run is over', () => {
+    const sp = new Tool('spectrometer', 0, 0, 0);
+    expect(sp.tanks[0].cap).toBe(SAMPLE_CAP);
+    expect(sp.step(0.1)).toEqual([]);
+    filled(sp.tanks[0], TARGET, SAMPLE_CAP / 2, 5);
+    expect(sp.scan()).toBe(true);
+    expect([sp.tanks[0].N, sp.tanks[0].Q]).toEqual([0, 0]);
+    expect(sp.reading![2 * 6 + SEXTANT_ATOMS.indexOf('R')]).toBeCloseTo(1 / 3, 9);
+    sp.scanAge = SCAN_LIGHTS[2] - 0.01;
+    expect(sp.scan()).toBe(false);
+    sp.scanAge = SCAN_LIGHTS[2];
+    expect(sp.scanning).toBe(false);
+    expect(sp.scan()).toBe(true);
+    expect(sp.reading!.every((x) => x === 0)).toBe(true);
+  });
+
+  it('rumbles harder as the run goes on, then stops', () => {
+    const levels = [0, 2, 3, 8, 9, 20].map(scanLevel);
+    for (let i = 1; i < levels.length; i++) expect(levels[i]).toBeGreaterThan(levels[i - 1]);
+    expect(scanLevel(SCAN_LIGHTS[2])).toBe(0);
+    expect(scanLevel(Infinity)).toBe(0);
   });
 });
 
