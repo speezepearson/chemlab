@@ -216,11 +216,11 @@ describe('dripping', () => {
   const packet = (atoms: number) => filled(new Vessel(Infinity), R, atoms, 2);
   const h = 0.02;
 
-  it('falls at about 0 per second below 1M atoms, and about 1 above 2M', () => {
+  it('falls at about 0 per second below 1M atoms, once a second at 1.5M, and ever faster beyond', () => {
     expect(dropRate(1e6)).toBeLessThan(0.02);
-    expect(dropRate(1.5e6)).toBeCloseTo(0.5);
-    expect(dropRate(2e6)).toBeGreaterThan(0.98);
-    expect(dropRate(5e6)).toBeGreaterThan(0.99);
+    expect(dropRate(1.5e6)).toBeCloseTo(1);
+    expect(dropRate(2e6)).toBeGreaterThan(50);
+    expect(dropRate(5e6)).toBeGreaterThan(1e9);
   });
 
   it('streams a fast flow straight through, taking any hanging drop along', () => {
@@ -246,21 +246,30 @@ describe('dripping', () => {
     expect(drip(drop, null, h, () => 0)).toBeNull();
   });
 
-  it('drops about DRIP.atoms-sized drops from a slow steady flow, conserving atoms', () => {
-    const drop = new Vessel(Infinity);
-    const flow = 1e6; // atoms per second: a drop takes a second or two to grow
-    let fallen = 0;
-    let n = 0;
-    for (let i = 0; i < 20000; i++) {
-      const d = drip(drop, packet(flow * h), h);
-      if (d) {
-        fallen += d.N;
-        n++;
+  it('drops about DRIP.atoms-sized drops from a steady flow, slow or fast, conserving atoms', () => {
+    // a drop falls about when the rate times how long it takes to grow by `spread` reaches 1:
+    // at size + spread·ln(flow / spread), so a faster flow makes only slightly bigger drops
+    for (const [flow, lo, hi] of [
+      [1e6, 1.6e6, 1.9e6],
+      [4e6, 1.8e6, 2.1e6],
+    ]) {
+      const drop = new Vessel(Infinity);
+      let fallen = 0;
+      let n = 0;
+      let biggest = 0;
+      for (let i = 0; i < 20000; i++) {
+        const d = drip(drop, packet(flow * h), h);
+        if (d) {
+          fallen += d.N;
+          n++;
+          biggest = Math.max(biggest, d.N);
+        }
       }
+      expect(fallen + drop.N).toBe(20000 * flow * h);
+      expect(fallen / n).toBeGreaterThan(lo);
+      expect(fallen / n).toBeLessThan(hi);
+      // no long tail of drops that hang on and on
+      expect(biggest).toBeLessThan(2.6e6);
     }
-    expect(fallen + drop.N).toBe(20000 * flow * h);
-    // almost none fall before 1M atoms, and past 2M they fall within a second or so: 1M more, at this flow
-    expect(fallen / n).toBeGreaterThan(1.5e6);
-    expect(fallen / n).toBeLessThan(3.5e6);
   });
 });

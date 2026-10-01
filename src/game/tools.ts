@@ -20,14 +20,13 @@ export const TANK_H = 84;
 export const EXCHANGE_RATE = 2 * MAX_FLOW;
 /**
  * Below this flow, in atoms per sim second, an outlet drips instead of streaming: what leaves it gathers
- * in a hanging drop, which falls at random (see dropRate). 0.005 flask/s is about three 1.5M-atom drops
- * a second.
+ * in a hanging drop, which falls at random (see dropRate). 0.005 flask/s is about three drops a second.
  */
 export const DRIP_FLOW = 0.005 * CAP;
 /**
  * How hanging drops fall (see dropRate), editable from the Chemistry panel:
- * - atoms: the size at which a drop falls at half a drop per second;
- * - spread: how gradually the rate rises with size around that, in atoms.
+ * - atoms: the size at which a drop falls at one drop per second;
+ * - spread: how many atoms more it takes to make that e times as likely.
  */
 export const DRIP = { atoms: 1.5e6, spread: 0.12e6 };
 const DEFAULT_DRIP = { ...DRIP };
@@ -37,12 +36,13 @@ export function restoreDefaultDrip(): void {
 }
 
 /**
- * How often a hanging drop of `atoms` atoms falls, per sim second: a Poisson process whose rate rises
- * smoothly with size, 1 / (1 + e^(−(atoms − DRIP.atoms) / DRIP.spread)). By default that's about 0 below
- * 1M atoms (0.015) and about 1 above 2M (0.985).
+ * How often a hanging drop of `atoms` atoms falls, per sim second: a Poisson process whose rate,
+ * e^((atoms − DRIP.atoms) / DRIP.spread), rises without limit as the drop grows, so a drop falls soon
+ * after it passes DRIP.atoms however fast it's growing. By default that's 0.015 at 1M atoms, 1 at 1.5M
+ * and 64 at 2M.
  */
 export function dropRate(atoms: number): number {
-  return 1 / (1 + Math.exp(-(atoms - DRIP.atoms) / DRIP.spread));
+  return Math.exp((atoms - DRIP.atoms) / DRIP.spread);
 }
 
 /**

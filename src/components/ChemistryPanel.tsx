@@ -80,7 +80,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
             </tr>
             <tr className="group">
               <td colSpan={4}>
-                <b>Dripping</b> <span>a hanging drop falls at 1 / (1 + e^(−(atoms − size) / spread)) per second</span>
+                <b>Dripping</b> <span>a hanging drop falls at e^((atoms − size) / spread) per second</span>
               </td>
             </tr>
             <tr>
