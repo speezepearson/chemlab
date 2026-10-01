@@ -1,6 +1,6 @@
 import { THERMO, type ChemParams } from '../chem/params';
 import { NS, SPECIES } from '../chem/species';
-import type { Vessel } from './flask';
+import { roomFor, volume, type Vessel } from './flask';
 import type { ToolKind } from './tools';
 
 /**
@@ -16,6 +16,8 @@ export interface SaveState {
   tools: SavedTool[];
   scales: SavedScale[];
   hoses: SavedHose[];
+  /** Where each faucet joins its pipe, as fractions of the home area (see HOME_W); where they start if left out. */
+  faucets?: { x: number; y: number }[];
   chem?: { bonds: ChemParams['bonds']; swapA: number; heatCap: number };
 }
 
@@ -27,7 +29,7 @@ export interface SavedVessel {
 }
 
 export interface SavedFlask extends SavedVessel {
-  /** Resting place: across as a fraction of the stage width, up from the floor in scaled pixels. */
+  /** Resting place: across as a fraction of the home area's width (see HOME_W), up from the floor in world units. */
   x: number;
   up: number;
   glass: number;
@@ -40,6 +42,10 @@ export interface SavedTool {
   fy: number;
   valves: number[];
   tanks: SavedVessel[];
+  /** Per spout, the drop hanging there, if any. */
+  drops?: SavedVessel[];
+  /** A spectrometer's last reading, if it's been run (see spectrum). */
+  reading?: number[];
 }
 
 export interface SavedScale {
@@ -54,6 +60,8 @@ export interface SavedHose {
   inlet: { x: number; y: number };
   outlet: { x: number; y: number };
   funnel: SavedVessel;
+  /** The drop hanging at the outlet, if any. */
+  drop?: SavedVessel;
 }
 
 const BY_NAME = new Map(SPECIES.map((s) => [s.name, s.i]));
@@ -71,10 +79,9 @@ export function loadVessel(v: Vessel, saved: SavedVessel): void {
   for (const [name, count] of Object.entries(saved.n ?? {})) {
     const s = BY_NAME.get(name);
     if (s === undefined) continue;
-    const size = SPECIES[s].size;
-    const m = Math.max(0, Math.min(Math.round(Number(count) || 0), Math.floor((v.cap - v.N) / size)));
+    const m = Math.max(0, Math.min(Math.round(Number(count) || 0), Math.floor((v.cap - volume(v)) / roomFor(s))));
     v.n[s] = m;
-    v.N += m * size;
+    v.N += m * SPECIES[s].size;
   }
   v.Q = v.N > 0 ? Math.max(0, Math.round(Number(saved.Q) || 0)) : 0;
   v.label = typeof saved.label === 'string' ? saved.label : '';

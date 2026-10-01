@@ -3,6 +3,7 @@ import { temperature } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP } from '../game/config';
 import type { GameEngine } from '../game/engine';
+import { volume, volumeUnit } from '../game/flask';
 import { fmtCount } from '../game/format';
 import { DragNumber } from './DragNumber';
 
@@ -47,7 +48,7 @@ export function FlaskEditor({ engine, id, onClose }: { engine: GameEngine; id: s
         <span>T</span>
         <DragNumber typeable min={0} value={temperature(f)} onChange={(v) => edit(() => f.setTemperature(v))} />
         <span className="muted">
-          {fmtCount(f.N)} / {fmtCount(f.cap)} atoms
+          {fmtCount(volume(f))} / {fmtCount(f.cap)} {volumeUnit()}
         </span>
       </div>
       <table>
@@ -90,7 +91,7 @@ export function FlaskEditor({ engine, id, onClose }: { engine: GameEngine; id: s
           aria-label="add species"
           value=""
           onChange={(e) => edit(() => f.setMolecules(+e.target.value, ADDED))}
-          disabled={f.N >= f.cap}
+          disabled={volume(f) >= f.cap}
         >
           <option value="" disabled>
             + add species…

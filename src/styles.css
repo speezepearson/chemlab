@@ -46,6 +46,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .seg button:last-child{border-right:0}
 .seg button.on{background:var(--accent);color:var(--bg)}
 label.tog{display:inline-flex;gap:6px;align-items:center;cursor:pointer;user-select:none}
+label.tog + label.tog{margin-left:12px}
 details{position:relative}
 summary{cursor:pointer;color:var(--muted);list-style:none}
 summary::-webkit-details-marker{display:none}
@@ -73,6 +74,13 @@ details tr.group b{font-weight:500}
 details tr.group span{color:var(--muted);font-size:11px}
 details > div.wide{width:320px}
 details .actions{display:flex;gap:8px;margin-top:8px}
+details fieldset.dist{border:1px solid var(--line);border-radius:6px;margin:8px 0 0;padding:4px 8px 6px}
+details fieldset.dist legend{padding:0 4px}
+details fieldset.dist select{padding:1px 4px}
+details label.slider{display:flex;align-items:center;gap:6px}
+details label.slider span{width:64px;color:var(--muted)}
+details label.slider input{flex:1;min-width:0}
+details label.slider output{width:40px;text-align:right;font-variant-numeric:tabular-nums}
 .hint{width:100%;margin:0;color:var(--muted);font-size:12px}
 #stage{flex:1;position:relative;min-height:0;min-width:0}
 .main{flex:1;display:flex;min-height:0}
@@ -129,3 +137,45 @@ canvas{display:block;width:100%;height:100%;touch-action:none}
   position:absolute;left:50%;top:14px;transform:translateX(-50%);background:var(--accent);color:var(--bg);
   padding:8px 14px;border-radius:8px;font-weight:500;box-shadow:0 6px 20px var(--shadow)
 }
+
+/* ---------------- intro ---------------- */
+.intro{
+  position:fixed;inset:0;z-index:100;background:#000;color:#b9c4bd;
+  display:flex;flex-direction:column;overflow:auto;opacity:1;transition:opacity 1s ease;
+}
+.intro.leaving{opacity:0;pointer-events:none}
+.intro-start{
+  margin:auto;background:transparent;color:#b9c4bd;border:1px solid #4a554f;border-radius:4px;
+  font:16px ui-monospace,"SF Mono",Menlo,Consolas,monospace;padding:10px 28px;letter-spacing:.1em;
+}
+.intro-start:hover{color:#e3ebe5;border-color:#7d8a83}
+.intro-console{
+  flex:1;overflow:auto;padding:16px 20px;opacity:1;transition:opacity 1s ease;
+  font:12px/1.45 ui-monospace,"SF Mono",Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;
+}
+.intro.logFading .intro-console{opacity:0}
+.intro-console .lvl-info{color:#9fb0a6}
+.intro-console .lvl-warn{color:#e2c044}
+.intro-console .lvl-erro{color:#ff7a66}
+.intro-console .lvl-CRIT{color:#ff3b30;font-weight:700}
+@keyframes intro-in{from{opacity:0}to{opacity:1}}
+.intro-notice{
+  margin:auto;max-width:700px;width:calc(100% - 32px);box-sizing:border-box;margin-block:24px;
+  background:#f5f8fc;color:#1d2a3a;border-radius:14px;padding:22px 28px 18px;
+  font-size:14px;line-height:1.45;animation:intro-in 1s ease both;box-shadow:0 20px 60px rgba(80,140,255,.15);
+}
+.intro-notice .brand{color:#4a6fa5;font-weight:600;letter-spacing:.04em;font-size:13px;margin-bottom:10px}
+.intro-notice h2{font-size:20px;font-weight:600;margin:0 0 6px}
+.intro-notice p{margin:6px 0}
+.intro-notice pre{
+  font:12.5px/1.45 ui-monospace,"SF Mono",Menlo,Consolas,monospace;background:#e8eef6;border-radius:8px;
+  padding:8px 12px;margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere;
+}
+.intro-notice hr{border:0;border-top:1px solid #d3dbe6;margin:12px 0}
+.intro-notice .crew{min-height:1.5em;margin:4px 0}
+.intro-notice .ok{display:flex;justify-content:flex-end;margin-top:14px}
+.intro-notice .ok button{
+  background:#2f5f9e;color:#fff;border:0;border-radius:8px;padding:7px 26px;font-weight:600;font-size:15px;
+}
+.intro-notice .ok button:hover{background:#3a70b6}
+.replay{margin-left:auto}

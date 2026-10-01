@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { SPECIES, TARGET, singleOf } from '../chem/species';
-import { Flask, sustenance, transfer } from './flask';
+import { afterEach, describe, expect, it } from 'vitest';
+import { SPECIES, TARGET, singleOf, speciesIndex } from '../chem/species';
+import { Flask, VOLUME, Vessel, sustenance, transfer, volume } from './flask';
 import { separate } from './tools';
 
 const atomTotal = (f: Flask) => SPECIES.reduce((t, s) => t + f.n[s.i] * s.size, 0);
@@ -77,5 +77,32 @@ describe('whole numbers', () => {
     const f = new Flask({ x: 0, y: 0 }, 300);
     expect(f.setMolecules(TARGET, 12.6)).toBe(13);
     expect(whole(f)).toBe(true);
+  });
+});
+
+describe('volume by molecules', () => {
+  const RG = speciesIndex(['R', 'G', null], 1);
+  afterEach(() => {
+    VOLUME.molecules = false;
+  });
+
+  it('counts atoms by default, and molecules when switched', () => {
+    const v = new Vessel(Infinity);
+    v.setMolecules(RG, 100);
+    expect(volume(v)).toBe(200);
+    VOLUME.molecules = true;
+    expect(volume(v)).toBe(100);
+  });
+
+  it('fills, pours and caps by molecules', () => {
+    VOLUME.molecules = true;
+    const v = new Vessel(1000);
+    // a pair takes one molecule's room, so 1000 of them fit: 2000 atoms
+    expect(v.setMolecules(RG, 5000)).toBe(1000);
+    expect(v.N).toBe(2000);
+    const dst = new Vessel(300);
+    transfer(v, dst, 500);
+    expect(dst.n[RG]).toBe(300);
+    expect(volume(v)).toBe(700);
   });
 });

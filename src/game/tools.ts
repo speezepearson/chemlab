@@ -1,9 +1,9 @@
-import { GROUP_PRIMARY } from '../chem/atoms';
+import { GROUP_PRIMARY, type Atom } from '../chem/atoms';
 import { THERMO } from '../chem/params';
 import { roundRandom, temperature, type Fluid } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
 import { CAP } from './config';
-import { Vessel, transfer, type Point } from './flask';
+import { Vessel, roomFor, transfer, volume, type Point } from './flask';
 
 /** Capacity of each tank on a tool, in atoms. */
 export const TANK_CAP = 4 * CAP;
@@ -18,17 +18,115 @@ export const TANK_H = 84;
  * each get ε = 2/3, and at 0.25 flask/s each, ε = 8/9.
  */
 export const EXCHANGE_RATE = 2 * MAX_FLOW;
+/**
+ * Below this flow, in atoms per sim second, an outlet drips instead of streaming: what leaves it gathers
+ * in a hanging drop, which falls at random (see dropRate). 0.005 flask/s is about three drops a second.
+ */
+export const DRIP_FLOW = 0.005 * CAP;
+/**
+ * How hanging drops fall (see dropRate), editable from the Chemistry panel:
+ * - atoms: the size at which a drop falls at one drop per second;
+ * - spread: how many atoms more it takes to make that e times as likely.
+ */
+export const DRIP = { atoms: 1.5e6, spread: 0.12e6 };
+const DEFAULT_DRIP = { ...DRIP };
 
-export type ToolKind = 'dispenser' | 'exchanger' | 'separator';
+export function restoreDefaultDrip(): void {
+  Object.assign(DRIP, DEFAULT_DRIP);
+}
+
+/**
+ * How often a hanging drop of `atoms` atoms falls, per sim second: a Poisson process whose rate,
+ * e^((atoms − DRIP.atoms) / DRIP.spread), rises without limit as the drop grows, so a drop falls soon
+ * after it passes DRIP.atoms however fast it's growing. By default that's 0.015 at 1M atoms, 1 at 1.5M
+ * and 64 at 2M.
+ */
+export function dropRate(atoms: number): number {
+  return Math.exp((atoms - DRIP.atoms) / DRIP.spread);
+}
+
+/**
+ * One sim step of `h` seconds at an outlet, given what left it this step (`out`) and the drop hanging
+ * there. A fast enough flow streams: it carries off any drop still hanging and is returned as is.
+ * Otherwise it gathers in the drop, which falls with probability 1 − e^(−dropRate·h); then the fallen
+ * drop is returned. Returns null if nothing leaves the outlet this step.
+ */
+export function drip(drop: Vessel, out: Vessel | null, h: number, rand = Math.random): Vessel | null {
+  if (out && out.N >= DRIP_FLOW * h) {
+    transfer(drop, out, volume(drop));
+    return out;
+  }
+  if (out) transfer(out, drop, volume(out));
+  if (drop.N <= 0 || rand() >= 1 - Math.exp(-dropRate(drop.N) * h)) return null;
+  const fell = new Vessel(Infinity);
+  transfer(drop, fell, volume(drop));
+  return fell;
+}
+
+/** How much a splitter's funnel holds, in atoms: just a buffer, like a hose's. */
+export const FUNNEL_CAP = CAP / 4;
+/** How fast a splitter's funnel drains, in atoms per sim second, whatever its valve is set to. */
+export const FUNNEL_RATE = 2 * MAX_FLOW;
+
+/**
+ * The size sorter's screens, in the order fluid meets them: per screen, the share of the species of each size
+ * (1, 2, 3 atoms) still on the chute that falls through. Whatever passes both goes out the chute's end.
+ */
+export const SORTER_SCREENS: readonly (readonly number[])[] = [
+  [0.7, 0, 0],
+  [0.95, 0.7, 0],
+];
+
+/** How much a spectrometer's sample cup holds, in atoms: a twentieth of a flask. */
+export const SAMPLE_CAP = CAP / 20;
+/** Sim seconds into a spectrometer run at which each of its three hexagons lights up; the run ends with the last. */
+export const SCAN_LIGHTS = [3, 9, 21] as const;
+/**
+ * A spectrometer run's phases: each lasts until its hexagon lights (see SCAN_LIGHTS), rumbling and shaking at
+ * its own level, from 0 to 1, a step up from the last.
+ */
+export const SCAN_PHASES = [
+  { end: SCAN_LIGHTS[0], level: 0.3 },
+  { end: SCAN_LIGHTS[1], level: 0.6 },
+  { end: SCAN_LIGHTS[2], level: 1 },
+] as const;
+
+/** How hard a spectrometer `age` seconds into its run rumbles and shakes (see SCAN_PHASES): 0 outside a run. */
+export function scanLevel(age: number): number {
+  if (age < 0) return 0;
+  return SCAN_PHASES.find((ph) => age < ph.end)?.level ?? 0;
+}
+
+/** The order of a spectrometer hexagon's sextants, clockwise from the top. */
+export const SEXTANT_ATOMS: readonly Atom[] = ['G', 'C', 'B', 'M', 'R', 'Y'];
+
+export type ToolKind = 'dispenser' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'spectrometer' | 'reference';
+
+/** Tools there's only ever one of: not in the palette, and never put away. */
+export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectrometer', 'reference'];
 
 /**
  * A tool's geometry in local units: multiply by the stage scale and offset by
  * the tool's position, which is the top center of its bounding box.
- * Every tank is open at y = 0 and has its floor at y = TANK_H, and drains
- * through its own valve, straight below its center.
+ * Every tank is open at y = 0 and has its floor at y = tankH (TANK_H unless
+ * set), and drains through its own valve, straight below its center.
  */
 export interface ToolShape {
   tanks: { name: string; x0: number; x1: number }[];
+  /** Depth of the tanks, if not TANK_H. */
+  tankH?: number;
+  /** Capacity of each tank, in atoms, if not TANK_CAP. */
+  tankCap?: number;
+  /** Whether the tanks are funnels, narrowing to a stem, rather than flat-bottomed. */
+  funnel?: boolean;
+  /** Whether the tool has no valves to turn. */
+  noValve?: boolean;
+  /** Whether the tanks are sealed on top, so nothing can be poured or fall into them. */
+  sealed?: boolean;
+  /** Spout flow with a valve fully open, in atoms per sim second, if not MAX_FLOW. */
+  maxFlow?: number;
+  /** Text shown above the tool, one entry per line. */
+  label?: string[];
   /** Where fluid leaves the tool, in the order Tool.step returns it. */
   spouts: number[];
   /** Height of the valves, and of the tips of the spouts. */
@@ -64,6 +162,69 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: 126,
     box: { x0: -44, x1: 44, y0: -6, y1: 128 },
   },
+  splitter: {
+    tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
+    tankH: 30,
+    tankCap: FUNNEL_CAP,
+    funnel: true,
+    // as far apart as the separator's
+    spouts: [-36, 36],
+    valveY: 42,
+    spoutY: 84,
+    box: { x0: -40, x1: 40, y0: -6, y1: 86 },
+  },
+  sorter: {
+    // a funnel at the high end of the chute (see SORTER_CHUTE), which drops through two screens, then off its end
+    tanks: [{ name: 'funnel', x0: -90, x1: -46 }],
+    tankH: 30,
+    tankCap: FUNNEL_CAP,
+    funnel: true,
+    noValve: true,
+    // as far apart as the separator's
+    spouts: [-24, 48, 120],
+    valveY: 30,
+    spoutY: 104,
+    box: { x0: -94, x1: 126, y0: -6, y1: 106 },
+  },
+  reference: {
+    // a flask's worth, sealed, draining a trickle through its valve
+    tanks: [{ name: 'reference', x0: -20, x1: 20 }],
+    tankH: 70,
+    tankCap: CAP,
+    sealed: true,
+    maxFlow: 0.02 * MAX_FLOW,
+    label: ['cryostabilizer', 'reference'],
+    spouts: [0],
+    valveY: 84,
+    spoutY: 100,
+    box: { x0: -40, x1: 40, y0: -26, y1: 102 },
+  },
+  spectrometer: {
+    // a sample cup on a cabinet with a screen and a run button (see SPECTROMETER)
+    tanks: [{ name: 'sample', x0: -12, x1: 12 }],
+    tankH: 20,
+    tankCap: SAMPLE_CAP,
+    funnel: true,
+    noValve: true,
+    spouts: [],
+    valveY: 20,
+    spoutY: 20,
+    box: { x0: -72, x1: 72, y0: -6, y1: 106 },
+  },
+};
+
+/** The size sorter's chute, in local units: it slopes down from (x0, y0) to (x1, y1), where it turns down into the last spout. */
+export const SORTER_CHUTE = { x0: -80, x1: 120, y0: 44, y1: 68 };
+/** Height of the sorter's chute at x, in local units. */
+export const chuteY = (x: number) =>
+  SORTER_CHUTE.y0 + ((x - SORTER_CHUTE.x0) / (SORTER_CHUTE.x1 - SORTER_CHUTE.x0)) * (SORTER_CHUTE.y1 - SORTER_CHUTE.y0);
+
+/** The spectrometer's cabinet, screen, hexagons (centers and radius) and run button, in local units. */
+export const SPECTROMETER = {
+  body: { x0: -70, x1: 70, y0: 26, y1: 104 },
+  screen: { x0: -62, x1: 62, y0: 32, y1: 80 },
+  hexes: { xs: [-40, 0, 40], y: 56, r: 17 },
+  button: { x0: 28, x1: 62, y0: 84, y1: 98 },
 };
 
 /** Horizontal center of a tank, which is also where its valve is. */
@@ -71,16 +232,20 @@ export const tankX = (tk: { x0: number; x1: number }) => (tk.x0 + tk.x1) / 2;
 
 /**
  * The exchanger's two hoses, wound around each other along the axis between
- * the tanks, in local units. Three half-twists take each hose from the top of
+ * the tanks, in local units. Nine half-twists take each hose from the top of
  * one end to the bottom of the other, so a stream comes down from its tank,
  * winds across, and drops out the far side.
  */
-export const HELIX = { x0: -35, x1: 35, y: 110, r: 6, halfTwists: 3 };
+export const HELIX = { x0: -35, x1: 35, y: 110, r: 6, halfTwists: 9 };
 
 export const TOOL_NAMES: Record<ToolKind, string> = {
   dispenser: 'Dispenser',
   exchanger: 'Heat exchanger',
   separator: 'Separator',
+  splitter: 'Splitter',
+  sorter: 'Size sorter',
+  spectrometer: 'Mass spectrometer',
+  reference: 'Cryostabilizer reference',
 };
 
 /**
@@ -102,32 +267,54 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
  *   counterflow on the way to their spouts, trading heat but never mixing.
  * - A **separator** has one tank and two spouts, and splits what drains
  *   between them by color (see LEFT_SHARE).
+ * - A **splitter** has a small funnel that drains straight through (at
+ *   FUNNEL_RATE) to two spouts. Its valve doesn't open or close: it sets the
+ *   share that goes right, from 0 (all left) to 1 (all right).
+ * - A **size sorter** has a funnel like the splitter's, with no valve, draining down a chute through two
+ *   screens and off its end, each with a spout under it (see SORTER_SCREENS).
+ * - A **cryostabilizer reference** is a sealed flask's worth of the target with a valve that lets out at most
+ *   0.02 flask/s.
+ * - A **mass spectrometer** has a small sample cup and no spouts. Running it (see scan) destroys the sample
+ *   and shows its spectrum on a screen.
  *
  * Tools run on sim time, so a slow drip into a reacting flask gives the same
  * result at any sim speed.
  */
 export class Tool {
   readonly tanks: Vessel[];
-  /** Per tank: 0 (closed) to 1 (MAX_FLOW). Closed by default, so a tool doesn't drip on everything it's carried over. */
+  /**
+   * Per tank: 0 (closed) to 1 (MAX_FLOW). Closed by default, so a tool doesn't drip on everything it's carried
+   * over. A splitter's one valve is instead the share going right, half by default.
+   */
   readonly valves: number[];
   /** Per spout, what left it on the last step, for drawing the stream; null if nothing did. */
-  out: (Fluid | null)[];
+  out: (Vessel | null)[];
+  /** Per spout, the drop hanging there, gathering a flow too slow to stream (see drip). */
+  readonly drops: Vessel[];
+  /** Per spout, whether it streamed on the last step, rather than dripped. Set by whoever runs drip. */
+  streaming: boolean[];
   /** Per spout, the flow on the last step, in flasks per second. */
   flow: number[];
+  /** A spectrometer's last reading (see spectrum), shown on its screen; null until it's first run. */
+  reading: number[] | null = null;
+  /** Sim seconds since the spectrometer was last run (see SCAN_LIGHTS); Infinity if it isn't running. */
+  scanAge = Infinity;
 
   constructor(
     readonly kind: ToolKind,
     /** Stable across z-reordering; used to find a tank from the god-mode editor. */
     readonly id: number,
-    /** Position as a fraction of the stage's width and height, so it survives resizes. */
+    /** Position as fractions of the home area's width and height (see HOME_W), outside [0, 1] beyond it. */
     public fx: number,
     public fy: number,
     valves: readonly number[] = [],
   ) {
-    this.tanks = SHAPES[kind].tanks.map(() => new Vessel(TANK_CAP));
-    this.valves = this.tanks.map((_, k) => valves[k] ?? 0);
+    this.tanks = SHAPES[kind].tanks.map(() => new Vessel(SHAPES[kind].tankCap ?? TANK_CAP));
+    this.valves = this.tanks.map((_, k) => valves[k] ?? (kind === 'splitter' ? 0.5 : 0));
     this.out = this.shape.spouts.map(() => null);
     this.flow = this.shape.spouts.map(() => 0);
+    this.drops = this.shape.spouts.map(() => new Vessel(Infinity));
+    this.streaming = this.shape.spouts.map(() => false);
   }
 
   get shape(): ToolShape {
@@ -135,25 +322,82 @@ export class Tool {
   }
 
   /** Run for `h` sim seconds. Returns, per spout, the fluid that left it, or null if none did. */
-  step(h: number): (Fluid | null)[] {
+  step(h: number): (Vessel | null)[] {
+    if (this.kind === 'spectrometer') return (this.out = []);
+    const funnel = this.kind === 'splitter' || this.kind === 'sorter';
     let packets = this.tanks.map((tank, k) => {
       const p = new Vessel(Infinity);
-      transfer(tank, p, this.valves[k] * MAX_FLOW * h);
+      transfer(tank, p, funnel ? FUNNEL_RATE * h : this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW) * h);
       return p;
     });
     if (this.kind === 'exchanger') counterflow(packets[0], packets[1], EXCHANGE_RATE * h);
     if (this.kind === 'separator') packets = separate(packets[0]);
+    if (this.kind === 'splitter') packets = divide(packets[0], () => 1 - this.valves[0]);
+    if (this.kind === 'sorter') packets = sieve(packets[0]);
     this.out = packets.map((p) => (p.N > 0 ? p : null));
-    this.flow = packets.map((p) => p.N / (MAX_FLOW * h));
+    this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
     return this.out;
   }
+
+  /** Whether a spectrometer run is under way, with hexagons still to light. */
+  get scanning(): boolean {
+    return this.scanAge < SCAN_LIGHTS[SCAN_LIGHTS.length - 1];
+  }
+
+  /**
+   * Run a spectrometer: read its sample's spectrum, destroy the sample, and start the hexagons lighting up
+   * (see SCAN_LIGHTS). Does nothing, returning false, while a run is under way.
+   */
+  scan(): boolean {
+    if (this.kind !== 'spectrometer' || this.scanning) return false;
+    const cup = this.tanks[0];
+    this.reading = spectrum(cup, cup.cap);
+    cup.n.fill(0);
+    cup.N = 0;
+    cup.Q = 0;
+    this.scanAge = 0;
+    return true;
+  }
+}
+
+/**
+ * What a spectrometer shows for a sample in a cup holding `cap`: for each molecule size w (1–3 atoms) and
+ * atom color c, in SEXTANT_ATOMS order, at index (w − 1)·6 + c, the share of the cup that molecules of size
+ * w with a c atom in them fill (by volume, see VOLUME). So a full cup of R lights 1R fully, and of R–G both
+ * 2R and 2G fully; a half-full cup reads half as bright.
+ */
+export function spectrum(f: Fluid, cap: number): number[] {
+  const out = new Array<number>(18).fill(0);
+  for (let s = 0; s < NS; s++) {
+    if (!f.n[s]) continue;
+    const sp = SPECIES[s];
+    for (const a of sp.atoms) if (a) out[(sp.size - 1) * 6 + SEXTANT_ATOMS.indexOf(a)] += (f.n[s] * roomFor(s)) / cap;
+  }
+  return out;
+}
+
+/** Pass a fluid over the size sorter's screens (see SORTER_SCREENS): what falls through each, then what's left. */
+export function sieve(f: Vessel): Vessel[] {
+  const out: Vessel[] = [];
+  let rest = f;
+  for (const screen of SORTER_SCREENS) {
+    const [through, over] = divide(rest, (s) => screen[SPECIES[s].size - 1]);
+    out.push(through);
+    rest = over;
+  }
+  return [...out, rest];
 }
 
 /** Split a fluid between the separator's left and right outlets by LEFT_SHARE, in whole molecules, heat in proportion. */
 export function separate(f: Fluid): [Vessel, Vessel] {
+  return divide(f, (s) => LEFT_SHARE[s]);
+}
+
+/** Split a fluid into left and right, sending `leftShare(s)` of species s left, in whole molecules, heat in proportion. */
+export function divide(f: Fluid, leftShare: (s: number) => number): [Vessel, Vessel] {
   const out: [Vessel, Vessel] = [new Vessel(Infinity), new Vessel(Infinity)];
   for (let s = 0; s < NS; s++) {
-    const left = Math.min(f.n[s], roundRandom(f.n[s] * LEFT_SHARE[s]));
+    const left = Math.min(f.n[s], roundRandom(f.n[s] * leftShare(s)));
     out[0].n[s] = left;
     out[1].n[s] = f.n[s] - left;
     out[0].N += left * SPECIES[s].size;
@@ -198,6 +442,8 @@ export interface Mouth {
   x0: number;
   x1: number;
   y: number;
+  /** Where whatever overflows the vessel spills over its lip, to fall onto whatever's below; the sink if left out. */
+  rim?: Point;
 }
 
 /** The first mouth that something falling from `p` lands in, or null if it falls to the floor. */
@@ -220,22 +466,26 @@ export const PUMP_RATE = 2 * MAX_FLOW;
 export class Hose {
   readonly funnel = new Vessel(HOSE_CAP);
   /** What left the outlet on the last step, for drawing; null if nothing did. */
-  out: Fluid | null = null;
+  out: Vessel | null = null;
+  /** The drop hanging at the outlet, gathering a flow too slow to stream (see drip). */
+  readonly drop = new Vessel(Infinity);
+  /** Whether the outlet streamed on the last step, rather than dripped. Set by whoever runs drip. */
+  streaming = false;
   /** The flow on the last step, in flasks per second. */
   flow = 0;
 
   constructor(
-    /** The funnel's mouth and the outlet's tip, as fractions of the stage's width and height. */
+    /** The funnel's mouth and the outlet's tip, as fractions of the home area's width and height (see HOME_W). */
     public inlet: Point,
     public outlet: Point,
   ) {}
 
   /** Run for `h` sim seconds. Returns what left the outlet, or null if nothing did. */
-  step(h: number): Fluid | null {
+  step(h: number): Vessel | null {
     const p = new Vessel(Infinity);
     transfer(this.funnel, p, PUMP_RATE * h);
     this.out = p.N > 0 ? p : null;
-    this.flow = p.N / (MAX_FLOW * h);
+    this.flow = volume(p) / (MAX_FLOW * h);
     return this.out;
   }
 }

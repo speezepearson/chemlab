@@ -31,14 +31,16 @@ export interface ChemParams {
  * that, so this one number turns every fluid's heat into a temperature.
  */
 export const THERMO = { heatCap: 3.0 };
+const DEFAULT_HEAT_CAP = THERMO.heatCap;
 
 export function defaultChemParams(): ChemParams {
   const bonds: Record<string, Omit<BondParams, 'A'> & { A?: number }> = {
     RG: { E: 100, Ea: 2 }, RM: { E: 3, Ea: 3 }, CG: { E: 2, Ea: 4 }, CM: { E: 5, Ea: 2 },
     RY: { E: 4, Ea: 1 }, CY: { E: 1, Ea: 2 }, GY: { E: 4, Ea: 1 }, MY: { E: 2, Ea: 2 },
-    // blue: strong bonds that essentially never form directly
-    RB: { E: 9, Ea: 1, A: 0.002 }, CB: { E: 7, Ea: 1, A: 0.002 },
-    GB: { E: 9, Ea: 1, A: 0.002 }, MB: { E: 6, Ea: 1, A: 0.002 },
+    // blue: uphill (E < 0), and never formed or broken directly (A = 0), so
+    // blue only enters or leaves a molecule by swapping places with yellow
+    RB: { E: -1, Ea: 1, A: 0 }, CB: { E: -1, Ea: 1, A: 0 },
+    GB: { E: -1, Ea: 1, A: 0 }, MB: { E: -1, Ea: 1, A: 0 },
   };
   return {
     bonds: Object.fromEntries(
@@ -46,4 +48,12 @@ export function defaultChemParams(): ChemParams {
     ),
     swapA: 1.0,
   };
+}
+
+/** Put the default chemistry back in place: every bond, the swap prefactor, and the heat capacity. */
+export function restoreDefaultChem(params: ChemParams): void {
+  const d = defaultChemParams();
+  params.bonds = d.bonds;
+  params.swapA = d.swapA;
+  THERMO.heatCap = DEFAULT_HEAT_CAP;
 }

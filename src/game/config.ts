@@ -7,3 +7,10 @@ export const GOAL_ATOMS = 2 * CAP;
 export const GOAL_PURITY = 0.99;
 /** Amounts of fluid below this many atoms count as nothing: too little to see or pour. */
 export const TRACE = CAP * 1e-6;
+/**
+ * The world is laid out in world units (a flask is 70 tall). It runs on forever left, right and up, above a
+ * floor (the sink). Its home area, HOME_W × HOME_H on the floor with its left edge at x = 0, holds the shelf
+ * of flasks and, to start with, the faucets along its top; it's where the view starts.
+ */
+export const HOME_W = 1000;
+export const HOME_H = 620;

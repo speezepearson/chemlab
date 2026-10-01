@@ -63,7 +63,7 @@ export function InfoPanel({ info }: { info: Inspection }) {
       <div className="hd">
         <span>T {info.T.toFixed(2)}</span>
         <span>
-          {fmtCount(info.N)} / {fmtCount(info.cap)} atoms
+          {fmtCount(info.volume)} / {fmtCount(info.cap)} {info.unit}
         </span>
       </div>
       <div className="row">

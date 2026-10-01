@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { SPECIES, singleOf } from '../chem/species';
+import { SPECIES, TARGET, singleOf, speciesIndex } from '../chem/species';
 import { CAP } from './config';
 import { heatAt, temperature } from '../chem/reactions';
 import { Vessel } from './flask';
-import { EXCHANGE_RATE, HOSE_CAP, Hose, MAX_FLOW, PUMP_RATE, TANK_CAP, Tool, counterflow, mouthBelow, separate, type Mouth } from './tools';
+import {
+  DRIP_FLOW, EXCHANGE_RATE, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
+  SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
+} from './tools';
 
 const R = singleOf('R');
 const G = singleOf('G');
@@ -48,6 +51,159 @@ describe('dispenser', () => {
 
   it('holds several flasks', () => {
     expect(TANK_CAP).toBeGreaterThanOrEqual(3 * CAP);
+  });
+});
+
+describe('splitter', () => {
+  function run(valve: number | undefined) {
+    const sp = new Tool('splitter', 0, 0, 0, valve === undefined ? [] : [valve]);
+    filled(sp.tanks[0], R, FUNNEL_CAP, 4);
+    const [l, r] = sp.step(0.05);
+    return { sp, l, r };
+  }
+
+  it('drains its funnel at FUNNEL_RATE, whatever the valve says', () => {
+    for (const v of [0, 0.3, 1]) {
+      const { sp, l, r } = run(v);
+      const out = (l?.N ?? 0) + (r?.N ?? 0);
+      expect(out / (FUNNEL_RATE * 0.05)).toBeCloseTo(1, 6);
+      expect(out + sp.tanks[0].N).toBe(FUNNEL_CAP);
+    }
+  });
+
+  it('sends everything left with the valve at 0, and everything right at 1', () => {
+    expect(run(0).r).toBeNull();
+    expect(run(1).l).toBeNull();
+  });
+
+  it('starts split evenly, and splits in proportion to the valve, heat with it', () => {
+    const even = run(undefined);
+    expect(even.sp.valves[0]).toBe(0.5);
+    expect(even.l!.N / even.r!.N).toBeCloseTo(1, 3);
+    const { l, r } = run(0.25);
+    expect(r!.N / (l!.N + r!.N)).toBeCloseTo(0.25, 3);
+    expect(temperature(l!)).toBeCloseTo(4, 3);
+    expect(temperature(r!)).toBeCloseTo(4, 3);
+  });
+
+  it('holds only a little', () => {
+    expect(new Tool('splitter', 0, 0, 0).tanks[0].cap).toBe(FUNNEL_CAP);
+  });
+});
+
+describe('cryostabilizer reference', () => {
+  it('holds a flask, and lets out at most 0.02 flask/s through its valve', () => {
+    const ref = new Tool('reference', 0, 0, 0, [1]);
+    expect(ref.tanks[0].cap).toBe(CAP);
+    expect(ref.shape.sealed).toBe(true);
+    filled(ref.tanks[0], TARGET, 0.4 * CAP, 1);
+    const out = ref.step(0.5)[0]!;
+    expect(out.N / (0.02 * MAX_FLOW * 0.5)).toBeCloseTo(1, 3);
+    ref.valves[0] = 0.5;
+    expect(ref.step(0.5)[0]!.N / (0.01 * MAX_FLOW * 0.5)).toBeCloseTo(1, 3);
+  });
+});
+
+describe('size sorter', () => {
+  const RG = speciesIndex(['R', 'G', null], 1);
+
+  it('takes 70% of singles through the first screen, 95% of the rest and 70% of pairs through the second', () => {
+    const so = new Tool('sorter', 0, 0, 0);
+    const f = so.tanks[0];
+    f.setMolecules(R, 6e7);
+    f.setMolecules(RG, 3e7);
+    f.setMolecules(TARGET, 2e7);
+    f.setTemperature(3);
+    const before = { N: f.N, Q: f.Q };
+    const outs = so.step(0.02);
+    expect(outs).toHaveLength(3);
+    const [a, b, c] = outs.map((v) => v!);
+    const drained = { R: a.n[R] + b.n[R] + c.n[R], RG: a.n[RG] + b.n[RG] + c.n[RG] };
+    expect(a.n[R] / drained.R).toBeCloseTo(0.7, 3);
+    expect(b.n[R] / drained.R).toBeCloseTo(0.3 * 0.95, 3);
+    expect(c.n[R] / drained.R).toBeCloseTo(0.3 * 0.05, 3);
+    expect([a.n[RG], b.n[RG] / drained.RG, c.n[RG] / drained.RG].map((x) => +x.toFixed(3))).toEqual([0, 0.7, 0.3]);
+    expect([a.n[TARGET], b.n[TARGET]]).toEqual([0, 0]);
+    expect(c.n[TARGET]).toBeGreaterThan(0);
+    // nothing made or lost, and the heat goes with the atoms
+    expect(a.N + b.N + c.N + f.N).toBe(before.N);
+    expect(a.Q + b.Q + c.Q + f.Q).toBe(before.Q);
+    for (const v of [a, b, c]) expect(temperature(v)).toBeCloseTo(3, 2);
+  });
+
+  it('drains its funnel at FUNNEL_RATE, with no valve', () => {
+    const so = new Tool('sorter', 0, 0, 0);
+    filled(so.tanks[0], R, FUNNEL_CAP, 4);
+    const out = so.step(0.05).reduce((t, v) => t + (v?.N ?? 0), 0);
+    expect(out / (FUNNEL_RATE * 0.05)).toBeCloseTo(1, 6);
+    expect(so.shape.noValve).toBe(true);
+  });
+});
+
+describe('mass spectrometer', () => {
+  const RG = speciesIndex(['R', 'G', null], 1);
+  const B = singleOf('B');
+  const at = (size: number, atom: 'R' | 'G' | 'B' | 'C' | 'M' | 'Y') => (size - 1) * 6 + SEXTANT_ATOMS.indexOf(atom);
+
+  const CUP = 1e7;
+  const read = (fill: [number, number][]) => {
+    const v = new Vessel(CUP);
+    for (const [s, atoms] of fill) v.setMolecules(s, atoms / SPECIES[s].size);
+    return spectrum(v, CUP);
+  };
+
+  it("reads the share of the cup each size's molecules with each color fill", () => {
+    // a full cup: 20% R, 20% G, 30% B and 30% R–G
+    const r = read([[R, 0.2 * CUP], [G, 0.2 * CUP], [B, 0.3 * CUP], [RG, 0.3 * CUP]]);
+    const want = new Array(18).fill(0);
+    want[at(1, 'R')] = 0.2;
+    want[at(1, 'G')] = 0.2;
+    want[at(1, 'B')] = 0.3;
+    want[at(2, 'R')] = 0.3;
+    want[at(2, 'G')] = 0.3;
+    r.forEach((x, i) => expect(x).toBeCloseTo(want[i], 9));
+  });
+
+  it('lights a full cup of one species fully in each of its sextants', () => {
+    expect(read([[R, CUP]])[at(1, 'R')]).toBe(1);
+    const rg = read([[RG, CUP]]);
+    expect([rg[at(2, 'R')], rg[at(2, 'G')]]).toEqual([1, 1]);
+    const t = read([[TARGET, CUP]]);
+    // as near full as whole triangles get
+    for (const a of ['R', 'G', 'B'] as const) expect(t[at(3, a)]).toBeCloseTo(1, 6);
+  });
+
+  it('reads a half-full cup half as bright, and an empty one dark', () => {
+    expect(read([[R, CUP]])[at(1, 'R')]).toBe(2 * read([[R, 0.5 * CUP], [G, 0.1 * CUP]])[at(1, 'R')]);
+    expect(spectrum(new Vessel(CUP), CUP).every((x) => x === 0)).toBe(true);
+  });
+
+  it('destroys its sample when run, and ignores the button until the run is over', () => {
+    const sp = new Tool('spectrometer', 0, 0, 0);
+    expect(sp.tanks[0].cap).toBe(SAMPLE_CAP);
+    expect(sp.step(0.1)).toEqual([]);
+    filled(sp.tanks[0], TARGET, SAMPLE_CAP / 2, 5);
+    expect(sp.scan()).toBe(true);
+    expect([sp.tanks[0].N, sp.tanks[0].Q]).toEqual([0, 0]);
+    // half full of the triangle
+    expect(sp.reading![2 * 6 + SEXTANT_ATOMS.indexOf('R')]).toBeCloseTo(0.5, 6);
+    sp.scanAge = SCAN_LIGHTS[2] - 0.01;
+    expect(sp.scan()).toBe(false);
+    sp.scanAge = SCAN_LIGHTS[2];
+    expect(sp.scanning).toBe(false);
+    expect(sp.scan()).toBe(true);
+    expect(sp.reading!.every((x) => x === 0)).toBe(true);
+  });
+
+  it('rumbles a step harder each phase, steady within one, then stops', () => {
+    const levels = [0, 2.9, 3, 8.9, 9, 20.9].map(scanLevel);
+    expect(levels[1]).toBe(levels[0]);
+    expect(levels[3]).toBe(levels[2]);
+    expect(levels[5]).toBe(levels[4]);
+    expect(levels[2]).toBeGreaterThan(levels[1]);
+    expect(levels[4]).toBeGreaterThan(levels[3]);
+    expect(scanLevel(SCAN_LIGHTS[2])).toBe(0);
+    expect(scanLevel(Infinity)).toBe(0);
   });
 });
 
@@ -169,5 +325,67 @@ describe('hose', () => {
     expect(temperature(out)).toBe(2);
     expect(hose.funnel.N / (HOSE_CAP - PUMP_RATE * 0.01)).toBeCloseTo(1, 6);
     expect(PUMP_RATE).toBeGreaterThan(MAX_FLOW);
+  });
+});
+
+describe('dripping', () => {
+  const packet = (atoms: number) => filled(new Vessel(Infinity), R, atoms, 2);
+  const h = 0.02;
+
+  it('falls at about 0 per second below 1M atoms, once a second at 1.5M, and ever faster beyond', () => {
+    expect(dropRate(1e6)).toBeLessThan(0.02);
+    expect(dropRate(1.5e6)).toBeCloseTo(1);
+    expect(dropRate(2e6)).toBeGreaterThan(50);
+    expect(dropRate(5e6)).toBeGreaterThan(1e9);
+  });
+
+  it('streams a fast flow straight through, taking any hanging drop along', () => {
+    const drop = packet(1e5);
+    const out = packet(DRIP_FLOW * h);
+    expect(drip(drop, out, h)).toBe(out);
+    expect(out.N).toBe(DRIP_FLOW * h + 1e5);
+    expect(drop.N).toBe(0);
+  });
+
+  it('gathers a slow flow in the drop, which falls whole when its luck runs out', () => {
+    const drop = new Vessel(Infinity);
+    // never falls: the drop just grows (by less than DRIP_FLOW·h a step, so it drips)
+    expect(drip(drop, packet(5e4), h, () => 0.999999)).toBeNull();
+    expect(drip(drop, packet(5e4), h, () => 0.999999)).toBeNull();
+    expect(drop.N).toBe(1e5);
+    expect(temperature(drop)).toBeCloseTo(2, 6);
+    // always falls: out comes everything, this step's flow included
+    const fell = drip(drop, packet(5e4), h, () => 0)!;
+    expect(fell.N).toBe(1.5e5);
+    expect(drop.N).toBe(0);
+    // nothing hanging, nothing arriving: nothing falls
+    expect(drip(drop, null, h, () => 0)).toBeNull();
+  });
+
+  it('drops about DRIP.atoms-sized drops from a steady flow, slow or fast, conserving atoms', () => {
+    // a drop falls about when the rate times how long it takes to grow by `spread` reaches 1:
+    // at size + spread·ln(flow / spread), so a faster flow makes only slightly bigger drops
+    for (const [flow, lo, hi] of [
+      [1e6, 1.6e6, 1.9e6],
+      [4e6, 1.8e6, 2.1e6],
+    ]) {
+      const drop = new Vessel(Infinity);
+      let fallen = 0;
+      let n = 0;
+      let biggest = 0;
+      for (let i = 0; i < 20000; i++) {
+        const d = drip(drop, packet(flow * h), h);
+        if (d) {
+          fallen += d.N;
+          n++;
+          biggest = Math.max(biggest, d.N);
+        }
+      }
+      expect(fallen + drop.N).toBe(20000 * flow * h);
+      expect(fallen / n).toBeGreaterThan(lo);
+      expect(fallen / n).toBeLessThan(hi);
+      // no long tail of drops that hang on and on
+      expect(biggest).toBeLessThan(2.6e6);
+    }
   });
 });

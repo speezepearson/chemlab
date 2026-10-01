@@ -18,12 +18,6 @@ function fluid(contents: [number, number][], T = 1): Fluid {
   return { n, N, Q: heatAt(T, N) };
 }
 
-function mix(a: Fluid, b: Fluid): Fluid {
-  const n = new Float64Array(NS);
-  for (let s = 0; s < NS; s++) n[s] = a.n[s] + b.n[s];
-  return { n, N: a.N + b.N, Q: a.Q + b.Q };
-}
-
 const single = (a: Atom, count: number): [number, number] => [singleOf(a), count];
 
 function run(net: ReactionNetwork, f: Fluid, seconds: number) {
@@ -71,23 +65,30 @@ describe('reactions', () => {
     expect(temperature(f)).toBeGreaterThan(1.3);
   });
 
-  it('makes the target by building △RGY and washing it with room-temperature blue', () => {
-    const f = fluid([single('R', 50), single('G', 50)]);
-    run(net, f, 60);
-    // forming R–G is very exothermic, so cool it back down (in the game, with the heat exchanger)
-    expect(temperature(f)).toBeGreaterThan(10);
-    f.Q = heatAt(1, f.N);
-    const withY = mix(f, fluid([single('Y', 50)]));
-    run(net, withY, 120);
-    const RGY = speciesIndex(['R', 'G', 'Y'], 7);
-    expect(withY.n[RGY]).toBeGreaterThan(20 * M);
+  it('never forms or breaks a blue bond directly, even white-hot', () => {
+    const f = fluid([[speciesIndex(['R', 'G', null], 1), 50], single('B', 50), [TARGET, 10]], 50);
+    const blueBonds = () =>
+      SPECIES.reduce((t, s) => t + f.n[s.i] * [2, 4].filter((b) => s.mask & b && s.atoms[2] === 'B').length, 0);
+    run(net, f, 10);
+    // the target's R–G bond can break at this heat, but with no yellow around, blue can't move
+    expect(blueBonds()).toBe(20 * M);
+    expect(f.n[singleOf('B')]).toBe(50 * M);
+  });
 
-    const washed = mix(withY, fluid([single('B', 150)]));
-    run(net, washed, 120);
-    expect(washed.n[TARGET]).toBeGreaterThan(30 * M);
-    // nearly all of the yellow has been displaced from molecules
-    const boundY = SPECIES.filter((s) => s.size > 1 && s.atoms[2] === 'Y').reduce((t, s) => t + washed.n[s.i], 0);
-    expect(boundY).toBeLessThan(5 * M);
+  it('swaps blue into △RGY in place of its yellow, uphill', () => {
+    const RGY = speciesIndex(['R', 'G', 'Y'], 7);
+    const f = fluid([[RGY, 50], single('B', 150)], 10);
+    run(net, f, 30);
+    expect(f.n[TARGET]).toBeGreaterThan(0.1 * M);
+    expect(f.n[singleOf('Y')]).toBeGreaterThan(0.1 * M);
+  });
+
+  it('gives the target back to any yellow it meets, downhill', () => {
+    const f = fluid([[TARGET, 50], single('Y', 10)]);
+    run(net, f, 30);
+    // each yellow undoes at least one; the heat that releases can free more yellow from the △RGY it makes
+    expect(f.n[TARGET]).toBeLessThanOrEqual(40 * M);
+    expect(f.n[singleOf('B')]).toBeGreaterThanOrEqual(10 * M);
   });
 });
 
@@ -106,7 +107,7 @@ describe('equilibrium', () => {
     const n = equilibrium(want, net.U, 0.2);
     expect(n.every(Number.isFinite)).toBe(true);
     atomCounts({ n, N: 1, Q: 0 }).forEach((v, a) => expect(v).toBeCloseTo(want[a], 12));
-    expect(n[TARGET]).toBeCloseTo(0.00005, 7); // a few parts per billion stay as R–B and G–B
+    expect(n[TARGET]).toBeLessThan(1e-8); // blue bonds are uphill, so the traces stay almost all unbound
   });
 
   it('satisfies detailed balance for bond formation', () => {
@@ -118,9 +119,9 @@ describe('equilibrium', () => {
   });
 
   it('favors the most stable shape of a triple', () => {
-    // △RMB has all three bonds; every other arrangement of R, M and B has fewer
-    const n = equilibrium(atoms({ R: 1, M: 1, B: 1 }), net.U, 1);
-    const ring = speciesIndex(['R', 'M', 'B'], 7);
+    // △RMY has all three bonds; every other arrangement of R, M and Y has fewer
+    const n = equilibrium(atoms({ R: 1, M: 1, Y: 1 }), net.U, 1);
+    const ring = speciesIndex(['R', 'M', 'Y'], 7);
     expect(n[ring]).toBeGreaterThan(0.5);
   });
 });
