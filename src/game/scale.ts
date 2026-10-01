@@ -45,7 +45,7 @@ export class Scale {
   tare = 0;
 
   constructor(
-    /** Position of the platform's top center, as a fraction of the stage's width and height. */
+    /** Position of the platform's top center, as fractions of the home area's width and height (see HOME_W). */
     public fx: number,
     public fy: number,
   ) {}

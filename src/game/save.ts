@@ -27,7 +27,7 @@ export interface SavedVessel {
 }
 
 export interface SavedFlask extends SavedVessel {
-  /** Resting place: across as a fraction of the stage width, up from the floor in scaled pixels. */
+  /** Resting place: across as a fraction of the home area's width (see HOME_W), up from the floor in world units. */
   x: number;
   up: number;
   glass: number;

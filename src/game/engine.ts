@@ -1,6 +1,6 @@
 import { temperature, type Fluid, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
-import { CAP, FILL_RATE, GOAL_ATOMS, N_FLASKS, POUR_RATE, TRACE } from './config';
+import { CAP, FILL_RATE, GOAL_ATOMS, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE, WORLD_SCALE } from './config';
 import { FAUCETS, faucetOutput, faucetTarget, type Faucet } from './faucets';
 import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
 import { FLASK_PATH_DATA, fillLevel, tiltedOutline } from './flaskShape';
@@ -66,14 +66,19 @@ const GLOW_STOPS = 32;
 const POUR_ANG = Math.PI * 0.61;
 /** How far below a faucet something can be and still get filled, in local units. */
 const FAUCET_REACH = 24;
-/** Distance between neighboring faucets, as a fraction of the stage's width. */
+/** Distance between neighboring faucets, as a fraction of the home area's width. */
 const FAUCET_SPACING = 0.12;
 /** Half-width of the part of a flask's mouth that catches a falling stream, in local units. */
 const FLASK_CATCH = 14;
-/** How close to a valve, in pixels, the pointer can be before it stops turning the lever. */
+/** How close to a valve, in world units, the pointer can be before it stops turning the lever. */
 const VALVE_DEADZONE = 20;
-/** Pixels of right-click drag (right or up opens) to turn a valve from closed to fully open. */
 const SINK_H = 16;
+/** Width of a stream flowing one flask per second, in world units; it goes as the square root of the flow. */
+const STREAM_WIDTH = 4.5;
+/** The most the camera zooms in, in screen pixels per world unit. */
+const MAX_ZOOM = 4;
+/** How much a pixel of scroll zooms: the zoom is multiplied by e^(−this·Δy). */
+const ZOOM_PER_PX = 0.0015;
 /** The separator's splitter, below its valve, in local units. */
 const SEP_BODY = { x0: -42, x1: 42, y0: 100, y1: 112 };
 
@@ -85,10 +90,24 @@ export class GameEngine {
   god = true;
 
   private ctx: CanvasRenderingContext2D;
-  private W = 0;
-  private H = 0;
-  private S = 1;
+  /**
+   * The world's size, in world units. Everything is laid out, hit-tested and drawn in world units (S is
+   * the size of a tool's local unit in them), and the camera maps them to the screen.
+   */
+  private readonly W = HOME_W * WORLD_SCALE;
+  private readonly H = HOME_H * WORLD_SCALE;
+  private readonly S = 1;
   private dpr = 1;
+  /** The canvas's size, in CSS pixels. */
+  private viewW = 0;
+  private viewH = 0;
+  /** The camera: screen pixels per world unit, and the world point at the canvas's top left. */
+  private zoom = 1;
+  private cam: Point = { x: 0, y: 0 };
+  /** Whether the player has zoomed or panned; until then, resizing refits the home area. */
+  private camMoved = false;
+  /** Panning by dragging the background: where it started on screen, and the camera then. */
+  private panDrag: { start: Point; cam: Point } | null = null;
   private L: Layout = { pipeY: 0, spoutY: 0, faucets: [], benchY: 0, floorY: 0, homes: [] };
   private flasks: Flask[] = [];
   /** Back to front. */
@@ -130,6 +149,7 @@ export class GameEngine {
     this.ctx = canvas.getContext('2d')!;
     this.resizeObserver = new ResizeObserver(() => this.layout());
     this.resizeObserver.observe(stage);
+    this.layoutWorld();
     this.layout();
     this.reset();
     this.bindInput();
@@ -201,11 +221,11 @@ export class GameEngine {
 
   /** Everything on the bench, plus the chemistry parameters, for saving. */
   snapshot(): SaveState {
-    const { W, S, L } = this;
+    const { S, L } = this;
     return {
       v: 1,
       preset: this.preset.id,
-      flasks: this.flasks.map((f) => ({ ...saveVessel(f), x: f.home.x / W, up: (L.floorY - f.home.y) / S, glass: f.glass })),
+      flasks: this.flasks.map((f) => ({ ...saveVessel(f), x: f.home.x / HOME_W, up: (L.floorY - f.home.y) / S, glass: f.glass })),
       tools: this.tools.map((t) => ({
         kind: t.kind, id: t.id, fx: t.fx, fy: t.fy, valves: [...t.valves], tanks: t.tanks.map(saveVessel),
       })),
@@ -220,13 +240,13 @@ export class GameEngine {
 
   /** Replace the bench with a saved one. `preset` is what Reset will go back to afterwards. */
   restore(s: SaveState, preset: Preset): void {
-    const { W, S, L } = this;
+    const { S, L } = this;
     this.preset = preset;
     loadChem(this.chem.params, s.chem);
     this.chem.rebuild();
     L.faucets = L.faucets.map((fa) => ({ ...fa, output: faucetOutput(fa, this.chem.U) }));
     this.flasks = s.flasks.map((sf, i) => {
-      const f = new Flask(this.clampRest({ x: sf.x * W, y: L.floorY - sf.up * S }), CAP);
+      const f = new Flask(this.clampRest({ x: sf.x * HOME_W, y: L.floorY - sf.up * S }), CAP);
       f.glass = Number.isFinite(sf.glass) ? sf.glass : glassGrams(i);
       loadVessel(f, sf);
       return f;
@@ -262,10 +282,10 @@ export class GameEngine {
   /** Make a new flask, scale or tool under the pointer (in client coordinates) and start carrying it. */
   spawn(kind: 'flask' | 'scale' | 'hose' | ToolKind, clientX: number, clientY: number): void {
     const r = this.canvas.getBoundingClientRect();
-    const p = (this.pointer = { x: clientX - r.left, y: clientY - r.top });
-    const { S, W, H } = this;
+    const p = (this.pointer = this.toWorld({ x: clientX - r.left, y: clientY - r.top }));
+    const { S } = this;
     if (kind === 'hose') {
-      const h = new Hose({ x: p.x / W, y: p.y / H }, { x: (p.x + 60 * S) / W, y: (p.y + 30 * S) / H });
+      const h = new Hose(this.toFrac(p), this.toFrac({ x: p.x + 60 * S, y: p.y + 30 * S }));
       this.hoses.push(h);
       this.hoseDrag = { hose: h, end: 'both', gap: { x: 60 * S, y: 30 * S } };
     } else if (kind === 'flask') {
@@ -274,11 +294,13 @@ export class GameEngine {
       this.flasks.push(f);
       this.drag = { flask: f, zone: null, off: { x: 0, y: 35 * S } };
     } else if (kind === 'scale') {
-      const sc = new Scale(p.x / W, p.y / H);
+      const at = this.toFrac(p);
+      const sc = new Scale(at.x, at.y);
       this.scales.push(sc);
       this.scaleDrag = { scale: sc, off: { x: 0, y: 0 } };
     } else {
-      const t = new Tool(kind, this.nextToolId++, p.x / W, (p.y - 40 * S) / H);
+      const at = this.toFrac({ x: p.x, y: p.y - 40 * S });
+      const t = new Tool(kind, this.nextToolId++, at.x, at.y);
       this.tools.push(t);
       this.toolDrag = { tool: t, off: { x: 0, y: 40 * S } };
     }
@@ -291,38 +313,77 @@ export class GameEngine {
 
   /* ---------------- layout ---------------- */
 
-  private layout(): void {
-    const { stage, canvas, L } = this;
-    const prev = { W: this.W, S: this.S, floorY: L.floorY };
-    const W = (this.W = stage.clientWidth);
-    const H = (this.H = stage.clientHeight);
-    const dpr = (this.dpr = window.devicePixelRatio || 1);
-    canvas.width = Math.round(W * dpr);
-    canvas.height = Math.round(H * dpr);
-    const S = (this.S = Math.max(0.55, Math.min(1.1, W / 760)));
-    L.pipeY = 30 * S;
-    L.spoutY = 62 * S;
+  /** Lay out the world, once: the faucets, shelf and sink, in the home area at the bottom left. */
+  private layoutWorld(): void {
+    const { L, S, H } = this;
+    const top = H - HOME_H;
+    L.pipeY = top + 30 * S;
+    L.spoutY = top + 62 * S;
     L.faucets = FAUCETS.map((fa, i) => ({
-      ...fa, output: faucetOutput(fa, this.chem.U), x: W * (0.06 + FAUCET_SPACING * i),
+      ...fa, output: faucetOutput(fa, this.chem.U), x: HOME_W * (0.06 + FAUCET_SPACING * i),
     }));
     L.floorY = H - SINK_H * S;
-    const cols = W < 560 ? 4 : 8;
-    const rows = Math.ceil(N_FLASKS / cols);
     L.homes = [];
-    for (let i = 0; i < N_FLASKS; i++) {
-      const r = Math.floor(i / cols);
-      const c = i % cols;
-      const inRow = Math.min(cols, N_FLASKS - r * cols);
-      L.homes.push({ x: (W * (c + 0.5)) / inRow, y: L.floorY - 22 * S - (rows - 1 - r) * 106 * S - 70 * S });
-    }
+    for (let i = 0; i < N_FLASKS; i++) L.homes.push({ x: (HOME_W * (i + 0.5)) / N_FLASKS, y: L.floorY - 92 * S });
     L.benchY = Math.max(...L.homes.map((h) => h.y)) + 70 * S;
-    // keep resting flasks in proportion: across by width, and up from the floor by scale, which keeps shelves full
-    if (prev.W > 0)
-      for (const f of this.flasks)
-        f.home = this.clampRest({ x: (f.home.x * W) / prev.W, y: L.floorY - ((prev.floorY - f.home.y) * S) / prev.S });
-    for (const t of this.tools) this.place(t, this.toolXY(t));
-    for (const sc of this.scales) this.placeScale(sc, this.scaleXY(sc));
-    this.settle();
+  }
+
+  /** Fit the canvas to the stage, and the camera to the canvas. */
+  private layout(): void {
+    const { stage, canvas } = this;
+    this.viewW = stage.clientWidth;
+    this.viewH = stage.clientHeight;
+    const dpr = (this.dpr = window.devicePixelRatio || 1);
+    canvas.width = Math.round(this.viewW * dpr);
+    canvas.height = Math.round(this.viewH * dpr);
+    if (this.camMoved) this.clampCam();
+    else {
+      // the home area, as big as fits, along the bottom left
+      this.zoom = Math.min(this.viewW / HOME_W, this.viewH / HOME_H);
+      this.cam = { x: 0, y: this.H - this.viewH / this.zoom };
+      this.clampCam();
+    }
+  }
+
+  /** Keep the zoom in range and the world in view, centered along any axis where it's smaller than the view. */
+  private clampCam(): void {
+    const { W, H } = this;
+    const minZoom = Math.min(this.viewW / W, this.viewH / H);
+    this.zoom = Math.max(minZoom, Math.min(MAX_ZOOM, this.zoom));
+    const vw = this.viewW / this.zoom;
+    const vh = this.viewH / this.zoom;
+    this.cam = {
+      x: vw >= W ? (W - vw) / 2 : Math.max(0, Math.min(W - vw, this.cam.x)),
+      y: vh >= H ? (H - vh) / 2 : Math.max(0, Math.min(H - vh, this.cam.y)),
+    };
+  }
+
+  /** A point on the canvas, in CSS pixels, in world units. */
+  private toWorld(p: Point): Point {
+    return { x: this.cam.x + p.x / this.zoom, y: this.cam.y + p.y / this.zoom };
+  }
+
+  /** A point in the world, on the canvas in CSS pixels. */
+  private toScreen(p: Point): Point {
+    return { x: (p.x - this.cam.x) * this.zoom, y: (p.y - this.cam.y) * this.zoom };
+  }
+
+  /** Draw in world units from here on. */
+  private worldTransform(): void {
+    const k = this.dpr * this.zoom;
+    this.ctx.setTransform(k, 0, 0, k, -k * this.cam.x, -k * this.cam.y);
+  }
+
+  /**
+   * Tools, scales and hose ends store their positions as fractions of the home area (see HOME_W), which
+   * run outside [0, 1] for the rest of the world. This is such a position in world units.
+   */
+  private fromFrac(f: Point): Point {
+    return { x: f.x * HOME_W, y: this.H - HOME_H + f.y * HOME_H };
+  }
+
+  private toFrac(p: Point): Point {
+    return { x: p.x / HOME_W, y: (p.y - (this.H - HOME_H)) / HOME_H };
   }
 
   /** A flask's resting place (its mouth), kept on the stage and above the sink. */
@@ -349,14 +410,18 @@ export class GameEngine {
 
   /** Top center of a scale's platform, in stage coordinates. */
   private scaleXY(sc: Scale): Point {
-    return { x: sc.fx * this.W, y: sc.fy * this.H };
+    return this.fromFrac({ x: sc.fx, y: sc.fy });
   }
 
   private placeScale(sc: Scale, p: Point): void {
-    const { S, W, H } = this;
+    const { S, W } = this;
     const b = SCALE_SHAPE.box;
-    sc.fx = Math.max(-b.x0 * S, Math.min(W - b.x1 * S, p.x)) / W;
-    sc.fy = Math.max(-b.y0 * S, Math.min(this.L.floorY - b.y1 * S, p.y)) / H;
+    const at = this.toFrac({
+      x: Math.max(-b.x0 * S, Math.min(W - b.x1 * S, p.x)),
+      y: Math.max(-b.y0 * S, Math.min(this.L.floorY - b.y1 * S, p.y)),
+    });
+    sc.fx = at.x;
+    sc.fy = at.y;
   }
 
   private onScale(sc: Scale, p: Point, r: { x0: number; x1: number; y0: number; y1: number }): boolean {
@@ -377,7 +442,7 @@ export class GameEngine {
 
   /** Top center of a tool, in stage coordinates. */
   private toolXY(t: Tool): Point {
-    return { x: t.fx * this.W, y: t.fy * this.H };
+    return this.fromFrac({ x: t.fx, y: t.fy });
   }
 
   /** A point in a tool's local units, in stage coordinates. */
@@ -424,27 +489,28 @@ export class GameEngine {
 
   /** Move a tool, keeping it on the stage and above the sink. */
   private place(t: Tool, p: Point): void {
-    const { S, W, H } = this;
+    const { S, W } = this;
     const b = t.shape.box;
-    const x = Math.max(-b.x0 * S, Math.min(W - b.x1 * S, p.x));
-    const y = Math.max(-b.y0 * S, Math.min(this.L.floorY - b.y1 * S, p.y));
-    t.fx = x / W;
-    t.fy = y / H;
+    const at = this.toFrac({
+      x: Math.max(-b.x0 * S, Math.min(W - b.x1 * S, p.x)),
+      y: Math.max(-b.y0 * S, Math.min(this.L.floorY - b.y1 * S, p.y)),
+    });
+    t.fx = at.x;
+    t.fy = at.y;
   }
 
   /* ---------------- hose geometry ---------------- */
 
   /** A hose end's point in stage coordinates: the funnel's mouth, or the outlet's tip. */
   private hoseEnd(h: Hose, end: 'inlet' | 'outlet'): Point {
-    const e = h[end];
-    return { x: e.x * this.W, y: e.y * this.H };
+    return this.fromFrac(h[end]);
   }
 
   private moveHoseEnd(h: Hose, end: 'inlet' | 'outlet', p: Point): void {
     const { S, W } = this;
     const x = Math.max(16 * S, Math.min(W - 16 * S, p.x));
     const y = Math.max(4 * S, Math.min(this.L.floorY - 16 * S, p.y));
-    h[end] = { x: x / W, y: y / this.H };
+    h[end] = this.toFrac({ x, y });
   }
 
   /** The hose end under p, frontmost first. */
@@ -491,10 +557,21 @@ export class GameEngine {
       c.addEventListener(type, fn);
       this.cleanups.push(() => c.removeEventListener(type, fn));
     };
+    // drag the background (or anything with the middle button) to pan
+    const startPan = (e: PointerEvent) => {
+      this.panDrag = { start: this.screenPt(e), cam: { ...this.cam } };
+      c.style.cursor = 'grabbing';
+      c.setPointerCapture(e.pointerId);
+    };
     on('pointerdown', (e) => {
       const p = this.ptr(e);
       this.pointer = p;
       this.rightHeld = (e.buttons & 2) !== 0;
+      if (e.button === 1) {
+        startPan(e);
+        e.preventDefault();
+        return;
+      }
       const t = this.hitTool(p);
       const hoseEnd = e.button === 0 ? this.hitHoseEnd(p) : null;
       if (hoseEnd) {
@@ -534,7 +611,7 @@ export class GameEngine {
             this.drag = { flask: f, zone: null, off: { x: p.x - f.home.x, y: p.y - f.home.y } };
             for (const sc of this.scales) sc.remove(f);
             c.setPointerCapture(e.pointerId);
-          }
+          } else startPan(e);
         }
       }
       this.updateHover();
@@ -545,15 +622,8 @@ export class GameEngine {
       window.addEventListener(type, fn);
       this.cleanups.push(() => window.removeEventListener(type, fn));
     };
-    onWindow('pointermove', (e) => {
-      const p = (this.pointer = this.ptr(e));
-      // pressing or releasing a second button while one is held is a move, not a down or up
-      this.rightHeld = (e.buttons & 2) !== 0;
-      if ((this.drag || this.toolDrag || this.scaleDrag || this.hoseDrag) && !(e.buttons & 1)) {
-        // let go of the left button while holding the right: drop what's carried
-        endDrag(e);
-        return;
-      }
+    /** Move whatever is being dragged to follow the pointer, at p in the world. */
+    const follow = (p: Point) => {
       if (this.valveDrag) {
         this.aimValve(this.valveDrag.tool, this.valveDrag.k, p);
       } else if (this.toolDrag) {
@@ -571,8 +641,48 @@ export class GameEngine {
         } else this.moveHoseEnd(hose, end, p);
       }
       this.updateHover();
+    };
+    onWindow('pointermove', (e) => {
+      if (this.panDrag) {
+        const sp = this.screenPt(e);
+        const { start, cam } = this.panDrag;
+        this.cam = { x: cam.x - (sp.x - start.x) / this.zoom, y: cam.y - (sp.y - start.y) / this.zoom };
+        this.clampCam();
+        this.camMoved = true;
+        this.pointer = this.toWorld(sp);
+        return;
+      }
+      const p = (this.pointer = this.ptr(e));
+      // pressing or releasing a second button while one is held is a move, not a down or up
+      this.rightHeld = (e.buttons & 2) !== 0;
+      if ((this.drag || this.toolDrag || this.scaleDrag || this.hoseDrag) && !(e.buttons & 1)) {
+        // let go of the left button while holding the right: drop what's carried
+        endDrag(e);
+        return;
+      }
+      follow(p);
     });
+    // scroll to zoom, keeping the world point under the pointer where it is
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const sp = this.screenPt(e);
+      const at = this.toWorld(sp);
+      const px = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? this.viewH : 1);
+      this.zoom *= Math.exp(-px * ZOOM_PER_PX);
+      this.clampCam(); // clamps the zoom
+      this.cam = { x: at.x - sp.x / this.zoom, y: at.y - sp.y / this.zoom };
+      this.clampCam();
+      this.camMoved = true;
+      this.pointer = this.toWorld(sp);
+      if (!this.panDrag) follow(this.pointer);
+    };
+    c.addEventListener('wheel', onWheel, { passive: false });
+    this.cleanups.push(() => c.removeEventListener('wheel', onWheel));
     const endDrag = (e: PointerEvent) => {
+      if (this.panDrag) {
+        this.panDrag = null;
+        c.style.cursor = '';
+      }
       this.pointer = this.ptr(e);
       this.rightHeld = (e.buttons & 2) !== 0;
       if (this.cb.isDiscard(e.clientX, e.clientY)) {
@@ -606,7 +716,7 @@ export class GameEngine {
     onWindow('pointerup', endDrag);
     onWindow('pointercancel', endDrag);
     on('pointerleave', () => {
-      if (this.drag || this.toolDrag || this.scaleDrag || this.valveDrag || this.hoseDrag) return;
+      if (this.drag || this.toolDrag || this.scaleDrag || this.valveDrag || this.hoseDrag || this.panDrag) return;
       this.pointer = { x: -1, y: -1 };
       this.updateHover();
     });
@@ -637,9 +747,15 @@ export class GameEngine {
     this.hover = busy || this.hoverTool ? null : this.hitFlask(p);
   }
 
-  private ptr(e: MouseEvent): Point {
+  /** Where an event happened on the canvas, in CSS pixels. */
+  private screenPt(e: MouseEvent): Point {
     const r = this.canvas.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  /** Where an event happened in the world. */
+  private ptr(e: MouseEvent): Point {
+    return this.toWorld(this.screenPt(e));
   }
 
   /** The frontmost tool under p. */
@@ -853,8 +969,11 @@ export class GameEngine {
     rows.sort((a, b) => b.atoms - a.atoms);
     this.cb.onInspect({
       T: temperature(f), volume: volume(f), cap: f.cap, unit: volumeUnit(), rows,
-      x0: target.x0, x1: target.x1, y: target.y,
-      stageW: this.W, stageH: this.H,
+      // the panel goes beside it on screen
+      x0: this.toScreen({ x: target.x0, y: target.y }).x,
+      x1: this.toScreen({ x: target.x1, y: target.y }).x,
+      y: this.toScreen({ x: target.x0, y: target.y }).y,
+      stageW: this.viewW, stageH: this.viewH,
     });
   }
 
@@ -866,7 +985,7 @@ export class GameEngine {
   }
 
   private drawFlask(f: Flask, mx: number, my: number, ang: number): void {
-    const { ctx, S, dpr, theme } = this;
+    const { ctx, S, theme } = this;
     ctx.save();
     ctx.translate(mx, my);
     ctx.rotate(ang);
@@ -880,7 +999,7 @@ export class GameEngine {
       const minX = mx + S * Math.min(...pts.map((p) => p.x));
       const maxX = mx + S * Math.max(...pts.map((p) => p.x));
       const maxY = my + S * Math.max(...pts.map((p) => p.y));
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      this.worldTransform();
       const top = my + S * fillLevel(ang, volume(f) / f.cap);
       ctx.fillStyle = fluidColor(f);
       ctx.fillRect(minX - 2, top, maxX - minX + 4, maxY - top + 2);
@@ -1167,11 +1286,12 @@ export class GameEngine {
     ctx.restore();
   }
 
-  private drawStream(x1: number, y1: number, x2: number, y2: number, color: string, width = 4): void {
+  /** A stream falling from (x1, y1) to (x2, y2), `flow` flasks per second wide (see STREAM_WIDTH). */
+  private drawStream(x1: number, y1: number, x2: number, y2: number, color: string, flow: number): void {
     const { ctx } = this;
     ctx.save();
     ctx.strokeStyle = color;
-    ctx.lineWidth = width * this.S;
+    ctx.lineWidth = STREAM_WIDTH * Math.sqrt(flow) * this.S;
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(x1, y1);
@@ -1183,9 +1303,14 @@ export class GameEngine {
   private draw(): void {
     const { ctx, W, H, S, L, dpr } = this;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, W, H);
+    ctx.clearRect(0, 0, this.viewW, this.viewH);
     this.readTheme();
     const { theme } = this;
+    this.worldTransform();
+    // the world's edge, for when it's zoomed out far enough to see it
+    ctx.strokeStyle = theme.line;
+    ctx.lineWidth = 1 / this.zoom;
+    ctx.strokeRect(0, 0, W, H);
     ctx.font = `${Math.round(11 * Math.max(S, 0.85))}px "Schibsted Grotesk", sans-serif`;
 
     // sink, all along the bottom: whatever falls off the bench ends up here
@@ -1215,22 +1340,22 @@ export class GameEngine {
         if (!out) return;
         const sp = this.spoutAt(t, k);
         const m = mouthBelow(mouths, sp);
-        this.drawStream(sp.x, sp.y, sp.x, m ? m.y + 2 * S : H, fluidColor(out), 1.5 + 3 * Math.min(1, t.flow[k]));
+        this.drawStream(sp.x, sp.y, sp.x, m ? m.y + 2 * S : H, fluidColor(out), t.flow[k]);
       });
     for (const hose of this.hoses) {
       if (!hose.out) continue;
       const sp = this.hoseEnd(hose, 'outlet');
       const m = mouthBelow(mouths, sp);
-      this.drawStream(sp.x, sp.y, sp.x, m ? m.y + 2 * S : H, fluidColor(hose.out), 1.5 + 3 * Math.min(1, hose.flow));
+      this.drawStream(sp.x, sp.y, sp.x, m ? m.y + 2 * S : H, fluidColor(hose.out), hose.flow);
     }
-    for (const { fa, m } of this.faucetFlows) this.drawStream(fa.x, L.spoutY, fa.x, m.y + 2 * S, fluidColor(fa.output));
+    for (const { fa, m } of this.faucetFlows) this.drawStream(fa.x, L.spoutY, fa.x, m.y + 2 * S, fluidColor(fa.output), FILL_RATE / CAP);
     if (drag && drag.flask.N > TRACE) {
       const D = drag.flask;
       const z = drag.zone;
       if (z?.kind === 'flask' && volume(z.f) < z.f.cap - TRACE)
-        this.drawStream(D.x, D.y, z.f.home.x, z.f.home.y + 4 * S, fluidColor(D));
-      if (z?.kind === 'tank' && volume(z.v) < z.v.cap - TRACE) this.drawStream(D.x, D.y, z.x, z.y + 4 * S, fluidColor(D));
-      if (z?.kind === 'sink') this.drawStream(D.x, D.y, D.x - 4 * S, H, fluidColor(D));
+        this.drawStream(D.x, D.y, z.f.home.x, z.f.home.y + 4 * S, fluidColor(D), POUR_RATE / CAP);
+      if (z?.kind === 'tank' && volume(z.v) < z.v.cap - TRACE) this.drawStream(D.x, D.y, z.x, z.y + 4 * S, fluidColor(D), POUR_RATE / CAP);
+      if (z?.kind === 'sink') this.drawStream(D.x, D.y, D.x - 4 * S, H, fluidColor(D), POUR_RATE / CAP);
     }
 
     // shelves

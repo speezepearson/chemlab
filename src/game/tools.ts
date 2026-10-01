@@ -92,11 +92,11 @@ export const tankX = (tk: { x0: number; x1: number }) => (tk.x0 + tk.x1) / 2;
 
 /**
  * The exchanger's two hoses, wound around each other along the axis between
- * the tanks, in local units. Three half-twists take each hose from the top of
+ * the tanks, in local units. Nine half-twists take each hose from the top of
  * one end to the bottom of the other, so a stream comes down from its tank,
  * winds across, and drops out the far side.
  */
-export const HELIX = { x0: -35, x1: 35, y: 110, r: 6, halfTwists: 3 };
+export const HELIX = { x0: -35, x1: 35, y: 110, r: 6, halfTwists: 9 };
 
 export const TOOL_NAMES: Record<ToolKind, string> = {
   dispenser: 'Dispenser',
@@ -147,7 +147,7 @@ export class Tool {
     readonly kind: ToolKind,
     /** Stable across z-reordering; used to find a tank from the god-mode editor. */
     readonly id: number,
-    /** Position as a fraction of the stage's width and height, so it survives resizes. */
+    /** Position as fractions of the home area's width and height (see HOME_W), outside [0, 1] beyond it. */
     public fx: number,
     public fy: number,
     valves: readonly number[] = [],
@@ -260,7 +260,7 @@ export class Hose {
   flow = 0;
 
   constructor(
-    /** The funnel's mouth and the outlet's tip, as fractions of the stage's width and height. */
+    /** The funnel's mouth and the outlet's tip, as fractions of the home area's width and height (see HOME_W). */
     public inlet: Point,
     public outlet: Point,
   ) {}

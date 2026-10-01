@@ -2,7 +2,7 @@ import { ATOMS, type Atom } from '../chem/atoms';
 import { equilibrium } from '../chem/equilibrium';
 import { T_ROOM, defaultChemParams } from '../chem/params';
 import { SPECIES, TARGET, singleOf, speciesEnergies } from '../chem/species';
-import { CAP } from './config';
+import { CAP, HOME_W } from './config';
 import { FAUCETS } from './faucets';
 import type { Vessel } from './flask';
 import type { ToolKind } from './tools';
@@ -18,7 +18,7 @@ export interface FlaskFill {
 /** A tool on the bench at the start. */
 export interface ToolSpec {
   kind: ToolKind;
-  /** Top center of the tool, as fractions of the stage's width and height. */
+  /** Top center of the tool, as fractions of the home area's width and height (see HOME_W). */
   at: [number, number];
   /** Per tank, 0 (closed) to 1 (fully open); closed if left out. */
   valves?: number[];
@@ -44,7 +44,7 @@ export interface Preset {
   description: string;
   flasks: (FlaskFill | null)[];
   tools?: ToolSpec[];
-  /** Top center of each scale's platform, as fractions of the stage's width and height. */
+  /** Top center of each scale's platform, as fractions of the home area's width and height (see HOME_W). */
   scales?: [number, number][];
   hoses?: HoseSpec[];
   /** Whether picking the preset from the menu restores the default chemistry. Reset leaves the chemistry alone. */
@@ -87,8 +87,8 @@ export const WASH_PRESET: Preset = {
       kind: 'dispenser', at: [WASH_AT[0], 0.14], valves: [0.005],
       tanks: [{ contents: [atomsOf(singleOf('B'), 4 * CAP)], T: WASH_T }],
     },
-    // under the separator's right spout, 36 local units right of its center (a unit is 1/760 of the stage's width)
-    { kind: 'dispenser', at: [WASH_AT[0] + 36 / 760, WASH_AT[1] + 0.25] },
+    // under the separator's right spout, 36 local units right of its center
+    { kind: 'dispenser', at: [WASH_AT[0] + 36 / HOME_W, WASH_AT[1] + 0.25] },
   ],
   hoses: [{ from: { tool: 0, spout: 0 }, to: { tool: 0, dx: -20 } }],
   defaultChem: true,
