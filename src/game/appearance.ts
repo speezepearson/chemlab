@@ -8,8 +8,21 @@
  *   glow          0     0.07   0.15   0.52   1.00   corona/halo size and opacity
  *   whitening     0     0.01   0.02   0.27   1.00   hot fluids wash out to white
  *
+ * And how composition looks (colorModel, cloudy): see fluidHue and fluidAlpha
+ * in flask.ts.
+ *
  * LOOK is mutable so the Appearance debug panel can tune it live.
  */
+
+/**
+ * How a molecule's atoms combine into its color. A fluid's color is then the
+ * atom-weighted average of its molecules' colors.
+ * - atoms: a molecule is the average of its atoms, so the fluid is just the
+ *   average of its atoms and no reaction changes it.
+ * - paint: atoms mix like paint (multiply), rescaled to the average's brightness.
+ * - light: atoms add like overlapping spotlights, clipped at full brightness.
+ */
+export type ColorModel = 'atoms' | 'paint' | 'light';
 
 export interface Look {
   /** value = 1 − e^(−coldRate·T) */
@@ -36,6 +49,16 @@ export interface Look {
   haloR1: number;
   haloPow: number;
   haloSharpness: number;
+  colorModel: ColorModel;
+  /** How far a molecule's color goes from its atoms' average to the paint model's color (0 to 1). */
+  paintMix: number;
+  /** How far a molecule's color goes from its atoms' average to the light model's color (0 to 1). */
+  lightMix: number;
+  /** Whether bigger molecules make a fluid cloudier: opacity is the atom-weighted average of alpha1..3 by molecule size. */
+  cloudy: boolean;
+  alpha1: number;
+  alpha2: number;
+  alpha3: number;
 }
 
 export function defaultLook(): Look {
@@ -58,6 +81,13 @@ export function defaultLook(): Look {
     haloR1: 420,
     haloPow: 1.5,
     haloSharpness: 2,
+    colorModel: 'atoms',
+    paintMix: 1,
+    lightMix: 1,
+    cloudy: false,
+    alpha1: 0.2,
+    alpha2: 0.6,
+    alpha3: 1,
   };
 }
 

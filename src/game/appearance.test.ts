@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { ATOM_RGB } from '../chem/atoms';
+import { singleOf, speciesIndex } from '../chem/species';
+import { Vessel, fluidAlpha, fluidHue } from './flask';
 import {
   LOOK, coronaAlpha, coronaRadius, defaultLook, glowFalloff, glowStrength, glowWhiteHeat, haloAlpha, haloRadius,
   heatValue, resetLook, whiteHeat,
@@ -73,5 +76,52 @@ describe('temperature appearance', () => {
       resetLook();
     }
     expect(LOOK).toEqual(defaultLook());
+  });
+});
+
+describe('composition', () => {
+  const R = singleOf('R');
+  const G = singleOf('G');
+  const RG = speciesIndex(['R', 'G', null], 1);
+  const fluid = (contents: [number, number][]) => {
+    const v = new Vessel(Infinity);
+    for (const [s, m] of contents) v.setMolecules(s, m);
+    return v;
+  };
+  const free = fluid([[R, 100], [G, 100]]);
+  const bonded = fluid([[RG, 100]]);
+  const dist = (a: readonly number[], b: readonly number[]) => Math.hypot(...a.map((x, k) => x - b[k]));
+  afterEach(resetLook);
+
+  it("by default, colors a fluid by its atoms alone, so bonding doesn't change it", () => {
+    expect(dist(fluidHue(free)!, fluidHue(bonded)!)).toBeLessThan(1e-9);
+    expect(fluidAlpha(bonded)).toBe(1);
+  });
+
+  it('under the light model, bonding R and G brightens it', () => {
+    LOOK.colorModel = 'light';
+    expect(dist(fluidHue(free)!, fluidHue(bonded)!)).toBeGreaterThan(50);
+    expect(Math.max(...fluidHue(bonded)!)).toBe(255);
+    // a free atom is its own color under any model
+    expect(fluidHue(fluid([[R, 1]]))).toEqual([...ATOM_RGB.R]);
+  });
+
+  it('under the paint model, bonding C and Y turns it green', () => {
+    LOOK.colorModel = 'paint';
+    const cy = fluidHue(fluid([[speciesIndex(['C', null, 'Y'], 2), 100]]))!;
+    expect(cy[1]).toBeGreaterThan(3 * Math.max(cy[0], cy[2]));
+  });
+
+  it('with mix 0, any model is the default', () => {
+    LOOK.colorModel = 'light';
+    LOOK.lightMix = 0;
+    expect(dist(fluidHue(free)!, fluidHue(bonded)!)).toBeLessThan(1e-9);
+  });
+
+  it('when cloudy, is as opaque as the atom-weighted alpha of its molecule sizes', () => {
+    LOOK.cloudy = true;
+    expect(fluidAlpha(free)).toBeCloseTo(LOOK.alpha1);
+    expect(fluidAlpha(bonded)).toBeCloseTo(LOOK.alpha2);
+    expect(fluidAlpha(fluid([[R, 100], [RG, 50]]))).toBeCloseTo((LOOK.alpha1 + LOOK.alpha2) / 2);
   });
 });
