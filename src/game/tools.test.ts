@@ -4,8 +4,8 @@ import { CAP } from './config';
 import { heatAt, temperature } from '../chem/reactions';
 import { Vessel, roomFor, volume } from './flask';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, heatBy, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
-  SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, heatBy, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PIPETTE_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
+  REFERENCE_CAP, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -30,14 +30,26 @@ describe('pipette', () => {
     expect(cupFillHeight((840 + 101.5) / 1106, 10, 84, 28, 14)).toBeCloseTo(91);
   });
 
-  it('holds a tenth of a flask, and empties it in five sim seconds fully open', () => {
+  it('holds a tenth of a flask, and lets out a fifth of that a second when full and fully open', () => {
     const p = new Tool('pipette', 0, 0, 0, [1]);
     expect(p.tanks[0].cap).toBe(CAP / 10);
     expect(p.shape.cup).toBeDefined();
     p.tanks[0].setMolecules(R, CAP / 10);
-    let t = 0;
-    for (; volume(p.tanks[0]) > 0 && t < 10; t += 0.02) p.step(0.02);
-    expect(t).toBeCloseTo(5, 1);
+    expect(p.level(0)).toBe(1);
+    expect(volume(p.step(0.02)[0]!) / (0.02 * PIPETTE_FLOW)).toBeCloseTo(1, 6);
+  });
+
+  it('flows with the height of its fluid, measured up its narrow tube once the cup has drained', () => {
+    const p = new Tool('pipette', 0, 0, 0, [1]);
+    p.tanks[0].setMolecules(R, CAP / 10);
+    const full = p.shape.tankH ?? 84;
+    const cupH = p.shape.cup!.h;
+    // the cup holds the top quarter of it, but only the top fraction cupH / (full + cupH) of its height
+    p.tanks[0].setMolecules(R, (0.75 * CAP) / 10);
+    expect(p.level(0)).toBeCloseTo(full / (full + cupH), 1);
+    const level = p.level(0);
+    // a few hundred thousand whole molecules, so right to within parts per million
+    expect(volume(p.step(0.02)[0]!) / (0.02 * level * PIPETTE_FLOW)).toBeCloseTo(1, 5);
   });
 
   it('flows in proportion to its valve, and not at all closed', () => {
@@ -150,12 +162,13 @@ describe('resistive heater', () => {
 });
 
 describe('dispenser', () => {
-  it('dispenses valve × MAX_FLOW atoms per sim second', () => {
+  it('dispenses valve × MAX_FLOW × how high its fluid stands, per sim second', () => {
     const d = new Tool('dispenser', 0, 0, 0, [0.5]);
     filled(d.tanks[0], R, 2 * CAP, 3);
+    expect(d.level(0)).toBe(0.5);
     const out = d.step(0.1)[0]!;
     // whole molecules, so right to within a few parts per billion
-    expect(out.N / (0.5 * MAX_FLOW * 0.1)).toBeCloseTo(1, 6);
+    expect(out.N / (0.5 * MAX_FLOW * 0.5 * 0.1)).toBeCloseTo(1, 6);
     expect(temperature(out)).toBeCloseTo(3, 6);
     expect(d.tanks[0].N).toBeCloseTo(2 * CAP - out.N);
     expect(atomTotal(out) + atomTotal(d.tanks[0])).toBeCloseTo(2 * CAP);
@@ -171,11 +184,23 @@ describe('dispenser', () => {
     expect(d.step(0.1)).toEqual([null]);
   });
 
-  it('empties completely rather than leaving a trace behind', () => {
+  it('slows as it empties, exponentially, so a nearly empty tank trickles', () => {
+    const d = new Tool('dispenser', 0, 0, 0, [1]);
+    filled(d.tanks[0], R, TANK_CAP, 1);
+    // drained by its own height, the tank empties as e^(−t·MAX_FLOW/TANK_CAP)
+    for (let t = 0; t < 2; t += 0.01) d.step(0.01);
+    expect(d.tanks[0].N / (TANK_CAP * Math.exp((-2 * MAX_FLOW) / TANK_CAP))).toBeCloseTo(1, 2);
+    const flow = (v: Vessel | null) => (v?.N ?? 0) / 0.01;
+    const before = flow(d.step(0.01)[0]);
+    for (let t = 0; t < 4; t += 0.01) d.step(0.01);
+    expect(flow(d.step(0.01)[0]) / before).toBeCloseTo(Math.exp((-4 * MAX_FLOW) / TANK_CAP), 2);
+  });
+
+  it('empties completely in the end, rather than leaving a trace behind', () => {
     const d = new Tool('dispenser', 0, 0, 0, [1]);
     filled(d.tanks[0], R, CAP, 1);
     let total = 0;
-    for (let i = 0; i < 200; i++) total += d.step(0.01)[0]?.N ?? 0;
+    for (let i = 0; i < 10000; i++) total += d.step(0.01)[0]?.N ?? 0;
     expect(d.tanks[0].N).toBe(0);
     expect(total / CAP).toBeCloseTo(1, 5);
   });
@@ -223,11 +248,11 @@ describe('splitter', () => {
 });
 
 describe('cryostabilizer reference', () => {
-  it('holds a hundred flasks, and lets out at most 0.02 flask/s through its valve', () => {
+  it('holds a hundred flasks, and lets out at most 0.02 flask/s through its valve, when full', () => {
     const ref = new Tool('reference', 0, 0, 0, [1]);
     expect(ref.tanks[0].cap).toBe(100 * CAP);
     expect(ref.shape.sealed).toBe(true);
-    filled(ref.tanks[0], TARGET, 0.4 * CAP, 1);
+    filled(ref.tanks[0], TARGET, 3 * REFERENCE_CAP, 1); // full: a hundred flasks of triangles
     const out = ref.step(0.5)[0]!;
     expect(volume(out) / (0.02 * MAX_FLOW * 0.5)).toBeCloseTo(1, 3);
     ref.valves[0] = 0.5;
@@ -353,8 +378,9 @@ describe('mass spectrometer', () => {
 describe('heat exchanger', () => {
   function run(valves: number[], TA = 10, TB = 1) {
     const x = new Tool('exchanger', 0, 0, 0, valves);
-    filled(x.tanks[0], R, CAP, TA);
-    filled(x.tanks[1], G, CAP, TB);
+    // full, so each valve lets out its whole rate
+    filled(x.tanks[0], R, TANK_CAP, TA);
+    filled(x.tanks[1], G, TANK_CAP, TB);
     return x.step(0.05);
   }
 
@@ -443,17 +469,18 @@ describe('separator', () => {
     expect(l.N).toBeCloseTo(atomTotal(l));
   });
 
-  it('drains its tank at the valve rate, out of both spouts, keeping the temperature', () => {
+  it('drains its tank at the valve rate times its level, out of both spouts, keeping the temperature', () => {
     const x = new Tool('separator', 0, 0, 0, [0.5]);
     filled(x.tanks[0], B, CAP, 3);
     x.tanks[0].setMolecules(Y, CAP);
+    expect(x.level(0)).toBe(0.5);
     const [l, r] = x.step(0.1);
-    expect((l!.N + r!.N) / (0.5 * MAX_FLOW * 0.1)).toBeCloseTo(1, 6);
+    expect((l!.N + r!.N) / (0.5 * MAX_FLOW * 0.5 * 0.1)).toBeCloseTo(1, 6);
     expect(temperature(l!)).toBe(3);
     // B leaves left e : 1, Y leaves left 1 : e, so from equal amounts the left outlet is e : 1 B to Y
     expect(l!.n[B] / l!.n[Y]).toBeCloseTo(Math.E);
     expect(r!.n[Y] / r!.n[B]).toBeCloseTo(Math.E);
-    expect(x.flow[0] + x.flow[1]).toBeCloseTo(0.5);
+    expect(x.flow[0] + x.flow[1]).toBeCloseTo(0.25);
   });
 });
 

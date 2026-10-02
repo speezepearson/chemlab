@@ -3,7 +3,7 @@ import { T_ROOM, type ChemParams } from '../chem/params';
 import { ReactionNetwork, heatAt, temperature, type Fluid } from '../chem/reactions';
 import { SPECIES, TARGET, speciesIndex } from '../chem/species';
 import { CAP } from './config';
-import { Vessel, transfer } from './flask';
+import { Vessel, transfer, volume } from './flask';
 import type { Recipe } from './presets';
 import { MAX_FLOW, separate } from './tools';
 
@@ -99,8 +99,9 @@ export class Route {
   /**
    * A separator whose left spout is hosed back into its own tank, so each pass
    * strips out what goes right (mostly secondary colors) and keeps the rest.
-   * The tank drains at `valve` flasks per second, and `feed`, if given, drips
-   * into it at `feedValve` flasks per second. What leaves the right spout goes
+   * The tank drains at `valve` flasks per second times how full it is, as a
+   * tool's tank does, and `feed`, if given, drips into it the same way at
+   * `feedValve`. What leaves the right spout goes
    * into `into` (a new unbounded vessel if left out), which is returned along
    * with the heat a thermostat at T added per atom, if T is given.
    */
@@ -112,9 +113,9 @@ export class Route {
     let heat = 0;
     const N0 = tank.N;
     for (let s = 0; s < o.seconds; s += H) {
-      if (o.feed && o.feedValve) transfer(o.feed, tank, o.feedValve * MAX_FLOW * H);
+      if (o.feed && o.feedValve) transfer(o.feed, tank, o.feedValve * MAX_FLOW * Math.min(1, volume(o.feed) / o.feed.cap) * H);
       const out = new Vessel(Infinity);
-      transfer(tank, out, o.valve * MAX_FLOW * H);
+      transfer(tank, out, o.valve * MAX_FLOW * Math.min(1, volume(tank) / tank.cap) * H);
       const [l, r] = separate(out);
       transfer(l, tank, l.N);
       transfer(r, right, r.N);

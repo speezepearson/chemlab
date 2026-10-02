@@ -7,7 +7,11 @@ import { Vessel, roomFor, transfer, volume, type Point } from './flask';
 
 /** Capacity of each tank on a tool, in atoms. */
 export const TANK_CAP = 4 * CAP;
-/** Spout flow with the valve fully open, in atoms per sim second (one flask per second). */
+/**
+ * Spout flow with the valve fully open and the tank full, in atoms per sim second (one flask per second). A valve
+ * lets out its openness times this, times how high the fluid stands, as a share of the tank's height (see
+ * Tool.level), so a nearly empty tank trickles.
+ */
 export const MAX_FLOW = CAP;
 /** Height of every tank, in local units. */
 export const TANK_H = 84;
@@ -81,8 +85,8 @@ export const SORTER_SCREENS: readonly (readonly number[])[] = [
 export const REFERENCE_CAP = 100 * CAP;
 /** How much a pipette holds, by volume: a tenth of a flask. */
 export const PIPETTE_CAP = CAP / 10;
-/** How long a pipette takes to empty with its valve fully open, in sim seconds. */
-export const PIPETTE_EMPTY_S = 5;
+/** A pipette's flow, full and fully open, in atoms per sim second: a fifth of what it holds. */
+export const PIPETTE_FLOW = PIPETTE_CAP / 5;
 /**
  * How high fluid filling `share` of a tank with a cup (see ToolShape.cup) stands above the tank's floor, in local
  * units. It's drawn across tube and cup together, in proportion to their area, so a full one is full to the cup's
@@ -201,7 +205,7 @@ export interface ToolShape {
   dial?: number;
   /** Whether the tanks are sealed on top, so nothing can be poured or fall into them. */
   sealed?: boolean;
-  /** Spout flow with a valve fully open, in atoms per sim second, if not MAX_FLOW. */
+  /** Spout flow with a valve fully open and the tank full, in atoms per sim second, if not MAX_FLOW. */
   maxFlow?: number;
   /** Text shown above the tool, one entry per line. */
   label?: string[];
@@ -226,7 +230,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tanks: [{ name: 'tube', x0: -5, x1: 5 }],
     tankCap: PIPETTE_CAP,
     cup: { w: 14, h: 14 },
-    maxFlow: PIPETTE_CAP / PIPETTE_EMPTY_S,
+    maxFlow: PIPETTE_FLOW,
     spouts: [0],
     valveY: 98,
     spoutY: 114,
@@ -370,7 +374,7 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
  * spouts on the bottom.
  *
  * - A **dispenser** has one tank and one spout. A **pipette** is a narrow one, a tenth of a flask, filled
- *   through a little funnel on top, that empties in PIPETTE_EMPTY_S with its valve fully open.
+ *   through a little funnel on top, that lets out PIPETTE_FLOW full and fully open.
  * - A **heat exchanger** has two tanks, whose streams pass each other in
  *   counterflow on the way to their spouts, trading heat but never mixing.
  * - A **separator** has one tank and two spouts, and splits what drains
@@ -453,7 +457,7 @@ export class Tool {
     const funnel = this.kind === 'splitter' || this.kind === 'sorter';
     let packets = this.tanks.map((tank, k) => {
       const p = new Vessel(Infinity);
-      transfer(tank, p, funnel ? FUNNEL_RATE * h : this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW) * h);
+      transfer(tank, p, funnel ? FUNNEL_RATE * h : this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW) * this.level(k) * h);
       return p;
     });
     if (this.kind === 'exchanger') counterflow(packets[0], packets[1], EXCHANGE_RATE * h);
@@ -484,6 +488,19 @@ export class Tool {
     this.out = packets.map((p) => (p.N > 0 ? p : null));
     this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
     return this.out;
+  }
+
+  /**
+   * How high the fluid in tank k stands, as a share of the tank's full height, as it's drawn: in step with how full
+   * it is, except in a tank with a cup on top (see cupFillHeight), whose narrow tube fills first.
+   */
+  level(k: number): number {
+    const v = this.tanks[k];
+    const share = Math.min(1, volume(v) / v.cap);
+    const { cup, tanks, tankH = TANK_H } = this.shape;
+    if (!cup) return share;
+    const w = tanks[k].x1 - tanks[k].x0;
+    return cupFillHeight(share, w, tankH, 2 * cup.w, cup.h) / (tankH + cup.h);
   }
 
   /** Whether a spectrometer run is under way, with hexagons still to light. */
