@@ -81,8 +81,8 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
 ## Design preferences
 
 - Don't give away the chemistry. The player is meant to work it out. The mass spectrometer has no text and no
-  sextant divider lines, the size sorter's screens look plain, and the faucets aren't pure atoms. Ask before adding
-  any visual cue that reveals how a tool or reaction works.
+  sextant divider lines, the size sorter's screens look plain, and the faucets aren't labeled (they're pure atoms and
+  settled pairs, which the user chose). Ask before adding any visual cue that reveals how a tool or reaction works.
 - The game's text matches the intro's premise. The player is Nadia Hassan, the target species is the cryostabilizer,
   and the ship belongs to Celestia Starlines.
 - Commits are small, one behavior per commit, with a message explaining why. The README changes in the same commit.

@@ -391,9 +391,13 @@ export class GameEngine {
     L.benchY = Math.max(...L.homes.map((h) => h.y)) + 70 * S;
   }
 
-  /** Put the faucets where they start, evenly along the top of the home area, or where a save had them. */
+  /**
+   * Put the faucets where they start, evenly along the top of the home area, or where a save had them. A save
+   * with a different number of faucets is from before the faucets changed, so its places are ignored.
+   */
   private placeFaucets(saved: readonly Point[] = []): void {
     const n = this.L.faucets.length;
+    if (saved.length !== n) saved = [];
     this.L.faucets.forEach((fa, i) => {
       const at = saved[i];
       const ok = at && Number.isFinite(at.x) && Number.isFinite(at.y);

@@ -60,7 +60,7 @@ The reaction types are:
 
 - **Reaction heat:** exotherms heat the fluid through a per-atom heat capacity.
 - **Mixing:** heat adds, so temperatures average, weighted by atom count.
-- **Cooling:** none in v1, so flasks stay hot forever. Most faucets give room-temperature fluid; the R–G one gives hot fluid (T = 20), and the blue one very cold fluid (T = 0.2), so the ways to lower a temperature are diluting with cooler faucet fluid, running endothermic reactions, or passing it through the heat exchanger against something cooler.
+- **Cooling:** none in v1, so flasks stay hot forever. Every faucet gives room-temperature fluid (T = 1), so the ways to lower a temperature are diluting with faucet fluid, running endothermic reactions, or passing it through the heat exchanger against something cooler.
 
 ### Appearance
 
@@ -82,7 +82,7 @@ The reaction types are:
 
 Blue bonds are uphill (E = −1 for now) and have no prefactor (A = 0), so they never form or break on their own, at any temperature. Blue gets into a molecule, or out of one, only by swapping places with yellow, its opposite color. The target, the **△RGB triangle**, sits above R–G + B, so it never dominates an equilibrium.
 
-At E = −1 the faucets that hold blue still pour a little bonded blue, and since A = 0 it never comes apart: the 40/40/20 faucet is 2.2% △RGB, and the R–M–B one 1.7% △RMB. At E = −10 they pour under a part in 10⁸, which is what keeps a separator cascade from collecting the target straight from a faucet.
+At E = −1 the four faucets of pairs with blue pour it 14% bonded, and since A = 0 it never comes apart. No faucet holds atoms from all three groups, so none pours any triangle: the target has to be made.
 
 The intended route:
 
@@ -97,24 +97,12 @@ With no yellow around, the product stays put hot or cold. Any yellow it meets un
 ## What's playable now (v1)
 
 - **Intro** (`src/intro/log.ts`, `src/components/Intro.tsx`): the first time the page opens, it shows only a *start* button. Pressing it shows the ship's console: four routine lines, and a few seconds later the incident, each line printed when its timestamp comes around. Stars drop out of the forward camera by the dozen, then the hundreds. Then comes a lidar trip and a burst of chaos, generated from a fixed seed: hull strain, depressurizing decks, sealing bulkheads, ruptured cryostabilizer reservoirs. The bridge and crew quarters stop answering, cryo drops to zero, and the computer checks 350 passengers ranked by chemistry and biology expertise, about 35 a second, until NADIA HASSAN's pod is the first to defrost. A few dozen of the names are hand-picked; the rest are generated from a fixed seed, pairing given and family names from the same pool (Japanese, Chinese, Spanish, and so on), and the order is shuffled. Five seconds later the log fades into a cheerful notice from Celestia Starlines, and its OK fades into the game. The bench sits paused underneath until then. Once finished, the intro doesn't play again on load (`slurry-lab.introSeen` in local storage), but *Replay intro* at the top right plays it again from the log.
-- **Filling:** hold a flask under a faucet with the right mouse button to fill it. The eight faucets are scrounged mixes rather than pure atoms, so that the atoms and their chemistry aren't handed to the player. Each is a recipe of atoms by share, at room temperature unless noted:
-  - 49% R, 49% G, and 0.5% each of C, M, B and Y, at T = 20;
-  - 99.99% B and 0.005% each of R and G, at T = 0.2;
-  - 95% R, M and B in equal parts, and 5% G, C and Y in equal parts;
-  - 40% R, 40% G, 20% B;
-  - 66.6% C, 33.3% Y, 0.1% M;
-  - 95% R, 5% G;
-  - 98% G, 2% R;
-  - 50% R, 50% C.
+- **Filling:** hold a flask under a faucet with the right mouse button to fill it. There are 18 faucets, all at room temperature (T = 1): one for each of the six atoms, pure, and one for each of the twelve pairs of atoms that can bond (every pair but the opposites R–C, G–M and B–Y). A pair's faucet pours what that pair, started pure, settles to at room temperature: its two atoms in equal parts at chemical equilibrium, which can be mostly bonded or mostly apart. The equilibrium is solved exactly in `src/chem/equilibrium.ts` and follows live edits to the chemistry. Under the default chemistry, by atoms:
+  - R–G is 100% bonded.
+  - C–M is 89% bonded, R–Y and G–Y 83%, R–M 73%, G–C and M–Y 60%, and C–Y 44%. The rest is the two free atoms, equally.
+  - Each pair with blue (G–B, R–B, C–B, M–B) is only 14% bonded, since blue bonds are uphill. Blue bonds never form or break on their own, so these sit as they are.
 
-  A faucet dispenses its atoms at chemical equilibrium at its temperature. The equilibrium is solved exactly in `src/chem/equilibrium.ts` and follows live edits to the chemistry, so the output can be mostly something else:
-  - The hot R–G faucet is 86% R–G (by atoms), with 5.4% each of free R and G, and traces, including 0.6% △RGY and 0.5% blue chains.
-  - The cold blue one is pure B: blue bonds are uphill, so the traces of R and G stay all but free.
-  - The R–M–B one is 31% R–M and 26% free B, with a long tail: 9% blue chains of R, M and B, 1.7% △RMB, and 0.1% △RGB.
-  - The 40/40/20 one is 71% R–G and 15% free B, with 12% blue chains (R–G–B and G–R–B) and 2.2% △RGB.
-  - The C–Y one is only 38% C–Y, since the bond is weak and C is in excess: the rest is 48% free C and 14% free Y.
-  - 95% R / 5% G is 90% free R and 10% R–G. 98% G / 2% R is 96% free G and 4% R–G.
-  - The R–C one is just free R and free C, since opposite colors never bond.
+  Left to right they go: the pairs of primaries (R–G, G–B, R–B); the color wheel, each atom with the pair of its neighbors between them (R, R–Y, Y, G–Y, G, G–C, C, B–C, B, B–M, M, R–M); then the pairs of secondaries (C–M, M–Y, C–Y). They start evenly spaced along the top of the home area. A save from before there were 18 faucets puts them back at their starting places.
 
   Faucet output is in chemical equilibrium with itself at the faucet's temperature, so a flask filled from one faucet just sits there. `src/game/faucets.test.ts` enforces this. A faucet fills anything parked right under it, including a tool's tank or a hose's funnel. Something you're carrying (a flask, a tool, or a hose's funnel end) only catches the stream while you hold the right mouse button.
 - **World and camera:** the world runs on forever left, right and up, above a floor: the sink, along which the shelf of flasks also runs. Lengths are in world units, where a flask is 70 tall. The view starts on a 1000 × 620 home area, which holds the shelf of flasks along its bottom and the faucets, evenly spaced, along its top. Drag a faucet by its pipe to put it anywhere above the floor; where each faucet is gets saved, and Reset or a preset puts them back. Scroll to zoom about the pointer (from 0.05 to 4 screen pixels per world unit), and drag empty space, or anything with the middle button, to pan; the view can't go below the floor. Everything is laid out, hit-tested and drawn in world units, so distances like the valve's dead zone scale with the zoom. Tools, scales, hoses and faucets store their positions as fractions of the home area, running outside [0, 1] beyond it, so presets and older saves land where they did. (Older saves' faucets start where they do now.)

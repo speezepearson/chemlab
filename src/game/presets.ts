@@ -3,7 +3,7 @@ import { equilibrium } from '../chem/equilibrium';
 import { T_ROOM, defaultChemParams } from '../chem/params';
 import { SPECIES, TARGET, singleOf, speciesEnergies } from '../chem/species';
 import { CAP, HOME_W } from './config';
-import { FAUCETS } from './faucets';
+import type { Faucet } from './faucets';
 import type { Vessel } from './flask';
 import type { ToolKind } from './tools';
 
@@ -61,11 +61,20 @@ export interface Preset {
 const atomsOf = (species: number, atoms: number) => ({ species, molecules: atoms / SPECIES[species].size });
 
 /**
- * A mix of faucets left to settle at temperature T: faucet i's recipe weighted by `mix[i]` flasks,
- * at chemical equilibrium under the default chemistry.
+ * The wash route's feed, as [recipe, flasks]: the R–G and C–Y faucets the game used to have, nearly even R and G
+ * with traces of everything else, and 2 : 1 C and Y. route.test.ts builds △RGY from the same.
  */
-function settled(mix: Record<number, number>, T: number): { species: number; molecules: number }[] {
-  const atoms = ATOMS.map((a) => Object.entries(mix).reduce((t, [i, fl]) => t + fl * (FAUCETS[+i].atoms[a] ?? 0), 0));
+export const WASH_FEED: readonly [Faucet, number][] = [
+  [{ atoms: { R: 0.49, G: 0.49, C: 0.005, M: 0.005, B: 0.005, Y: 0.005 }, T: 20 }, 0.5],
+  [{ atoms: { C: 0.666, Y: 0.333, M: 0.001 } }, 1.5],
+];
+
+/**
+ * A mix of recipes left to settle at temperature T, each weighted by its flasks, at chemical equilibrium under
+ * the default chemistry.
+ */
+function settled(mix: readonly [Faucet, number][], T: number): { species: number; molecules: number }[] {
+  const atoms = ATOMS.map((a) => mix.reduce((t, [fa, fl]) => t + fl * (fa.atoms[a] ?? 0), 0));
   const n = equilibrium(atoms, speciesEnergies(defaultChemParams()), T);
   return SPECIES.filter((s) => n[s.i] * CAP >= 1).map((s) => ({ species: s.i, molecules: n[s.i] * CAP }));
 }
@@ -79,15 +88,15 @@ export const WASH_PRESET: Preset = {
   id: 'wash',
   name: 'Wash route (sandbox)',
   description:
-    'Midway through the intended route, to tinker with: the separator holds △RGY (from ½ flask of the R–G faucet ' +
-    'and 1½ of the C–Y one, settled at T = 1) plus 1½ flasks of blue, heated to T = 12. Its left spout is ' +
+    'Midway through the intended route, to tinker with: the separator holds △RGY (from ½ flask of nearly even R ' +
+    'and G and 1½ of 2 : 1 C and Y, settled at T = 1) plus 1½ flasks of blue, heated to T = 12. Its left spout is ' +
     'hosed back into its own tank, so each pass strips out yellow, and hot blue drips in from the tank above. ' +
     'Whatever goes right collects in the catch tank below. Picking this preset also restores the default chemistry.',
   flasks: [],
   tools: [
     {
       kind: 'separator', at: WASH_AT, valves: [0.02],
-      tanks: [{ contents: [...settled({ 0: 0.5, 4: 1.5 }, 1), atomsOf(singleOf('B'), 1.5 * CAP)], T: WASH_T }],
+      tanks: [{ contents: [...settled(WASH_FEED, 1), atomsOf(singleOf('B'), 1.5 * CAP)], T: WASH_T }],
     },
     {
       kind: 'dispenser', at: [WASH_AT[0], 0.14], valves: [0.003],

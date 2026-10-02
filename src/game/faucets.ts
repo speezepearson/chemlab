@@ -16,24 +16,22 @@ export interface Faucet {
   T?: number;
 }
 
+/** A faucet of one atom, pure. */
+const pure = (a: Atom): Faucet => ({ atoms: { [a]: 1 } });
+/** A faucet of a pair of atoms that can bond, as if it started as nothing but that pair and settled. */
+const pair = (a: Atom, b: Atom): Faucet => ({ atoms: { [a]: 0.5, [b]: 0.5 } });
+
 /**
- * Scrounged, not pure: the player has to work out what's in each one. The
- * mixes are deliberately not the six free atoms, which would give away too
- * much about how the world's chemistry works.
+ * One faucet for each of the six atoms and each of the twelve pairs that can bond, all at room temperature.
+ * A pair's faucet is what that pair, started pure, settles to (see faucetOutput): some of it may come apart.
+ * Left to right: the pairs of primaries, then the color wheel (each atom with the pairs of its neighbors
+ * between them), then the pairs of secondaries.
  */
 export const FAUCETS: readonly Faucet[] = [
-  // R–G, with a little of everything else, hot
-  { atoms: { R: 0.49, G: 0.49, C: 0.005, M: 0.005, B: 0.005, Y: 0.005 }, T: 20 },
-  // nearly pure blue, very cold
-  { atoms: { B: 0.9999, R: 0.00005, G: 0.00005 }, T: 0.2 },
-  // R–M–B, with the other colors as contaminants
-  { atoms: { R: 0.95 / 3, M: 0.95 / 3, B: 0.95 / 3, G: 0.05 / 3, C: 0.05 / 3, Y: 0.05 / 3 } },
-  { atoms: { R: 0.4, G: 0.4, B: 0.2 } },
-  // C–Y, with a trace of magenta
-  { atoms: { C: 0.666, Y: 0.333, M: 0.001 } },
-  { atoms: { R: 0.95, G: 0.05 } },
-  { atoms: { G: 0.98, R: 0.02 } },
-  { atoms: { R: 0.5, C: 0.5 } },
+  pair('R', 'G'), pair('G', 'B'), pair('R', 'B'),
+  pure('R'), pair('R', 'Y'), pure('Y'), pair('G', 'Y'), pure('G'), pair('G', 'C'),
+  pure('C'), pair('B', 'C'), pure('B'), pair('B', 'M'), pure('M'), pair('R', 'M'),
+  pair('C', 'M'), pair('M', 'Y'), pair('C', 'Y'),
 ];
 
 /** A faucet's recipe as text, e.g. "95% R, 5% G" or "49% R, 49% G, 0.5% C, 0.5% M, 0.5% B, 0.5% Y at T = 20". */
