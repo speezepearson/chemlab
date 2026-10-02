@@ -615,11 +615,16 @@ export class GameEngine {
     return null;
   }
 
-  /** Every open top that falling fluid can land in. */
+  /**
+   * Every open top that falling fluid can land in. Something carried (see carried) has none unless the right
+   * button is held.
+   */
   private mouths(): Mouth[] {
     const { S, drag } = this;
+    const held = this.rightHeld ? new Set<Vessel>() : this.carried();
     const out: Mouth[] = [];
     for (const f of this.flasks) {
+      if (held.has(f)) continue;
       const carried = drag?.flask === f;
       if (carried && f.ang !== 0) continue; // tilted to pour
       const p = carried ? f : f.home;
@@ -627,13 +632,14 @@ export class GameEngine {
       out.push({ v: f, x0: p.x - FLASK_CATCH * S, x1: p.x + FLASK_CATCH * S, y: p.y, rim: { x: p.x + FLASK_LIP * S, y: p.y } });
     }
     for (const t of this.tools) {
-      if (t.lidded) continue;
+      if (t.lidded || t.tanks.some((v) => held.has(v))) continue;
       t.tanks.forEach((v, k) => {
         const r = this.tankRect(t, k);
         out.push({ v, x0: r.x0, x1: r.x1, y: r.y0, rim: { x: r.x1 + 3 * S, y: r.y0 } });
       });
     }
     for (const h of this.hoses) {
+      if (held.has(h.funnel)) continue;
       const e = this.hoseEnd(h, 'inlet');
       out.push({ v: h.funnel, x0: e.x - 14 * S, x1: e.x + 14 * S, y: e.y, rim: { x: e.x + 15 * S, y: e.y } });
     }
@@ -936,12 +942,16 @@ export class GameEngine {
     return null;
   }
 
-  /** The vessels being carried: they catch a faucet's stream only while the right button is held. */
+  /**
+   * The vessels being carried: a flask, a tool's tanks, a hose's funnel (by either end), or the flasks on a
+   * scale. They take in fluid (see mouths), and pour it out, only while the right button is held.
+   */
   private carried(): Set<Vessel> {
     const out = new Set<Vessel>();
     if (this.drag) out.add(this.drag.flask);
     if (this.toolDrag) for (const v of this.toolDrag.tool.tanks) out.add(v);
-    if (this.hoseDrag && this.hoseDrag.end !== 'outlet') out.add(this.hoseDrag.hose.funnel);
+    if (this.hoseDrag) out.add(this.hoseDrag.hose.funnel);
+    if (this.scaleDrag) for (const { f } of this.scaleDrag.scale.load) out.add(f);
     return out;
   }
 
@@ -1031,17 +1041,22 @@ export class GameEngine {
         if (out) tot.v.addFrom(out, volume(out), true);
         tot.streamed ||= streamed;
       };
+      const stillTool = !this.rightHeld && this.toolDrag?.tool.shape.spouts.length ? this.toolDrag.tool : null;
+      const stillHose = this.rightHeld ? null : (this.hoseDrag?.hose ?? null);
       for (let i = 0; i < sub; i++) {
         if (drag && pourInto) this.pourFrom(drag.flask, pourInto, POUR_RATE * h);
         else if (drag && pourInto === null) transfer(drag.flask, null, POUR_RATE * h);
         for (const { fa, m } of this.faucetFlows) this.stream(m.v, fa.output, FILL_RATE * h);
-        this.tools.forEach((t, j) =>
+        this.tools.forEach((t, j) => {
+          // carried, it pours nothing out without the right button (a spectrometer has nothing to pour)
+          if (t === stillTool) return;
           t.step(h).forEach((out, k) => {
             tally(toolTotals[j][k], out, false); // before pouring, which can gather it into a drop
             tally(toolTotals[j][k], null, pour(t.drops[k], out, spouts[j][k], targets[j][k]));
-          }),
-        );
+          });
+        });
         this.hoses.forEach((hose, j) => {
+          if (hose === stillHose) return;
           const out = hose.step(h);
           tally(hoseTotals[j], out, false);
           tally(hoseTotals[j], null, pour(hose.drop, out, outlets[j], hoseTargets[j]));
