@@ -274,8 +274,8 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
  *   screens and off its end, each with a spout under it (see SORTER_SCREENS).
  * - A **cryostabilizer reference** is a sealed flask's worth of the target with a valve that lets out at most
  *   0.02 flask/s.
- * - A **mass spectrometer** has a small sample cup and no spouts. Running it (see scan) destroys the sample
- *   and shows its spectrum on a screen.
+ * - A **mass spectrometer** has a small sample cup and no spouts. Running it (see scan) reads the sample's
+ *   spectrum onto a screen, then lids the cup and drains the sample away into the cabinet over the run.
  *
  * Tools run on sim time, so a slow drip into a reacting flask gives the same
  * result at any sim speed.
@@ -323,7 +323,16 @@ export class Tool {
 
   /** Run for `h` sim seconds. Returns, per spout, the fluid that left it, or null if none did. */
   step(h: number): (Vessel | null)[] {
-    if (this.kind === 'spectrometer') return (this.out = []);
+    if (this.kind === 'spectrometer') {
+      if (this.scanning) {
+        // drained evenly, so the cup is empty just as the run ends
+        const cup = this.tanks[0];
+        const left = SCAN_LIGHTS[SCAN_LIGHTS.length - 1] - this.scanAge;
+        transfer(cup, null, left <= h ? volume(cup) : (volume(cup) * h) / left);
+        this.scanAge += h;
+      }
+      return (this.out = []);
+    }
     const funnel = this.kind === 'splitter' || this.kind === 'sorter';
     let packets = this.tanks.map((tank, k) => {
       const p = new Vessel(Infinity);
@@ -344,17 +353,19 @@ export class Tool {
     return this.scanAge < SCAN_LIGHTS[SCAN_LIGHTS.length - 1];
   }
 
+  /** Whether the tanks are lidded, so nothing can be poured or fall in: always if sealed, and a spectrometer's while it runs. */
+  get lidded(): boolean {
+    return !!this.shape.sealed || (this.kind === 'spectrometer' && this.scanning);
+  }
+
   /**
-   * Run a spectrometer: read its sample's spectrum, destroy the sample, and start the hexagons lighting up
-   * (see SCAN_LIGHTS). Does nothing, returning false, while a run is under way.
+   * Run a spectrometer: read its sample's spectrum and start the hexagons lighting up (see SCAN_LIGHTS), while
+   * step lids the cup and drains the sample away. Does nothing, returning false, while a run is under way.
    */
   scan(): boolean {
     if (this.kind !== 'spectrometer' || this.scanning) return false;
     const cup = this.tanks[0];
     this.reading = spectrum(cup, cup.cap);
-    cup.n.fill(0);
-    cup.N = 0;
-    cup.Q = 0;
     this.scanAge = 0;
     return true;
   }

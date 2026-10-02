@@ -179,20 +179,29 @@ describe('mass spectrometer', () => {
     expect(spectrum(new Vessel(CUP), CUP).every((x) => x === 0)).toBe(true);
   });
 
-  it('destroys its sample when run, and ignores the button until the run is over', () => {
+  it('reads its sample when run, lids it and drains it evenly over the run, ignoring the button until the end', () => {
     const sp = new Tool('spectrometer', 0, 0, 0);
-    expect(sp.tanks[0].cap).toBe(SAMPLE_CAP);
+    const cup = sp.tanks[0];
+    expect(cup.cap).toBe(SAMPLE_CAP);
     expect(sp.step(0.1)).toEqual([]);
-    sp.tanks[0].setMolecules(TARGET, SAMPLE_CAP / 2 / roomFor(TARGET));
-    sp.tanks[0].setTemperature(5);
+    expect(sp.lidded).toBe(false);
+    cup.setMolecules(TARGET, SAMPLE_CAP / 2 / roomFor(TARGET));
+    cup.setTemperature(5);
+    const full = volume(cup);
     expect(sp.scan()).toBe(true);
-    expect([sp.tanks[0].N, sp.tanks[0].Q]).toEqual([0, 0]);
     // half full of the triangle
     expect(sp.reading![2 * 6 + SEXTANT_ATOMS.indexOf('R')]).toBeCloseTo(0.5, 6);
-    sp.scanAge = SCAN_LIGHTS[2] - 0.01;
+    expect(sp.lidded).toBe(true);
+    const end = SCAN_LIGHTS[2];
+    let t = 0;
+    for (; t < end / 2 - 1e-9; t += 0.02) sp.step(0.02);
+    expect(volume(cup) / full).toBeCloseTo(0.5, 2);
+    expect(temperature(cup)).toBeCloseTo(5, 2);
     expect(sp.scan()).toBe(false);
-    sp.scanAge = SCAN_LIGHTS[2];
-    expect(sp.scanning).toBe(false);
+    for (; sp.scanning; t += 0.02) sp.step(0.02);
+    expect(Math.abs(t - end)).toBeLessThanOrEqual(0.02 + 1e-9);
+    expect([cup.N, cup.Q]).toEqual([0, 0]);
+    expect(sp.lidded).toBe(false);
     expect(sp.scan()).toBe(true);
     expect(sp.reading!.every((x) => x === 0)).toBe(true);
   });

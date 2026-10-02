@@ -619,7 +619,7 @@ export class GameEngine {
       out.push({ v: f, x0: p.x - FLASK_CATCH * S, x1: p.x + FLASK_CATCH * S, y: p.y, rim: { x: p.x + FLASK_LIP * S, y: p.y } });
     }
     for (const t of this.tools) {
-      if (t.shape.sealed) continue;
+      if (t.lidded) continue;
       t.tanks.forEach((v, k) => {
         const r = this.tankRect(t, k);
         out.push({ v, x0: r.x0, x1: r.x1, y: r.y0, rim: { x: r.x1 + 3 * S, y: r.y0 } });
@@ -902,7 +902,7 @@ export class GameEngine {
     }
     for (let i = this.tools.length - 1; i >= 0; i--) {
       const t = this.tools[i];
-      if (t.shape.sealed) continue;
+      if (t.lidded) continue;
       for (let k = 0; k < t.tanks.length; k++) {
         const r = this.tankRect(t, k);
         if (p.x > r.x0 - 8 * S && p.x < r.x1 + 8 * S && p.y > r.y0 - 40 * S && p.y < r.y1)
@@ -993,20 +993,7 @@ export class GameEngine {
     }
     this.pouring = simDt > 0 && pourInto !== undefined;
 
-    // spectrometer runs go by sim time too: a step louder each phase, a chime as each ends, silent while paused
-    for (const t of this.tools) {
-      if (!t.scanning) continue;
-      const before = t.scanAge;
-      t.scanAge += simDt;
-      const r = this.rumbles.get(t);
-      for (const at of SCAN_LIGHTS) if (before < at && t.scanAge >= at) r?.chime();
-      r?.level(simDt > 0 ? scanLevel(t.scanAge) : 0);
-    }
-    for (const [t, r] of this.rumbles)
-      if (!this.tools.includes(t) || !t.scanning) {
-        r.stop(); // done, put away, or the bench was replaced
-        this.rumbles.delete(t);
-      }
+    const scanFrom = this.tools.map((t) => t.scanAge);
 
     // everything that moves fluid, and chemistry, on sim time, interleaved so a drip meets the reaction it
     // feeds, and a faucet keeps up with the valve draining what it fills
@@ -1084,6 +1071,20 @@ export class GameEngine {
       });
     }
     this.spillTime = simDt;
+
+    // spectrometer runs go by sim time too (Tool.step ages them): a step louder each phase, a chime as each
+    // ends, silent while paused
+    this.tools.forEach((t, j) => {
+      const r = this.rumbles.get(t);
+      if (!r) return;
+      for (const at of SCAN_LIGHTS) if (scanFrom[j] < at && t.scanAge >= at) r.chime();
+      r.level(simDt > 0 ? scanLevel(t.scanAge) : 0);
+    });
+    for (const [t, r] of this.rumbles)
+      if (!this.tools.includes(t) || !t.scanning) {
+        r.stop(); // done, put away, or the bench was replaced
+        this.rumbles.delete(t);
+      }
 
     const streams = new Map<Vessel, { flow: number; full: number }>();
     for (const [v, amount] of this.inflow) streams.set(v, { flow: amount / simDt, full: volume(v) / v.cap });
@@ -1321,7 +1322,7 @@ export class GameEngine {
     t.tanks.forEach((v, k) => {
       const r = this.tankRect(t, k);
       this.drawTank(v, r.x0, r.y0, r.x1, r.y1, sh.funnel);
-      if (sh.sealed) {
+      if (t.lidded) {
         // a lid, and nothing gets in
         ctx.fillStyle = theme.pipe;
         ctx.beginPath();
