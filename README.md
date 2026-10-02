@@ -92,7 +92,7 @@ The intended route:
 
 With no yellow around, the product stays put hot or cold. Any yellow it meets undoes it, downhill and fast, and the heat that releases can free more yellow.
 
-**This doesn't work yet.** The wash also turns open chains (R–G–Y, and R–G + Y) into blue chains, R–G–B and G–R–B. These are dead ends that no separator tells from the target, and with the default chemistry they come out ahead of it by 2 times or more. `npm run route` prints the route stage by stage, and the *Wash route (sandbox)* preset sets up the wash step to tinker with.
+**This doesn't work yet.** The wash also turns open chains (R–G–Y, and R–G + Y) into blue chains, R–G–B and G–R–B. These are dead ends that no separator tells from the target, and with the default chemistry they come out ahead of it by 2 times or more. The *Wash route (sandbox)* preset sets up the wash step to tinker with.
 
 ## What's playable now (v1)
 
@@ -142,7 +142,7 @@ With no yellow around, the product stays put hot or cold. Any yellow it meets un
 
 ## Open questions / next steps
 
-- **Blue chains beat the target in the wash.** The route harness (`npm run route`, `src/game/route.test.ts`) shows the wash preset peaking at about 0.1 flasks of △RGB at 4–7% purity, with twice as much R–G–B and G–R–B (at blue E = −1; at E = −10 it was 0.04 flasks at 1–2%, with 3–6 times as much chain). Two things feed the chains:
+- **Blue chains beat the target in the wash.** Runs of the wash preset peaked at about 0.1 flasks of △RGB at 4–7% purity, with twice as much R–G–B and G–R–B (at blue E = −1; at E = −10 it was 0.04 flasks at 1–2%, with 3–6 times as much chain). Two things feed the chains:
   - An open chain R–G–Y washes with one uphill blue bond instead of the ring's two, so it's favored by about e^(|E(R–B)|/T).
   - The default yellow bonds are weak (E = 4), so at wash temperature most △RGY falls apart into R–G + Y, and G–R–Y from those washes into G–R–B.
 
@@ -176,14 +176,13 @@ With no yellow around, the product stays put hot or cold. Any yellow it meets un
 npm install
 npm run dev        # local dev server
 npm test           # chemistry tests (vitest)
-npm run route      # the synthesis route, printed stage by stage (src/game/route.test.ts)
 npm run build      # typecheck + production build into dist/
 ```
 
 Code layout:
 
 - `src/chem/`: the chemistry model, pure TypeScript with no DOM. It covers atoms, species enumeration, parameters, and the reaction network with its integrator.
-- `src/game/`: flasks, tools, the scale, pouring, fluid color, and `GameEngine`, which owns the canvas. It handles layout, pointer input, the simulation loop and drawing. `route.ts` is a harness that runs a synthesis on the same pieces without the UI and reports each stage.
+- `src/game/`: flasks, tools, the scale, pouring, fluid color, and `GameEngine`, which owns the canvas. It handles layout, pointer input, the simulation loop and drawing.
 - `src/components/`: the React UI around the canvas: speed control, the chemistry table and the god-mode panel.
 
 ### Deploys and PR previews

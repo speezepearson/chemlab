@@ -7,8 +7,6 @@ same commit as any behavior change. This file holds what README doesn't: how to 
 
 - `npx tsc -b`: typecheck. It's strict, with unused locals and imports as errors, so run it before committing.
 - `npm test`: runs vitest on all `*.test.ts`. These are pure-logic tests; nothing touches the canvas.
-- `npm run route`: the synthesis-route harness (`src/game/route.ts`). It prints a report; `--silent=false` is already
-  in the script.
 - `npx vite --port 5199 --strictPort`: the dev server, for browser checks.
 
 ## Checking things in a browser
@@ -35,7 +33,7 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
   - `species.ts` defines the 50 species.
   - `params.ts` holds the bond parameters, and `randomize.ts` the bond randomizer.
   - `reactions.ts` is Arrhenius kinetics on whole molecules.
-  - `equilibrium.ts` is the exact full-equilibrium solver, for the presets' and the route's settled mixes. Faucets
+  - `equilibrium.ts` is the exact full-equilibrium solver, for the presets' settled mixes. Faucets
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
 - `src/game/`: everything else in the game.
   - `engine.ts` owns the canvas, input, sim loop and all drawing.

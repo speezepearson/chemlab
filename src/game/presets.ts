@@ -67,7 +67,7 @@ export interface Recipe {
 
 /**
  * The wash route's feed, as [recipe, flasks]: what the game's old R–G and C–Y faucets poured, nearly even R and
- * G with traces of everything else, and 2 : 1 C and Y. route.test.ts builds △RGY from the same.
+ * G with traces of everything else, and 2 : 1 C and Y.
  */
 export const WASH_FEED: readonly [Recipe, number][] = [
   [{ atoms: { R: 0.49, G: 0.49, C: 0.005, M: 0.005, B: 0.005, Y: 0.005 }, T: 20 }, 0.5],
@@ -88,7 +88,7 @@ function settled(mix: readonly [Recipe, number][], T: number): { species: number
 const WASH_AT: [number, number] = [0.36, 0.4];
 const WASH_T = 12;
 
-/** The wash route's starting bench. route.test.ts runs the same thing without the UI. */
+/** The wash route's starting bench. */
 export const WASH_PRESET: Preset = {
   id: 'wash',
   name: 'Wash route (sandbox)',
