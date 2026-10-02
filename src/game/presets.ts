@@ -3,7 +3,6 @@ import { equilibrium } from '../chem/equilibrium';
 import { T_ROOM, defaultChemParams } from '../chem/params';
 import { SPECIES, TARGET, singleOf, speciesEnergies } from '../chem/species';
 import { CAP, HOME_W } from './config';
-import type { Faucet } from './faucets';
 import type { Vessel } from './flask';
 import type { ToolKind } from './tools';
 
@@ -60,11 +59,17 @@ export interface Preset {
 /** `atoms` atoms' worth of one species. */
 const atomsOf = (species: number, atoms: number) => ({ species, molecules: atoms / SPECIES[species].size });
 
+/** A fluid by its share of each atom, at full chemical equilibrium at T (room temperature if left out). */
+export interface Recipe {
+  atoms: Partial<Record<Atom, number>>;
+  T?: number;
+}
+
 /**
- * The wash route's feed, as [recipe, flasks]: the R–G and C–Y faucets the game used to have, nearly even R and G
- * with traces of everything else, and 2 : 1 C and Y. route.test.ts builds △RGY from the same.
+ * The wash route's feed, as [recipe, flasks]: what the game's old R–G and C–Y faucets poured, nearly even R and
+ * G with traces of everything else, and 2 : 1 C and Y. route.test.ts builds △RGY from the same.
  */
-export const WASH_FEED: readonly [Faucet, number][] = [
+export const WASH_FEED: readonly [Recipe, number][] = [
   [{ atoms: { R: 0.49, G: 0.49, C: 0.005, M: 0.005, B: 0.005, Y: 0.005 }, T: 20 }, 0.5],
   [{ atoms: { C: 0.666, Y: 0.333, M: 0.001 } }, 1.5],
 ];
@@ -73,7 +78,7 @@ export const WASH_FEED: readonly [Faucet, number][] = [
  * A mix of recipes left to settle at temperature T, each weighted by its flasks, at chemical equilibrium under
  * the default chemistry.
  */
-function settled(mix: readonly [Faucet, number][], T: number): { species: number; molecules: number }[] {
+function settled(mix: readonly [Recipe, number][], T: number): { species: number; molecules: number }[] {
   const atoms = ATOMS.map((a) => mix.reduce((t, [fa, fl]) => t + fl * (fa.atoms[a] ?? 0), 0));
   const n = equilibrium(atoms, speciesEnergies(defaultChemParams()), T);
   return SPECIES.filter((s) => n[s.i] * CAP >= 1).map((s) => ({ species: s.i, molecules: n[s.i] * CAP }));

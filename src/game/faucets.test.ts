@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { defaultChemParams, T_ROOM } from '../chem/params';
 import { ReactionNetwork, atomCounts, heatAt, temperature, type Fluid } from '../chem/reactions';
-import { ATOMS } from '../chem/atoms';
+import { equilibriumFluid } from '../chem/equilibrium';
 import { NS, SPECIES } from '../chem/species';
 import { CAP } from './config';
 import { Vessel } from './flask';
@@ -11,23 +11,27 @@ import type { Mouth } from './tools';
 describe('faucets', () => {
   const net = new ReactionNetwork(defaultChemParams());
 
+  it('are the six atoms and the twelve pairs that can bond, once each', () => {
+    const starts = FAUCETS.map((fa) => SPECIES[fa.start]);
+    expect(new Set(starts).size).toBe(18);
+    expect(starts.filter((s) => s.size === 1)).toHaveLength(6);
+    expect(starts.filter((s) => s.size === 2)).toHaveLength(12);
+  });
+
   for (const fa of FAUCETS) {
     describe(`${describeFaucet(fa)} faucet`, () => {
-      const out = faucetOutput(fa, net.U);
+      const out = faucetOutput(fa, net);
       const T = fa.T ?? T_ROOM;
+      const start = SPECIES[fa.start];
 
       it('outputs fluid at its temperature', () => {
         expect(temperature(out)).toBeCloseTo(T, 12);
       });
 
-      it('has a recipe that sums to 100%', () => {
-        expect(Object.values(fa.atoms).reduce((t, v) => t + v, 0)).toBeCloseTo(1, 12);
-      });
-
-      it('outputs its recipe of atoms', () => {
+      it("outputs its start's atoms", () => {
         const total = atomCounts(out).reduce((t, v) => t + v, 0);
         expect(total).toBeCloseTo(out.N, 12);
-        atomCounts(out).forEach((v, a) => expect(v).toBeCloseTo(fa.atoms[ATOMS[a]] ?? 0, 12));
+        atomCounts(out).forEach((v, a) => expect(v).toBeCloseTo(start.atomIdx.includes(a) ? 1 / start.size : 0, 9));
       });
 
       it('outputs fluid in chemical equilibrium with itself', () => {
@@ -41,8 +45,30 @@ describe('faucets', () => {
         for (let s = 0; s < NS; s++) expect((f.n[s] - before[s]) / CAP, SPECIES[s].name).toBeCloseTo(0, 5);
         expect(temperature(f) / T).toBeCloseTo(1, 5);
       });
+
+      if (start.size === 2) {
+        const blue = start.atoms.includes('B');
+        it(blue ? 'stays whole, since blue bonds never break' : 'settles to full equilibrium, since its bond can break', () => {
+          const atoms = Object.fromEntries(start.atoms.filter((a) => a).map((a) => [a!, 0.5]));
+          const full = equilibriumFluid(atoms, net.U, T);
+          for (let s = 0; s < NS; s++) {
+            const want = blue ? (s === fa.start ? 0.5 : 0) : full.n[s];
+            expect(out.n[s], SPECIES[s].name).toBeCloseTo(want, 6);
+          }
+        });
+      }
     });
   }
+
+  it('settles again when the chemistry changes', () => {
+    const own = new ReactionNetwork(defaultChemParams());
+    const cy = FAUCETS.find((fa) => describeFaucet(fa) === 'C–Y')!;
+    const before = faucetOutput(cy, own).n[cy.start];
+    expect(faucetOutput(cy, own).n[cy.start]).toBe(before); // cached
+    own.params.bonds.CY.E *= 2;
+    own.rebuild();
+    expect(faucetOutput(cy, own).n[cy.start]).toBeGreaterThan(before);
+  });
 });
 
 describe('faucetTarget', () => {

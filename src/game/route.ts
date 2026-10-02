@@ -1,9 +1,10 @@
-import type { ChemParams } from '../chem/params';
+import { equilibriumFluid } from '../chem/equilibrium';
+import { T_ROOM, type ChemParams } from '../chem/params';
 import { ReactionNetwork, heatAt, temperature, type Fluid } from '../chem/reactions';
 import { SPECIES, TARGET, speciesIndex } from '../chem/species';
 import { CAP } from './config';
-import { faucetOutput, type Faucet } from './faucets';
 import { Vessel, transfer } from './flask';
+import type { Recipe } from './presets';
 import { MAX_FLOW, separate } from './tools';
 
 /*
@@ -56,10 +57,10 @@ export class Route {
     this.net = new ReactionNetwork(params);
   }
 
-  /** `atoms` atoms fresh from a faucet with this recipe, in an unbounded vessel. */
-  faucet(fa: Faucet, atoms: number): Vessel {
+  /** `atoms` atoms of a recipe, at full equilibrium at its temperature, in an unbounded vessel. */
+  recipe(r: Recipe, atoms: number): Vessel {
     const v = new Vessel(Infinity);
-    v.addFrom(faucetOutput(fa, this.net.U), atoms);
+    v.addFrom(equilibriumFluid(r.atoms, this.net.U, r.T ?? T_ROOM), atoms);
     return v;
   }
 

@@ -1,5 +1,5 @@
 import {
-  ATOMS, ATOM_RGB, BIT_PAIRS, GROUP, pairKey, popcount3,
+  ATOMS, ATOM_RGB, BIT_PAIRS, GROUP, bitOf, pairKey, popcount3,
   type Atom, type Group,
 } from './atoms';
 import type { ChemParams } from './params';
@@ -93,6 +93,12 @@ function slotsFor(atom: Atom): Slots {
 export const SINGLE: readonly number[] = ATOMS.map((a) => speciesIndex(slotsFor(a), 0));
 export function singleOf(atom: Atom): number {
   return SINGLE[ATOMS.indexOf(atom)];
+}
+
+/** The species of a and b bonded to each other (they must be from different groups). */
+export function pairOf(a: Atom, b: Atom): number {
+  const slots = ([0, 1, 2] as const).map((g) => (g === GROUP[a] ? a : g === GROUP[b] ? b : null));
+  return speciesIndex(slots, bitOf(GROUP[a], GROUP[b]));
 }
 
 /** The target: the R–G–B triangle. */

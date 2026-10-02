@@ -292,7 +292,7 @@ export class GameEngine {
     this.preset = preset;
     loadChem(this.chem.params, s.chem);
     this.chem.rebuild();
-    for (const fa of L.faucets) fa.output = faucetOutput(fa, this.chem.U);
+    for (const fa of L.faucets) fa.output = faucetOutput(fa, this.chem);
     this.flasks = s.flasks.map((sf, i) => {
       const f = new Flask(this.clampRest({ x: sf.x * HOME_W, y: L.floorY - sf.up * S }), CAP);
       f.glass = Number.isFinite(sf.glass) ? sf.glass : glassGrams(i);
@@ -383,7 +383,7 @@ export class GameEngine {
   /** Lay out the world, once: the faucets (see placeFaucets), and the shelf along the bottom of the home area. */
   private layoutWorld(): void {
     const { L, S, H } = this;
-    L.faucets = FAUCETS.map((fa) => ({ ...fa, output: faucetOutput(fa, this.chem.U), fx: 0, fy: 0 }));
+    L.faucets = FAUCETS.map((fa) => ({ ...fa, output: faucetOutput(fa, this.chem), fx: 0, fy: 0 }));
     this.placeFaucets();
     L.floorY = H - SINK_H * S;
     L.homes = [];
@@ -1005,7 +1005,7 @@ export class GameEngine {
     const carried = this.carried();
     this.faucetFlows = [];
     for (const fa of L.faucets) {
-      fa.output = faucetOutput(fa, this.chem.U); // cheap, and follows edits to the chemistry
+      fa.output = faucetOutput(fa, this.chem); // cheap, and follows edits to the chemistry
       const m = faucetTarget(mouths, this.faucetXY(fa).spout, FAUCET_REACH * S, carried, this.rightHeld);
       if (m && simDt > 0) this.faucetFlows.push({ fa, m });
     }

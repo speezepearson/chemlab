@@ -16,7 +16,7 @@ import { TANK_CAP } from './tools';
 describe('route', () => {
   it('builds △RGY from the old R–G and C–Y faucets', () => {
     const r = new Route(defaultChemParams());
-    const pot = r.mix(...WASH_FEED.map(([fa, flasks]) => r.faucet(fa, flasks * CAP)));
+    const pot = r.mix(...WASH_FEED.map(([rec, flasks]) => r.recipe(rec, flasks * CAP)));
     r.report('R–G + hot C–Y, mixed', pot);
     // held at T = 1, standing in for cooling it with the heat exchanger
     const heat = r.hold([pot], 120, 1);

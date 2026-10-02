@@ -1,5 +1,17 @@
-import { ATOMS } from './atoms';
+import { ATOMS, type Atom } from './atoms';
+import { THERMO } from './params';
+import type { Fluid } from './reactions';
 import { NS, SPECIES } from './species';
+
+/**
+ * One atom's worth of a fluid made of atoms in these shares, at full chemical equilibrium at T: every reaction
+ * run to its end, including ones the kinetics never get to (see equilibrium).
+ */
+export function equilibriumFluid(atoms: Partial<Record<Atom, number>>, U: Float64Array, T: number): Fluid {
+  const shares = ATOMS.map((a) => atoms[a] ?? 0);
+  const total = shares.reduce((t, v) => t + v, 0);
+  return { n: equilibrium(shares.map((v) => v / total), U, T), N: 1, Q: T * THERMO.heatCap };
+}
 
 /**
  * Molecule counts at chemical equilibrium for a fluid holding `atoms[a]` atoms
