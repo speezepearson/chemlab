@@ -77,7 +77,8 @@ export function Palette({ engine }: { engine: GameEngine }) {
         <button
           key={kind}
           aria-label={label}
-          title={`${label}: drag onto the bench for a new one, or back here to put one away`}
+          // no name in the tooltip: working out what each tool does is part of the game
+          title="Drag onto the bench for a new one, or back here to put one away"
           onPointerDown={(e) => {
             e.preventDefault();
             engine.spawn(kind, e.clientX, e.clientY);
