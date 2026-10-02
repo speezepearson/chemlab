@@ -176,6 +176,7 @@ With no yellow around, the product stays put hot or cold. Any yellow it meets un
   - Maybe add an off switch to the new device. The note doesn't say which device is meant.
   - Maybe add a mixer.
   - Add some sort of UI tutorial on how to change valve positions (right-click near a valve and point).
+  - A way to empty the reservoir on the new machine, and some sign that fluid poured into it goes into an internal reservoir. Maybe just cap the reservoir and drain it slowly as the machine runs.
 
 ## Development
 
