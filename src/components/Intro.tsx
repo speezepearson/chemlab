@@ -17,8 +17,20 @@ type Phase = 'start' | 'log' | 'logFading' | 'message' | 'leaving';
 /**
  * The intro, over everything: a start button, then the ship's console log as the disaster unfolds, then the
  * cheerful notice that wakes the player, whose OK fades into the game. `onLogEnd` is called as the log fades.
+ * With `skipStart` (a replay) it opens on the log. With `resume` (a returning player) it's only the start button,
+ * which fades straight into the game: browsers keep sound off until a click, so this is that click.
  */
-export function Intro({ skipStart = false, onLogEnd, onDone }: { skipStart?: boolean; onLogEnd(): void; onDone(): void }) {
+export function Intro({
+  skipStart = false,
+  resume = false,
+  onLogEnd,
+  onDone,
+}: {
+  skipStart?: boolean;
+  resume?: boolean;
+  onLogEnd(): void;
+  onDone(): void;
+}) {
   const [phase, setPhase] = useState<Phase>(skipStart ? 'log' : 'start');
   const [shown, setShown] = useState(0);
   const consoleRef = useRef<HTMLDivElement>(null);
@@ -65,7 +77,7 @@ export function Intro({ skipStart = false, onLogEnd, onDone }: { skipStart?: boo
   return (
     <div className={`intro ${phase}`}>
       {phase === 'start' && (
-        <button className="intro-start" onClick={() => setPhase('log')} autoFocus>
+        <button className="intro-start" onClick={() => setPhase(resume ? 'leaving' : 'log')} autoFocus>
           start
         </button>
       )}
@@ -75,7 +87,7 @@ export function Intro({ skipStart = false, onLogEnd, onDone }: { skipStart?: boo
           {INCIDENT.slice(0, shown).map((l, i) => line(l, OPENING.length + i))}
         </div>
       )}
-      {(phase === 'message' || phase === 'leaving') && <Notice onOk={() => setPhase('leaving')} />}
+      {(phase === 'message' || (phase === 'leaving' && !resume)) && <Notice onOk={() => setPhase('leaving')} />}
     </div>
   );
 }

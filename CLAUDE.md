@@ -21,7 +21,8 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
 - Set up a scene by writing a save before the page loads:
   `page.addInitScript(s => localStorage.setItem('slurry-lab.save', s), JSON.stringify(save))`. The format is
   `SaveState` in `src/game/save.ts`; tool positions are fractions of the home area.
-- Set `localStorage['slurry-lab.introSeen'] = '1'` to skip the intro.
+- Set `localStorage['slurry-lab.introSeen'] = '1'` to skip the intro. A start button still covers the page (it's
+  the click that lets sound play), and the bench stays paused under it, so click `.intro-start` first.
 - Tools drain fast at 16×. Use slow valves, or screenshot early, to catch something mid-flow.
 - Shell gotcha: `pkill -f "port 5199"` exits 144 because the pattern matches its own shell. That's harmless; append
   `; true`.

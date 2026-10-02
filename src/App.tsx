@@ -49,14 +49,17 @@ export function App() {
   const [chemVersion, setChemVersion] = useState(0);
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
-  /** The intro, if it's showing: from its start button the first time, straight into the log on a replay. */
-  const [intro, setIntro] = useState<'first' | 'replay' | null>(() => (introSeen() ? null : 'first'));
+  /**
+   * The intro, if it's showing: from its start button the first time, straight into the log on a replay, and
+   * just the start button for a returning player, so there's a click to turn the sound on.
+   */
+  const [intro, setIntro] = useState<'first' | 'replay' | 'resume' | null>(() => (introSeen() ? 'resume' : 'first'));
   const endIntro = useCallback(() => {
     markIntroSeen();
     setIntro(null);
   }, []);
   /** Whether the intro is still before the end of its console log: the ship's ambience starts after it. */
-  const [preLog, setPreLog] = useState(intro !== null);
+  const [preLog, setPreLog] = useState(intro === 'first');
   const endLog = useCallback(() => setPreLog(false), []);
   useEffect(() => ambience(!preLog), [preLog]);
   const presetRef = useRef(preset);
@@ -198,7 +201,7 @@ export function App() {
           {won && <div id="win">Enough cryostabilizer to reach Mu Ceti.</div>}
         </div>
       </div>
-      {intro && <Intro skipStart={intro === 'replay'} onLogEnd={endLog} onDone={endIntro} />}
+      {intro && <Intro skipStart={intro === 'replay'} resume={intro === 'resume'} onLogEnd={endLog} onDone={endIntro} />}
     </>
   );
 }
