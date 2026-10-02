@@ -79,21 +79,11 @@ The reaction types are:
 
   *Mix* blends between the average (0) and the full model (1). The *Cloudiness* checkbox makes bigger molecules more opaque: the fluid's opacity is the atom-weighted average of an α for singles, pairs and triples.
 
-## The intended puzzle
+## The puzzle's chemistry
 
 Blue bonds are uphill (E = −1 for now) and have no prefactor (A = 0), so they never form or break on their own, at any temperature. Blue gets into a molecule, or out of one, only by swapping places with yellow, its opposite color. The target, the **△RGB triangle**, sits above R–G + B, so it never dominates an equilibrium.
 
 The four faucets of pairs with blue pour them whole, since with A = 0 they never come apart. No faucet holds atoms from all three groups, so none pours any triangle: the target has to be made.
-
-The intended route:
-
-1. Build **△RGY**: R–G plus yellow.
-2. **Wash** it with blue, hot and with blue in excess. The swap that puts blue in yellow's place is uphill, so the yellow has to be pulled out as it's freed, which a separator does if its left spout is hosed back into its own tank.
-3. Separate the △RGB from what's left.
-
-With no yellow around, the product stays put hot or cold. Any yellow it meets undoes it, downhill and fast, and the heat that releases can free more yellow.
-
-**This doesn't work yet.** The wash also turns open chains (R–G–Y, and R–G + Y) into blue chains, R–G–B and G–R–B. These are dead ends that no separator tells from the target, and with the default chemistry they come out ahead of it by 2 times or more. `npm run route` prints the route stage by stage, and the *Wash route (sandbox)* preset sets up the wash step to tinker with.
 
 ## What's playable now (v1)
 
@@ -137,25 +127,20 @@ With no yellow around, the product stays put hot or cold. Any yellow it meets un
   - **Spectrometer:** its rumble and chimes (see above).
   - **Where sounds come from** (`src/game/place.ts`): drips, streams and the spectrometer are heard from where they are on the bench. Anything in view plays at full volume, panned gently toward its side (halfway at the screen's edge). Off screen it fades, to a quarter half a view past the edge and to silence a whole view's width (or height) past it, and pans all the way to its side once it's half a view off to the left or right. Above or below the view it only fades. Zooming out brings more into view, and so into earshot. The ship's ambience comes from everywhere.
   - **Volume:** the *Sound* panel has a slider for each of these (hum, klaxon, fire alarm, drips, streams, spectrometer) and one for everything. Gain goes as the square of the slider, so 50 plays a sound as synthesized, the top four times as loud, and the bottom silent. They start at 50, except the far-off klaxon at 23 and fire alarm at 26, and *Restore defaults* puts them back there. Sliders are kept in local storage, not in saves.
-- **Presets:** the dropdown next to Reset loads a starting layout, and Reset restarts the current one. *Stranded* is the game. *Temperature range* shows flasks from T = 0 to T = 100, to show how temperature looks. *Heat exchanger demo* passes hot red and room-temperature green through the exchanger. *Separator demo* splits red from cyan. *Wash route (sandbox)* is the wash step of the intended route, set up to tinker with: a hot separator of △RGY and blue with its left spout hosed back into its tank, hot blue dripping in from above, and a catch tank under the right spout. Picking it from the menu also restores the default chemistry. Presets are defined in `src/game/presets.ts`, and can place hoses by naming the tool spout and tank each end goes to. The dropdown shows only in god mode; outside it, Reset still restarts the current preset.
+- **Presets:** the dropdown next to Reset loads a starting layout, and Reset restarts the current one. *Stranded* is the game. *Temperature range* shows flasks from T = 0 to T = 100, to show how temperature looks. *Heat exchanger demo* passes hot red and room-temperature green through the exchanger. *Separator demo* splits red from cyan. *Wash route (sandbox)* is a sandbox to tinker with: a hot separator of △RGY and blue with its left spout hosed back into its tank, hot blue dripping in from above, and a catch tank under the right spout. Picking it from the menu also restores the default chemistry. Presets are defined in `src/game/presets.ts`, and can place hoses by naming the tool spout and tank each end goes to. The dropdown shows only in god mode; outside it, Reset still restarts the current preset.
 - **Chemistry table:** every parameter is live-editable. Drag a number sideways to scale it by 1% per pixel (100 px ≈ ×e). Double-click a bond energy `E` to flip its sign, or any other number to type it, which is how to set an `A` back to 0. *Restore defaults* puts the default chemistry back, volume back to counting molecules, and the drip, heater and cooling settings back too. All reaction rates rebuild on every change.
 - **Random chemistries** (`src/chem/randomize.ts`): below the Chemistry table, pick a distribution for bond energies E and another for activation energies Ea. Each can be normal (mean, std dev), lognormal (median, σ of ln), uniform (min, max) or log-uniform (min, max, every decade equally likely), and each draw is then negated with probability P(negate). Every parameter has a slider (logarithmic for medians and log-uniform bounds). *Randomize E, Ea* draws every bond's E and Ea independently from them, to three significant figures, except that every bond to B keeps E = −2 and R–G keeps E = 100. Prefactors A are left alone, so blue still only moves by swapping. A negative Ea is allowed: that reaction runs faster than its prefactor, the faster the colder. The sliders' settings last until the page reloads; the drawn chemistry is saved and exported like any other.
 - **Saving** (`src/game/save.ts`): the bench (every flask, tool, scale and hose, their contents (a heater's tube included), valves and tares) and the chemistry parameters are saved to local storage every 2 seconds and when you leave the page, and restored on load. *Export* copies the whole setup as a string (base64 of JSON), and *Import* loads one. Contents are stored by species name, so saves survive reordering the species list.
 
 ## Open questions / next steps
 
-- **Blue chains beat the target in the wash.** The route harness (`npm run route`, `src/game/route.test.ts`) shows the wash preset peaking at about 0.1 flasks of △RGB at 4–7% purity, with twice as much R–G–B and G–R–B (at blue E = −1; at E = −10 it was 0.04 flasks at 1–2%, with 3–6 times as much chain). Two things feed the chains:
-  - An open chain R–G–Y washes with one uphill blue bond instead of the ring's two, so it's favored by about e^(|E(R–B)|/T).
-  - The default yellow bonds are weak (E = 4), so at wash temperature most △RGY falls apart into R–G + Y, and G–R–Y from those washes into G–R–B.
-
-  Stronger, slower yellow bonds keep the ring shut, but then the wash is so far uphill that the separator (yellow vs. △RGY: e per pass) can't pull yellow out fast enough. Parameter scans, including asymmetric blue bonds (R–B stable, G–B very uphill), found nothing much better. Candidate levers: a separator that tells shapes apart, a sharper separator, or a separate barrier for ring closure.
-- **Separation.** Nothing yet separates species, so washed product sits in a flask with free Y and leftover B. The candidates are:
+- **Separation.** The separator and size sorter split species only partly. Candidates for more:
   - boiling: small species are volatile, which reuses temperature;
   - a size sieve: singles pass, pairs and triples stay;
   - a color trap: an item that binds one free color.
 
   The choice affects what shape the target should be.
-- **Temperature control.** The resistive heater heats, and everything cools to the room. Nothing chills below room temperature yet except endotherms; an ice bath would. The route harness (`npm run route`) doesn't model cooling, so it overstates how hot the wash stays, and the *Temperature range* preset's flasks now drift to room temperature over a minute or two.
+- **Temperature control.** The resistive heater heats, and everything cools to the room. Nothing chills below room temperature yet except endotherms; an ice bath would. The *Temperature range* preset's flasks now drift to room temperature over a minute or two.
 - **More glassware and tools.** Graduated cylinders and pipettes.
 - **Tool follow-ups.**
   - A tank can only be emptied through its spout.
@@ -178,7 +163,7 @@ With no yellow around, the product stays put hot or cold. Any yellow it meets un
 npm install
 npm run dev        # local dev server
 npm test           # chemistry tests (vitest)
-npm run route      # the synthesis route, printed stage by stage (src/game/route.test.ts)
+npm run route      # a synthesis harness, printed stage by stage (src/game/route.test.ts)
 npm run build      # typecheck + production build into dist/
 ```
 
