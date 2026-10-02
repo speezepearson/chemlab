@@ -9,6 +9,7 @@ import { DEFAULT_PRESET, SPECTROMETER_AT, applyFill, type Preset } from './prese
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
 import { rumble, type Rumble } from './rumble';
+import { WaterSounds } from './water';
 import {
   HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SHAPES, SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, drip,
   UNIQUE_TOOLS, mouthBelow, scanLevel, tankX, type Mouth, type ToolKind,
@@ -169,6 +170,11 @@ export class GameEngine {
   private nextToolId = 0;
   /** Running spectrometers' sounds. */
   private rumbles = new Map<Tool, Rumble>();
+  private water = new WaterSounds();
+  /** This frame's streams, for their sound: how much ran into each vessel, by volume. */
+  private inflow = new Map<Vessel, number>();
+  /** How many drops landed in vessels this frame, for their sound. */
+  private landed = 0;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -192,6 +198,7 @@ export class GameEngine {
     this.resizeObserver.disconnect();
     for (const c of this.cleanups) c();
     for (const r of this.rumbles.values()) r.stop();
+    this.water.stop();
   }
 
   /**
@@ -938,6 +945,8 @@ export class GameEngine {
     const { S, L, drag, pointer } = this;
     this.open = this.mouths();
     this.spills.clear();
+    this.inflow.clear();
+    this.landed = 0;
 
     // where the carried flask is, and what it's pouring into (null: the sink), if anything
     let pourInto: Vessel | null | undefined;
@@ -1014,7 +1023,7 @@ export class GameEngine {
       const pour = (drop: Vessel, out: Vessel | null, sp: Point, target: Mouth | null): boolean => {
         const down = drip(drop, out, h);
         if (down && down === out) {
-          if (target) this.fill(target.v, out);
+          if (target) this.stream(target.v, out);
         } else if (down) this.falling.push({ v: down, x: sp.x, y: sp.y, vy: 0 });
         return !!down && down === out;
       };
@@ -1030,7 +1039,7 @@ export class GameEngine {
       for (let i = 0; i < sub; i++) {
         if (drag && pourInto) this.pourFrom(drag.flask, pourInto, POUR_RATE * h);
         else if (drag && pourInto === null) transfer(drag.flask, null, POUR_RATE * h);
-        for (const { fa, m } of this.faucetFlows) this.fill(m.v, fa.output, FILL_RATE * h);
+        for (const { fa, m } of this.faucetFlows) this.stream(m.v, fa.output, FILL_RATE * h);
         this.tools.forEach((t, j) =>
           t.step(h).forEach((out, k) => {
             tally(toolTotals[j][k], out, false); // before pouring, which can gather it into a drop
@@ -1048,7 +1057,10 @@ export class GameEngine {
           d.vy += GRAVITY * h;
           d.y += d.vy * h;
           const m = mouthBelow(mouths, { x: d.x, y: from });
-          if (m && m.y <= d.y) this.fill(m.v, d.v);
+          if (m && m.y <= d.y) {
+            this.fill(m.v, d.v);
+            this.landed++;
+          }
           return !(m && m.y <= d.y) && d.y < this.H;
         });
         for (const v of vessels) {
@@ -1072,6 +1084,10 @@ export class GameEngine {
       });
     }
     this.spillTime = simDt;
+
+    const streams = new Map<Vessel, { flow: number; full: number }>();
+    for (const [v, amount] of this.inflow) streams.set(v, { flow: amount / simDt, full: volume(v) / v.cap });
+    this.water.update(dt, this.landed, streams);
 
     // goal
     let tgt = 0;
@@ -1101,11 +1117,17 @@ export class GameEngine {
     this.overflow(v);
   }
 
+  /** fill, as a stream rather than a drop: it's heard trickling in. */
+  private stream(v: Vessel, src: Fluid, amount = volume(src)): void {
+    this.inflow.set(v, (this.inflow.get(v) ?? 0) + amount);
+    this.fill(v, src, amount);
+  }
+
   /** Pour `amount` out of a carried flask into v (see fill). */
   private pourFrom(D: Flask, v: Vessel, amount: number): void {
     const poured = new Vessel(Infinity);
     transfer(D, poured, amount);
-    this.fill(v, poured);
+    this.stream(v, poured);
   }
 
   /**
@@ -1124,7 +1146,7 @@ export class GameEngine {
     if (!spill) this.spills.set(v, (spill = { at: rim, v: new Vessel(Infinity) }));
     spill.v.addFrom(out, volume(out), true);
     const below = mouthBelow(this.open, rim);
-    if (below) this.fill(below.v, out);
+    if (below) this.stream(below.v, out);
   }
 
   /** The vessel god mode is showing, with its extent for placing the panel. */
