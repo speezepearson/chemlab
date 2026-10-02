@@ -12,7 +12,7 @@ import { CENTER, placement, type Placement } from './place';
 import { rumble, type Rumble } from './rumble';
 import { WaterSounds } from './water';
 import {
-  HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SHAPES, SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, cupFillHeight, drip,
+  HELIX, Hose, MAX_FLOW, MIXER_PLATE, SCAN_LIGHTS, SHAPES, SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, cupFillHeight, drip,
   UNIQUE_TOOLS, mouthBelow, scanLevel, tankX, type Mouth, type ToolKind,
 } from './tools';
 
@@ -1532,6 +1532,7 @@ export class GameEngine {
       ctx.fillText(v.label, at.x, at.y);
     });
     if (t.kind === 'exchanger') this.drawHelix(t);
+    if (t.kind === 'mixer') this.drawStirrer(t);
     if (t.kind === 'sorter') this.drawChute(t);
     if (t.kind === 'spectrometer') this.drawSpectrometer(t);
     if (t.kind === 'separator') {
@@ -1582,6 +1583,36 @@ export class GameEngine {
       ctx.lineWidth = 1.5;
       ctx.strokeRect(r.x0 - 5 * S, r.y0 - 5 * S, r.x1 - r.x0 + 10 * S, r.y1 - r.y0 + 10 * S);
     }
+  }
+
+  /**
+   * The mixer's stir plate under its tank, with its lamp lit, and the stir bar turning on the tank's floor, seen
+   * edge on, so it looks longest broadside and shortest end on.
+   */
+  private drawStirrer(t: Tool): void {
+    const { ctx, S, theme } = this;
+    const o = this.toolXY(t);
+    const p = MIXER_PLATE;
+    ctx.fillStyle = theme.bench;
+    ctx.strokeStyle = theme.pipe;
+    ctx.lineWidth = 2 * S;
+    ctx.beginPath();
+    ctx.roundRect(o.x + p.x0 * S, o.y + p.y0 * S, (p.x1 - p.x0) * S, (p.y1 - p.y0) * S, 3 * S);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#e8a33a';
+    ctx.beginPath();
+    ctx.arc(o.x + (p.x1 - 8) * S, o.y + ((p.y0 + p.y1) / 2) * S, 2 * S, 0, Math.PI * 2);
+    ctx.fill();
+    const half = Math.max(3, 13 * Math.abs(Math.cos(t.spin)));
+    const y = (t.shape.tankH ?? TANK_H) - 4;
+    ctx.fillStyle = '#f4f2ec';
+    ctx.strokeStyle = theme.glass;
+    ctx.lineWidth = 1 * S;
+    ctx.beginPath();
+    ctx.roundRect(o.x - half * S, o.y + (y - 2) * S, 2 * half * S, 4 * S, 2 * S);
+    ctx.fill();
+    ctx.stroke();
   }
 
   /**

@@ -85,6 +85,24 @@ describe('dispenser', () => {
   });
 });
 
+describe('mixer', () => {
+  it('keeps its tank stirred, so what it holds never separates, and dispenses like a dispenser', () => {
+    const m = new Tool('mixer', 0, 0, 0, [1]);
+    m.tanks[0].setMolecules(R, CAP);
+    m.tanks[0].setMolecules(singleOf('C'), CAP);
+    for (let i = 0; i < 500; i++) m.tanks[0].settle(0.02);
+    const out = m.step(0.1)[0]!;
+    expect(out.n[R] / volume(out)).toBeCloseTo(0.5, 1);
+    expect(out.N / (MAX_FLOW * 0.1)).toBeCloseTo(1, 6);
+  });
+
+  it('turns its stir bar on sim time', () => {
+    const m = new Tool('mixer', 0, 0, 0);
+    m.step(1 / 12);
+    expect(m.spin).toBeCloseTo(Math.PI / 2);
+  });
+});
+
 describe('splitter', () => {
   function run(valve: number | undefined) {
     const sp = new Tool('splitter', 0, 0, 0, valve === undefined ? [] : [valve]);
