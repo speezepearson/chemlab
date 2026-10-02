@@ -102,6 +102,12 @@ export class Vessel implements Fluid {
     if (this.layered) this.layers = plunge(this.layers, p);
   }
 
+  /** Stir every layer by `stir` more (per sim second), as when the vessel is jostled. */
+  slosh(stir: number): void {
+    this.reconcile();
+    for (const l of this.layers) l.stir += stir;
+  }
+
   /** Forget the layers, so the contents count as evenly mixed (after replacing them wholesale). */
   remix(): void {
     this.layers = [];

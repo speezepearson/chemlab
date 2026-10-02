@@ -39,9 +39,10 @@ export function massOf(f: Fluid): number {
  * - rate: how fast neighboring layers trade molecules, per sim second, as a share of the smaller layer;
  * - gravity: how much a species' density biases that trade, light up and heavy down;
  * - calm: sim seconds for stirring to die down by a factor e;
- * - churn: how hard landing fluid stirs the layers it falls through, per its volume over theirs.
+ * - churn: how hard landing fluid stirs the layers it falls through, per its volume over theirs;
+ * - slosh: how hard moving a vessel stirs all of it, per world unit per second of change in its velocity.
  */
-export const MIXING = { color: 0.8, open: 0.8, rate: 10, gravity: 0.05, calm: 1, churn: 1 };
+export const MIXING = { color: 0.8, open: 0.8, rate: 10, gravity: 0.05, calm: 1, churn: 1, slosh: 0.0015 };
 const DEFAULT_MIXING = { ...MIXING };
 
 export function restoreDefaultMixing(): void {

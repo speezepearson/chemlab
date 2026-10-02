@@ -1,3 +1,4 @@
+import { MIXING } from '../chem/mixing';
 import { temperature, type Fluid, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
 import { CAP, FILL_RATE, GOAL_ATOMS, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
@@ -184,6 +185,8 @@ export class GameEngine {
   private water = new WaterSounds();
   /** This frame's streams, for their sound: how much ran into each vessel, by volume. */
   private inflow = new Map<Vessel, number>();
+  /** Per vessel, where it was last frame, its tilt, and its velocity, smoothed (see slosh). */
+  private motion = new Map<Vessel, { at: Point; ang: number; v: Point }>();
   /** Where each drop that landed in a vessel this frame landed, for its sound. */
   private landed: Point[] = [];
 
@@ -1059,6 +1062,7 @@ export class GameEngine {
     }
 
     // each faucet fills whatever is parked right under it, or held there with the right button
+    this.slosh(dt);
     const simDt = dt * this.speed;
     const mouths = (this.open = this.mouths());
     const carried = this.carried();
@@ -1198,6 +1202,36 @@ export class GameEngine {
     this.inspect(now);
     this.raf = requestAnimationFrame(this.frame);
   };
+
+  /**
+   * Stir whatever moved this frame (`dt` real seconds) by how sharply its velocity changed: by MIXING.slosh per
+   * world unit per second of change, so starting and stopping a move each stir it, a quick move a lot and a gentle
+   * one a little. Velocity is smoothed over about 0.1 s, so the pointer's jitter doesn't count. A flask snapping
+   * into or out of its pouring tilt isn't counted as moving.
+   */
+  private slosh(dt: number): void {
+    if (dt <= 0) return;
+    const seen = new Set<Vessel>();
+    const k = 1 - Math.exp(-dt / 0.1);
+    const track = (v: Vessel, at: Point, ang = 0) => {
+      seen.add(v);
+      const m = this.motion.get(v);
+      if (!m || m.ang !== ang) {
+        this.motion.set(v, { at: { ...at }, ang, v: { x: 0, y: 0 } });
+        return;
+      }
+      const vx = m.v.x + ((at.x - m.at.x) / dt - m.v.x) * k;
+      const vy = m.v.y + ((at.y - m.at.y) / dt - m.v.y) * k;
+      const dv = Math.hypot(vx - m.v.x, vy - m.v.y);
+      if (dv > 1e-6) v.slosh(MIXING.slosh * dv);
+      m.at = { ...at };
+      m.v = { x: vx, y: vy };
+    };
+    for (const f of this.flasks) track(f, f, f.ang);
+    for (const t of this.tools) for (const v of t.tanks) track(v, this.toolXY(t));
+    for (const h of this.hoses) track(h.funnel, this.hoseEnd(h, 'inlet'));
+    for (const v of this.motion.keys()) if (!seen.has(v)) this.motion.delete(v);
+  }
 
   /**
    * Pour `amount` of src (by volume) into v, without depleting src, however full v is. Whatever no longer

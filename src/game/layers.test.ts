@@ -98,6 +98,17 @@ describe('layers', () => {
     expect(L[0].stir).toBe(0);
   });
 
+  it('mix when sloshed, then settle again', () => {
+    const v = stood(R, C);
+    v.slosh(5);
+    for (let i = 0; i < 25; i++) v.settle(0.02);
+    let L = v.strata();
+    expect(share(L[L.length - 1], R)).toBeLessThan(0.75);
+    for (let i = 0; i < 1000; i++) v.settle(0.02);
+    L = v.strata();
+    expect(share(L[L.length - 1], R)).toBeGreaterThan(0.9);
+  });
+
   it('stay mixed when stirred', () => {
     const v = new Vessel(CAP);
     v.stirred = true;
