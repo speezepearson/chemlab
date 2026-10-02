@@ -87,6 +87,8 @@ const FLASK_LIP = 12;
 const LABEL_Y = 86;
 /** How close to a valve, in world units, the pointer can be before it stops turning the lever: the valve's core (see drawTool), not its lever. */
 const VALVE_DEADZONE = 6;
+/** How near a valve, in world units, the pointer shows the right-button hint: about the reach of its lever. */
+const VALVE_HINT = 24;
 const SINK_H = 16;
 /** Width of a stream flowing one flask per second, in world units; it goes as the square root of the flow. */
 const STREAM_WIDTH = 4.5;
@@ -655,11 +657,11 @@ export class GameEngine {
 
   /**
    * Every open top that falling fluid can land in. Something carried (see carried) has none unless the right
-   * button is held.
+   * button is held, or `withCarried` asks what would be open if it were.
    */
-  private mouths(): Mouth[] {
+  private mouths(withCarried = false): Mouth[] {
     const { S, drag } = this;
-    const held = this.rightHeld ? new Set<Vessel>() : this.carried();
+    const held = this.rightHeld || withCarried ? new Set<Vessel>() : this.carried();
     const out: Mouth[] = [];
     for (const f of this.flasks) {
       if (held.has(f)) continue;
@@ -1966,6 +1968,7 @@ export class GameEngine {
     for (const h of this.hoses) this.drawHose(h);
     this.drawDrops();
     if (drag) this.drawFlask(drag.flask, drag.flask.x, drag.flask.y, drag.flask.ang);
+    if (this.rightWouldDo()) this.drawRightHint();
 
     // glow goes on top of everything, so a very hot flask washes out its surroundings
     for (const f of this.flasks) {
@@ -1978,6 +1981,67 @@ export class GameEngine {
         const r = this.tankRect(t, k);
         this.drawGlow(v, (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2, v.cap);
       });
+  }
+
+  /**
+   * Whether pressing the right button now would do something: turn the valve the pointer is near, pour the
+   * carried flask into what it's over, let a carried tool or hose flow, or catch something falling into what's
+   * carried (from a faucet, spout or hose).
+   */
+  private rightWouldDo(): boolean {
+    const { pointer: p, S } = this;
+    if (this.rightHeld || (p.x === -1 && p.y === -1)) return false;
+    const t = this.hoverTool;
+    const near = (q: Point) => Math.hypot(q.x - p.x, q.y - p.y) < VALVE_HINT * S;
+    if (t && !t.shape.noValve && t.tanks.some((_, k) => near(this.valveAt(t, k)))) return true;
+    const carried = this.carried();
+    if (!carried.size) return false;
+    if (this.drag) {
+      const z = this.zoneAt(p, this.drag.flask);
+      if (z && z.kind !== 'scale') return true;
+    }
+    const tool = this.toolDrag?.tool;
+    const drains = (k: number) => tool!.kind === 'splitter' || tool!.kind === 'sorter' || tool!.valves[k] > 0;
+    if (tool?.shape.spouts.length && tool.tanks.some((v, k) => v.N > TRACE && drains(k))) return true;
+    if (this.hoseDrag && this.hoseDrag.hose.funnel.N > TRACE) return true;
+    const open = this.mouths(true);
+    const catches = (from: Point, reach = Infinity) => {
+      const m = mouthBelow(open, from);
+      return !!m && carried.has(m.v) && m.y - from.y <= reach;
+    };
+    if (this.L.faucets.some((fa) => catches(this.faucetXY(fa).spout, FAUCET_REACH * S))) return true;
+    for (const u of this.tools)
+      if (u.shape.spouts.some((_, k) => (u.out[k] || u.drops[k].N > 0) && catches(this.spoutAt(u, k)))) return true;
+    return this.hoses.some((h) => (h.out || h.drop.N > 0) && catches(this.hoseEnd(h, 'outlet')));
+  }
+
+  /** A little mouse with its right button lit, just below and right of the pointer: the right button would do something. */
+  private drawRightHint(): void {
+    const { ctx, theme } = this;
+    const s = this.toScreen(this.pointer);
+    ctx.save();
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.translate(Math.round(s.x + 14), Math.round(s.y + 12));
+    ctx.globalAlpha = 0.75;
+    const body = new Path2D();
+    body.roundRect(0, 0, 12, 17, 6);
+    ctx.fillStyle = theme.bench;
+    ctx.fill(body);
+    ctx.save();
+    ctx.clip(body);
+    ctx.fillStyle = theme.accent;
+    ctx.fillRect(6, 0, 6, 7);
+    ctx.restore();
+    ctx.strokeStyle = theme.ink;
+    ctx.lineWidth = 1.2;
+    ctx.stroke(body);
+    ctx.beginPath();
+    ctx.moveTo(0, 7);
+    ctx.lineTo(12, 7);
+    ctx.moveTo(6, 0);
+    ctx.lineTo(6, 7);
+    ctx.stroke();
+    ctx.restore();
   }
 
   /** Glow from a vessel's fluid, centered on (cx, cy). */
