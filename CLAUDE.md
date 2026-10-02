@@ -7,6 +7,9 @@ same commit as any behavior change. This file holds what README doesn't: how to 
 
 - `npx tsc -b`: typecheck. It's strict, with unused locals and imports as errors, so run it before committing.
 - `npm test`: runs vitest on all `*.test.ts`. These are pure-logic tests; nothing touches the canvas.
+  - No test may depend on the default chemistry (`defaultChemParams`, `THERMO`) or on the default values of the panel's
+    tunables (`DRIP` aside: heater, cooling). They're all in flux. A test that needs reactions uses the fixed chemistry
+    in `src/chem/testChem.ts`, and one that touches a tunable reads its current value rather than a literal.
 - `npm run route`: the synthesis-route harness (`src/game/route.ts`). It prints a report; `--silent=false` is already
   in the script.
 - `npx vite --port 5199 --strictPort`: the dev server, for browser checks.

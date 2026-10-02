@@ -126,11 +126,11 @@ describe('resistive heater', () => {
     expect(out[2].N + out[3].N).toBe(0);
   });
 
-  it('feeds its tube at most a flask a second', () => {
+  it('feeds its tube at most HEATER.feed', () => {
     const ht = new Tool('heater', 0, 0, 0);
     filled(ht.tanks[0], R, ht.tanks[0].cap, 1);
-    ht.step(0.1);
-    expect(ht.tube.reduce((n, v) => n + v.N, 0) / (0.1 * MAX_FLOW)).toBeCloseTo(1, 6);
+    ht.step(0.01);
+    expect(ht.tube.reduce((n, v) => n + v.N, 0) / (0.01 * HEATER.feed)).toBeCloseTo(1, 6);
   });
 
   it('has a wire that is off at 0, about room temperature just above, and HEATER.maxT at 1', () => {

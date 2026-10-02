@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { defaultChemParams, T_ROOM } from '../chem/params';
+import { T_ROOM } from '../chem/params';
+import { testChemParams } from '../chem/testChem';
 import { ReactionNetwork, atomCounts, heatAt, temperature, type Fluid } from '../chem/reactions';
 import { equilibriumFluid } from '../chem/equilibrium';
-import { NS, SPECIES } from '../chem/species';
+import { NS, SPECIES, bondParam } from '../chem/species';
 import { CAP } from './config';
 import { Vessel } from './flask';
 import { FAUCETS, describeFaucet, faucetOutput, faucetTarget } from './faucets';
 import type { Mouth } from './tools';
 
 describe('faucets', () => {
-  const net = new ReactionNetwork(defaultChemParams());
+  const net = new ReactionNetwork(testChemParams());
 
   it('are the six atoms and the twelve pairs that can bond, once each', () => {
     const starts = FAUCETS.map((fa) => SPECIES[fa.start]);
@@ -47,12 +48,13 @@ describe('faucets', () => {
       });
 
       if (start.size === 2) {
-        const blue = start.atoms.includes('B');
-        it(blue ? 'stays whole, since blue bonds never break' : 'settles to full equilibrium, since its bond can break', () => {
-          const atoms = Object.fromEntries(start.atoms.filter((a) => a).map((a) => [a!, 0.5]));
+        const [a, b] = start.atoms.filter((x) => x !== null);
+        const frozen = bondParam(net.params, a!, b!).A === 0;
+        it(frozen ? "stays whole, since its bond can't break" : 'settles to full equilibrium, since its bond can break', () => {
+          const atoms = Object.fromEntries([a, b].map((x) => [x!, 0.5]));
           const full = equilibriumFluid(atoms, net.U, T);
           for (let s = 0; s < NS; s++) {
-            const want = blue ? (s === fa.start ? 0.5 : 0) : full.n[s];
+            const want = frozen ? (s === fa.start ? 0.5 : 0) : full.n[s];
             expect(out.n[s], SPECIES[s].name).toBeCloseTo(want, 6);
           }
         });
@@ -61,7 +63,7 @@ describe('faucets', () => {
   }
 
   it('settles again when the chemistry changes', () => {
-    const own = new ReactionNetwork(defaultChemParams());
+    const own = new ReactionNetwork(testChemParams());
     const cy = FAUCETS.find((fa) => describeFaucet(fa) === 'C–Y')!;
     const before = faucetOutput(cy, own).n[cy.start];
     expect(faucetOutput(cy, own).n[cy.start]).toBe(before); // cached

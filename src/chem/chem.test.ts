@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultChemParams } from './params';
+import { testChemParams } from './testChem';
 import { ReactionNetwork, atomCounts, heatAt, temperature, type Fluid } from './reactions';
 import { NS, SPECIES, TARGET, singleOf, speciesIndex } from './species';
 import { ATOMS, type Atom } from './atoms';
@@ -39,7 +39,7 @@ describe('species', () => {
 });
 
 describe('reactions', () => {
-  const net = new ReactionNetwork(defaultChemParams());
+  const net = new ReactionNetwork(testChemParams());
 
   it('builds the full network', () => {
     expect(net.count).toBe(1428);
@@ -59,10 +59,15 @@ describe('reactions', () => {
     expect(Number.isInteger(f.Q)).toBe(true);
   });
 
-  it('heats up from exothermic bonding', () => {
+  it('turns the energy that bonding releases into heat', () => {
     const f = fluid([single('R', 50), single('G', 50)]);
+    const energy = () => SPECIES.reduce((t, s) => t + f.n[s.i] * net.U[s.i], 0);
+    const [U0, Q0] = [energy(), f.Q];
     run(net, f, 30);
-    expect(temperature(f)).toBeGreaterThan(1.3);
+    expect(energy()).toBeLessThan(U0);
+    // whole quanta, rounded at random, so right to within a little
+    expect((f.Q - Q0) / (U0 - energy())).toBeCloseTo(1, 3);
+    expect(temperature(f)).toBeGreaterThan(1);
   });
 
   it('never forms or breaks a blue bond directly, even white-hot', () => {
@@ -93,7 +98,7 @@ describe('reactions', () => {
 });
 
 describe('equilibrium', () => {
-  const net = new ReactionNetwork(defaultChemParams());
+  const net = new ReactionNetwork(testChemParams());
   const atoms = (counts: Partial<Record<Atom, number>>) => ATOMS.map((a) => counts[a] ?? 0);
 
   it('conserves atoms', () => {
