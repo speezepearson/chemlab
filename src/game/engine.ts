@@ -1,10 +1,11 @@
+import { MIXING } from '../chem/mixing';
 import { temperature, type Fluid, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
 import { CAP, FILL_RATE, GOAL_ATOMS, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { FAUCETS, faucetOutput, faucetTarget, type Faucet } from './faucets';
 import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
 import { FLASK_PATH_DATA, fillLevel, tiltedOutline } from './flaskShape';
-import { Flask, Vessel, fluidColor, glowColor, sustenance, transfer, volume, volumeUnit, type Point } from './flask';
+import { Flask, Vessel, cool, fluidColor, glowColor, sustenance, transfer, volume, volumeUnit, type Point } from './flask';
 import { DEFAULT_PRESET, SPECTROMETER_AT, applyFill, type Preset } from './presets';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
@@ -12,7 +13,7 @@ import { CENTER, placement, type Placement } from './place';
 import { rumble, type Rumble } from './rumble';
 import { WaterSounds } from './water';
 import {
-  HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SHAPES, SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, cupFillHeight, drip,
+  HELIX, Hose, MAX_FLOW, MIXER_PLATE, SCAN_LIGHTS, SHAPES, SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, cupFillHeight, drip,
   UNIQUE_TOOLS, mouthBelow, scanLevel, tankX, type Mouth, type ToolKind,
 } from './tools';
 
@@ -184,6 +185,8 @@ export class GameEngine {
   private water = new WaterSounds();
   /** This frame's streams, for their sound: how much ran into each vessel, by volume. */
   private inflow = new Map<Vessel, number>();
+  /** Per vessel, where it was last frame, its tilt, and its velocity, smoothed (see slosh). */
+  private motion = new Map<Vessel, { at: Point; ang: number; v: Point }>();
   /** Where each drop that landed in a vessel this frame landed, for its sound. */
   private landed: Point[] = [];
 
@@ -1059,6 +1062,7 @@ export class GameEngine {
     }
 
     // each faucet fills whatever is parked right under it, or held there with the right button
+    this.slosh(dt);
     const simDt = dt * this.speed;
     const mouths = (this.open = this.mouths());
     const carried = this.carried();
@@ -1104,7 +1108,7 @@ export class GameEngine {
       const stillHose = this.rightHeld ? null : (this.hoseDrag?.hose ?? null);
       for (let i = 0; i < sub; i++) {
         if (drag && pourInto) this.pourFrom(drag.flask, pourInto, POUR_RATE * h);
-        else if (drag && pourInto === null) transfer(drag.flask, null, POUR_RATE * h);
+        else if (drag && pourInto === null) transfer(drag.flask, null, POUR_RATE * h, 'top');
         for (const { fa, m } of this.faucetFlows) this.stream(m.v, fa.output, FILL_RATE * h);
         this.tools.forEach((t, j) => {
           // carried, it pours nothing out without the right button (a spectrometer has nothing to pour)
@@ -1133,7 +1137,9 @@ export class GameEngine {
           return !(m && m.y <= d.y) && d.y < this.H;
         });
         for (const v of vessels) {
-          this.chem.step(v, h);
+          v.react(this.chem, h);
+          v.settle(h);
+          cool(v, h);
           // by molecules, breaking bonds swells a fluid, and whatever no longer fits spills
           this.overflow(v);
         }
@@ -1198,6 +1204,36 @@ export class GameEngine {
   };
 
   /**
+   * Stir whatever moved this frame (`dt` real seconds) by how sharply its velocity changed: by MIXING.slosh per
+   * world unit per second of change, so starting and stopping a move each stir it, a quick move a lot and a gentle
+   * one a little. Velocity is smoothed over about 0.1 s, so the pointer's jitter doesn't count. A flask snapping
+   * into or out of its pouring tilt isn't counted as moving.
+   */
+  private slosh(dt: number): void {
+    if (dt <= 0) return;
+    const seen = new Set<Vessel>();
+    const k = 1 - Math.exp(-dt / 0.1);
+    const track = (v: Vessel, at: Point, ang = 0) => {
+      seen.add(v);
+      const m = this.motion.get(v);
+      if (!m || m.ang !== ang) {
+        this.motion.set(v, { at: { ...at }, ang, v: { x: 0, y: 0 } });
+        return;
+      }
+      const vx = m.v.x + ((at.x - m.at.x) / dt - m.v.x) * k;
+      const vy = m.v.y + ((at.y - m.at.y) / dt - m.v.y) * k;
+      const dv = Math.hypot(vx - m.v.x, vy - m.v.y);
+      if (dv > 1e-6) v.slosh(MIXING.slosh * dv);
+      m.at = { ...at };
+      m.v = { x: vx, y: vy };
+    };
+    for (const f of this.flasks) track(f, f, f.ang);
+    for (const t of this.tools) for (const v of t.tanks) track(v, this.toolXY(t));
+    for (const h of this.hoses) track(h.funnel, this.hoseEnd(h, 'inlet'));
+    for (const v of this.motion.keys()) if (!seen.has(v)) this.motion.delete(v);
+  }
+
+  /**
    * Pour `amount` of src (by volume) into v, without depleting src, however full v is. Whatever no longer
    * fits overflows (see overflow).
    */
@@ -1215,12 +1251,12 @@ export class GameEngine {
   /** Pour `amount` out of a carried flask into v (see fill). */
   private pourFrom(D: Flask, v: Vessel, amount: number): void {
     const poured = new Vessel(Infinity);
-    transfer(D, poured, amount);
+    transfer(D, poured, amount, 'top');
     this.stream(v, poured);
   }
 
   /**
-   * Whatever of v's contents, mixed, no longer fits spills over its rim, falling into the first open top
+   * Whatever of v's contents no longer fits spills off the top over its rim, falling into the first open top
    * below (which may overflow in turn), or down the sink. A vessel with no rim (a flask tilted to pour)
    * spills straight down the sink.
    */
@@ -1228,7 +1264,7 @@ export class GameEngine {
     const over = volume(v) - v.cap;
     if (over <= 0) return;
     const out = new Vessel(Infinity);
-    transfer(v, out, over);
+    transfer(v, out, over, 'top');
     const rim = this.open.find((m) => m.v === v)?.rim;
     if (!rim || out.N <= 0) return;
     let spill = this.spills.get(v);
@@ -1305,9 +1341,8 @@ export class GameEngine {
       const maxX = mx + S * Math.max(...pts.map((p) => p.x));
       const maxY = my + S * Math.max(...pts.map((p) => p.y));
       this.worldTransform();
-      const top = my + S * fillLevel(ang, volume(f) / f.cap);
-      ctx.fillStyle = fluidColor(f);
-      ctx.fillRect(minX - 2, top, maxX - minX + 4, maxY - top + 2);
+      this.drawBands(f, maxY + 2, (share) => my + S * fillLevel(ang, share), (y0, y1) =>
+        ctx.fillRect(minX - 2, y0, maxX - minX + 4, y1 - y0));
       ctx.restore();
     }
     ctx.fillStyle = theme.glasshi;
@@ -1325,6 +1360,25 @@ export class GameEngine {
     ctx.restore();
   }
 
+  /**
+   * A vessel's fluid as bands, one per layer (see Vessel.strata), each in its own color: `y(share)` is where the
+   * surface would be with that share of the vessel's capacity filled, `bottom` is below the lowest fluid, and
+   * `rect(y0, y1)` fills between two heights. Each band reaches a device pixel into the one below, so no seam shows.
+   */
+  private drawBands(v: Vessel, bottom: number, y: (share: number) => number, rect: (y0: number, y1: number) => void): void {
+    const { ctx } = this;
+    const seam = 1 / (this.zoom * this.dpr);
+    let filled = 0;
+    let below = bottom;
+    for (const l of v.layered ? v.strata() : [v]) {
+      filled += volume(l);
+      const top = y(filled / v.cap);
+      ctx.fillStyle = fluidColor(l);
+      rect(top, below === bottom ? below : below + seam);
+      below = top;
+    }
+  }
+
   /** The fluid in a tank with a cup, standing across tube and cup together (see cupFillHeight). */
   private drawCupFluid(t: Tool, k: number): void {
     const v = t.tanks[k];
@@ -1333,7 +1387,6 @@ export class GameEngine {
     const r = this.tankRect(t, k);
     const o = this.openingOf(t, k);
     const cup = t.shape.cup!;
-    const h = cupFillHeight(volume(v) / v.cap, (r.x1 - r.x0) / S, (r.y1 - r.y0) / S, 2 * cup.w, cup.h);
     // the cup, then the tube with its floor rounded as drawTank rounds it
     const rad = Math.min(6 * S, (r.x1 - r.x0) / 2);
     const inside = new Path2D();
@@ -1348,9 +1401,9 @@ export class GameEngine {
     inside.closePath();
     ctx.save();
     ctx.clip(inside);
-    ctx.fillStyle = fluidColor(v);
-    const top = r.y1 - h * S;
-    ctx.fillRect(o.x0, top, o.x1 - o.x0, r.y1 - top + 1);
+    const height = (share: number) =>
+      cupFillHeight(share, (r.x1 - r.x0) / S, (r.y1 - r.y0) / S, 2 * cup.w, cup.h);
+    this.drawBands(v, r.y1 + 1, (share) => r.y1 - height(share) * S, (y0, y1) => ctx.fillRect(o.x0, y0, o.x1 - o.x0, y1 - y0));
     ctx.restore();
   }
 
@@ -1426,9 +1479,7 @@ export class GameEngine {
     if (showFluid && v.N > TRACE) {
       ctx.save();
       ctx.clip(inside);
-      const top = y1 - Math.min(1, volume(v) / v.cap) * (y1 - y0);
-      ctx.fillStyle = fluidColor(v);
-      ctx.fillRect(x0, top, x1 - x0, y1 - top + 1);
+      this.drawBands(v, y1 + 1, (share) => y1 - Math.min(1, share) * (y1 - y0), (a, b) => ctx.fillRect(x0, a, x1 - x0, b - a));
       ctx.restore();
     }
     ctx.fillStyle = theme.glasshi;
@@ -1516,6 +1567,7 @@ export class GameEngine {
       ctx.fillText(v.label, at.x, at.y);
     });
     if (t.kind === 'exchanger') this.drawHelix(t);
+    if (t.kind === 'mixer') this.drawStirrer(t);
     if (t.kind === 'sorter') this.drawChute(t);
     if (t.kind === 'spectrometer') this.drawSpectrometer(t);
     if (t.kind === 'separator') {
@@ -1566,6 +1618,36 @@ export class GameEngine {
       ctx.lineWidth = 1.5;
       ctx.strokeRect(r.x0 - 5 * S, r.y0 - 5 * S, r.x1 - r.x0 + 10 * S, r.y1 - r.y0 + 10 * S);
     }
+  }
+
+  /**
+   * The mixer's stir plate under its tank, with its lamp lit, and the stir bar turning on the tank's floor, seen
+   * edge on, so it looks longest broadside and shortest end on.
+   */
+  private drawStirrer(t: Tool): void {
+    const { ctx, S, theme } = this;
+    const o = this.toolXY(t);
+    const p = MIXER_PLATE;
+    ctx.fillStyle = theme.bench;
+    ctx.strokeStyle = theme.pipe;
+    ctx.lineWidth = 2 * S;
+    ctx.beginPath();
+    ctx.roundRect(o.x + p.x0 * S, o.y + p.y0 * S, (p.x1 - p.x0) * S, (p.y1 - p.y0) * S, 3 * S);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#e8a33a';
+    ctx.beginPath();
+    ctx.arc(o.x + (p.x1 - 8) * S, o.y + ((p.y0 + p.y1) / 2) * S, 2 * S, 0, Math.PI * 2);
+    ctx.fill();
+    const half = Math.max(3, 13 * Math.abs(Math.cos(t.spin)));
+    const y = (t.shape.tankH ?? TANK_H) - 4;
+    ctx.fillStyle = '#f4f2ec';
+    ctx.strokeStyle = theme.glass;
+    ctx.lineWidth = 1 * S;
+    ctx.beginPath();
+    ctx.roundRect(o.x - half * S, o.y + (y - 2) * S, 2 * half * S, 4 * S, 2 * S);
+    ctx.fill();
+    ctx.stroke();
   }
 
   /**

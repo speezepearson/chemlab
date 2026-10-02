@@ -124,7 +124,7 @@ export function scanLevel(age: number): number {
 export const SEXTANT_ATOMS: readonly Atom[] = ['G', 'C', 'B', 'M', 'R', 'Y'];
 
 export type ToolKind =
-  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'spectrometer' | 'reference';
+  | 'dispenser' | 'pipette' | 'mixer' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'spectrometer' | 'reference';
 
 /** Tools there's only ever one of: not in the palette, and never put away. */
 export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectrometer', 'reference'];
@@ -182,6 +182,14 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     valveY: 98,
     spoutY: 114,
     box: { x0: -18, x1: 18, y0: -20, y1: 116 },
+  },
+  mixer: {
+    // a dispenser on a stir plate (see MIXER_PLATE), its pipe running down through the plate
+    tanks: [{ name: 'tank', x0: -30, x1: 30 }],
+    spouts: [0],
+    valveY: 106,
+    spoutY: 122,
+    box: { x0: -38, x1: 38, y0: -6, y1: 124 },
   },
   exchanger: {
     tanks: [
@@ -267,6 +275,11 @@ export const SPECTROMETER = {
   button: { x0: 28, x1: 62, y0: 84, y1: 98 },
 };
 
+/** The mixer's stir plate, under its tank, in local units. */
+export const MIXER_PLATE = { x0: -36, x1: 36, y0: 88, y1: 98 };
+/** How fast a mixer's stir bar turns, in radians per sim second: three turns a second. */
+export const MIXER_SPIN = 6 * Math.PI;
+
 /** Horizontal center of a tank, which is also where its valve is. */
 export const tankX = (tk: { x0: number; x1: number }) => (tk.x0 + tk.x1) / 2;
 
@@ -281,6 +294,7 @@ export const HELIX = { x0: -35, x1: 35, y: 110, r: 6, halfTwists: 9 };
 export const TOOL_NAMES: Record<ToolKind, string> = {
   dispenser: 'Dispenser',
   pipette: 'Pipette',
+  mixer: 'Mixer',
   exchanger: 'Heat exchanger',
   separator: 'Separator',
   splitter: 'Splitter',
@@ -305,6 +319,8 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
  *
  * - A **dispenser** has one tank and one spout. A **pipette** is a narrow one, a tenth of a flask, filled
  *   through a little funnel on top, that empties in PIPETTE_EMPTY_S with its valve fully open.
+ * - A **mixer** is a dispenser on a stir plate: its tank is kept fully stirred, so it never separates (see
+ *   Vessel.stirred).
  * - A **heat exchanger** has two tanks, whose streams pass each other in
  *   counterflow on the way to their spouts, trading heat but never mixing.
  * - A **separator** has one tank and two spouts, and splits what drains
@@ -341,6 +357,8 @@ export class Tool {
   reading: number[] | null = null;
   /** Sim seconds since the spectrometer was last run (see SCAN_LIGHTS); Infinity if it isn't running. */
   scanAge = Infinity;
+  /** How far a mixer's stir bar has turned, in radians (see MIXER_SPIN). */
+  spin = 0;
 
   constructor(
     readonly kind: ToolKind,
@@ -357,6 +375,7 @@ export class Tool {
     this.flow = this.shape.spouts.map(() => 0);
     this.drops = this.shape.spouts.map(() => new Vessel(Infinity));
     this.streaming = this.shape.spouts.map(() => false);
+    if (kind === 'mixer') this.tanks[0].stirred = true;
   }
 
   get shape(): ToolShape {
@@ -370,15 +389,16 @@ export class Tool {
         // drained evenly, so the cup is empty just as the run ends
         const cup = this.tanks[0];
         const left = SCAN_LIGHTS[SCAN_LIGHTS.length - 1] - this.scanAge;
-        transfer(cup, null, left <= h ? volume(cup) : (volume(cup) * h) / left);
+        transfer(cup, null, left <= h ? volume(cup) : (volume(cup) * h) / left, 'bottom');
         this.scanAge += h;
       }
       return (this.out = []);
     }
+    if (this.kind === 'mixer') this.spin = (this.spin + MIXER_SPIN * h) % (2 * Math.PI);
     const funnel = this.kind === 'splitter' || this.kind === 'sorter';
     let packets = this.tanks.map((tank, k) => {
       const p = new Vessel(Infinity);
-      transfer(tank, p, funnel ? FUNNEL_RATE * h : this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW) * h);
+      transfer(tank, p, funnel ? FUNNEL_RATE * h : this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW) * h, 'bottom');
       return p;
     });
     if (this.kind === 'exchanger') counterflow(packets[0], packets[1], EXCHANGE_RATE * h);
@@ -536,7 +556,7 @@ export class Hose {
   /** Run for `h` sim seconds. Returns what left the outlet, or null if nothing did. */
   step(h: number): Vessel | null {
     const p = new Vessel(Infinity);
-    transfer(this.funnel, p, PUMP_RATE * h);
+    transfer(this.funnel, p, PUMP_RATE * h, 'bottom');
     this.out = p.N > 0 ? p : null;
     this.flow = volume(p) / (MAX_FLOW * h);
     return this.out;

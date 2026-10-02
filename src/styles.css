@@ -70,6 +70,9 @@ details tr.sep td{padding-top:8px}
 }
 .num:hover,.num.live{border-color:var(--accent)}
 details p{margin:8px 0 0;color:var(--muted);font-size:11px}
+details p.lead{margin:8px 0 4px}
+details p.lead:first-child{margin-top:0}
+details p.lead b{font-weight:500;color:var(--ink)}
 details tr.group td{padding-top:8px;text-align:left;white-space:normal}
 details tr.group:first-child td{padding-top:0}
 details tr.group b{font-weight:500}

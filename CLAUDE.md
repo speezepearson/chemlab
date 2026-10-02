@@ -7,8 +7,6 @@ same commit as any behavior change. This file holds what README doesn't: how to 
 
 - `npx tsc -b`: typecheck. It's strict, with unused locals and imports as errors, so run it before committing.
 - `npm test`: runs vitest on all `*.test.ts`. These are pure-logic tests; nothing touches the canvas.
-- `npm run route`: the synthesis-route harness (`src/game/route.ts`). It prints a report; `--silent=false` is already
-  in the script.
 - `npx vite --port 5199 --strictPort`: the dev server, for browser checks.
 
 ## Checking things in a browser
@@ -34,13 +32,15 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
 - `src/chem/`: the chemistry.
   - `species.ts` defines the 50 species.
   - `params.ts` holds the bond parameters, and `randomize.ts` the bond randomizer.
+  - `mixing.ts` holds atom masses, each species' character, and the miscibility parameters (`MIXING`).
   - `reactions.ts` is Arrhenius kinetics on whole molecules.
-  - `equilibrium.ts` is the exact full-equilibrium solver, for the presets' and the route's settled mixes. Faucets
+  - `equilibrium.ts` is the exact full-equilibrium solver, for the presets' settled mixes. Faucets
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
 - `src/game/`: everything else in the game.
   - `engine.ts` owns the canvas, input, sim loop and all drawing.
   - `tools.ts` holds tool shapes and per-step logic, plus drips and the spectrometer reading.
-  - `flask.ts` has `Vessel`, `transfer`, volume and colors.
+  - `flask.ts` has `Vessel`, `transfer` and colors; `volume.ts` the volume functions.
+  - `layers.ts` is a vessel's stack of layers: settling, stirring, landing fluid and draining an end.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
     `volumes.ts`); `rumble.ts` is the spectrometer, `ambience.ts` the ship, `water.ts` drips and streams.
@@ -56,12 +56,16 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
   `transfer`, `addFrom`, `divide`, `fill` or `overflow`, which round with `roundRandom`. Never assign fractions.
 - **Volume isn't atoms.** Capacities and flows are in `volume()` units: molecules by default, or atoms when the
   "volume counts molecules" toggle is off. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
-- **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
+- **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops, layering, cooling,
   chemistry, the spectrometer's run and sound, and the drip and stream sounds. All of it runs in sim substeps of at
   most 0.02 sim s inside `frame()`, and pausing freezes it. The one exception, at the user's request, is the ship's ambience
   (`ambience.ts`), which plays on in real time through pauses and the intro's notice.
   - Anything drawn per outlet must use totals over the whole frame. A single substep's output can be empty, for
     example when a wide-open valve drains its tank in the first substep.
+- **Layers.** A vessel's totals (`n`, `N`, `Q`) are authoritative; its `layers` catch up (any difference spread
+  evenly) whenever they're next used, so setting totals directly is fine. Read the layers through `strata()`. Anything
+  that takes fluid out of a vessel names its end: `transfer(..., 'top')` for pouring and spilling, `'bottom'` for
+  valves and pumps. Packets in flight (`new Vessel(Infinity)`) aren't layered.
 - **Landing fluid goes through `fill()`.** Anything that lands in a vessel (streams, drops, faucets, pours) must use
   `engine.fill()`, not `addFrom`. `fill()` mixes everything in, then `overflow()` spills the excess of the mixture
   over the vessel's `Mouth.rim` onto whatever is below, possibly in a cascade.

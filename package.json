@@ -8,7 +8,6 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "route": "vitest run src/game/route.test.ts --silent=false",
     "preview": "vite preview"
   },
   "dependencies": {

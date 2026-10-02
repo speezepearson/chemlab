@@ -3,6 +3,7 @@ import { defaultChemParams, restoreDefaultChem } from './chem/params';
 import { ReactionNetwork } from './chem/reactions';
 import { AppearancePanel } from './components/AppearancePanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
+import { PhysicsPanel } from './components/PhysicsPanel';
 import { FlaskEditor } from './components/FlaskEditor';
 import { LabelEditor } from './components/LabelEditor';
 import { SoundPanel } from './components/SoundPanel';
@@ -186,6 +187,7 @@ export function App() {
           </button>
           {/* the chemistry, and what the machines are called, are for god mode */}
           {god && <ChemistryPanel key={chemVersion} network={network} />}
+          {god && <PhysicsPanel />}
           {god && <AppearancePanel />}
           <SoundPanel god={god} />
           <button

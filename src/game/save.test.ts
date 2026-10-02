@@ -17,6 +17,16 @@ describe('saves', () => {
     expect([w.N, w.Q, w.label]).toEqual([v.N, v.Q, v.label]);
   });
 
+  it('round-trip the layers of a vessel', () => {
+    const v = new Vessel(1e6);
+    v.setMolecules(singleOf('R'), 1000);
+    v.setMolecules(singleOf('C'), 1000);
+    for (let i = 0; i < 500; i++) v.settle(0.02);
+    const w = new Vessel(1e6);
+    loadVessel(w, saveVessel(v));
+    expect(w.strata().map((l) => [...l.n])).toEqual(v.strata().map((l) => [...l.n]));
+  });
+
   it('drop what does not fit, unknown species, and fractions', () => {
     const w = new Vessel(10);
     loadVessel(w, { n: { '△RGB': 2.6, nonsense: 5, R: 100 }, Q: 12.4 });
