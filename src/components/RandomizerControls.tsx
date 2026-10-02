@@ -5,7 +5,9 @@ import { fmt } from './DragNumber';
 const STEPS = 1000;
 
 /** A slider for one number, linear or logarithmic between min and max, with its value beside it. */
-function Slider({ label, value, spec, onChange }: { label: string; value: number; spec: DistParam; onChange(v: number): void }) {
+export function Slider({ label, value, spec, onChange }: {
+  label: string; value: number; spec: Pick<DistParam, 'min' | 'max' | 'log'>; onChange(v: number): void;
+}) {
   const { min, max, log } = spec;
   const toPos = (v: number) =>
     Math.round(STEPS * (log ? Math.log(v / min) / Math.log(max / min) : (v - min) / (max - min)));
