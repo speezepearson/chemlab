@@ -122,19 +122,22 @@ export function scanLevel(age: number): number {
 
 /** How many stretches the heater's tube is cut into, each holding what passes through it as one mixed packet. */
 export const HEATER_CELLS = 24;
-/** How long fluid takes to run the length of the heater's tube, in sim seconds, however much is in it. */
-export const HEATER_TRANSIT = 6;
-/** How fast the heater's funnel drains into its tube, in atoms per sim second: one flask a second. */
-export const HEATER_FEED = MAX_FLOW;
 /** The stretches of the heater's tube that its three taps draw from: the ends of its first three quarters. */
 export const HEATER_TAPS = [5, 11, 17] as const;
 /**
- * How fast fluid in the heater's tube heats toward the wire's temperature, per sim second: it closes
- * 1 − e^(−rate·t) of the gap in t seconds, so 31% by the first tap, 53%, 68%, and 78% by the end.
+ * How the resistive heater behaves, editable from the Chemistry panel:
+ * - feed: how fast its funnel drains into its tube, in atoms per sim second (one flask a second);
+ * - transit: how long fluid takes to run the length of the tube, in sim seconds, however much is in it;
+ * - rate: how fast fluid in the tube heats toward the wire's temperature, per sim second: it closes
+ *   1 − e^(−rate·t) of the gap in t seconds, so by default 31% by the first tap, 53%, 68%, and 78% by the end;
+ * - maxT: the wire's temperature with the dial turned all the way up.
  */
-export const HEATER_RATE = 0.25;
-/** The wire's temperature with the dial turned all the way up. */
-export const HEATER_MAX_T = 100;
+export const HEATER = { feed: MAX_FLOW, transit: 6, rate: 0.25, maxT: 100 };
+const DEFAULT_HEATER = { ...HEATER };
+
+export function restoreDefaultHeater(): void {
+  Object.assign(HEATER, DEFAULT_HEATER);
+}
 
 /** The heater's tube, in local units: from x0 to x1 (cut into HEATER_CELLS equal stretches), centered at y, of radius r. */
 export const HEATER_TUBE = { x0: -144, x1: 144, y: 48, r: 7 };
@@ -147,19 +150,19 @@ export const HEATER_BOX = { x0: 100, x1: 140, y0: 2, y1: 36 };
 
 /**
  * The heater's wire temperature for a dial setting from 0 to 1: off at 0 (it heats nothing), then rising
- * geometrically from room temperature to HEATER_MAX_T, so a quarter turn is about 3 and halfway is 10.
+ * geometrically from room temperature to HEATER.maxT, so by default a quarter turn is about 3 and halfway is 10.
  */
 export function wireTemperature(dial: number): number {
-  return dial > 0 ? HEATER_MAX_T ** Math.min(1, dial) : 0;
+  return dial > 0 ? HEATER.maxT ** Math.min(1, dial) : 0;
 }
 
 /**
- * Heat a packet of fluid by the wire for `h` sim seconds: it closes 1 − e^(−HEATER_RATE·h) of the gap to the
+ * Heat a packet of fluid by the wire for `h` sim seconds: it closes 1 − e^(−HEATER.rate·h) of the gap to the
  * wire's temperature, in whole quanta. The wire only ever heats: fluid hotter than it is left alone.
  */
 export function heatBy(f: Fluid, wireT: number, h: number): void {
   if (f.N <= 0 || wireT <= temperature(f)) return;
-  f.Q += roundRandom((heatAt(wireT, f.N) - f.Q) * (1 - Math.exp(-HEATER_RATE * h)));
+  f.Q += roundRandom((heatAt(wireT, f.N) - f.Q) * (1 - Math.exp(-HEATER.rate * h)));
 }
 
 /** The order of a spectrometer hexagon's sextants, clockwise from the top. */
@@ -377,8 +380,8 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
  *   share that goes right, from 0 (all left) to 1 (all right).
  * - A **size sorter** has a funnel like the splitter's, with no valve, draining down a chute through two
  *   screens and off its end, each with a spout under it (see SORTER_SCREENS).
- * - A **resistive heater** has a funnel draining (at HEATER_FEED) into one end of a long tube, which carries
- *   it to the other end in HEATER_TRANSIT and out a spout there, heating it all the way (see heatBy) with a
+ * - A **resistive heater** has a funnel draining (at HEATER.feed) into one end of a long tube, which carries
+ *   it to the other end in HEATER.transit and out a spout there, heating it all the way (see heatBy) with a
  *   wire whose temperature its dial sets (see wireTemperature). Three taps along the tube, each a valve over
  *   a spout, let fluid out sooner, less heated.
  * - A **cryostabilizer reference** is a sealed hundred flasks' worth of the target with a valve that lets out at most
@@ -463,18 +466,18 @@ export class Tool {
   }
 
   /**
-   * A heater's step: each stretch of the tube passes h / (HEATER_TRANSIT / HEATER_CELLS) of itself on, the last
+   * A heater's step: each stretch of the tube passes h / (HEATER.transit / HEATER_CELLS) of itself on, the last
    * out the end, and the funnel tops up the first; then each tap lets out what its valve allows from its
    * stretch, and the wire heats what's left.
    */
   private heat(h: number): (Vessel | null)[] {
     const { tube, valves } = this;
     const packets = this.shape.spouts.map(() => new Vessel(Infinity));
-    const on = Math.min(1, (h * HEATER_CELLS) / HEATER_TRANSIT);
+    const on = Math.min(1, (h * HEATER_CELLS) / Math.max(1e-9, HEATER.transit));
     const last = tube.length - 1;
     transfer(tube[last], packets[HEATER_TAPS.length], volume(tube[last]) * on);
     for (let c = last - 1; c >= 0; c--) transfer(tube[c], tube[c + 1], volume(tube[c]) * on);
-    transfer(this.tanks[0], tube[0], HEATER_FEED * h);
+    transfer(this.tanks[0], tube[0], HEATER.feed * h);
     HEATER_TAPS.forEach((c, j) => transfer(tube[c], packets[j], valves[j] * MAX_FLOW * h));
     const wireT = wireTemperature(valves[this.shape.dial!]);
     for (const v of tube) heatBy(v, wireT, h);

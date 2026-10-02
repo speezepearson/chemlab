@@ -4,11 +4,26 @@ import { RANDOMIZER, randomizeBonds } from '../chem/randomize';
 import type { ReactionNetwork } from '../chem/reactions';
 import { SPECIES, TARGET } from '../chem/species';
 import { VOLUME } from '../game/flask';
-import { DRIP, restoreDefaultDrip } from '../game/tools';
+import { CAP } from '../game/config';
+import { DRIP, HEATER, restoreDefaultDrip, restoreDefaultHeater } from '../game/tools';
 import { DragNumber } from './DragNumber';
 import { RandomizerControls } from './RandomizerControls';
 
 const FIELDS: (keyof BondParams)[] = ['E', 'Ea', 'A'];
+
+/** A row of the table with one live-editable number in it. */
+function NumberRow({ label, value, min, onChange }: { label: string; value: number; min?: number; onChange: (v: number) => void }) {
+  return (
+    <tr>
+      <td>{label}</td>
+      <td>
+        <DragNumber typeable min={min} value={value} onChange={onChange} />
+      </td>
+      <td />
+      <td />
+    </tr>
+  );
+}
 
 /** Live-editable parameter table. Edits mutate the params and rebuild all reactions. */
 export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
@@ -101,6 +116,15 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
               <td />
               <td />
             </tr>
+            <tr className="group">
+              <td colSpan={4}>
+                <b>Resistive heater</b> <span>fluid closes 1 − e^(−rate·t) of the gap to the wire; the wire is maxT^dial</span>
+              </td>
+            </tr>
+            <NumberRow label="feed, flasks/s" min={0} value={HEATER.feed / CAP} onChange={(v) => edit(() => (HEATER.feed = v * CAP))} />
+            <NumberRow label="transit, s" min={0.01} value={HEATER.transit} onChange={(v) => edit(() => (HEATER.transit = v))} />
+            <NumberRow label="heating rate, /s" min={0} value={HEATER.rate} onChange={(v) => edit(() => (HEATER.rate = v))} />
+            <NumberRow label="max wire T" min={1} value={HEATER.maxT} onChange={(v) => edit(() => (HEATER.maxT = v))} />
           </tbody>
         </table>
         <p>
@@ -116,6 +140,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
                 restoreDefaultChem(p);
                 VOLUME.molecules = true;
                 restoreDefaultDrip();
+                restoreDefaultHeater();
               })
             }
           >

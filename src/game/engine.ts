@@ -12,7 +12,7 @@ import { CENTER, placement, type Placement } from './place';
 import { rumble, type Rumble } from './rumble';
 import { WaterSounds } from './water';
 import {
-  HEATER_BOX, HEATER_CELLS, HEATER_FEED, HEATER_TRANSIT, HEATER_TUBE, HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SHAPES,
+  HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SHAPES,
   SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, cupFillHeight, drip, UNIQUE_TOOLS, mouthBelow, scanLevel,
   tankX, type Mouth, type ToolKind,
 } from './tools';
@@ -1667,7 +1667,7 @@ export class GameEngine {
     ctx.save();
     ctx.clip(tube);
     const w = (x1 - x0) / HEATER_CELLS;
-    const full = (HEATER_FEED * HEATER_TRANSIT) / HEATER_CELLS;
+    const full = (HEATER.feed * HEATER.transit) / HEATER_CELLS;
     t.tube.forEach((v, c) => {
       if (v.N <= TRACE) return;
       const d = 2 * r * Math.min(1, volume(v) / full);
