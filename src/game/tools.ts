@@ -77,6 +77,8 @@ export const SORTER_SCREENS: readonly (readonly number[])[] = [
   [0.95, 0.7, 0],
 ];
 
+/** How much the cryostabilizer reference holds, by volume: a hundred flasks. */
+export const REFERENCE_CAP = 100 * CAP;
 /** How much a spectrometer's sample cup holds, by volume: a thousandth of a flask, 1M. */
 export const SAMPLE_CAP = CAP / 1000;
 /** Sim seconds into a spectrometer run at which each of its three hexagons lights up; the run ends with the last. */
@@ -187,10 +189,10 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -94, x1: 126, y0: -6, y1: 106 },
   },
   reference: {
-    // a flask's worth, sealed, draining a trickle through its valve
+    // a hundred flasks' worth, sealed, draining a trickle through its valve
     tanks: [{ name: 'reference', x0: -20, x1: 20 }],
     tankH: 70,
-    tankCap: CAP,
+    tankCap: REFERENCE_CAP,
     sealed: true,
     maxFlow: 0.02 * MAX_FLOW,
     label: ['cryostabilizer', 'reference'],
@@ -272,7 +274,7 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
  *   share that goes right, from 0 (all left) to 1 (all right).
  * - A **size sorter** has a funnel like the splitter's, with no valve, draining down a chute through two
  *   screens and off its end, each with a spout under it (see SORTER_SCREENS).
- * - A **cryostabilizer reference** is a sealed flask's worth of the target with a valve that lets out at most
+ * - A **cryostabilizer reference** is a sealed hundred flasks' worth of the target with a valve that lets out at most
  *   0.02 flask/s.
  * - A **mass spectrometer** has a small sample cup and no spouts. Running it (see scan) reads the sample's
  *   spectrum onto a screen, then lids the cup and drains the sample away into the cabinet over the run.

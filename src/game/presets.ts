@@ -4,7 +4,7 @@ import { T_ROOM, defaultChemParams } from '../chem/params';
 import { SPECIES, TARGET, singleOf, speciesEnergies } from '../chem/species';
 import { CAP, HOME_W } from './config';
 import type { Vessel } from './flask';
-import type { ToolKind } from './tools';
+import { REFERENCE_CAP, type ToolKind } from './tools';
 
 /** Starting contents of one shelf slot. */
 export interface FlaskFill {
@@ -125,7 +125,7 @@ export const PRESETS: readonly Preset[] = [
     flasks: [],
     tools: [
       // over the fourth flask, so opening its valve drips into it
-      { kind: 'reference', at: [0.44, 0.55], tanks: [{ contents: [atomsOf(TARGET, 0.4 * CAP)], T: T_ROOM }] },
+      { kind: 'reference', at: [0.44, 0.55], tanks: [{ contents: [{ species: TARGET, molecules: REFERENCE_CAP }], T: T_ROOM }] },
       { kind: 'separator', at: [0.1, 0.3] },
       { kind: 'dispenser', at: [0.3, 0.3] },
       { kind: 'exchanger', at: [0.62, 0.3] },

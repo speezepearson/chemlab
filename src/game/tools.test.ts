@@ -92,9 +92,9 @@ describe('splitter', () => {
 });
 
 describe('cryostabilizer reference', () => {
-  it('holds a flask, and lets out at most 0.02 flask/s through its valve', () => {
+  it('holds a hundred flasks, and lets out at most 0.02 flask/s through its valve', () => {
     const ref = new Tool('reference', 0, 0, 0, [1]);
-    expect(ref.tanks[0].cap).toBe(CAP);
+    expect(ref.tanks[0].cap).toBe(100 * CAP);
     expect(ref.shape.sealed).toBe(true);
     filled(ref.tanks[0], TARGET, 0.4 * CAP, 1);
     const out = ref.step(0.5)[0]!;
