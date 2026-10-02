@@ -167,13 +167,16 @@ export function App() {
           <label className="tog">
             <input type="checkbox" checked={god} onChange={(e) => setGod(e.target.checked)} /> god mode
           </label>
-          <select aria-label="preset" value={preset.id} onChange={(e) => loadPreset(e.target.value)}>
-            {PRESETS.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+          {/* switching scenarios is for god mode; Reset still restarts the current one */}
+          {god && (
+            <select aria-label="preset" value={preset.id} onChange={(e) => loadPreset(e.target.value)}>
+              {PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button onClick={reset}>Reset</button>
           <button onClick={exportSave} title="Copy a string holding this whole setup">
             {copied ? 'Copied!' : 'Export'}
