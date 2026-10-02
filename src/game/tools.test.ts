@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SPECIES, TARGET, singleOf, speciesIndex } from '../chem/species';
 import { CAP } from './config';
 import { heatAt, temperature } from '../chem/reactions';
-import { Vessel } from './flask';
+import { Vessel, roomFor, volume } from './flask';
 import {
   DRIP_FLOW, EXCHANGE_RATE, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
   SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
@@ -98,9 +98,9 @@ describe('cryostabilizer reference', () => {
     expect(ref.shape.sealed).toBe(true);
     filled(ref.tanks[0], TARGET, 0.4 * CAP, 1);
     const out = ref.step(0.5)[0]!;
-    expect(out.N / (0.02 * MAX_FLOW * 0.5)).toBeCloseTo(1, 3);
+    expect(volume(out) / (0.02 * MAX_FLOW * 0.5)).toBeCloseTo(1, 3);
     ref.valves[0] = 0.5;
-    expect(ref.step(0.5)[0]!.N / (0.01 * MAX_FLOW * 0.5)).toBeCloseTo(1, 3);
+    expect(volume(ref.step(0.5)[0]!) / (0.01 * MAX_FLOW * 0.5)).toBeCloseTo(1, 3);
   });
 });
 
@@ -146,9 +146,10 @@ describe('mass spectrometer', () => {
   const at = (size: number, atom: 'R' | 'G' | 'B' | 'C' | 'M' | 'Y') => (size - 1) * 6 + SEXTANT_ATOMS.indexOf(atom);
 
   const CUP = 1e7;
+  /** A cup's reading, filled with each species by volume. */
   const read = (fill: [number, number][]) => {
     const v = new Vessel(CUP);
-    for (const [s, atoms] of fill) v.setMolecules(s, atoms / SPECIES[s].size);
+    for (const [s, room] of fill) v.setMolecules(s, room / roomFor(s));
     return spectrum(v, CUP);
   };
 
@@ -182,7 +183,8 @@ describe('mass spectrometer', () => {
     const sp = new Tool('spectrometer', 0, 0, 0);
     expect(sp.tanks[0].cap).toBe(SAMPLE_CAP);
     expect(sp.step(0.1)).toEqual([]);
-    filled(sp.tanks[0], TARGET, SAMPLE_CAP / 2, 5);
+    sp.tanks[0].setMolecules(TARGET, SAMPLE_CAP / 2 / roomFor(TARGET));
+    sp.tanks[0].setTemperature(5);
     expect(sp.scan()).toBe(true);
     expect([sp.tanks[0].N, sp.tanks[0].Q]).toEqual([0, 0]);
     // half full of the triangle

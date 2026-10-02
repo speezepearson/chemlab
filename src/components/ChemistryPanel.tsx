@@ -114,7 +114,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
             onClick={() =>
               edit(() => {
                 restoreDefaultChem(p);
-                VOLUME.molecules = false;
+                VOLUME.molecules = true;
                 restoreDefaultDrip();
               })
             }

@@ -32,9 +32,9 @@ describe('Flask.setMolecules', () => {
   it('clamps to what fits in the flask', () => {
     const f = new Flask({ x: 0, y: 0 }, 300);
     f.setMolecules(singleOf('G'), 120);
-    // 180 atoms of room left = 60 triangles
-    expect(f.setMolecules(TARGET, 1000)).toBe(60);
-    expect(f.N).toBe(300);
+    // room for 180 more molecules
+    expect(f.setMolecules(TARGET, 1000)).toBe(180);
+    expect(f.N).toBe(120 + 3 * 180);
   });
 
   it('clamps negative counts to zero', () => {
@@ -83,19 +83,18 @@ describe('whole numbers', () => {
 describe('volume by molecules', () => {
   const RG = speciesIndex(['R', 'G', null], 1);
   afterEach(() => {
-    VOLUME.molecules = false;
+    VOLUME.molecules = true;
   });
 
-  it('counts atoms by default, and molecules when switched', () => {
+  it('counts molecules by default, and atoms when switched', () => {
     const v = new Vessel(Infinity);
     v.setMolecules(RG, 100);
-    expect(volume(v)).toBe(200);
-    VOLUME.molecules = true;
     expect(volume(v)).toBe(100);
+    VOLUME.molecules = false;
+    expect(volume(v)).toBe(200);
   });
 
   it('fills, pours and caps by molecules', () => {
-    VOLUME.molecules = true;
     const v = new Vessel(1000);
     // a pair takes one molecule's room, so 1000 of them fit: 2000 atoms
     expect(v.setMolecules(RG, 5000)).toBe(1000);

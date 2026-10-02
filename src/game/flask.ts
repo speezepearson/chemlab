@@ -11,11 +11,11 @@ export interface Point {
 }
 
 /**
- * What takes up room in a vessel: atoms (the default), or molecules. With molecules, bonding shrinks a fluid
+ * What takes up room in a vessel: molecules (the default), or atoms. With molecules, bonding shrinks a fluid
  * and breaking bonds swells it, so a full vessel can overflow as it reacts. Toggled from the Chemistry panel.
  * Mass, heat capacity and reaction rates stay per atom either way.
  */
-export const VOLUME = { molecules: false };
+export const VOLUME = { molecules: true };
 
 /** A fluid's volume: its atoms, or its molecules if VOLUME.molecules. */
 export function volume(f: Fluid): number {
