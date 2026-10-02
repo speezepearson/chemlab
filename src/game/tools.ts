@@ -150,6 +150,8 @@ export interface ToolShape {
   cup?: { w: number; h: number };
   /** Whether the tool has no valves to turn. */
   noValve?: boolean;
+  /** Where the valves are, if not one under each tank's center at valveY: then there's one valve per entry. */
+  valves?: Point[];
   /** Whether the tanks are sealed on top, so nothing can be poured or fall into them. */
   sealed?: boolean;
   /** Spout flow with a valve fully open, in atoms per sim second, if not MAX_FLOW. */
@@ -325,7 +327,7 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
 export class Tool {
   readonly tanks: Vessel[];
   /**
-   * Per tank: 0 (closed) to 1 (MAX_FLOW). Closed by default, so a tool doesn't drip on everything it's carried
+   * Per valve (one per tank unless the shape places them): 0 (closed) to 1 (MAX_FLOW). Closed by default, so a tool doesn't drip on everything it's carried
    * over. A splitter's one valve is instead the share going right, half by default.
    */
   readonly valves: number[];
@@ -352,7 +354,8 @@ export class Tool {
     valves: readonly number[] = [],
   ) {
     this.tanks = SHAPES[kind].tanks.map(() => new Vessel(SHAPES[kind].tankCap ?? TANK_CAP));
-    this.valves = this.tanks.map((_, k) => valves[k] ?? (kind === 'splitter' ? 0.5 : 0));
+    const nValves = SHAPES[kind].valves?.length ?? this.tanks.length;
+    this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' ? 0.5 : 0));
     this.out = this.shape.spouts.map(() => null);
     this.flow = this.shape.spouts.map(() => 0);
     this.drops = this.shape.spouts.map(() => new Vessel(Infinity));

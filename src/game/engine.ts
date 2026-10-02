@@ -593,8 +593,9 @@ export class GameEngine {
     return p.x > a.x && p.x < b.x && p.y > a.y && p.y < b.y;
   }
 
+  /** Where valve k is: as the shape places it, or under tank k. */
   private valveAt(t: Tool, k: number): Point {
-    return this.onTool(t, { x: tankX(t.shape.tanks[k]), y: t.shape.valveY });
+    return this.onTool(t, t.shape.valves?.[k] ?? { x: tankX(t.shape.tanks[k]), y: t.shape.valveY });
   }
 
   /**
@@ -727,11 +728,13 @@ export class GameEngine {
         c.setPointerCapture(e.pointerId);
       } else if (e.button === 2) {
         if (t && !t.shape.noValve) {
-          // the valve nearest the pointer, left to right
-          const o = this.toolXY(t);
-          const dist = (j: number) => Math.abs(p.x - o.x - tankX(t.shape.tanks[j]) * this.S);
+          // the valve nearest the pointer
+          const dist = (j: number) => {
+            const v = this.valveAt(t, j);
+            return Math.hypot(p.x - v.x, p.y - v.y);
+          };
           let k = 0;
-          for (let j = 1; j < t.tanks.length; j++) if (dist(j) < dist(k)) k = j;
+          for (let j = 1; j < t.valves.length; j++) if (dist(j) < dist(k)) k = j;
           this.valveDrag = { tool: t, k };
           this.aimValve(t, k, p);
           c.setPointerCapture(e.pointerId);
@@ -1534,7 +1537,7 @@ export class GameEngine {
       ctx.stroke();
     }
 
-    if (!sh.noValve) t.tanks.forEach((_, k) => {
+    if (!sh.noValve) t.valves.forEach((_, k) => {
       // valve: the lever points right when closed and up when open, toward where the pointer turned it;
       // a splitter's points toward the side that gets more, straight up for an even split
       const vc = this.valveAt(t, k);
@@ -2089,7 +2092,7 @@ export class GameEngine {
     if (this.rightHeld || (p.x === -1 && p.y === -1)) return false;
     const t = this.hoverTool;
     const near = (q: Point) => Math.hypot(q.x - p.x, q.y - p.y) < VALVE_HINT * S;
-    if (t && !t.shape.noValve && t.tanks.some((_, k) => near(this.valveAt(t, k)))) return true;
+    if (t && !t.shape.noValve && t.valves.some((_, k) => near(this.valveAt(t, k)))) return true;
     const carried = this.carried();
     if (!carried.size) return false;
     if (this.drag) {
