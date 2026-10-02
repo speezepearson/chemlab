@@ -80,7 +80,7 @@ export const SORTER_SCREENS: readonly (readonly number[])[] = [
 /** How much a spectrometer's sample cup holds, in atoms: a twentieth of a flask. */
 export const SAMPLE_CAP = CAP / 20;
 /** Sim seconds into a spectrometer run at which each of its three hexagons lights up; the run ends with the last. */
-export const SCAN_LIGHTS = [3, 9, 21] as const;
+export const SCAN_LIGHTS = [1, 3, 7] as const;
 /**
  * A spectrometer run's phases: each lasts until its hexagon lights (see SCAN_LIGHTS), rumbling and shaking at
  * its own level, from 0 to 1, a step up from the last.

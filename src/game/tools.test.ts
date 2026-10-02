@@ -198,7 +198,8 @@ describe('mass spectrometer', () => {
   });
 
   it('rumbles a step harder each phase, steady within one, then stops', () => {
-    const levels = [0, 2.9, 3, 8.9, 9, 20.9].map(scanLevel);
+    const [a, b, c] = SCAN_LIGHTS;
+    const levels = [0, a - 0.01, a, b - 0.01, b, c - 0.01].map(scanLevel);
     expect(levels[1]).toBe(levels[0]);
     expect(levels[3]).toBe(levels[2]);
     expect(levels[5]).toBe(levels[4]);
