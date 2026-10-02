@@ -171,6 +171,11 @@ With no yellow around, the product stays put hot or cold. Any yellow it meets un
   - The swap prefactor: if it's too high, recoloring is trivial and the whole puzzle is getting the topology right.
   - Heat capacity: R + G alone heats up noticeably.
   - Whether the six colors stay distinguishable in mixtures.
+- **Playtester notes** (not yet acted on):
+  - Make sure there's a synthesis pathway: a route that actually reaches 99%+ cryostabilizer.
+  - Maybe add an off switch to the new device. The note doesn't say which device is meant.
+  - Maybe add a mixer.
+  - Add some sort of UI tutorial on how to change valve positions (right-click near a valve and point).
 
 ## Development
 
