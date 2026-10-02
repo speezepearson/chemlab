@@ -77,10 +77,33 @@ export const SORTER_SCREENS: readonly (readonly number[])[] = [
   [0.95, 0.7, 0],
 ];
 
-/** How much a spectrometer's sample cup holds, in atoms: a twentieth of a flask. */
-export const SAMPLE_CAP = CAP / 20;
+/** How much the cryostabilizer reference holds, by volume: a hundred flasks. */
+export const REFERENCE_CAP = 100 * CAP;
+/** How much a pipette holds, by volume: a tenth of a flask. */
+export const PIPETTE_CAP = CAP / 10;
+/** How long a pipette takes to empty with its valve fully open, in sim seconds. */
+export const PIPETTE_EMPTY_S = 5;
+/**
+ * How high fluid filling `share` of a tank with a cup (see ToolShape.cup) stands above the tank's floor, in local
+ * units. It's drawn across tube and cup together, in proportion to their area, so a full one is full to the cup's
+ * brim, where it would spill.
+ */
+export function cupFillHeight(share: number, tubeW: number, tubeH: number, mouthW: number, cupH: number): number {
+  const tube = tubeW * tubeH;
+  const cup = ((tubeW + mouthW) / 2) * cupH;
+  const a = Math.max(0, Math.min(1, share)) * (tube + cup);
+  if (a <= tube) return a / tubeW;
+  // up the cup, the width grows from tubeW to mouthW, so the area to height y is tubeW·y + k·y²
+  const k = (mouthW - tubeW) / (2 * cupH);
+  const rest = a - tube;
+  const y = k > 0 ? (Math.sqrt(tubeW * tubeW + 4 * k * rest) - tubeW) / (2 * k) : rest / tubeW;
+  return tubeH + Math.min(cupH, y);
+}
+
+/** How much a spectrometer's sample cup holds, by volume: a thousandth of a flask, 1M. */
+export const SAMPLE_CAP = CAP / 1000;
 /** Sim seconds into a spectrometer run at which each of its three hexagons lights up; the run ends with the last. */
-export const SCAN_LIGHTS = [3, 9, 21] as const;
+export const SCAN_LIGHTS = [1, 3, 7] as const;
 /**
  * A spectrometer run's phases: each lasts until its hexagon lights (see SCAN_LIGHTS), rumbling and shaking at
  * its own level, from 0 to 1, a step up from the last.
@@ -100,7 +123,8 @@ export function scanLevel(age: number): number {
 /** The order of a spectrometer hexagon's sextants, clockwise from the top. */
 export const SEXTANT_ATOMS: readonly Atom[] = ['G', 'C', 'B', 'M', 'R', 'Y'];
 
-export type ToolKind = 'dispenser' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'spectrometer' | 'reference';
+export type ToolKind =
+  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'spectrometer' | 'reference';
 
 /** Tools there's only ever one of: not in the palette, and never put away. */
 export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectrometer', 'reference'];
@@ -119,6 +143,11 @@ export interface ToolShape {
   tankCap?: number;
   /** Whether the tanks are funnels, narrowing to a stem, rather than flat-bottomed. */
   funnel?: boolean;
+  /**
+   * A little funnel on top of each tank, which is where fluid goes in: its mouth reaches `w` either side of the
+   * tank's center, `h` above the tank's top.
+   */
+  cup?: { w: number; h: number };
   /** Whether the tool has no valves to turn. */
   noValve?: boolean;
   /** Whether the tanks are sealed on top, so nothing can be poured or fall into them. */
@@ -142,6 +171,17 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     valveY: 98,
     spoutY: 114,
     box: { x0: -34, x1: 34, y0: -6, y1: 116 },
+  },
+  pipette: {
+    // a narrow dispenser, filled through a little funnel on top
+    tanks: [{ name: 'tube', x0: -5, x1: 5 }],
+    tankCap: PIPETTE_CAP,
+    cup: { w: 14, h: 14 },
+    maxFlow: PIPETTE_CAP / PIPETTE_EMPTY_S,
+    spouts: [0],
+    valveY: 98,
+    spoutY: 114,
+    box: { x0: -18, x1: 18, y0: -20, y1: 116 },
   },
   exchanger: {
     tanks: [
@@ -187,10 +227,10 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -94, x1: 126, y0: -6, y1: 106 },
   },
   reference: {
-    // a flask's worth, sealed, draining a trickle through its valve
+    // a hundred flasks' worth, sealed, draining a trickle through its valve
     tanks: [{ name: 'reference', x0: -20, x1: 20 }],
     tankH: 70,
-    tankCap: CAP,
+    tankCap: REFERENCE_CAP,
     sealed: true,
     maxFlow: 0.02 * MAX_FLOW,
     label: ['cryostabilizer', 'reference'],
@@ -240,6 +280,7 @@ export const HELIX = { x0: -35, x1: 35, y: 110, r: 6, halfTwists: 9 };
 
 export const TOOL_NAMES: Record<ToolKind, string> = {
   dispenser: 'Dispenser',
+  pipette: 'Pipette',
   exchanger: 'Heat exchanger',
   separator: 'Separator',
   splitter: 'Splitter',
@@ -262,7 +303,8 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
  * Something with tanks on top, each draining through its own valve, and
  * spouts on the bottom.
  *
- * - A **dispenser** has one tank and one spout.
+ * - A **dispenser** has one tank and one spout. A **pipette** is a narrow one, a tenth of a flask, filled
+ *   through a little funnel on top, that empties in PIPETTE_EMPTY_S with its valve fully open.
  * - A **heat exchanger** has two tanks, whose streams pass each other in
  *   counterflow on the way to their spouts, trading heat but never mixing.
  * - A **separator** has one tank and two spouts, and splits what drains
@@ -272,10 +314,10 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
  *   share that goes right, from 0 (all left) to 1 (all right).
  * - A **size sorter** has a funnel like the splitter's, with no valve, draining down a chute through two
  *   screens and off its end, each with a spout under it (see SORTER_SCREENS).
- * - A **cryostabilizer reference** is a sealed flask's worth of the target with a valve that lets out at most
+ * - A **cryostabilizer reference** is a sealed hundred flasks' worth of the target with a valve that lets out at most
  *   0.02 flask/s.
- * - A **mass spectrometer** has a small sample cup and no spouts. Running it (see scan) destroys the sample
- *   and shows its spectrum on a screen.
+ * - A **mass spectrometer** has a small sample cup and no spouts. Running it (see scan) reads the sample's
+ *   spectrum onto a screen, then lids the cup and drains the sample away into the cabinet over the run.
  *
  * Tools run on sim time, so a slow drip into a reacting flask gives the same
  * result at any sim speed.
@@ -323,7 +365,16 @@ export class Tool {
 
   /** Run for `h` sim seconds. Returns, per spout, the fluid that left it, or null if none did. */
   step(h: number): (Vessel | null)[] {
-    if (this.kind === 'spectrometer') return (this.out = []);
+    if (this.kind === 'spectrometer') {
+      if (this.scanning) {
+        // drained evenly, so the cup is empty just as the run ends
+        const cup = this.tanks[0];
+        const left = SCAN_LIGHTS[SCAN_LIGHTS.length - 1] - this.scanAge;
+        transfer(cup, null, left <= h ? volume(cup) : (volume(cup) * h) / left);
+        this.scanAge += h;
+      }
+      return (this.out = []);
+    }
     const funnel = this.kind === 'splitter' || this.kind === 'sorter';
     let packets = this.tanks.map((tank, k) => {
       const p = new Vessel(Infinity);
@@ -344,17 +395,19 @@ export class Tool {
     return this.scanAge < SCAN_LIGHTS[SCAN_LIGHTS.length - 1];
   }
 
+  /** Whether the tanks are lidded, so nothing can be poured or fall in: always if sealed, and a spectrometer's while it runs. */
+  get lidded(): boolean {
+    return !!this.shape.sealed || (this.kind === 'spectrometer' && this.scanning);
+  }
+
   /**
-   * Run a spectrometer: read its sample's spectrum, destroy the sample, and start the hexagons lighting up
-   * (see SCAN_LIGHTS). Does nothing, returning false, while a run is under way.
+   * Run a spectrometer: read its sample's spectrum and start the hexagons lighting up (see SCAN_LIGHTS), while
+   * step lids the cup and drains the sample away. Does nothing, returning false, while a run is under way.
    */
   scan(): boolean {
     if (this.kind !== 'spectrometer' || this.scanning) return false;
     const cup = this.tanks[0];
     this.reading = spectrum(cup, cup.cap);
-    cup.n.fill(0);
-    cup.N = 0;
-    cup.Q = 0;
     this.scanAge = 0;
     return true;
   }

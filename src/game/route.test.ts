@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { defaultChemParams } from '../chem/params';
 import { CAP } from './config';
 import { Vessel } from './flask';
-import { WASH_PRESET, applyFill } from './presets';
+import { WASH_FEED, WASH_PRESET, applyFill } from './presets';
 import { Route, formatLog, type StageReport } from './route';
 import { TANK_CAP } from './tools';
 
@@ -14,9 +14,9 @@ import { TANK_CAP } from './tools';
  */
 
 describe('route', () => {
-  it('builds △RGY from the R–G and C–Y faucets', () => {
+  it('builds △RGY from the old R–G and C–Y faucets', () => {
     const r = new Route(defaultChemParams());
-    const pot = r.mix(r.faucet(0, 0.5 * CAP), r.faucet(4, 1.5 * CAP));
+    const pot = r.mix(...WASH_FEED.map(([rec, flasks]) => r.recipe(rec, flasks * CAP)));
     r.report('R–G + hot C–Y, mixed', pot);
     // held at T = 1, standing in for cooling it with the heat exchanger
     const heat = r.hold([pot], 120, 1);

@@ -20,9 +20,10 @@ describe('saves', () => {
   it('drop what does not fit, unknown species, and fractions', () => {
     const w = new Vessel(10);
     loadVessel(w, { n: { '△RGB': 2.6, nonsense: 5, R: 100 }, Q: 12.4 });
+    // by molecules, 3 triangles leave room for 7 R
     expect(w.n[TARGET]).toBe(3);
-    expect(w.n[singleOf('R')]).toBe(1);
-    expect([w.N, w.Q]).toEqual([10, 12]);
+    expect(w.n[singleOf('R')]).toBe(7);
+    expect([w.N, w.Q]).toEqual([16, 12]);
   });
 
   it('encode to a string and back, including the chemistry', () => {

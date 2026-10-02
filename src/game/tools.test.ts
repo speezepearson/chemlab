@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { SPECIES, TARGET, singleOf, speciesIndex } from '../chem/species';
 import { CAP } from './config';
 import { heatAt, temperature } from '../chem/reactions';
-import { Vessel } from './flask';
+import { Vessel, roomFor, volume } from './flask';
 import {
   DRIP_FLOW, EXCHANGE_RATE, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
-  SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
+  SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -17,6 +17,37 @@ function filled(v: Vessel, species: number, atoms: number, T: number): Vessel {
   v.setTemperature(T);
   return v;
 }
+
+describe('pipette', () => {
+  it('is drawn filling its tube first, then its cup by area, to the brim when full', () => {
+    // a 10 × 84 tube under a cup 28 wide at the mouth, 14 tall: 840 + 266 of area
+    expect(cupFillHeight(0, 10, 84, 28, 14)).toBe(0);
+    expect(cupFillHeight(420 / 1106, 10, 84, 28, 14)).toBeCloseTo(42);
+    expect(cupFillHeight(840 / 1106, 10, 84, 28, 14)).toBeCloseTo(84);
+    expect(cupFillHeight(1, 10, 84, 28, 14)).toBeCloseTo(98);
+    expect(cupFillHeight(2, 10, 84, 28, 14)).toBeCloseTo(98);
+    // halfway up the cup it's 19 wide, so (10 + 19) / 2 · 7 of the cup's area is below
+    expect(cupFillHeight((840 + 101.5) / 1106, 10, 84, 28, 14)).toBeCloseTo(91);
+  });
+
+  it('holds a tenth of a flask, and empties it in five sim seconds fully open', () => {
+    const p = new Tool('pipette', 0, 0, 0, [1]);
+    expect(p.tanks[0].cap).toBe(CAP / 10);
+    expect(p.shape.cup).toBeDefined();
+    p.tanks[0].setMolecules(R, CAP / 10);
+    let t = 0;
+    for (; volume(p.tanks[0]) > 0 && t < 10; t += 0.02) p.step(0.02);
+    expect(t).toBeCloseTo(5, 1);
+  });
+
+  it('flows in proportion to its valve, and not at all closed', () => {
+    const p = new Tool('pipette', 0, 0, 0, [0.5]);
+    p.tanks[0].setMolecules(R, CAP / 10);
+    expect(volume(p.step(1)[0]!) / (CAP / 10 / 5 / 2)).toBeCloseTo(1, 4);
+    p.valves[0] = 0;
+    expect(p.step(1)[0]).toBeNull();
+  });
+});
 
 describe('dispenser', () => {
   it('dispenses valve × MAX_FLOW atoms per sim second', () => {
@@ -92,15 +123,15 @@ describe('splitter', () => {
 });
 
 describe('cryostabilizer reference', () => {
-  it('holds a flask, and lets out at most 0.02 flask/s through its valve', () => {
+  it('holds a hundred flasks, and lets out at most 0.02 flask/s through its valve', () => {
     const ref = new Tool('reference', 0, 0, 0, [1]);
-    expect(ref.tanks[0].cap).toBe(CAP);
+    expect(ref.tanks[0].cap).toBe(100 * CAP);
     expect(ref.shape.sealed).toBe(true);
     filled(ref.tanks[0], TARGET, 0.4 * CAP, 1);
     const out = ref.step(0.5)[0]!;
-    expect(out.N / (0.02 * MAX_FLOW * 0.5)).toBeCloseTo(1, 3);
+    expect(volume(out) / (0.02 * MAX_FLOW * 0.5)).toBeCloseTo(1, 3);
     ref.valves[0] = 0.5;
-    expect(ref.step(0.5)[0]!.N / (0.01 * MAX_FLOW * 0.5)).toBeCloseTo(1, 3);
+    expect(volume(ref.step(0.5)[0]!) / (0.01 * MAX_FLOW * 0.5)).toBeCloseTo(1, 3);
   });
 });
 
@@ -146,9 +177,10 @@ describe('mass spectrometer', () => {
   const at = (size: number, atom: 'R' | 'G' | 'B' | 'C' | 'M' | 'Y') => (size - 1) * 6 + SEXTANT_ATOMS.indexOf(atom);
 
   const CUP = 1e7;
+  /** A cup's reading, filled with each species by volume. */
   const read = (fill: [number, number][]) => {
     const v = new Vessel(CUP);
-    for (const [s, atoms] of fill) v.setMolecules(s, atoms / SPECIES[s].size);
+    for (const [s, room] of fill) v.setMolecules(s, room / roomFor(s));
     return spectrum(v, CUP);
   };
 
@@ -178,25 +210,36 @@ describe('mass spectrometer', () => {
     expect(spectrum(new Vessel(CUP), CUP).every((x) => x === 0)).toBe(true);
   });
 
-  it('destroys its sample when run, and ignores the button until the run is over', () => {
+  it('reads its sample when run, lids it and drains it evenly over the run, ignoring the button until the end', () => {
     const sp = new Tool('spectrometer', 0, 0, 0);
-    expect(sp.tanks[0].cap).toBe(SAMPLE_CAP);
+    const cup = sp.tanks[0];
+    expect(cup.cap).toBe(SAMPLE_CAP);
     expect(sp.step(0.1)).toEqual([]);
-    filled(sp.tanks[0], TARGET, SAMPLE_CAP / 2, 5);
+    expect(sp.lidded).toBe(false);
+    cup.setMolecules(TARGET, SAMPLE_CAP / 2 / roomFor(TARGET));
+    cup.setTemperature(5);
+    const full = volume(cup);
     expect(sp.scan()).toBe(true);
-    expect([sp.tanks[0].N, sp.tanks[0].Q]).toEqual([0, 0]);
     // half full of the triangle
     expect(sp.reading![2 * 6 + SEXTANT_ATOMS.indexOf('R')]).toBeCloseTo(0.5, 6);
-    sp.scanAge = SCAN_LIGHTS[2] - 0.01;
+    expect(sp.lidded).toBe(true);
+    const end = SCAN_LIGHTS[2];
+    let t = 0;
+    for (; t < end / 2 - 1e-9; t += 0.02) sp.step(0.02);
+    expect(volume(cup) / full).toBeCloseTo(0.5, 2);
+    expect(temperature(cup)).toBeCloseTo(5, 2);
     expect(sp.scan()).toBe(false);
-    sp.scanAge = SCAN_LIGHTS[2];
-    expect(sp.scanning).toBe(false);
+    for (; sp.scanning; t += 0.02) sp.step(0.02);
+    expect(Math.abs(t - end)).toBeLessThanOrEqual(0.02 + 1e-9);
+    expect([cup.N, cup.Q]).toEqual([0, 0]);
+    expect(sp.lidded).toBe(false);
     expect(sp.scan()).toBe(true);
     expect(sp.reading!.every((x) => x === 0)).toBe(true);
   });
 
   it('rumbles a step harder each phase, steady within one, then stops', () => {
-    const levels = [0, 2.9, 3, 8.9, 9, 20.9].map(scanLevel);
+    const [a, b, c] = SCAN_LIGHTS;
+    const levels = [0, a - 0.01, a, b - 0.01, b, c - 0.01].map(scanLevel);
     expect(levels[1]).toBe(levels[0]);
     expect(levels[3]).toBe(levels[2]);
     expect(levels[5]).toBe(levels[4]);

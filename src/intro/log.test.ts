@@ -7,7 +7,7 @@ describe('intro log', () => {
       '[2058-11-08 04:11:11.049Z] [warn] top foreport photo lost stars AGZ1013 - probable ccd malfunction',
     );
     expect(formatLine(INCIDENT[INCIDENT.length - 1])).toBe(
-      '[2058-11-08 04:11:59.708Z] [info] initiating transport to R046 - Emergency Chemistry Lab',
+      '[2058-11-08 04:12:00.335Z] [info] initiating transport to R046 - Emergency Chemistry Lab',
     );
   });
 
@@ -34,9 +34,21 @@ describe('intro log', () => {
 
   it('fails every cryo pod it checks but the last, lined up in columns', () => {
     const checks = INCIDENT.filter((l) => / checking /.test(l.msg));
-    expect(checks).toHaveLength(48);
+    expect(checks).toHaveLength(350);
     expect(checks.slice(0, -1).every((l) => l.level === 'erro' && l.msg.endsWith('ECRYOFAIL'))).toBe(true);
-    expect(checks[47].msg).toBe(`48: checking ${PLAYER}               success`);
-    expect(checks[0].msg).toBe('01: checking AMARA OKONKWO              ECRYOFAIL');
+    expect(checks[349].msg).toBe(`350: checking ${PLAYER}               success`);
+    expect(checks[0].msg).toBe('001: checking GABRIELA ARAÚJO            ECRYOFAIL');
+    const names = checks.map((l) => l.msg.slice('001: checking '.length, -'ECRYOFAIL'.length).trimEnd());
+    expect(new Set(names).size).toBe(350);
+    expect(names.every((n) => n.length < 27)).toBe(true);
+  });
+
+  it('checks a passenger every 0.2/7 s or so', () => {
+    const at = INCIDENT.filter((l) => / checking /.test(l.msg)).map((l) => l.s);
+    for (let i = 1; i < at.length; i++) {
+      expect(at[i] - at[i - 1]).toBeGreaterThan(0.02);
+      expect(at[i] - at[i - 1]).toBeLessThan(0.036);
+    }
+    expect((at[at.length - 1] - at[0]) / (at.length - 1)).toBeCloseTo(0.2 / 7, 3);
   });
 });

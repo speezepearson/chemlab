@@ -23,8 +23,10 @@ body{
   margin:0;height:100%;background:var(--bg);color:var(--ink);
   font-family:"Schibsted Grotesk",-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   font-size:14px;line-height:1.35;display:flex;flex-direction:column;overflow:hidden;
-  font-variant-numeric:tabular-nums;
 }
+/* Live numbers keep their width as they change. Only on them: in Schibsted Grotesk, tabular figures also widen
+   periods, commas and colons, which looks like stray spaces in running text. */
+.num,.num-input,output,#info li span{font-variant-numeric:tabular-nums}
 #root{flex:1;display:flex;flex-direction:column;min-height:0}
 header{
   padding:10px 14px 8px;border-bottom:1px solid var(--line);
@@ -73,6 +75,8 @@ details tr.group:first-child td{padding-top:0}
 details tr.group b{font-weight:500}
 details tr.group span{color:var(--muted);font-size:11px}
 details > div.wide{width:320px}
+details > div.sound{width:280px}
+details > div.sound label.slider span{width:84px}
 details .actions{display:flex;gap:8px;margin-top:8px}
 details fieldset.dist{border:1px solid var(--line);border-radius:6px;margin:8px 0 0;padding:4px 8px 6px}
 details fieldset.dist legend{padding:0 4px}
@@ -107,6 +111,9 @@ canvas{display:block;width:100%;height:100%;touch-action:none}
   border-radius:8px;padding:8px 10px;width:220px;font-size:12px;
   box-shadow:0 6px 20px var(--shadow);
 }
+#info.brief{width:auto;padding:6px}
+#info .blotch{display:block;width:34px;height:30px;border-radius:52% 48% 57% 43% / 46% 58% 42% 54%}
+#info .blotch.empty{border:1.5px dashed var(--line)}
 #info .hd{display:flex;justify-content:space-between;color:var(--muted);margin-bottom:6px}
 #info .row{display:flex;gap:10px;align-items:flex-start}
 #info canvas{width:88px;height:88px;flex:none}
@@ -124,6 +131,12 @@ canvas{display:block;width:100%;height:100%;touch-action:none}
 #editor .hd b{font-weight:500}
 #editor .line{display:flex;gap:8px;align-items:center;margin:6px 0}
 #editor .muted{color:var(--muted)}
+#editor .line input{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:0 4px;flex:1;min-width:0}
+.label-edit{
+  position:absolute;transform:translate(-50%,-75%);width:120px;z-index:6;text-align:center;
+  font:12px "Schibsted Grotesk",sans-serif;color:var(--ink);background:var(--panel);
+  border:1px solid var(--accent);border-radius:4px;padding:2px 4px;box-shadow:0 4px 12px var(--shadow);
+}
 #editor p.muted{margin:8px 0 0;font-size:11px}
 #editor table{border-collapse:collapse;width:100%}
 #editor th{font-weight:500;color:var(--muted);text-align:left;padding:0 4px 4px 0}

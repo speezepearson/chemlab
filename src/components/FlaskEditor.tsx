@@ -6,6 +6,7 @@ import type { GameEngine } from '../game/engine';
 import { volume, volumeUnit } from '../game/flask';
 import { fmtCount } from '../game/format';
 import { DragNumber } from './DragNumber';
+import { MAX_LABEL } from './LabelEditor';
 
 /** Smallest molecule count worth listing; reactions leave dust below this. */
 const SHOWN = CAP * 1e-5;
@@ -43,6 +44,16 @@ export function FlaskEditor({ engine, id, onClose }: { engine: GameEngine; id: s
         <button aria-label="close" onClick={onClose}>
           ×
         </button>
+      </div>
+      <div className="line">
+        <span>label</span>
+        <input
+          value={f.label}
+          maxLength={MAX_LABEL}
+          placeholder="none"
+          aria-label="label"
+          onChange={(e) => edit(() => (f.label = e.target.value))}
+        />
       </div>
       <div className="line">
         <span>T</span>

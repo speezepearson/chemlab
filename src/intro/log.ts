@@ -14,8 +14,9 @@ export interface LogLine {
 
 /** A line as the console prints it. */
 export function formatLine({ s, level, msg }: LogLine): string {
-  const sec = s.toFixed(3).padStart(6, '0');
-  return `[2058-11-08 04:11:${sec}Z] [${level}] ${msg}`;
+  const min = 11 + Math.floor(s / 60);
+  const sec = (s % 60).toFixed(3).padStart(6, '0');
+  return `[2058-11-08 04:${min}:${sec}Z] [${level}] ${msg}`;
 }
 
 /** A seeded generator (mulberry32), so the chaos comes out the same every time. */
@@ -104,7 +105,8 @@ function chaos(from: number, to: number): LogLine[] {
   return out;
 }
 
-const PASSENGERS = [
+/** Hand-picked passengers, ranked among the generated ones. */
+const NAMED = [
   'AMARA OKONKWO', 'LUKAS BRANDT', 'SAKURA NAKAMURA', 'MATEO HERRERA', 'PRIYA RAGHAVAN', 'SVEN LINDQVIST',
   'FATIMA EL-AMRANI', 'DMITRI VOLKOV', 'CHLOÉ MARCHAND', 'KWAME MENSAH', 'NGUYEN THI LAN', "SEAN O'DONNELL",
   'ISABELLA ROSSI', 'TARIQ HAMDAN', 'MIN-JUN PARK', 'ASTRID HALVORSEN', 'RAFAEL OLIVEIRA', 'ZEYNEP AYDIN',
@@ -112,14 +114,67 @@ const PASSENGERS = [
   'BONGANI DLAMINI', 'ELENI PAPADOPOULOU', 'ARJUN MEHTA', 'KATARINA HORVAT', 'YUSUF ÇELIK', 'MARIE DUBOIS',
   'SANTIAGO GÓMEZ', 'INGRID JOHANSSON', 'ADEBAYO ADEYEMI', 'MAYA COHEN', 'PHAM VAN DUC', 'NIAMH KELLY',
   'GIORGI BERIDZE', 'LEILANI KAHALE', 'FERNANDO CASTILLO', 'OKSANA SHEVCHENKO', 'HIROSHI WATANABE',
-  'AYESHA SIDDIQUI', 'JANNE VIRTANEN', 'CAMILA FERREIRA', 'TENZIN DORJE', 'MARKO PETROVIĆ', 'NADIA HASSAN',
+  'AYESHA SIDDIQUI', 'JANNE VIRTANEN', 'CAMILA FERREIRA', 'TENZIN DORJE', 'MARKO PETROVIĆ',
 ];
-const CHECKED_AT = [
-  50.3, 50.487, 50.712, 50.893, 51.104, 51.296, 51.519, 51.701, 51.894, 52.12, 52.305, 52.497, 52.716, 52.903,
-  53.098, 53.322, 53.508, 53.701, 53.912, 54.089, 54.302, 54.497, 54.718, 54.902, 55.115, 55.296, 55.509, 55.703,
-  55.921, 56.108, 56.297, 56.524, 56.711, 56.893, 57.106, 57.318, 57.497, 57.702, 57.926, 58.11, 58.304, 58.519,
-  58.698, 58.913, 59.101, 59.297, 59.522, 59.704,
+
+/** Given names and family names that go together, and whether the family name comes first. */
+const NAME_POOLS: [given: string, family: string, familyFirst?: boolean][] = [
+  ['HARUTO YUI REN AOI SOTA HINA KAITO MEI RIKU YUNA TAKESHI EMI', 'SATO SUZUKI TAKAHASHI ITO YAMAMOTO KOBAYASHI KATO YOSHIDA MORI INOUE KIMURA SHIMIZU'],
+  ['JING XIAOMING YUTONG HAORAN MEILING ZIHAN JUN LIHUA YIFAN XINYI BO QIANG', 'WANG ZHANG LIU CHEN YANG HUANG ZHAO WU ZHOU XU SUN GUO', true],
+  ['JI-WOO SEO-YEON DO-HYUN HA-EUN JUN-HO SOO-AH MIN-SEO TAE-YANG', 'KIM LEE CHOI JUNG KANG YOON JANG LIM'],
+  ['VAN_AN THI_MAI MINH_KHOA THI_HUONG DUC_ANH THU_HA QUANG_HUY BAO_NGOC', 'NGUYEN TRAN LE PHAM HOANG VU DANG BUI', true],
+  ['ANANYA ROHAN DIVYA VIKRAM KAVYA ADITYA MEERA SANJAY NEHA RAHUL ISHAAN LAKSHMI', 'SHARMA IYER PATEL REDDY NAIR GUPTA BANERJEE DESAI KRISHNAN MALHOTRA CHATTERJEE PILLAI'],
+  ['LAYLA KARIM YASMIN AHMED NOUR SALMA KHALID RANIA YOUSSEF HUDA ZIAD AMIRA', 'AL-SAYED HADDAD MANSOUR NASSER KHOURY SALEH AZIZ IBRAHIM RAHMAN TAHA ABBOUD BAKRI'],
+  ['CHIDI NGOZI OLUWASEUN FUNMILAYO EMEKA ADAEZE KOFI ABENA YAW AMINATA IBRAHIMA FOLAKE', 'OKAFOR EZE BALOGUN NWOSU OWUSU ASANTE DIALLO TRAORÉ OKORO BOATENG SOW ADEWALE'],
+  ['THABO LERATO SIPHO ZANELE WANJIRU AMANI NEO BAKARI ZURI KAGISO', 'NDLOVU MOKOENA KHUMALO MWANGI OTIENO KAMAU NKOSI MOLOI ODHIAMBO BANDA'],
+  ['LUCÍA DIEGO VALENTINA ALEJANDRO SOFÍA JAVIER CARMEN ANDRÉS PAULA MIGUEL XIMENA PABLO', 'GARCÍA RODRÍGUEZ MARTÍNEZ LÓPEZ SÁNCHEZ RAMÍREZ TORRES FLORES VARGAS MORALES ORTIZ DELGADO'],
+  ['BEATRIZ THIAGO LARISSA GUSTAVO MARIANA LEONARDO GABRIELA VINÍCIUS', 'SANTOS SOUZA COSTA ALMEIDA CARVALHO RIBEIRO BARBOSA ARAÚJO'],
+  ['ÉLODIE THÉO MANON JULIEN CAMILLE ANTOINE AMÉLIE LOUIS', 'LEROY MOREAU LAURENT LEFÈVRE GIRARD BONNET FONTAINE ROUSSEAU'],
+  ['JONAS LENA FELIX MIA TOBIAS KLARA MAXIMILIAN GRETA', 'MÜLLER SCHMIDT WEBER FISCHER BECKER HOFFMANN KOCH RICHTER'],
+  ['ERIK FREYA BJÖRN SIGRID OSKAR LIV MAGNUS ELSA', 'NILSSON ANDERSEN BERG HANSEN LARSEN EKLUND SOLBERG LUNDGREN'],
+  ['IVAN ANYA PAVEL MILENA TOMASZ ZOFIA ALEKSEI KSENIA', 'NOWAK HORVÁTH PAVLIĆ KOVAČ MAZUR BONDARENKO KOVALENKO MELNYK'],
+  ['GIULIA MARCO FRANCESCA LORENZO CHIARA MATTEO ELENA ALESSANDRO', 'BIANCHI ROMANO COLOMBO RICCI MARINO GRECO BRUNO GALLO'],
+  ['OLIVER EMMA JACK CHLOE HENRY GRACE SAMUEL ABIGAIL DANIEL HANNAH', 'SMITH JOHNSON WILLIAMS TAYLOR BROWN WALKER CLARKE HUGHES BENNETT MITCHELL'],
+  ['ELIF EMRE KEMAL AYŞE MEHMET DENIZ', 'YILMAZ DEMIR KAYA ŞAHIN ÖZTÜRK ARSLAN'],
+  ['DARIUS SHIRIN PARISA AZADEH KIAN ROYA', 'TEHRANI MOHAMMADI KARIMI HOSSEINI RAHIMI JAFARI'],
+  ['MALIA SIONE LOSA TEVITA', 'FIFITA TUILAGI VAIPULU LEAUPEPE'],
+  ['ANGELICA KRISTINE RAMON JOSÉ_MARI', 'REYES DELA_CRUZ BAUTISTA MANALO'],
+  ['DEWI BUDI PUTRI AGUS', 'SANTOSO WIJAYA HALIM SETIAWAN'],
+  ['NOA ITAI TAMAR YONATAN', 'LEVI FRIEDMAN BEN-DAVID MIZRAHI'],
 ];
+
+/** `n` passengers: the hand-picked ones and generated ones, shuffled, from their own seed so the chaos stays put. */
+function passengers(n: number): string[] {
+  const r = seeded(4456);
+  const one = <T>(xs: readonly T[]): T => xs[Math.floor(r() * xs.length)];
+  const words = (s: string) => s.split(' ').map((w) => w.replace('_', ' '));
+  const out = new Set(NAMED);
+  while (out.size < n) {
+    const [given, family, familyFirst] = one(NAME_POOLS);
+    const g = one(words(given));
+    const f = one(words(family));
+    out.add(familyFirst ? `${f} ${g}` : `${g} ${f}`);
+  }
+  const all = [...out];
+  for (let i = all.length - 1; i > 0; i--) {
+    const j = Math.floor(r() * (i + 1));
+    [all[i], all[j]] = [all[j], all[i]];
+  }
+  return all;
+}
+
+/** Every passenger checked, the last of them the one woken. */
+const PASSENGERS = [...passengers(349), 'NADIA HASSAN'];
+
+/** One check every 0.2/7 s or so, a little uneven, from 50.3 s on. */
+const CHECKED_AT = (() => {
+  const r = seeded(122);
+  const out: number[] = [];
+  let s = 50.3;
+  for (let i = 0; i < PASSENGERS.length; i++, s += (0.2 / 7) * (0.85 + 0.3 * r())) out.push(Math.round(s * 1000) / 1000);
+  return out;
+})();
+const LAST_CHECK = CHECKED_AT[CHECKED_AT.length - 1];
 
 /** The passenger the computer wakes. */
 export const PLAYER = PASSENGERS[PASSENGERS.length - 1];
@@ -148,8 +203,8 @@ export const INCIDENT: readonly LogLine[] = [
   { s: 49.588, level: 'warn', msg: '... sorting ...' },
   ...PASSENGERS.map((name, i): LogLine => {
     const ok = name === PLAYER;
-    return { s: CHECKED_AT[i], level: ok ? 'info' : 'erro', msg: `${pad(i + 1, 2)}: checking ${name.padEnd(27)}${ok ? 'success' : 'ECRYOFAIL'}` };
+    return { s: CHECKED_AT[i], level: ok ? 'info' : 'erro', msg: `${pad(i + 1, 3)}: checking ${name.padEnd(27)}${ok ? 'success' : 'ECRYOFAIL'}` };
   }),
-  { s: 59.706, level: 'info', msg: 'starting defrost' },
-  { s: 59.708, level: 'info', msg: 'initiating transport to R046 - Emergency Chemistry Lab' },
+  { s: LAST_CHECK + 0.002, level: 'info', msg: 'starting defrost' },
+  { s: LAST_CHECK + 0.004, level: 'info', msg: 'initiating transport to R046 - Emergency Chemistry Lab' },
 ];

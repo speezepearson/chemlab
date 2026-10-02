@@ -56,6 +56,8 @@ interface Reaction {
 export class ReactionNetwork {
   readonly U = new Float64Array(NS);
   count = 0;
+  /** Goes up with every rebuild, so whatever depends on the chemistry knows to recompute. */
+  version = 0;
   private ra = new Int16Array(0);
   private rb = new Int16Array(0);
   private p1 = new Int16Array(0);
@@ -71,6 +73,7 @@ export class ReactionNetwork {
   }
 
   rebuild(): void {
+    this.version++;
     const p = this.params;
     const U = speciesEnergies(p, this.U);
     const rx: Reaction[] = [];
@@ -173,6 +176,51 @@ export class ReactionNetwork {
       this.bar[i] = r.bar;
       this.dU[i] = r.dU;
     });
+  }
+
+  /**
+   * The longest step that consumes at most `share` of any species present in f, at f's current rates: how far
+   * step can go in one go and still follow the kinetics rather than overshoot them. Infinity if nothing reacts.
+   */
+  stableDt(f: Fluid, share: number): number {
+    const N = f.N;
+    if (N <= 0) return Infinity;
+    const { n } = f;
+    const { ra, rb, k, bar, cons, count } = this;
+    const invT = 1 / Math.max(temperature(f), 0.05);
+    cons.fill(0);
+    for (let i = 0; i < count; i++) {
+      const a = n[ra[i]];
+      if (a <= 0) continue;
+      const b = rb[i];
+      if (b >= 0 && n[b] <= 0) continue;
+      const rate = (b >= 0 ? (a * n[b]) / N : a) * k[i] * Math.exp(-bar[i] * invT);
+      cons[ra[i]] += rate;
+      if (b >= 0) cons[b] += rate;
+    }
+    let dt = Infinity;
+    for (let s = 0; s < NS; s++) if (cons[s] > 0) dt = Math.min(dt, (share * n[s]) / cons[s]);
+    return dt;
+  }
+
+  /**
+   * Hold f at temperature T and let it react until nothing changes, however long that takes in sim time. Each
+   * step is as long as the kinetics allow (see stableDt), so slow reactions get there in a few dozen steps; ones
+   * that can't happen at all (A = 0, like blue bonds forming or breaking) never do.
+   */
+  settle(f: Fluid, T: number, maxSteps = 10000): void {
+    const before = new Float64Array(NS);
+    for (let i = 0; i < maxSteps; i++) {
+      f.Q = heatAt(T, f.N);
+      const dt = this.stableDt(f, 0.3);
+      if (!Number.isFinite(dt)) break;
+      before.set(f.n);
+      this.step(f, dt);
+      let change = 0;
+      for (let s = 0; s < NS; s++) change = Math.max(change, (Math.abs(f.n[s] - before[s]) * SPECIES[s].size) / f.N);
+      if (change < 1e-11) break;
+    }
+    f.Q = heatAt(T, f.N);
   }
 
   /**
