@@ -80,8 +80,8 @@ const FAUCET_REACH = 24;
 const FLASK_CATCH = 14;
 /** Where an overflowing flask spills, right of its mouth's center, in local units: just outside its lip. */
 const FLASK_LIP = 12;
-/** How close to a valve, in world units, the pointer can be before it stops turning the lever. */
-const VALVE_DEADZONE = 20;
+/** How close to a valve, in world units, the pointer can be before it stops turning the lever: the valve's core (see drawTool), not its lever. */
+const VALVE_DEADZONE = 6;
 const SINK_H = 16;
 /** Width of a stream flowing one flask per second, in world units; it goes as the square root of the flow. */
 const STREAM_WIDTH = 4.5;
