@@ -73,6 +73,9 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
   - Tools, scales, hose ends and faucets store positions as fractions of the 1000 × 620 home area (`fromFrac` and
     `toFrac`), so presets and old saves keep working.
   - Canvas `shadowBlur` is in device pixels, so scale it by `zoom * dpr`.
+- **`drawTool` is also the hit test.** `hitTool` draws a tool into a few offscreen pixels around the pointer (see
+  `drawnAt`) and counts it as hit if anything lands there. So `drawTool` and its helpers must draw through `this.ctx`
+  (never a canvas captured elsewhere), never set an absolute transform, and change no state.
 - **Adding a tool kind** touches all of these:
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - A `drawTool` branch in `engine.ts`.

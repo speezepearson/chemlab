@@ -90,6 +90,13 @@ const LABEL_Y = 86;
 const VALVE_DEADZONE = 6;
 /** How near a valve's center, in world units, the right button grabs it: the reach of its lever, or a dial's ticks. */
 const VALVE_REACH = 15;
+/**
+ * Side of the square, in screen pixels, around the pointer that's checked for a tool's drawing (see drawnAt):
+ * odd, so it's centered, and wide enough to catch a thin pipe.
+ */
+const HIT_PX = 5;
+/** How opaque a tool's drawing must be at the pointer to count as hit, from 0 to 255: anything but nothing. */
+const HIT_ALPHA = 4;
 const SINK_H = 16;
 /** Width of a stream flowing one flask per second, in world units; it goes as the square root of the flow. */
 const STREAM_WIDTH = 4.5;
@@ -127,6 +134,9 @@ export class GameEngine {
   god = true;
 
   private ctx: CanvasRenderingContext2D;
+  /** A few pixels to draw into for hit-testing (see drawnAt). */
+  private readonly hitCtx = Object.assign(document.createElement('canvas'), { width: HIT_PX, height: HIT_PX })
+    .getContext('2d', { willReadFrequently: true })!;
   /**
    * The bottom of the world, in world units: it runs on forever every other way. Everything is laid out,
    * hit-tested and drawn in world units (S is the size of a tool's local unit in them), and the camera maps
@@ -959,16 +969,46 @@ export class GameEngine {
     return best;
   }
 
-  /** The frontmost tool under p. */
+  /**
+   * The frontmost tool under p: one with something drawn there (within a couple of screen pixels), so the
+   * empty space around its tanks, pipes and levers isn't part of it. Glass counts, however faint.
+   */
   private hitTool(p: Point): Tool | null {
     const { S } = this;
     for (let i = this.tools.length - 1; i >= 0; i--) {
       const t = this.tools[i];
       const o = this.toolXY(t);
       const b = t.shape.box;
-      if (p.x > o.x + b.x0 * S && p.x < o.x + b.x1 * S && p.y > o.y + b.y0 * S && p.y < o.y + b.y1 * S) return t;
+      // the box holds everything but valve levers, which reach a little past it
+      const m = 15 * S;
+      const inBox = p.x > o.x + b.x0 * S - m && p.x < o.x + b.x1 * S + m && p.y > o.y + b.y0 * S - m && p.y < o.y + b.y1 * S + m;
+      if (inBox && this.drawnAt(p, () => this.drawTool(t))) return t;
     }
     return null;
+  }
+
+  /**
+   * Whether `draw`, drawing in world units with this.ctx as usual, puts anything within HIT_PX / 2 screen pixels
+   * of p. It draws into a few pixels around p instead of the canvas, so it's cheap, and so a hit always matches
+   * what's on screen.
+   */
+  private drawnAt(p: Point, draw: () => void): boolean {
+    const hit = this.hitCtx;
+    const main = this.ctx;
+    hit.setTransform(1, 0, 0, 1, 0, 0);
+    hit.clearRect(0, 0, HIT_PX, HIT_PX);
+    hit.font = main.font;
+    const z = this.zoom;
+    hit.setTransform(z, 0, 0, z, HIT_PX / 2 - z * p.x, HIT_PX / 2 - z * p.y);
+    this.ctx = hit;
+    try {
+      draw();
+    } finally {
+      this.ctx = main;
+    }
+    const px = hit.getImageData(0, 0, HIT_PX, HIT_PX).data;
+    for (let i = 3; i < px.length; i += 4) if (px[i] >= HIT_ALPHA) return true;
+    return false;
   }
 
   /** The tank under p, on the frontmost tool under p. */
