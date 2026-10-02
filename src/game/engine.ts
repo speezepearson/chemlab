@@ -88,8 +88,8 @@ const FLASK_LIP = 12;
 const LABEL_Y = 86;
 /** How close to a valve, in world units, the pointer can be before it stops turning the lever: the valve's core (see drawTool), not its lever. */
 const VALVE_DEADZONE = 6;
-/** How near a valve, in world units, the pointer shows the right-button hint: about the reach of its lever. */
-const VALVE_HINT = 24;
+/** How near a valve's center, in world units, the right button grabs it: the reach of its lever, or a dial's ticks. */
+const VALVE_REACH = 15;
 const SINK_H = 16;
 /** Width of a stream flowing one flask per second, in world units; it goes as the square root of the flow. */
 const STREAM_WIDTH = 4.5;
@@ -745,16 +745,10 @@ export class GameEngine {
         hs.push(...hs.splice(hs.indexOf(hoseEnd.hose), 1)); // bring to front
         c.setPointerCapture(e.pointerId);
       } else if (e.button === 2) {
-        if (t && !t.shape.noValve) {
-          // the valve nearest the pointer
-          const dist = (j: number) => {
-            const v = this.valveAt(t, j);
-            return Math.hypot(p.x - v.x, p.y - v.y);
-          };
-          let k = 0;
-          for (let j = 1; j < t.valves.length; j++) if (dist(j) < dist(k)) k = j;
-          this.valveDrag = { tool: t, k };
-          this.aimValve(t, k, p);
+        const v = this.valveNear(p);
+        if (v) {
+          this.valveDrag = v;
+          this.aimValve(v.tool, v.k, p);
           c.setPointerCapture(e.pointerId);
         }
       } else if (e.button === 0) {
@@ -947,6 +941,22 @@ export class GameEngine {
   /** Where an event happened in the world. */
   private ptr(e: MouseEvent): Point {
     return this.toWorld(this.screenPt(e));
+  }
+
+  /** The valve nearest p within VALVE_REACH of its center, on any tool; the frontmost tool's if two are as near. */
+  private valveNear(p: Point): { tool: Tool; k: number } | null {
+    let best: { tool: Tool; k: number } | null = null;
+    let reach = VALVE_REACH * this.S;
+    for (let i = this.tools.length - 1; i >= 0; i--) {
+      const tool = this.tools[i];
+      if (tool.shape.noValve) continue;
+      tool.valves.forEach((_, k) => {
+        const v = this.valveAt(tool, k);
+        const d = Math.hypot(p.x - v.x, p.y - v.y);
+        if (d < reach) [best, reach] = [{ tool, k }, d];
+      });
+    }
+    return best;
   }
 
   /** The frontmost tool under p. */
@@ -2216,9 +2226,7 @@ export class GameEngine {
   private rightWouldDo(): boolean {
     const { pointer: p, S } = this;
     if (this.rightHeld || (p.x === -1 && p.y === -1)) return false;
-    const t = this.hoverTool;
-    const near = (q: Point) => Math.hypot(q.x - p.x, q.y - p.y) < VALVE_HINT * S;
-    if (t && !t.shape.noValve && t.valves.some((_, k) => near(this.valveAt(t, k)))) return true;
+    if (this.valveNear(p)) return true;
     const carried = this.carried();
     if (!carried.size) return false;
     if (this.drag) {
