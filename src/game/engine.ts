@@ -15,8 +15,12 @@ import {
   UNIQUE_TOOLS, mouthBelow, scanLevel, tankX, type Mouth, type ToolKind,
 } from './tools';
 
-/** What the god-mode panel needs to show for one vessel. */
+/** What the hover panel needs to show for one vessel: all of it in god mode, otherwise just its color. */
 export interface Inspection {
+  /** Outside god mode: show only the color. */
+  brief: boolean;
+  /** The fluid's color, as drawn in the vessel; null if it's empty. */
+  color: string | null;
   T: number;
   /** How full it is, out of cap, in `unit` (atoms or molecules, see VOLUME). */
   volume: number;
@@ -1150,9 +1154,8 @@ export class GameEngine {
     if (below) this.stream(below.v, out);
   }
 
-  /** The vessel god mode is showing, with its extent for placing the panel. */
+  /** The vessel the hover panel is showing, with its extent for placing the panel. */
   private inspectTarget(): { v: Vessel; x0: number; x1: number; y: number } | null {
-    if (!this.god) return null;
     const { S } = this;
     const f = this.drag?.flask ?? this.hover;
     if (f) {
@@ -1185,6 +1188,7 @@ export class GameEngine {
     }
     rows.sort((a, b) => b.atoms - a.atoms);
     this.cb.onInspect({
+      brief: !this.god, color: f.N > TRACE ? fluidColor(f) : null,
       T: temperature(f), volume: volume(f), cap: f.cap, unit: volumeUnit(), rows,
       // the panel goes beside it on screen
       x0: this.toScreen({ x: target.x0, y: target.y }).x,

@@ -6,11 +6,45 @@ import { fmtCount } from '../game/format';
 const PIE = 176; // backing pixels; drawn at half size
 const MAX_ROWS = 8;
 
-/** God-mode readout for one vessel: temperature, fill, species pie and top species. */
+/** The hover readout for one vessel: in god mode its full contents, otherwise just a blotch of its color. */
 export function InfoPanel({ info }: { info: Inspection }) {
+  return info.brief ? <Blotch info={info} /> : <Contents info={info} />;
+}
+
+/** Where to put a panel: beside the vessel, inside the stage. */
+function usePlacement(info: Inspection) {
   const ref = useRef<HTMLDivElement>(null);
-  const pieRef = useRef<HTMLCanvasElement>(null);
   const [pos, setPos] = useState({ left: 0, top: 0 });
+  useLayoutEffect(() => {
+    const el = ref.current!;
+    const { x0, x1, y, stageW: W, stageH: H } = info;
+    const pw = el.offsetWidth;
+    const ph = el.offsetHeight;
+    let left = x1 + 8;
+    let top = y - 10;
+    if (left + pw > W - 6) left = x0 - pw - 8;
+    if (left < 6) left = 6;
+    if (top + ph > H - 6) top = H - 6 - ph;
+    if (top < 6) top = 6;
+    setPos({ left, top });
+  }, [info]);
+  return { ref, pos };
+}
+
+/** Outside god mode: the fluid's color, as it's drawn, and nothing more; a dashed outline if it's empty. */
+function Blotch({ info }: { info: Inspection }) {
+  const { ref, pos } = usePlacement(info);
+  return (
+    <div id="info" className="brief" ref={ref} style={pos}>
+      <i className={info.color ? 'blotch' : 'blotch empty'} style={info.color ? { background: info.color } : undefined} />
+    </div>
+  );
+}
+
+/** God-mode readout: temperature, fill, species pie and top species. */
+function Contents({ info }: { info: Inspection }) {
+  const { ref, pos } = usePlacement(info);
+  const pieRef = useRef<HTMLCanvasElement>(null);
 
   const total = info.rows.reduce((t, r) => t + r.atoms, 0);
 
@@ -43,20 +77,6 @@ export function InfoPanel({ info }: { info: Inspection }) {
       a0 = a1;
     }
   }, [info, total]);
-
-  useLayoutEffect(() => {
-    const el = ref.current!;
-    const { x0, x1, y, stageW: W, stageH: H } = info;
-    const pw = el.offsetWidth;
-    const ph = el.offsetHeight;
-    let left = x1 + 8;
-    let top = y - 10;
-    if (left + pw > W - 6) left = x0 - pw - 8;
-    if (left < 6) left = 6;
-    if (top + ph > H - 6) top = H - 6 - ph;
-    if (top < 6) top = 6;
-    setPos({ left, top });
-  }, [info]);
 
   return (
     <div id="info" ref={ref} style={pos}>
