@@ -45,18 +45,16 @@ export function FlaskEditor({ engine, id, onClose }: { engine: GameEngine; id: s
           ×
         </button>
       </div>
-      {id.startsWith('f') && (
-        <div className="line">
-          <span>label</span>
-          <input
-            value={f.label}
-            maxLength={MAX_LABEL}
-            placeholder="none"
-            aria-label="flask label"
-            onChange={(e) => edit(() => (f.label = e.target.value))}
-          />
-        </div>
-      )}
+      <div className="line">
+        <span>label</span>
+        <input
+          value={f.label}
+          maxLength={MAX_LABEL}
+          placeholder="none"
+          aria-label="label"
+          onChange={(e) => edit(() => (f.label = e.target.value))}
+        />
+      </div>
       <div className="line">
         <span>T</span>
         <DragNumber typeable min={0} value={temperature(f)} onChange={(v) => edit(() => f.setTemperature(v))} />

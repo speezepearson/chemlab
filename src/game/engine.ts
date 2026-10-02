@@ -44,7 +44,7 @@ export interface EngineCallbacks {
   onInspect(info: Inspection | null): void;
   /** A vessel was double-clicked in god mode; look it up with GameEngine.vessel(id). */
   onEdit(id: string): void;
-  /** Outside god mode, a flask was double-clicked to label it: its id, as for onEdit. */
+  /** Outside god mode, a flask or a tool's tank was double-clicked to label it: its id, as for onEdit. */
   onLabel(id: string): void;
   /** Whether letting go of something at this point (in client coordinates) puts it away. */
   isDiscard(clientX: number, clientY: number): boolean;
@@ -226,7 +226,8 @@ export class GameEngine {
     if (!tool || !tool.tanks[k]) return undefined;
     const nth = this.tools.filter((t) => t.kind === tool.kind && t.id <= tool.id).length;
     const tank = tool.tanks.length > 1 ? ` ${tool.shape.tanks[k].name}` : '';
-    return { vessel: tool.tanks[k], title: `${TOOL_NAMES[tool.kind]} ${nth}${tank}` };
+    const label = tool.tanks[k].label ? ` (${tool.tanks[k].label})` : '';
+    return { vessel: tool.tanks[k], title: `${TOOL_NAMES[tool.kind]} ${nth}${tank}${label}` };
   }
 
   /** Restart from the current preset. */
@@ -458,10 +459,24 @@ export class GameEngine {
     this.cam = { x: this.cam.x, y: Math.min(this.H - this.viewH / this.zoom, this.cam.y) };
   }
 
-  /** Where a flask's label is drawn (see vessel for its id), on the canvas in CSS pixels; null if it isn't a flask. */
+  /** Where a flask's or tank's label is drawn (see vessel for its id), on the canvas in CSS pixels. */
   labelSpot(id: string): Point | null {
-    const f = id.startsWith('f') ? this.flasks[+id.slice(1)] : undefined;
-    return f ? this.toScreen({ x: f.home.x, y: f.home.y + LABEL_Y * this.S }) : null;
+    const fm = /^f(\d+)$/.exec(id);
+    if (fm) {
+      const f = this.flasks[+fm[1]];
+      return f ? this.toScreen({ x: f.home.x, y: f.home.y + LABEL_Y * this.S }) : null;
+    }
+    const tm = /^t(\d+)\.(\d+)$/.exec(id);
+    const tool = tm ? this.tools.find((t) => t.id === +tm[1]) : undefined;
+    const k = tm ? +tm[2] : -1;
+    return tool && tool.tanks[k] ? this.toScreen(this.tankLabelAt(tool, k)) : null;
+  }
+
+  /** Where a tank's label is written: just above its rim and any lid, or above the tool's own label if it has one. */
+  private tankLabelAt(t: Tool, k: number): Point {
+    const r = this.tankRect(t, k);
+    const lines = t.shape.label?.length ?? 0;
+    return { x: (r.x0 + r.x1) / 2, y: r.y0 - (lines ? 11 * lines + 10 : 9) * this.S };
   }
 
   /** A point on the canvas, in CSS pixels, in world units. */
@@ -853,8 +868,10 @@ export class GameEngine {
     on('dblclick', (e) => {
       const p = this.ptr(e);
       if (!this.god) {
-        const f = this.hitFlask(p);
-        if (f) this.cb.onLabel(`f${this.flasks.indexOf(f)}`);
+        const hit = this.tankAt(p);
+        const f = hit ? null : this.hitFlask(p);
+        if (hit) this.cb.onLabel(`t${hit.tool.id}.${hit.k}`);
+        else if (f) this.cb.onLabel(`f${this.flasks.indexOf(f)}`);
         return;
       }
       const hit = this.tankAt(p);
@@ -1373,6 +1390,14 @@ export class GameEngine {
       ctx.textBaseline = 'alphabetic';
       sh.label.forEach((line, i) => ctx.fillText(line, o.x, o.y + (-21 + 11 * i) * S));
     }
+    t.tanks.forEach((v, k) => {
+      if (!v.label) return;
+      const at = this.tankLabelAt(t, k);
+      ctx.fillStyle = theme.muted;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText(v.label, at.x, at.y);
+    });
     if (t.kind === 'exchanger') this.drawHelix(t);
     if (t.kind === 'sorter') this.drawChute(t);
     if (t.kind === 'spectrometer') this.drawSpectrometer(t);

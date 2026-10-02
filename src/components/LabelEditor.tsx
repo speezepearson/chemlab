@@ -1,11 +1,11 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import type { GameEngine } from '../game/engine';
 
-/** The longest label a flask takes: about as wide as the flask's slot on the shelf. */
+/** The longest label a flask or tank takes: about as wide as a flask's slot on the shelf. */
 export const MAX_LABEL = 20;
 
 /**
- * A text field over a flask's label, for naming what's in it: Enter or clicking away keeps it, Escape leaves it
+ * A text field over a flask's or a tool tank's label, for naming what's in it: Enter or clicking away keeps it, Escape leaves it
  * as it was, and an empty one clears the label.
  */
 export function LabelEditor({ engine, id, onClose }: { engine: GameEngine; id: string; onClose(): void }) {
@@ -48,7 +48,7 @@ export function LabelEditor({ engine, id, onClose }: { engine: GameEngine; id: s
       value={text}
       maxLength={MAX_LABEL}
       placeholder="label"
-      aria-label="flask label"
+      aria-label="label"
       onChange={(e) => setText(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === 'Enter') finish(true);
