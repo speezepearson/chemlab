@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { SPECIES, TARGET, singleOf, speciesIndex } from '../chem/species';
-import { Flask, VOLUME, Vessel, sustenance, transfer, volume } from './flask';
+import { temperature } from '../chem/reactions';
+import { CAP } from './config';
+import { COOLING, Flask, VOLUME, Vessel, cool, sustenance, transfer, volume } from './flask';
 import { separate } from './tools';
 
 const atomTotal = (f: Flask) => SPECIES.reduce((t, s) => t + f.n[s.i] * s.size, 0);
@@ -103,5 +105,37 @@ describe('volume by molecules', () => {
     transfer(v, dst, 500);
     expect(dst.n[RG]).toBe(300);
     expect(volume(v)).toBe(700);
+  });
+});
+
+describe('cooling', () => {
+  const hot = (molecules: number, species = singleOf('R')) => {
+    const v = new Vessel(CAP);
+    v.setMolecules(species, molecules);
+    v.setTemperature(11);
+    return v;
+  };
+  const after = (v: Vessel, seconds: number) => {
+    for (let t = 0; t < seconds - 1e-9; t += 0.02) cool(v, 0.02);
+    return temperature(v);
+  };
+
+  it('brings a full flask of single atoms a factor e closer to ambient every tau', () => {
+    const v = hot(CAP);
+    expect(after(v, COOLING.tau) - COOLING.ambient).toBeCloseTo(10 / Math.E, 2);
+    expect(Number.isInteger(v.Q)).toBe(true);
+    expect(after(v, 20 * COOLING.tau)).toBeCloseTo(COOLING.ambient, 4);
+  });
+
+  it('cools less fluid faster, and fluid with more atoms to its volume slower', () => {
+    const tau = (v: Vessel) => COOLING.tau / Math.log(10 / (after(v, COOLING.tau) - COOLING.ambient));
+    expect(tau(hot(CAP / 8))).toBeCloseTo(COOLING.tau / 2, 0); // 1/8 the heat, 1/4 the area
+    expect(tau(hot(CAP, TARGET))).toBeCloseTo(3 * COOLING.tau, 0); // three times the atoms, the same area
+  });
+
+  it('warms cold fluid', () => {
+    const v = hot(CAP);
+    v.setTemperature(0);
+    expect(after(v, COOLING.tau)).toBeCloseTo(COOLING.ambient * (1 - 1 / Math.E), 2);
   });
 });

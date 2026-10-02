@@ -227,8 +227,8 @@ export class ReactionNetwork {
    * Advance a fluid by dt (explicit Euler, mass action on mole fractions).
    * Expected fluxes are scaled down where they would drive a species
    * negative, then each becomes a whole number of events by roundRandom.
-   * Reaction heat goes into the fluid's heat, also in whole quanta; there is
-   * no cooling.
+   * Reaction heat goes into the fluid's heat, also in whole quanta. Cooling is
+   * separate (see cool in game/flask.ts).
    */
   step(f: Fluid, dt: number): void {
     const N = f.N;

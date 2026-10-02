@@ -56,7 +56,7 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
   `transfer`, `addFrom`, `divide`, `fill` or `overflow`, which round with `roundRandom`. Never assign fractions.
 - **Volume isn't atoms.** Capacities and flows are in `volume()` units: molecules by default, or atoms when the
   "volume counts molecules" toggle is off. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
-- **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
+- **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops, layering, cooling,
   chemistry, the spectrometer's run and sound, and the drip and stream sounds. All of it runs in sim substeps of at
   most 0.02 sim s inside `frame()`, and pausing freezes it. The one exception, at the user's request, is the ship's ambience
   (`ambience.ts`), which plays on in real time through pauses and the intro's notice.

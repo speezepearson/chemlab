@@ -1,8 +1,8 @@
 import { ATOMS, ATOM_RGB } from '../chem/atoms';
-import { THERMO } from '../chem/params';
+import { THERMO, T_ROOM } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
-import { GOAL_PURITY, TRACE } from './config';
+import { CAP, GOAL_PURITY, TRACE } from './config';
 import { GLASS_GRAMS } from './scale';
 import {
   churn, drain, exchange, layerOf, normalize, overturn, plunge, present, runs, spread, type End, type Layer,
@@ -206,6 +206,34 @@ export class Vessel implements Fluid {
     for (let i = 0; i + 1 < L.length; i++) exchange(L[i], L[i + 1], sp, T, h);
     overturn(L, sp);
   }
+}
+
+/**
+ * How fluids cool (or warm) toward the ship's air, editable from the Physics panel:
+ * - ambient: the air's temperature;
+ * - tau: sim seconds for a full flask of single atoms to get a factor e closer to it.
+ */
+export const COOLING = { ambient: T_ROOM, tau: 60 };
+const DEFAULT_COOLING = { ...COOLING };
+
+export function restoreDefaultCooling(): void {
+  Object.assign(COOLING, DEFAULT_COOLING);
+}
+
+/**
+ * Newton's law of cooling, for h sim seconds: heat leaves for the air (or comes in from it) in proportion to the
+ * fluid's surface area and its difference from COOLING.ambient. The area goes as volume^⅔, as for any vessel of a
+ * given shape, and the heat it holds as its atoms, so a vessel's time constant is tau · (atoms / CAP) /
+ * (volume / CAP)^⅔: a fuller vessel takes longer, and so does fluid of bigger molecules, more atoms to a volume.
+ * The heat goes to the air, which holds so much that its temperature never changes. One temperature per vessel:
+ * its layers are thin, touching and stirred by whatever lands, so they share heat much faster than the walls lose it.
+ */
+export function cool(v: Fluid, h: number): void {
+  const vol = volume(v);
+  if (v.N <= 0 || vol <= 0 || !(COOLING.tau > 0)) return;
+  const tau = (COOLING.tau * (v.N / CAP)) / Math.cbrt(vol / CAP) ** 2;
+  const target = COOLING.ambient * THERMO.heatCap * v.N;
+  v.Q = Math.max(0, v.Q - roundRandom((v.Q - target) * (1 - Math.exp(-h / tau))));
 }
 
 /** Atoms of the target in a fluid that counts toward the goal: all of them if it's at least GOAL_PURITY target, else none. */

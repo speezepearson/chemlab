@@ -1,6 +1,7 @@
 import { useReducer } from 'react';
 import { ATOMS } from '../chem/atoms';
 import { ATOM_MASS, MIXING, restoreDefaultMixing, updateMasses } from '../chem/mixing';
+import { COOLING, restoreDefaultCooling } from '../game/flask';
 import type { DistParam } from '../chem/randomize';
 import { Slider } from './RandomizerControls';
 
@@ -17,7 +18,12 @@ const MIX_ROWS: [label: string, key: keyof typeof MIXING, spec: Spec][] = [
 
 const MASS: Spec = { min: 0.25, max: 2 };
 
-/** God-mode sliders for how fluids layer (see MIXING in chem/mixing.ts) and the atoms' masses. */
+const COOL_ROWS: [label: string, key: keyof typeof COOLING, spec: Spec][] = [
+  ['ambient T', 'ambient', { min: 0, max: 10 }],
+  ['tau s', 'tau', { min: 1, max: 3600, log: true }],
+];
+
+/** God-mode sliders for how fluids layer (see MIXING in chem/mixing.ts), the atoms' masses, and cooling. */
 export function PhysicsPanel() {
   const [, rerender] = useReducer((x: number) => x + 1, 0);
   const edit = (apply: () => void) => {
@@ -53,8 +59,24 @@ export function PhysicsPanel() {
             }
           />
         ))}
+        <p className="lead">
+          <b>Cooling</b> Fluid heads for the ambient temperature, a full flask of single atoms by a factor e every{' '}
+          <i>tau</i> seconds; time constants go as atoms / volume^⅔.
+        </p>
+        {COOL_ROWS.map(([label, key, spec]) => (
+          <Slider key={key} label={label} value={COOLING[key]} spec={spec} onChange={(v) => edit(() => (COOLING[key] = v))} />
+        ))}
         <div className="actions">
-          <button onClick={() => edit(restoreDefaultMixing)}>Restore defaults</button>
+          <button
+            onClick={() =>
+              edit(() => {
+                restoreDefaultMixing();
+                restoreDefaultCooling();
+              })
+            }
+          >
+            Restore defaults
+          </button>
         </div>
       </div>
     </details>
