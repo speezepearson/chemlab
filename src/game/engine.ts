@@ -1354,6 +1354,32 @@ export class GameEngine {
     ctx.restore();
   }
 
+  /**
+   * Ten marks up the left wall of a tank with a cup, at each tenth of its capacity as its fluid is drawn (see
+   * cupFillHeight): evenly up the tube, then closer together up the widening cup, the last at the brim. Halves are
+   * longer.
+   */
+  private drawGraduations(t: Tool, k: number): void {
+    const { ctx, S, theme } = this;
+    const r = this.tankRect(t, k);
+    const o = this.openingOf(t, k);
+    const cup = t.shape.cup!;
+    const tubeW = (r.x1 - r.x0) / S;
+    const tubeH = (r.y1 - r.y0) / S;
+    ctx.strokeStyle = theme.glass;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 1; i <= 10; i++) {
+      const h = cupFillHeight(i / 10, tubeW, tubeH, 2 * cup.w, cup.h);
+      const y = r.y1 - h * S;
+      // the left wall: straight up the tube, then slanting out up the cup
+      const x = h <= tubeH ? r.x0 : r.x0 + ((h - tubeH) / cup.h) * (o.x0 - r.x0);
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + (i % 5 === 0 ? 5 : 3) * S, y);
+    }
+    ctx.stroke();
+  }
+
   /** The little glass funnel on top of a tank, narrowing from its mouth (see openingOf) to the tank's top. */
   private drawCup(t: Tool, k: number): void {
     const { ctx, theme } = this;
@@ -1466,6 +1492,7 @@ export class GameEngine {
       if (sh.cup) this.drawCupFluid(t, k);
       this.drawTank(v, r.x0, r.y0, r.x1, r.y1, sh.funnel, !sh.cup, !sh.cup);
       if (sh.cup) this.drawCup(t, k);
+      if (sh.cup) this.drawGraduations(t, k);
       if (t.lidded) {
         // a lid, and nothing gets in
         ctx.fillStyle = theme.pipe;
