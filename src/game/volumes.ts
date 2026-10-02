@@ -3,11 +3,14 @@
  * starts at the middle; its gain goes as the square of its position, so the middle is the sound as designed, the
  * top is four times that, and the bottom is silent. Kept in local storage, not in saves: it's a preference.
  */
-export const CHANNELS = ['master', 'spectrometer'] as const;
+export const CHANNELS = ['master', 'hum', 'klaxon', 'alarm', 'spectrometer'] as const;
 export type Channel = (typeof CHANNELS)[number];
 
 export const CHANNEL_NAMES: Record<Channel, string> = {
   master: 'everything',
+  hum: 'hum',
+  klaxon: 'klaxon',
+  alarm: 'fire alarm',
   spectrometer: 'spectrometer',
 };
 

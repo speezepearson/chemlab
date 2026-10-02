@@ -16,9 +16,9 @@ type Phase = 'start' | 'log' | 'logFading' | 'message' | 'leaving';
 
 /**
  * The intro, over everything: a start button, then the ship's console log as the disaster unfolds, then the
- * cheerful notice that wakes the player, whose OK fades into the game.
+ * cheerful notice that wakes the player, whose OK fades into the game. `onLogEnd` is called as the log fades.
  */
-export function Intro({ skipStart = false, onDone }: { skipStart?: boolean; onDone(): void }) {
+export function Intro({ skipStart = false, onLogEnd, onDone }: { skipStart?: boolean; onLogEnd(): void; onDone(): void }) {
   const [phase, setPhase] = useState<Phase>(skipStart ? 'log' : 'start');
   const [shown, setShown] = useState(0);
   const consoleRef = useRef<HTMLDivElement>(null);
@@ -39,6 +39,10 @@ export function Intro({ skipStart = false, onDone }: { skipStart?: boolean; onDo
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [phase]);
+
+  useEffect(() => {
+    if (phase === 'logFading') onLogEnd();
+  }, [phase, onLogEnd]);
 
   useEffect(() => {
     if (phase !== 'logFading' && phase !== 'leaving') return;

@@ -18,7 +18,7 @@ describe('volumes', () => {
     expect(parseVolumes(null)).toEqual(defaultVolumes());
     expect(parseVolumes('not json')).toEqual(defaultVolumes());
     expect(parseVolumes('[1, 2]')).toEqual(defaultVolumes());
-    const v = parseVolumes(JSON.stringify({ spectrometer: 0.2, master: 'loud', bogus: 1 }));
-    expect(v).toEqual({ ...defaultVolumes(), spectrometer: 0.2 });
+    const v = parseVolumes(JSON.stringify({ hum: 0.2, klaxon: 'loud', alarm: 3, master: 0, bogus: 1 }));
+    expect(v).toEqual({ ...defaultVolumes(), hum: 0.2, master: 0 });
   });
 });

@@ -9,6 +9,7 @@ import { Intro } from './components/Intro';
 import { InfoPanel } from './components/InfoPanel';
 import { Palette } from './components/Palette';
 import { SpeedControl } from './components/SpeedControl';
+import { ambience } from './game/ambience';
 import { GOAL_ATOMS, GOAL_PURITY } from './game/config';
 import { fmtCount } from './game/format';
 import { GameEngine, type Inspection } from './game/engine';
@@ -54,6 +55,10 @@ export function App() {
     markIntroSeen();
     setIntro(null);
   }, []);
+  /** Whether the intro is still before the end of its console log: the ship's ambience starts after it. */
+  const [preLog, setPreLog] = useState(intro !== null);
+  const endLog = useCallback(() => setPreLog(false), []);
+  useEffect(() => ambience(!preLog), [preLog]);
   const presetRef = useRef(preset);
   presetRef.current = preset;
   const stageRef = useRef<HTMLDivElement>(null);
@@ -172,7 +177,13 @@ export function App() {
           <ChemistryPanel key={chemVersion} network={network} />
           <AppearancePanel />
           <SoundPanel />
-          <button className="replay" onClick={() => setIntro('replay')}>
+          <button
+            className="replay"
+            onClick={() => {
+              setIntro('replay');
+              setPreLog(true);
+            }}
+          >
             Replay intro
           </button>
         </div>
@@ -187,7 +198,7 @@ export function App() {
           {won && <div id="win">Enough cryostabilizer to reach Mu Ceti.</div>}
         </div>
       </div>
-      {intro && <Intro skipStart={intro === 'replay'} onDone={endIntro} />}
+      {intro && <Intro skipStart={intro === 'replay'} onLogEnd={endLog} onDone={endIntro} />}
     </>
   );
 }

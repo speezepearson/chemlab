@@ -39,7 +39,7 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
   - `flask.ts` has `Vessel`, `transfer`, volume and colors.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
-    `volumes.ts`); `rumble.ts` is the spectrometer. New sounds
+    `volumes.ts`); `rumble.ts` is the spectrometer, `ambience.ts` the ship. New sounds
     play into a channel's `bus()`, never straight to the destination, so the sliders reach them.
 - `src/intro/log.ts`: the intro's console script, deterministic from a seed. `src/components/Intro.tsx` plays it.
 - `src/components/`: the React UI around the canvas: palette, the Chemistry and Appearance panels, the editor.
@@ -52,7 +52,8 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
   molecules" toggle is on. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
 - **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
   chemistry and the spectrometer's run and sound. All of it runs in sim substeps of at most 0.02 sim s inside
-  `frame()`, and pausing freezes it.
+  `frame()`, and pausing freezes it. The one exception, at the user's request, is the ship's ambience
+  (`ambience.ts`), which plays on in real time through pauses and the intro's notice.
   - Anything drawn per outlet must use totals over the whole frame. A single substep's output can be empty, for
     example when a wide-open valve drains its tank in the first substep.
 - **Landing fluid goes through `fill()`.** Anything that lands in a vessel (streams, drops, faucets, pours) must use
