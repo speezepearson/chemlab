@@ -183,6 +183,7 @@ export function applyFill(f: Vessel, fill: FlaskFill | null): void {
   f.N = 0;
   f.Q = 0;
   f.label = fill?.label ?? '';
+  f.remix();
   if (!fill) return;
   for (const { species, molecules } of fill.contents) {
     const m = Math.round(molecules); // whole molecules only

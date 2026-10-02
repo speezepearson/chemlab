@@ -1,8 +1,13 @@
 import { ATOMS, ATOM_RGB } from '../chem/atoms';
-import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
+import { THERMO } from '../chem/params';
+import { heatAt, roundRandom, temperature, type Fluid, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { GOAL_PURITY, TRACE } from './config';
 import { GLASS_GRAMS } from './scale';
+import {
+  churn, drain, exchange, layerOf, normalize, overturn, plunge, present, runs, spread, type End, type Layer,
+} from './layers';
+import { roomFor, volume } from './volume';
 import { LOOK, css, glowWhiteHeat, heatValue, whiteHeat, whiten, type RGB } from './appearance';
 
 export interface Point {
@@ -10,36 +15,31 @@ export interface Point {
   y: number;
 }
 
+export { VOLUME, roomFor, volume, volumeUnit } from './volume';
+
 /**
- * What takes up room in a vessel: molecules (the default), or atoms. With molecules, bonding shrinks a fluid
- * and breaking bonds swells it, so a full vessel can overflow as it reacts. Toggled from the Chemistry panel.
- * Mass, heat capacity and reaction rates stay per atom either way.
+ * A container of fluid with a fixed capacity, by volume (see VOLUME). Its counts and heat are always whole numbers.
+ *
+ * A vessel with a finite capacity is layered: its contents are kept as a stack of layers (see layers.ts), which
+ * separate by miscibility and density while it stands, and it can be drained from the top or the bottom. The
+ * counts (n, N) are the totals, and they're what's authoritative: anything that sets them directly leaves the
+ * layers to catch up, with the change spread evenly through them, the next time they're used. Heat is kept for
+ * the whole vessel, which is at one temperature throughout.
  */
-export const VOLUME = { molecules: true };
-
-/** A fluid's volume: its atoms, or its molecules if VOLUME.molecules. */
-export function volume(f: Fluid): number {
-  if (!VOLUME.molecules) return f.N;
-  let m = 0;
-  for (let s = 0; s < NS; s++) m += f.n[s];
-  return m;
-}
-
-/** The units volume is counted in, for display. */
-export const volumeUnit = () => (VOLUME.molecules ? 'molecules' : 'atoms');
-
-/** How much room one molecule of species s takes: its atoms, or 1 if VOLUME.molecules. */
-export const roomFor = (s: number) => (VOLUME.molecules ? 1 : SPECIES[s].size);
-
-/** A container of fluid with a fixed capacity, by volume (see VOLUME). Its counts and heat are always whole numbers. */
 export class Vessel implements Fluid {
   n = new Float64Array(NS);
   N = 0;
   Q = 0;
+  /** The layers, bottom to top; empty when the vessel is, or isn't layered. See strata. */
+  layers: Layer[] = [];
+  /** Whether a mixer keeps it fully stirred, so it never separates. */
+  stirred = false;
 
   constructor(
     readonly cap: number,
     public label = '',
+    /** Whether it keeps layers: by default, if it has a finite capacity. Packets of fluid in flight don't. */
+    readonly layered = Number.isFinite(cap),
   ) {}
 
   /**
@@ -64,12 +64,19 @@ export class Vessel implements Fluid {
   /**
    * Add about `amount` worth (by volume) of a fluid, in whole molecules, without depleting it (a faucet's
    * recipe, or a packet already sent on its way); returns the atoms actually added. Only what fits is
-   * added, unless `overfill`, which leaves it to the caller to deal with the excess.
+   * added, unless `overfill`, which leaves it to the caller to deal with the excess. In a layered vessel it
+   * lands as a packet (see receive).
    */
   addFrom(src: Fluid, amount: number, overfill = false): number {
     if (!overfill) amount = Math.min(amount, this.cap - volume(this));
     const vs = volume(src);
     if (amount <= 0 || vs <= 0) return 0;
+    if (this.layered) {
+      const p = new Vessel(Infinity);
+      const added = p.addFrom(src, amount, true);
+      this.receive(p);
+      return added;
+    }
     const f = amount / vs;
     let added = 0;
     for (let s = 0; s < NS; s++) {
@@ -80,6 +87,124 @@ export class Vessel implements Fluid {
     this.Q += roundRandom((src.Q * added) / src.N);
     this.N += added;
     return added;
+  }
+
+  /**
+   * Take in all of a packet of fluid, heat and all, without depleting it. In a layered vessel it sinks through
+   * whatever's lighter than itself, stirring it, and comes to rest as a layer of its own (see plunge).
+   */
+  receive(p: Fluid): void {
+    if (p.N <= 0) return;
+    this.reconcile();
+    for (let s = 0; s < NS; s++) this.n[s] += p.n[s];
+    this.N += p.N;
+    this.Q += p.Q;
+    if (this.layered) this.layers = plunge(this.layers, p);
+  }
+
+  /** Forget the layers, so the contents count as evenly mixed (after replacing them wholesale). */
+  remix(): void {
+    this.layers = [];
+  }
+
+  /**
+   * Bring the layers in line with the totals: whatever was set directly since they were last used is spread
+   * through them (see spread), evenly by volume if added, in proportion if taken away.
+   */
+  private reconcile(): void {
+    if (!this.layered) return;
+    if (this.N <= 0) {
+      this.layers = [];
+      return;
+    }
+    if (!this.layers.length) {
+      this.layers = normalize([layerOf(this)]);
+      return;
+    }
+    let changed = false;
+    for (let s = 0; s < NS; s++) {
+      let sum = 0;
+      for (const l of this.layers) sum += l.n[s];
+      if (sum === this.n[s]) continue;
+      spread(this.layers, s, this.n[s] - sum);
+      changed = true;
+    }
+    if (changed) this.layers = normalize(this.layers);
+  }
+
+  /** The layers, bottom to top, up to date, each with its share of the heat (so at the vessel's temperature). */
+  strata(): readonly Layer[] {
+    this.reconcile();
+    for (const l of this.layers) l.Q = this.N > 0 ? (this.Q * l.N) / this.N : 0;
+    return this.layers;
+  }
+
+  /**
+   * Move about `amount` (by volume) of the contents into `into`, from `end`, keeping the counts; heat is left to
+   * the caller. Returns the atoms moved.
+   */
+  drawOff(into: Fluid | null, amount: number, end: End): number {
+    this.reconcile();
+    return drain(this, into, amount, end);
+  }
+
+  /**
+   * React for h sim seconds. Each run of similar layers (see runs) reacts as one fluid, so fluids that have
+   * separated only react where they meet, as they trade molecules.
+   */
+  react(net: ReactionNetwork, h: number): void {
+    if (this.N <= 0) return;
+    this.reconcile();
+    const groups = this.layered ? runs(this.layers) : [];
+    if (groups.length <= 1) {
+      net.step(this, h); // the layers catch up when next used
+      return;
+    }
+    const T = temperature(this);
+    let heat = 0;
+    for (const g of groups) {
+      const f: Fluid = layerOf(g[0]);
+      for (const l of g.slice(1)) {
+        for (let s = 0; s < NS; s++) f.n[s] += l.n[s];
+        f.N += l.N;
+      }
+      const before = Float64Array.from(f.n);
+      f.Q = T * THERMO.heatCap * f.N;
+      const q = f.Q;
+      net.step(f, h);
+      heat += f.Q - q;
+      for (let s = 0; s < NS; s++) {
+        const d = f.n[s] - before[s];
+        if (!d) continue;
+        spread(g, s, d);
+        this.n[s] += d;
+        this.N += d * SPECIES[s].size;
+      }
+    }
+    this.Q = Math.max(0, this.Q + Math.round(heat));
+    this.layers = normalize(this.layers);
+  }
+
+  /**
+   * Let the layers settle for h sim seconds: stirring mixes what it reaches and dies down, neighbors trade
+   * molecules toward equilibrium (see exchange), and anything denser than what's below it sinks. A stirred
+   * vessel (see stirred) is just kept evenly mixed.
+   */
+  settle(h: number): void {
+    if (!this.layered || this.N <= 0) return;
+    this.reconcile();
+    if (this.stirred) {
+      this.layers = [layerOf(this)];
+      return;
+    }
+    const L = this.layers;
+    const sp = present(this);
+    // a single species has nothing to separate from
+    if (L.length < 2 || sp.length < 2) return;
+    churn(L, sp, h);
+    const T = temperature(this);
+    for (let i = 0; i + 1 < L.length; i++) exchange(L[i], L[i + 1], sp, T, h);
+    overturn(L, sp);
   }
 }
 
@@ -110,32 +235,40 @@ export class Flask extends Vessel {
 
 /**
  * Move about `amount` worth (by volume, see VOLUME) of src's contents, in whole molecules, into dst (or down
- * the sink if dst is null), with heat in proportion; returns the atoms actually moved.
+ * the sink if dst is null), with heat in proportion; returns the atoms actually moved. A layered src gives it up
+ * from `end`: the top, the bottom, or evenly from every layer. A layered dst takes it in as a packet (see
+ * Vessel.receive).
  */
-export function transfer(src: Fluid, dst: (Fluid & { cap: number }) | null, amount: number): number {
+export function transfer(src: Fluid, dst: (Fluid & { cap: number }) | null, amount: number, end: End = 'all'): number {
   const vs = volume(src);
   amount = Math.min(amount, vs, dst ? dst.cap - volume(dst) : Infinity);
   if (amount <= 0) return 0;
-  const f = amount / vs;
+  const packet = dst instanceof Vessel && dst.layered ? new Vessel(Infinity) : null;
+  const into = packet ?? dst;
+  const N0 = src.N;
   let moved = 0;
-  for (let s = 0; s < NS; s++) {
-    const m = Math.min(src.n[s], roundRandom(src.n[s] * f));
-    if (!m) continue;
-    src.n[s] -= m;
-    if (dst) dst.n[s] += m;
-    moved += m * SPECIES[s].size;
+  if (src instanceof Vessel && src.layered) moved = src.drawOff(into, amount, end);
+  else {
+    const f = amount / vs;
+    for (let s = 0; s < NS; s++) {
+      const m = Math.min(src.n[s], roundRandom(src.n[s] * f));
+      if (!m) continue;
+      src.n[s] -= m;
+      if (into) into.n[s] += m;
+      moved += m * SPECIES[s].size;
+    }
+    src.N -= moved;
+    if (into) into.N += moved;
   }
-  const q = moved >= src.N ? src.Q : Math.min(src.Q, roundRandom((src.Q * moved) / src.N));
+  const q = moved >= N0 ? src.Q : Math.min(src.Q, roundRandom((src.Q * moved) / N0));
   src.Q -= q;
-  src.N -= moved;
-  if (dst) {
-    dst.Q += q;
-    dst.N += moved;
-  }
+  if (into) into.Q += q;
+  if (packet) (dst as Vessel).receive(packet);
   if (src.N < TRACE) {
     src.N = 0;
     src.n.fill(0);
     src.Q = 0;
+    if (src instanceof Vessel) src.remix();
   }
   return moved;
 }

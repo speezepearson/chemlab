@@ -370,7 +370,7 @@ export class Tool {
         // drained evenly, so the cup is empty just as the run ends
         const cup = this.tanks[0];
         const left = SCAN_LIGHTS[SCAN_LIGHTS.length - 1] - this.scanAge;
-        transfer(cup, null, left <= h ? volume(cup) : (volume(cup) * h) / left);
+        transfer(cup, null, left <= h ? volume(cup) : (volume(cup) * h) / left, 'bottom');
         this.scanAge += h;
       }
       return (this.out = []);
@@ -378,7 +378,7 @@ export class Tool {
     const funnel = this.kind === 'splitter' || this.kind === 'sorter';
     let packets = this.tanks.map((tank, k) => {
       const p = new Vessel(Infinity);
-      transfer(tank, p, funnel ? FUNNEL_RATE * h : this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW) * h);
+      transfer(tank, p, funnel ? FUNNEL_RATE * h : this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW) * h, 'bottom');
       return p;
     });
     if (this.kind === 'exchanger') counterflow(packets[0], packets[1], EXCHANGE_RATE * h);
@@ -536,7 +536,7 @@ export class Hose {
   /** Run for `h` sim seconds. Returns what left the outlet, or null if nothing did. */
   step(h: number): Vessel | null {
     const p = new Vessel(Infinity);
-    transfer(this.funnel, p, PUMP_RATE * h);
+    transfer(this.funnel, p, PUMP_RATE * h, 'bottom');
     this.out = p.N > 0 ? p : null;
     this.flow = volume(p) / (MAX_FLOW * h);
     return this.out;

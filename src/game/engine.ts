@@ -1104,7 +1104,7 @@ export class GameEngine {
       const stillHose = this.rightHeld ? null : (this.hoseDrag?.hose ?? null);
       for (let i = 0; i < sub; i++) {
         if (drag && pourInto) this.pourFrom(drag.flask, pourInto, POUR_RATE * h);
-        else if (drag && pourInto === null) transfer(drag.flask, null, POUR_RATE * h);
+        else if (drag && pourInto === null) transfer(drag.flask, null, POUR_RATE * h, 'top');
         for (const { fa, m } of this.faucetFlows) this.stream(m.v, fa.output, FILL_RATE * h);
         this.tools.forEach((t, j) => {
           // carried, it pours nothing out without the right button (a spectrometer has nothing to pour)
@@ -1133,7 +1133,8 @@ export class GameEngine {
           return !(m && m.y <= d.y) && d.y < this.H;
         });
         for (const v of vessels) {
-          this.chem.step(v, h);
+          v.react(this.chem, h);
+          v.settle(h);
           // by molecules, breaking bonds swells a fluid, and whatever no longer fits spills
           this.overflow(v);
         }
@@ -1215,12 +1216,12 @@ export class GameEngine {
   /** Pour `amount` out of a carried flask into v (see fill). */
   private pourFrom(D: Flask, v: Vessel, amount: number): void {
     const poured = new Vessel(Infinity);
-    transfer(D, poured, amount);
+    transfer(D, poured, amount, 'top');
     this.stream(v, poured);
   }
 
   /**
-   * Whatever of v's contents, mixed, no longer fits spills over its rim, falling into the first open top
+   * Whatever of v's contents no longer fits spills off the top over its rim, falling into the first open top
    * below (which may overflow in turn), or down the sink. A vessel with no rim (a flask tilted to pour)
    * spills straight down the sink.
    */
@@ -1228,7 +1229,7 @@ export class GameEngine {
     const over = volume(v) - v.cap;
     if (over <= 0) return;
     const out = new Vessel(Infinity);
-    transfer(v, out, over);
+    transfer(v, out, over, 'top');
     const rim = this.open.find((m) => m.v === v)?.rim;
     if (!rim || out.N <= 0) return;
     let spill = this.spills.get(v);
@@ -1305,9 +1306,8 @@ export class GameEngine {
       const maxX = mx + S * Math.max(...pts.map((p) => p.x));
       const maxY = my + S * Math.max(...pts.map((p) => p.y));
       this.worldTransform();
-      const top = my + S * fillLevel(ang, volume(f) / f.cap);
-      ctx.fillStyle = fluidColor(f);
-      ctx.fillRect(minX - 2, top, maxX - minX + 4, maxY - top + 2);
+      this.drawBands(f, maxY + 2, (share) => my + S * fillLevel(ang, share), (y0, y1) =>
+        ctx.fillRect(minX - 2, y0, maxX - minX + 4, y1 - y0));
       ctx.restore();
     }
     ctx.fillStyle = theme.glasshi;
@@ -1325,6 +1325,25 @@ export class GameEngine {
     ctx.restore();
   }
 
+  /**
+   * A vessel's fluid as bands, one per layer (see Vessel.strata), each in its own color: `y(share)` is where the
+   * surface would be with that share of the vessel's capacity filled, `bottom` is below the lowest fluid, and
+   * `rect(y0, y1)` fills between two heights. Each band reaches a device pixel into the one below, so no seam shows.
+   */
+  private drawBands(v: Vessel, bottom: number, y: (share: number) => number, rect: (y0: number, y1: number) => void): void {
+    const { ctx } = this;
+    const seam = 1 / (this.zoom * this.dpr);
+    let filled = 0;
+    let below = bottom;
+    for (const l of v.layered ? v.strata() : [v]) {
+      filled += volume(l);
+      const top = y(filled / v.cap);
+      ctx.fillStyle = fluidColor(l);
+      rect(top, below === bottom ? below : below + seam);
+      below = top;
+    }
+  }
+
   /** The fluid in a tank with a cup, standing across tube and cup together (see cupFillHeight). */
   private drawCupFluid(t: Tool, k: number): void {
     const v = t.tanks[k];
@@ -1333,7 +1352,6 @@ export class GameEngine {
     const r = this.tankRect(t, k);
     const o = this.openingOf(t, k);
     const cup = t.shape.cup!;
-    const h = cupFillHeight(volume(v) / v.cap, (r.x1 - r.x0) / S, (r.y1 - r.y0) / S, 2 * cup.w, cup.h);
     // the cup, then the tube with its floor rounded as drawTank rounds it
     const rad = Math.min(6 * S, (r.x1 - r.x0) / 2);
     const inside = new Path2D();
@@ -1348,9 +1366,9 @@ export class GameEngine {
     inside.closePath();
     ctx.save();
     ctx.clip(inside);
-    ctx.fillStyle = fluidColor(v);
-    const top = r.y1 - h * S;
-    ctx.fillRect(o.x0, top, o.x1 - o.x0, r.y1 - top + 1);
+    const height = (share: number) =>
+      cupFillHeight(share, (r.x1 - r.x0) / S, (r.y1 - r.y0) / S, 2 * cup.w, cup.h);
+    this.drawBands(v, r.y1 + 1, (share) => r.y1 - height(share) * S, (y0, y1) => ctx.fillRect(o.x0, y0, o.x1 - o.x0, y1 - y0));
     ctx.restore();
   }
 
@@ -1426,9 +1444,7 @@ export class GameEngine {
     if (showFluid && v.N > TRACE) {
       ctx.save();
       ctx.clip(inside);
-      const top = y1 - Math.min(1, volume(v) / v.cap) * (y1 - y0);
-      ctx.fillStyle = fluidColor(v);
-      ctx.fillRect(x0, top, x1 - x0, y1 - top + 1);
+      this.drawBands(v, y1 + 1, (share) => y1 - Math.min(1, share) * (y1 - y0), (a, b) => ctx.fillRect(x0, a, x1 - x0, b - a));
       ctx.restore();
     }
     ctx.fillStyle = theme.glasshi;
