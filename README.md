@@ -83,6 +83,8 @@ The reaction types are:
 
 Blue bonds are uphill (E = −1 for now) and have no prefactor (A = 0), so they never form or break on their own, at any temperature. Blue gets into a molecule, or out of one, only by swapping places with yellow, its opposite color. The target, the **△RGB triangle**, sits above R–G + B, so it never dominates an equilibrium.
 
+Yellow bonds have a high barrier (Ea = 10), so at room temperature they hardly form or break, and it takes heat to bond yellow to anything or free it. That keeps a trace of yellow from eating the target. Yellow still swaps in for blue freely (swaps have no barrier), so each yellow atom spoils one triangle into △RGY. But that ring can't open cold, so the yellow stays stuck there instead of moving on to the next triangle. Hot, it does move on, and the damage keeps growing.
+
 The four faucets of pairs with blue pour them whole, since with A = 0 they never come apart. No faucet holds atoms from all three groups, so none pours any triangle: the target has to be made.
 
 ## What's playable now (v1)

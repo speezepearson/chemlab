@@ -36,7 +36,7 @@ const DEFAULT_HEAT_CAP = THERMO.heatCap;
 export function defaultChemParams(): ChemParams {
   const bonds: Record<string, Omit<BondParams, 'A'> & { A?: number }> = {
     RG: { E: 100, Ea: 2 }, RM: { E: 3, Ea: 3 }, CG: { E: 2, Ea: 4 }, CM: { E: 5, Ea: 2 },
-    RY: { E: 4, Ea: 1 }, CY: { E: 1, Ea: 2 }, GY: { E: 4, Ea: 1 }, MY: { E: 2, Ea: 2 },
+    RY: { E: 4, Ea: 10 }, CY: { E: 1, Ea: 10 }, GY: { E: 4, Ea: 10 }, MY: { E: 2, Ea: 10 },
     // blue: uphill (E < 0), and never formed or broken directly (A = 0), so
     // blue only enters or leaves a molecule by swapping places with yellow
     RB: { E: -1, Ea: 1, A: 0 }, CB: { E: -1, Ea: 1, A: 0 },
