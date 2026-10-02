@@ -1,10 +1,10 @@
 import { useReducer } from 'react';
 import { VOLUMES, setVolume } from '../game/audio';
-import { CHANNELS, CHANNEL_NAMES, DEFAULT_VOLUME } from '../game/volumes';
+import { CHANNELS, CHANNEL_NAMES, DEFAULT_VOLUMES } from '../game/volumes';
 
 const STEPS = 100;
 
-/** A volume slider for each kind of sound, and one for everything. The middle is as designed. */
+/** A volume slider for each kind of sound, and one for everything, and a button to put them back. */
 export function SoundPanel() {
   const [, rerender] = useReducer((x: number) => x + 1, 0);
   return (
@@ -27,7 +27,17 @@ export function SoundPanel() {
             <output>{Math.round(100 * VOLUMES[ch])}</output>
           </label>
         ))}
-        <p>{Math.round(100 * DEFAULT_VOLUME)} is as designed. The top is four times as loud, the bottom silent.</p>
+        <p>The top is four times as loud as 50, the bottom silent.</p>
+        <div className="actions">
+          <button
+            onClick={() => {
+              for (const ch of CHANNELS) setVolume(ch, DEFAULT_VOLUMES[ch]);
+              rerender();
+            }}
+          >
+            Restore defaults
+          </button>
+        </div>
       </div>
     </details>
   );

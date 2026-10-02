@@ -1,17 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { CHANNELS, DEFAULT_VOLUME, defaultVolumes, gainOf, parseVolumes } from './volumes';
+import { DEFAULT_VOLUMES, MIDDLE, defaultVolumes, gainOf, parseVolumes } from './volumes';
 
 describe('volumes', () => {
-  it('maps the middle of a slider to the designed level, the top to four times it, the bottom to silence', () => {
-    expect(gainOf(DEFAULT_VOLUME)).toBe(1);
+  it('maps the middle of a slider to the sound as synthesized, the top to four times it, the bottom to silence', () => {
+    expect(gainOf(MIDDLE)).toBe(1);
     expect(gainOf(1)).toBe(4);
     expect(gainOf(0)).toBe(0);
     expect(gainOf(2)).toBe(4);
     expect(gainOf(-1)).toBe(0);
   });
 
-  it('starts every channel at the default', () => {
-    for (const c of CHANNELS) expect(defaultVolumes()[c]).toBe(DEFAULT_VOLUME);
+  it('starts the far-off alarms well under everything else', () => {
+    expect(defaultVolumes()).toEqual(DEFAULT_VOLUMES);
+    expect(DEFAULT_VOLUMES.klaxon).toBeLessThan(MIDDLE);
+    expect(DEFAULT_VOLUMES.alarm).toBeLessThan(MIDDLE);
+    expect(DEFAULT_VOLUMES.hum).toBe(MIDDLE);
   });
 
   it('reads what was stored, and defaults whatever is missing or junk', () => {
