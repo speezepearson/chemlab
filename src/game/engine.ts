@@ -44,6 +44,8 @@ export interface EngineCallbacks {
   onInspect(info: Inspection | null): void;
   /** A vessel was double-clicked in god mode; look it up with GameEngine.vessel(id). */
   onEdit(id: string): void;
+  /** Outside god mode, a flask was double-clicked to label it: its id, as for onEdit. */
+  onLabel(id: string): void;
   /** Whether letting go of something at this point (in client coordinates) puts it away. */
   isDiscard(clientX: number, clientY: number): boolean;
 }
@@ -80,6 +82,8 @@ const FAUCET_REACH = 24;
 const FLASK_CATCH = 14;
 /** Where an overflowing flask spills, right of its mouth's center, in local units: just outside its lip. */
 const FLASK_LIP = 12;
+/** Where a flask's label sits, below its mouth, in local units: the text's baseline, on the bench under it. */
+const LABEL_Y = 86;
 /** How close to a valve, in world units, the pointer can be before it stops turning the lever: the valve's core (see drawTool), not its lever. */
 const VALVE_DEADZONE = 6;
 const SINK_H = 16;
@@ -452,6 +456,12 @@ export class GameEngine {
   private clampCam(): void {
     this.zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, this.zoom));
     this.cam = { x: this.cam.x, y: Math.min(this.H - this.viewH / this.zoom, this.cam.y) };
+  }
+
+  /** Where a flask's label is drawn (see vessel for its id), on the canvas in CSS pixels; null if it isn't a flask. */
+  labelSpot(id: string): Point | null {
+    const f = id.startsWith('f') ? this.flasks[+id.slice(1)] : undefined;
+    return f ? this.toScreen({ x: f.home.x, y: f.home.y + LABEL_Y * this.S }) : null;
   }
 
   /** A point on the canvas, in CSS pixels, in world units. */
@@ -841,8 +851,12 @@ export class GameEngine {
       if (this.drag || this.toolDrag || this.scaleDrag || this.hoseDrag) e.preventDefault();
     });
     on('dblclick', (e) => {
-      if (!this.god) return;
       const p = this.ptr(e);
+      if (!this.god) {
+        const f = this.hitFlask(p);
+        if (f) this.cb.onLabel(`f${this.flasks.indexOf(f)}`);
+        return;
+      }
       const hit = this.tankAt(p);
       if (hit) {
         this.cb.onEdit(`t${hit.tool.id}.${hit.k}`);
@@ -1888,7 +1902,7 @@ export class GameEngine {
       if (f.label && !this.scales.some((sc) => sc.load.some((l) => l.f === f))) {
         ctx.fillStyle = theme.muted;
         ctx.textAlign = 'center';
-        ctx.fillText(f.label, f.home.x, f.home.y + 86 * S);
+        ctx.fillText(f.label, f.home.x, f.home.y + LABEL_Y * S);
       }
       if (this.hover === f && this.god) {
         ctx.strokeStyle = theme.accent;

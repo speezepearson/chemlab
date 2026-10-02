@@ -129,6 +129,12 @@ canvas{display:block;width:100%;height:100%;touch-action:none}
 #editor .hd b{font-weight:500}
 #editor .line{display:flex;gap:8px;align-items:center;margin:6px 0}
 #editor .muted{color:var(--muted)}
+#editor .line input{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:0 4px;flex:1;min-width:0}
+.label-edit{
+  position:absolute;transform:translate(-50%,-75%);width:120px;z-index:6;text-align:center;
+  font:12px "Schibsted Grotesk",sans-serif;color:var(--ink);background:var(--panel);
+  border:1px solid var(--accent);border-radius:4px;padding:2px 4px;box-shadow:0 4px 12px var(--shadow);
+}
 #editor p.muted{margin:8px 0 0;font-size:11px}
 #editor table{border-collapse:collapse;width:100%}
 #editor th{font-weight:500;color:var(--muted);text-align:left;padding:0 4px 4px 0}

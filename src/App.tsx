@@ -4,6 +4,7 @@ import { ReactionNetwork } from './chem/reactions';
 import { AppearancePanel } from './components/AppearancePanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
 import { FlaskEditor } from './components/FlaskEditor';
+import { LabelEditor } from './components/LabelEditor';
 import { SoundPanel } from './components/SoundPanel';
 import { Intro } from './components/Intro';
 import { InfoPanel } from './components/InfoPanel';
@@ -49,6 +50,8 @@ export function App() {
   const [chemVersion, setChemVersion] = useState(0);
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
+  /** The flask whose label is being typed, outside god mode. */
+  const [labeling, setLabeling] = useState<string | null>(null);
   /**
    * The intro, if it's showing: from its start button the first time, straight into the log on a replay, and
    * just the start button for a returning player, so there's a click to turn the sound on.
@@ -73,6 +76,7 @@ export function App() {
       onWin: () => setWon(true),
       onInspect: setInspection,
       onEdit: setEditing,
+      onLabel: setLabeling,
       isDiscard: (x, y) => !!document.elementFromPoint(x, y)?.closest('.palette'),
     }, presetRef.current);
     if (saved) e.restore(saved, presetRef.current);
@@ -198,6 +202,9 @@ export function App() {
           <canvas ref={canvasRef} />
           {inspection && <InfoPanel info={inspection} />}
           {engine && editing !== null && <FlaskEditor engine={engine} id={editing} onClose={() => setEditing(null)} />}
+          {engine && labeling !== null && (
+            <LabelEditor key={labeling} engine={engine} id={labeling} onClose={() => setLabeling(null)} />
+          )}
           {won && <div id="win">Enough cryostabilizer to reach Mu Ceti.</div>}
         </div>
       </div>
