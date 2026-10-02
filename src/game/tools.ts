@@ -77,8 +77,8 @@ export const SORTER_SCREENS: readonly (readonly number[])[] = [
   [0.95, 0.7, 0],
 ];
 
-/** How much a spectrometer's sample cup holds, in atoms: a twentieth of a flask. */
-export const SAMPLE_CAP = CAP / 20;
+/** How much a spectrometer's sample cup holds, by volume: a thousandth of a flask, 1M. */
+export const SAMPLE_CAP = CAP / 1000;
 /** Sim seconds into a spectrometer run at which each of its three hexagons lights up; the run ends with the last. */
 export const SCAN_LIGHTS = [1, 3, 7] as const;
 /**
