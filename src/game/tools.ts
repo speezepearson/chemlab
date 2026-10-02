@@ -83,6 +83,23 @@ export const REFERENCE_CAP = 100 * CAP;
 export const PIPETTE_CAP = CAP / 10;
 /** How long a pipette takes to empty with its valve fully open, in sim seconds. */
 export const PIPETTE_EMPTY_S = 5;
+/**
+ * How high fluid filling `share` of a tank with a cup (see ToolShape.cup) stands above the tank's floor, in local
+ * units. It's drawn across tube and cup together, in proportion to their area, so a full one is full to the cup's
+ * brim, where it would spill.
+ */
+export function cupFillHeight(share: number, tubeW: number, tubeH: number, mouthW: number, cupH: number): number {
+  const tube = tubeW * tubeH;
+  const cup = ((tubeW + mouthW) / 2) * cupH;
+  const a = Math.max(0, Math.min(1, share)) * (tube + cup);
+  if (a <= tube) return a / tubeW;
+  // up the cup, the width grows from tubeW to mouthW, so the area to height y is tubeW·y + k·y²
+  const k = (mouthW - tubeW) / (2 * cupH);
+  const rest = a - tube;
+  const y = k > 0 ? (Math.sqrt(tubeW * tubeW + 4 * k * rest) - tubeW) / (2 * k) : rest / tubeW;
+  return tubeH + Math.min(cupH, y);
+}
+
 /** How much a spectrometer's sample cup holds, by volume: a thousandth of a flask, 1M. */
 export const SAMPLE_CAP = CAP / 1000;
 /** Sim seconds into a spectrometer run at which each of its three hexagons lights up; the run ends with the last. */

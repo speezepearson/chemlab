@@ -5,7 +5,7 @@ import { heatAt, temperature } from '../chem/reactions';
 import { Vessel, roomFor, volume } from './flask';
 import {
   DRIP_FLOW, EXCHANGE_RATE, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
-  SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
+  SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -19,6 +19,17 @@ function filled(v: Vessel, species: number, atoms: number, T: number): Vessel {
 }
 
 describe('pipette', () => {
+  it('is drawn filling its tube first, then its cup by area, to the brim when full', () => {
+    // a 10 × 84 tube under a cup 28 wide at the mouth, 14 tall: 840 + 266 of area
+    expect(cupFillHeight(0, 10, 84, 28, 14)).toBe(0);
+    expect(cupFillHeight(420 / 1106, 10, 84, 28, 14)).toBeCloseTo(42);
+    expect(cupFillHeight(840 / 1106, 10, 84, 28, 14)).toBeCloseTo(84);
+    expect(cupFillHeight(1, 10, 84, 28, 14)).toBeCloseTo(98);
+    expect(cupFillHeight(2, 10, 84, 28, 14)).toBeCloseTo(98);
+    // halfway up the cup it's 19 wide, so (10 + 19) / 2 · 7 of the cup's area is below
+    expect(cupFillHeight((840 + 101.5) / 1106, 10, 84, 28, 14)).toBeCloseTo(91);
+  });
+
   it('holds a tenth of a flask, and empties it in five sim seconds fully open', () => {
     const p = new Tool('pipette', 0, 0, 0, [1]);
     expect(p.tanks[0].cap).toBe(CAP / 10);

@@ -12,7 +12,7 @@ import { CENTER, placement, type Placement } from './place';
 import { rumble, type Rumble } from './rumble';
 import { WaterSounds } from './water';
 import {
-  HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SHAPES, SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, drip,
+  HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SHAPES, SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, cupFillHeight, drip,
   UNIQUE_TOOLS, mouthBelow, scanLevel, tankX, type Mouth, type ToolKind,
 } from './tools';
 
@@ -1325,6 +1325,35 @@ export class GameEngine {
     ctx.restore();
   }
 
+  /** The fluid in a tank with a cup, standing across tube and cup together (see cupFillHeight). */
+  private drawCupFluid(t: Tool, k: number): void {
+    const v = t.tanks[k];
+    if (v.N <= TRACE) return;
+    const { ctx, S } = this;
+    const r = this.tankRect(t, k);
+    const o = this.openingOf(t, k);
+    const cup = t.shape.cup!;
+    const h = cupFillHeight(volume(v) / v.cap, (r.x1 - r.x0) / S, (r.y1 - r.y0) / S, 2 * cup.w, cup.h);
+    // the cup, then the tube with its floor rounded as drawTank rounds it
+    const rad = Math.min(6 * S, (r.x1 - r.x0) / 2);
+    const inside = new Path2D();
+    inside.moveTo(o.x0, o.y);
+    inside.lineTo(r.x0, r.y0);
+    inside.lineTo(r.x0, r.y1 - rad);
+    inside.quadraticCurveTo(r.x0, r.y1, r.x0 + rad, r.y1);
+    inside.lineTo(r.x1 - rad, r.y1);
+    inside.quadraticCurveTo(r.x1, r.y1, r.x1, r.y1 - rad);
+    inside.lineTo(r.x1, r.y0);
+    inside.lineTo(o.x1, o.y);
+    inside.closePath();
+    ctx.save();
+    ctx.clip(inside);
+    ctx.fillStyle = fluidColor(v);
+    const top = r.y1 - h * S;
+    ctx.fillRect(o.x0, top, o.x1 - o.x0, r.y1 - top + 1);
+    ctx.restore();
+  }
+
   /** The little glass funnel on top of a tank, narrowing from its mouth (see openingOf) to the tank's top. */
   private drawCup(t: Tool, k: number): void {
     const { ctx, theme } = this;
@@ -1348,7 +1377,9 @@ export class GameEngine {
   }
 
   /** An open-topped glass tank with a rounded floor, or a funnel narrowing to a stem; `lip` flares its rim. */
-  private drawTank(v: Vessel, x0: number, y0: number, x1: number, y1: number, funnel = false, lip = true): void {
+  private drawTank(
+    v: Vessel, x0: number, y0: number, x1: number, y1: number, funnel = false, lip = true, showFluid = true,
+  ): void {
     const { ctx, S, theme } = this;
     const r = Math.min(6 * S, (x1 - x0) / 2);
     const wall = new Path2D();
@@ -1366,7 +1397,7 @@ export class GameEngine {
     wall.lineTo(x1, y0);
     const inside = new Path2D(wall);
     inside.closePath();
-    if (v.N > TRACE) {
+    if (showFluid && v.N > TRACE) {
       ctx.save();
       ctx.clip(inside);
       const top = y1 - Math.min(1, volume(v) / v.cap) * (y1 - y0);
@@ -1432,7 +1463,8 @@ export class GameEngine {
     for (const x of sh.spouts) ctx.fillRect(o.x + (x - 4) * S, o.y + (sh.spoutY - 6) * S, 8 * S, 6 * S);
     t.tanks.forEach((v, k) => {
       const r = this.tankRect(t, k);
-      this.drawTank(v, r.x0, r.y0, r.x1, r.y1, sh.funnel, !sh.cup);
+      if (sh.cup) this.drawCupFluid(t, k);
+      this.drawTank(v, r.x0, r.y0, r.x1, r.y1, sh.funnel, !sh.cup, !sh.cup);
       if (sh.cup) this.drawCup(t, k);
       if (t.lidded) {
         // a lid, and nothing gets in
