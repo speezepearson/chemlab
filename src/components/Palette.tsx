@@ -11,6 +11,13 @@ const ICONS: Record<string, ReactNode> = {
       <circle className="valve" cx="20" cy="31" r="2.5" />
     </>
   ),
+  pipette: (
+    <>
+      <path className="pipe" d="M20 28 V36" />
+      <path className="glass" d="M13 4 L18 10 V27 Q18 29 20 29 Q22 29 22 27 V10 L27 4" />
+      <circle className="valve" cx="20" cy="32" r="2.5" />
+    </>
+  ),
   exchanger: (
     <>
       <path className="pipe" d="M9 22 V27 M31 22 V27 M29 31 V37 M11 31 V37" />
@@ -61,6 +68,7 @@ const ICONS: Record<string, ReactNode> = {
 const ITEMS = [
   ['flask', 'Flask'],
   ['dispenser', 'Dispenser'],
+  ['pipette', 'Pipette'],
   ['exchanger', 'Heat exchanger'],
   ['separator', 'Separator'],
   ['splitter', 'Splitter'],

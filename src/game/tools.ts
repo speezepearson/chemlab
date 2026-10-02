@@ -79,6 +79,10 @@ export const SORTER_SCREENS: readonly (readonly number[])[] = [
 
 /** How much the cryostabilizer reference holds, by volume: a hundred flasks. */
 export const REFERENCE_CAP = 100 * CAP;
+/** How much a pipette holds, by volume: a tenth of a flask. */
+export const PIPETTE_CAP = CAP / 10;
+/** How long a pipette takes to empty with its valve fully open, in sim seconds. */
+export const PIPETTE_EMPTY_S = 5;
 /** How much a spectrometer's sample cup holds, by volume: a thousandth of a flask, 1M. */
 export const SAMPLE_CAP = CAP / 1000;
 /** Sim seconds into a spectrometer run at which each of its three hexagons lights up; the run ends with the last. */
@@ -102,7 +106,8 @@ export function scanLevel(age: number): number {
 /** The order of a spectrometer hexagon's sextants, clockwise from the top. */
 export const SEXTANT_ATOMS: readonly Atom[] = ['G', 'C', 'B', 'M', 'R', 'Y'];
 
-export type ToolKind = 'dispenser' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'spectrometer' | 'reference';
+export type ToolKind =
+  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'spectrometer' | 'reference';
 
 /** Tools there's only ever one of: not in the palette, and never put away. */
 export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectrometer', 'reference'];
@@ -121,6 +126,11 @@ export interface ToolShape {
   tankCap?: number;
   /** Whether the tanks are funnels, narrowing to a stem, rather than flat-bottomed. */
   funnel?: boolean;
+  /**
+   * A little funnel on top of each tank, which is where fluid goes in: its mouth reaches `w` either side of the
+   * tank's center, `h` above the tank's top.
+   */
+  cup?: { w: number; h: number };
   /** Whether the tool has no valves to turn. */
   noValve?: boolean;
   /** Whether the tanks are sealed on top, so nothing can be poured or fall into them. */
@@ -144,6 +154,17 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     valveY: 98,
     spoutY: 114,
     box: { x0: -34, x1: 34, y0: -6, y1: 116 },
+  },
+  pipette: {
+    // a narrow dispenser, filled through a little funnel on top
+    tanks: [{ name: 'tube', x0: -5, x1: 5 }],
+    tankCap: PIPETTE_CAP,
+    cup: { w: 14, h: 14 },
+    maxFlow: PIPETTE_CAP / PIPETTE_EMPTY_S,
+    spouts: [0],
+    valveY: 98,
+    spoutY: 114,
+    box: { x0: -18, x1: 18, y0: -20, y1: 116 },
   },
   exchanger: {
     tanks: [
@@ -242,6 +263,7 @@ export const HELIX = { x0: -35, x1: 35, y: 110, r: 6, halfTwists: 9 };
 
 export const TOOL_NAMES: Record<ToolKind, string> = {
   dispenser: 'Dispenser',
+  pipette: 'Pipette',
   exchanger: 'Heat exchanger',
   separator: 'Separator',
   splitter: 'Splitter',
@@ -264,7 +286,8 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
  * Something with tanks on top, each draining through its own valve, and
  * spouts on the bottom.
  *
- * - A **dispenser** has one tank and one spout.
+ * - A **dispenser** has one tank and one spout. A **pipette** is a narrow one, a tenth of a flask, filled
+ *   through a little funnel on top, that empties in PIPETTE_EMPTY_S with its valve fully open.
  * - A **heat exchanger** has two tanks, whose streams pass each other in
  *   counterflow on the way to their spouts, trading heat but never mixing.
  * - A **separator** has one tank and two spouts, and splits what drains

@@ -260,9 +260,9 @@ export class GameEngine {
     this.hoses = (preset.hoses ?? []).map(({ from, to }) => {
       const h = new Hose({ x: 0, y: 0 }, { x: 0, y: 0 });
       const sp = this.spoutAt(this.tools[from.tool], from.spout);
-      const r = this.tankRect(this.tools[to.tool], to.tank ?? 0);
+      const r = this.openingOf(this.tools[to.tool], to.tank ?? 0);
       this.moveHoseEnd(h, 'inlet', { x: sp.x, y: sp.y + 16 * S });
-      this.moveHoseEnd(h, 'outlet', { x: (r.x0 + r.x1) / 2 + (to.dx ?? 0) * S, y: r.y0 - 24 * S });
+      this.moveHoseEnd(h, 'outlet', { x: (r.x0 + r.x1) / 2 + (to.dx ?? 0) * S, y: r.y - 24 * S });
       return h;
     });
     this.placeFaucets();
@@ -477,9 +477,9 @@ export class GameEngine {
 
   /** Where a tank's label is written: just above its rim and any lid, or above the tool's own label if it has one. */
   private tankLabelAt(t: Tool, k: number): Point {
-    const r = this.tankRect(t, k);
+    const o = this.openingOf(t, k);
     const lines = t.shape.label?.length ?? 0;
-    return { x: (r.x0 + r.x1) / 2, y: r.y0 - (lines ? 11 * lines + 10 : 9) * this.S };
+    return { x: (o.x0 + o.x1) / 2, y: o.y - (lines ? 11 * lines + 10 : 9) * this.S };
   }
 
   /** Where a sound at p in the world is heard from: full and centered in view, fading and panning off screen. */
@@ -617,6 +617,15 @@ export class GameEngine {
     t.valves[k] = Math.max(0, Math.min(1, open));
   }
 
+  /** Where fluid goes into a tank: its open top, or the mouth of the little funnel on top if it has one. */
+  private openingOf(t: Tool, k: number): { x0: number; x1: number; y: number } {
+    const r = this.tankRect(t, k);
+    const cup = t.shape.cup;
+    if (!cup) return { x0: r.x0, x1: r.x1, y: r.y0 };
+    const cx = (r.x0 + r.x1) / 2;
+    return { x0: cx - cup.w * this.S, x1: cx + cup.w * this.S, y: r.y0 - cup.h * this.S };
+  }
+
   private tankRect(t: Tool, k: number): { x0: number; x1: number; y0: number; y1: number } {
     const o = this.toolXY(t);
     const { S } = this;
@@ -674,8 +683,8 @@ export class GameEngine {
     for (const t of this.tools) {
       if (t.lidded || t.tanks.some((v) => held.has(v))) continue;
       t.tanks.forEach((v, k) => {
-        const r = this.tankRect(t, k);
-        out.push({ v, x0: r.x0, x1: r.x1, y: r.y0, rim: { x: r.x1 + 3 * S, y: r.y0 } });
+        const r = this.openingOf(t, k);
+        out.push({ v, x0: r.x0, x1: r.x1, y: r.y, rim: { x: r.x1 + 3 * S, y: r.y } });
       });
     }
     for (const h of this.hoses) {
@@ -937,7 +946,10 @@ export class GameEngine {
     if (!tool) return null;
     for (let k = 0; k < tool.tanks.length; k++) {
       const r = this.tankRect(tool, k);
-      if (p.x > r.x0 && p.x < r.x1 && p.y > r.y0 - 6 * this.S && p.y < r.y1) return { tool, k };
+      const o = this.openingOf(tool, k);
+      const inTank = p.x > r.x0 && p.x < r.x1 && p.y > r.y0 - 6 * this.S && p.y < r.y1;
+      const inCup = p.x > o.x0 && p.x < o.x1 && p.y > o.y - 6 * this.S && p.y < r.y0;
+      if (inTank || inCup) return { tool, k };
     }
     return null;
   }
@@ -965,8 +977,9 @@ export class GameEngine {
       if (t.lidded) continue;
       for (let k = 0; k < t.tanks.length; k++) {
         const r = this.tankRect(t, k);
-        if (p.x > r.x0 - 8 * S && p.x < r.x1 + 8 * S && p.y > r.y0 - 40 * S && p.y < r.y1)
-          return { kind: 'tank', v: t.tanks[k], x: (r.x0 + r.x1) / 2, y: r.y0 };
+        const o = this.openingOf(t, k);
+        if (p.x > o.x0 - 8 * S && p.x < o.x1 + 8 * S && p.y > o.y - 40 * S && p.y < r.y1)
+          return { kind: 'tank', v: t.tanks[k], x: (o.x0 + o.x1) / 2, y: o.y };
       }
     }
     for (const h of this.hoses) {
@@ -1312,10 +1325,32 @@ export class GameEngine {
     ctx.restore();
   }
 
-  /** An open-topped glass tank with a rounded floor, or a funnel narrowing to a stem. */
-  private drawTank(v: Vessel, x0: number, y0: number, x1: number, y1: number, funnel = false): void {
+  /** The little glass funnel on top of a tank, narrowing from its mouth (see openingOf) to the tank's top. */
+  private drawCup(t: Tool, k: number): void {
+    const { ctx, theme } = this;
+    const r = this.tankRect(t, k);
+    const o = this.openingOf(t, k);
+    const glass = new Path2D();
+    glass.moveTo(o.x0, o.y);
+    glass.lineTo(r.x0, r.y0);
+    glass.lineTo(r.x1, r.y0);
+    glass.lineTo(o.x1, o.y);
+    ctx.fillStyle = theme.glasshi;
+    ctx.fill(glass);
+    const sides = new Path2D();
+    sides.moveTo(o.x0, o.y);
+    sides.lineTo(r.x0, r.y0);
+    sides.moveTo(r.x1, r.y0);
+    sides.lineTo(o.x1, o.y);
+    ctx.strokeStyle = theme.glass;
+    ctx.lineWidth = 1.6;
+    ctx.stroke(sides);
+  }
+
+  /** An open-topped glass tank with a rounded floor, or a funnel narrowing to a stem; `lip` flares its rim. */
+  private drawTank(v: Vessel, x0: number, y0: number, x1: number, y1: number, funnel = false, lip = true): void {
     const { ctx, S, theme } = this;
-    const r = 6 * S;
+    const r = Math.min(6 * S, (x1 - x0) / 2);
     const wall = new Path2D();
     wall.moveTo(x0, y0);
     if (funnel) {
@@ -1344,6 +1379,7 @@ export class GameEngine {
     ctx.strokeStyle = theme.glass;
     ctx.lineWidth = 1.6;
     ctx.stroke(wall);
+    if (!lip) return;
     ctx.beginPath();
     ctx.moveTo(x0 - 3 * S, y0);
     ctx.lineTo(x0, y0);
@@ -1396,7 +1432,8 @@ export class GameEngine {
     for (const x of sh.spouts) ctx.fillRect(o.x + (x - 4) * S, o.y + (sh.spoutY - 6) * S, 8 * S, 6 * S);
     t.tanks.forEach((v, k) => {
       const r = this.tankRect(t, k);
-      this.drawTank(v, r.x0, r.y0, r.x1, r.y1, sh.funnel);
+      this.drawTank(v, r.x0, r.y0, r.x1, r.y1, sh.funnel, !sh.cup);
+      if (sh.cup) this.drawCup(t, k);
       if (t.lidded) {
         // a lid, and nothing gets in
         ctx.fillStyle = theme.pipe;

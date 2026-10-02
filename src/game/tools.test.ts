@@ -18,6 +18,26 @@ function filled(v: Vessel, species: number, atoms: number, T: number): Vessel {
   return v;
 }
 
+describe('pipette', () => {
+  it('holds a tenth of a flask, and empties it in five sim seconds fully open', () => {
+    const p = new Tool('pipette', 0, 0, 0, [1]);
+    expect(p.tanks[0].cap).toBe(CAP / 10);
+    expect(p.shape.cup).toBeDefined();
+    p.tanks[0].setMolecules(R, CAP / 10);
+    let t = 0;
+    for (; volume(p.tanks[0]) > 0 && t < 10; t += 0.02) p.step(0.02);
+    expect(t).toBeCloseTo(5, 1);
+  });
+
+  it('flows in proportion to its valve, and not at all closed', () => {
+    const p = new Tool('pipette', 0, 0, 0, [0.5]);
+    p.tanks[0].setMolecules(R, CAP / 10);
+    expect(volume(p.step(1)[0]!) / (CAP / 10 / 5 / 2)).toBeCloseTo(1, 4);
+    p.valves[0] = 0;
+    expect(p.step(1)[0]).toBeNull();
+  });
+});
+
 describe('dispenser', () => {
   it('dispenses valve × MAX_FLOW atoms per sim second', () => {
     const d = new Tool('dispenser', 0, 0, 0, [0.5]);
