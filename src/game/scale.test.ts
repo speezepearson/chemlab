@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ATOM_MASS } from '../chem/mixing';
 import { singleOf } from '../chem/species';
 import { CAP, N_FLASKS } from './config';
 import { Flask } from './flask';
@@ -19,9 +20,9 @@ describe('flask weights', () => {
     expect(glassGrams(3)).toBe(w[3]);
   });
 
-  it('count fluid at 1 kg per billion atoms', () => {
+  it('count fluid at 1 kg per billion atoms of unit mass', () => {
     const f = flask(0, CAP);
-    expect(flaskGrams(f) - f.glass).toBeCloseTo(1000);
+    expect(flaskGrams(f) - f.glass).toBeCloseTo(1000 * ATOM_MASS.R);
   });
 });
 
@@ -32,9 +33,9 @@ describe('Scale', () => {
     const a = flask(0, CAP / 4);
     sc.put(a, -40);
     sc.put(flask(1), 40);
-    expect(sc.reading()).toBe(Math.round(glassGrams(0) + 250 + glassGrams(1)));
+    expect(sc.reading()).toBe(Math.round(glassGrams(0) + 250 * ATOM_MASS.R + glassGrams(1)));
     sc.put(a, 10); // moving a flask along the platform doesn't weigh it twice
-    expect(sc.reading()).toBe(Math.round(glassGrams(0) + 250 + glassGrams(1)));
+    expect(sc.reading()).toBe(Math.round(glassGrams(0) + 250 * ATOM_MASS.R + glassGrams(1)));
     sc.remove(a);
     expect(sc.reading()).toBe(Math.round(glassGrams(1)));
   });
@@ -45,8 +46,8 @@ describe('Scale', () => {
     sc.put(f, 0);
     sc.zero();
     expect(sc.reading()).toBe(0);
-    f.setMolecules(singleOf('R'), CAP * 0.123);
-    expect(sc.reading()).toBe(123);
+    f.setMolecules(singleOf('Y'), CAP * 0.1);
+    expect(sc.reading()).toBe(125); // Y weighs 1.25
     sc.remove(f);
     expect(sc.reading()).toBe(-Math.round(glassGrams(5)));
   });

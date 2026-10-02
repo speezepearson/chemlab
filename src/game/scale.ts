@@ -1,8 +1,9 @@
+import { massOf } from '../chem/mixing';
 import { CAP } from './config';
 import type { Flask } from './flask';
 
-/** Fluid weighs 1 µg per atom, so a billion atoms (a full flask) weighs 1 kg. */
-export const GRAMS_PER_ATOM = 1000 / CAP;
+/** Fluid weighs 1 µg per unit of mass (see ATOM_MASS), so a billion atoms of average mass weigh 1 kg. */
+export const GRAMS_PER_MASS = 1000 / CAP;
 /** Nominal weight of an empty flask; each one is off by up to ±GLASS_ERROR. */
 export const GLASS_GRAMS = 100;
 export const GLASS_ERROR = 6;
@@ -24,7 +25,7 @@ export function glassGrams(i: number): number {
 }
 
 export function flaskGrams(f: Flask): number {
-  return f.glass + f.N * GRAMS_PER_ATOM;
+  return f.glass + massOf(f) * GRAMS_PER_MASS;
 }
 
 /** Scale geometry in local units, origin at the top center of the platform. */
