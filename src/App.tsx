@@ -181,9 +181,10 @@ export function App() {
           <button onClick={importSave} title="Load a setup from an exported string">
             Import
           </button>
-          <ChemistryPanel key={chemVersion} network={network} />
-          <AppearancePanel />
-          <SoundPanel />
+          {/* the chemistry, and what the machines are called, are for god mode */}
+          {god && <ChemistryPanel key={chemVersion} network={network} />}
+          {god && <AppearancePanel />}
+          <SoundPanel god={god} />
           <button
             className="replay"
             onClick={() => {

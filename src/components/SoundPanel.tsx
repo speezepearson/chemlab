@@ -4,14 +4,18 @@ import { CHANNELS, CHANNEL_NAMES, DEFAULT_VOLUMES } from '../game/volumes';
 
 const STEPS = 100;
 
-/** A volume slider for each kind of sound, and one for everything, and a button to put them back. */
-export function SoundPanel() {
+/**
+ * A volume slider for each kind of sound, and one for everything, and a button to put them back. Outside god mode
+ * there's no spectrometer slider, since its name says what the machine is.
+ */
+export function SoundPanel({ god }: { god: boolean }) {
   const [, rerender] = useReducer((x: number) => x + 1, 0);
+  const shown = CHANNELS.filter((ch) => god || ch !== 'spectrometer');
   return (
     <details>
       <summary>Sound</summary>
       <div className="sound">
-        {CHANNELS.map((ch) => (
+        {shown.map((ch) => (
           <label key={ch} className="slider">
             <span>{CHANNEL_NAMES[ch]}</span>
             <input
