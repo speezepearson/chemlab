@@ -41,6 +41,7 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
   - `engine.ts` owns the canvas, input, sim loop and all drawing.
   - `tools.ts` holds tool shapes and per-step logic, plus drips and the spectrometer reading.
   - `flask.ts` has `Vessel`, `transfer`, volume and colors.
+  - `cooling.ts` is Newtonian cooling to the room; the engine works out each vessel's exposure from how it's drawn.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
     `volumes.ts`); `rumble.ts` is the spectrometer, `ambience.ts` the ship, `water.ts` drips and streams.

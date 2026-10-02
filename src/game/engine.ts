@@ -3,7 +3,8 @@ import { NS, SPECIES } from '../chem/species';
 import { CAP, FILL_RATE, GOAL_ATOMS, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { FAUCETS, faucetOutput, faucetTarget, type Faucet } from './faucets';
 import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
-import { FLASK_PATH_DATA, fillLevel, tiltedOutline } from './flaskShape';
+import { FLASK_OUTLINE, FLASK_PATH_DATA, areaBelow, fillLevel, tiltedOutline } from './flaskShape';
+import { cool, exposure, taper } from './cooling';
 import { Flask, Vessel, fluidColor, glowColor, sustenance, transfer, volume, volumeUnit, type Point } from './flask';
 import { DEFAULT_PRESET, SPECTROMETER_AT, applyFill, type Preset } from './presets';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
@@ -127,6 +128,12 @@ function wireColor(d: number): RGB {
 }
 
 const FLASK_PATH = new Path2D(FLASK_PATH_DATA);
+/** The inside of a flask, in local units squared, as drawn. */
+const FLASK_AREA = areaBelow(FLASK_OUTLINE, 0);
+/** How tall a flask is inside, mouth to base, in local units. */
+const FLASK_DEPTH = 70;
+/** Width of the stem a funnel-shaped tank narrows to, in local units (see drawTank). */
+const FUNNEL_STEM = 6;
 
 /** Owns the canvas: layout, pointer input, the simulation loop and drawing. */
 export class GameEngine {
@@ -406,6 +413,51 @@ export class GameEngine {
 
   private vessels(): Vessel[] {
     return [...this.flasks, ...this.tools.flatMap((t) => [...t.tanks, ...t.tube]), ...this.hoses.map((h) => h.funnel)];
+  }
+
+  /**
+   * Every vessel holding fluid, with how exposed that fluid is to the room (see exposure): how deep it stands,
+   * and how wide on average, as it's drawn. A flask fills its wide base first; a tank fills straight up, a funnel
+   * from its narrow stem; a pipette fills its tube, then its cup; a heater's tube holds a shallow stream along its
+   * floor.
+   */
+  private exposures(): [Vessel, number][] {
+    const out: [Vessel, number][] = [];
+    const share = (v: Vessel) => Math.min(1, volume(v) / v.cap);
+    for (const f of this.flasks) {
+      if (f.N <= 0) continue;
+      const h = FLASK_DEPTH - fillLevel(0, share(f));
+      out.push([f, exposure(h, (share(f) * FLASK_AREA) / h)]);
+    }
+    for (const t of this.tools) {
+      const sh = t.shape;
+      const H = sh.tankH ?? TANK_H;
+      t.tanks.forEach((v, k) => {
+        if (v.N <= 0) return;
+        const W = sh.tanks[k].x1 - sh.tanks[k].x0;
+        if (sh.cup) {
+          const cupW = 2 * sh.cup.w;
+          const h = cupFillHeight(share(v), W, H, cupW, sh.cup.h);
+          const area = share(v) * (W * H + ((W + cupW) / 2) * sh.cup.h);
+          out.push([v, exposure(h, area / h)]);
+        } else {
+          const { h, w } = taper(share(v), H, sh.funnel ? FUNNEL_STEM : W, W);
+          out.push([v, exposure(h, w)]);
+        }
+      });
+      const full = (HEATER.feed * HEATER.transit) / HEATER_CELLS;
+      for (const v of t.tube) {
+        if (v.N <= 0) continue;
+        const d = 2 * HEATER_TUBE.r;
+        out.push([v, exposure(d * Math.min(1, volume(v) / full), d)]);
+      }
+    }
+    for (const hose of this.hoses) {
+      // its funnel is 28 wide at the mouth, 8 at the bottom, and 12 deep (see drawHose)
+      const { h, w } = taper(share(hose.funnel), 12, 8, 28);
+      if (hose.funnel.N > 0) out.push([hose.funnel, exposure(h, w)]);
+    }
+    return out;
   }
 
   /* ---------------- layout ---------------- */
@@ -1146,6 +1198,8 @@ export class GameEngine {
     // everything that moves fluid, and chemistry, on sim time, interleaved so a drip meets the reaction it
     // feeds, and a faucet keeps up with the valve draining what it fills
     const vessels = this.vessels();
+    // how exposed each one's fluid is to the room, from how it stands now; it hardly changes in a frame
+    const exposures = simDt > 0 ? this.exposures() : [];
     if (simDt > 0) {
       const sub = Math.ceil(simDt / 0.02);
       const h = simDt / sub;
@@ -1208,6 +1262,7 @@ export class GameEngine {
           // by molecules, breaking bonds swells a fluid, and whatever no longer fits spills
           this.overflow(v);
         }
+        for (const [v, e] of exposures) cool(v, e, h);
       }
       this.tools.forEach((t, j) =>
         toolTotals[j].forEach(({ v, streamed }, k) => {

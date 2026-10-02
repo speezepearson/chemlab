@@ -5,6 +5,7 @@ import type { ReactionNetwork } from '../chem/reactions';
 import { SPECIES, TARGET } from '../chem/species';
 import { VOLUME } from '../game/flask';
 import { CAP } from '../game/config';
+import { COOLING, restoreDefaultCooling } from '../game/cooling';
 import { DRIP, HEATER, restoreDefaultDrip, restoreDefaultHeater } from '../game/tools';
 import { DragNumber } from './DragNumber';
 import { RandomizerControls } from './RandomizerControls';
@@ -125,6 +126,13 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
             <NumberRow label="transit, s" min={0.01} value={HEATER.transit} onChange={(v) => edit(() => (HEATER.transit = v))} />
             <NumberRow label="heating rate, /s" min={0} value={HEATER.rate} onChange={(v) => edit(() => (HEATER.rate = v))} />
             <NumberRow label="max wire T" min={1} value={HEATER.maxT} onChange={(v) => edit(() => (HEATER.maxT = v))} />
+            <tr className="group">
+              <td colSpan={4}>
+                <b>Cooling</b> <span>each second, fluid closes 1 − e^(−rate·exposure) of the gap to ambient</span>
+              </td>
+            </tr>
+            <NumberRow label="rate" min={0} value={COOLING.rate} onChange={(v) => edit(() => (COOLING.rate = v))} />
+            <NumberRow label="ambient T" min={0} value={COOLING.ambient} onChange={(v) => edit(() => (COOLING.ambient = v))} />
           </tbody>
         </table>
         <p>
@@ -141,6 +149,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
                 VOLUME.molecules = true;
                 restoreDefaultDrip();
                 restoreDefaultHeater();
+                restoreDefaultCooling();
               })
             }
           >
