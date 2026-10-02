@@ -73,6 +73,8 @@ details tr.group:first-child td{padding-top:0}
 details tr.group b{font-weight:500}
 details tr.group span{color:var(--muted);font-size:11px}
 details > div.wide{width:320px}
+details > div.sound{width:280px}
+details > div.sound label.slider span{width:84px}
 details .actions{display:flex;gap:8px;margin-top:8px}
 details fieldset.dist{border:1px solid var(--line);border-radius:6px;margin:8px 0 0;padding:4px 8px 6px}
 details fieldset.dist legend{padding:0 4px}

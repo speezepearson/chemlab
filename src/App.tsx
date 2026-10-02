@@ -4,6 +4,7 @@ import { ReactionNetwork } from './chem/reactions';
 import { AppearancePanel } from './components/AppearancePanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
 import { FlaskEditor } from './components/FlaskEditor';
+import { SoundPanel } from './components/SoundPanel';
 import { Intro } from './components/Intro';
 import { InfoPanel } from './components/InfoPanel';
 import { Palette } from './components/Palette';
@@ -170,6 +171,7 @@ export function App() {
           </button>
           <ChemistryPanel key={chemVersion} network={network} />
           <AppearancePanel />
+          <SoundPanel />
           <button className="replay" onClick={() => setIntro('replay')}>
             Replay intro
           </button>
