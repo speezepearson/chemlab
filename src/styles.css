@@ -23,8 +23,10 @@ body{
   margin:0;height:100%;background:var(--bg);color:var(--ink);
   font-family:"Schibsted Grotesk",-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   font-size:14px;line-height:1.35;display:flex;flex-direction:column;overflow:hidden;
-  font-variant-numeric:tabular-nums;
 }
+/* Live numbers keep their width as they change. Only on them: in Schibsted Grotesk, tabular figures also widen
+   periods, commas and colons, which looks like stray spaces in running text. */
+.num,.num-input,output,.goal span,#info li span{font-variant-numeric:tabular-nums}
 #root{flex:1;display:flex;flex-direction:column;min-height:0}
 header{
   padding:10px 14px 8px;border-bottom:1px solid var(--line);

@@ -23,6 +23,8 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
   `SaveState` in `src/game/save.ts`; tool positions are fractions of the home area.
 - Set `localStorage['slurry-lab.introSeen'] = '1'` to skip the intro. A start button still covers the page (it's
   the click that lets sound play), and the bench stays paused under it, so click `.intro-start` first.
+- Pass `ignoreHTTPSErrors: true` to `browser.newContext`, or the Google font (Schibsted Grotesk) fails to load through
+  the sandbox's proxy and pages render in a fallback font, hiding font-specific bugs.
 - Tools drain fast at 16×. Use slow valves, or screenshot early, to catch something mid-flow.
 - Shell gotcha: `pkill -f "port 5199"` exits 144 because the pattern matches its own shell. That's harmless; append
   `; true`.
