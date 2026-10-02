@@ -1,11 +1,13 @@
-import { audio, brownNoise, bus, whiteNoise } from './audio';
+import { Spot, audio, brownNoise, bus, whiteNoise } from './audio';
 import type { Vessel } from './flask';
+import type { Placement } from './place';
 import { MAX_FLOW } from './tools';
 
 /**
  * Fluid's sounds, driven by the engine from sim time (so paused is silent): a plink for each drop landing in a
  * vessel, and a trickle for each vessel a stream is running into. A trickle is louder the faster it flows, and like
- * a bottle under a tap it rises in pitch as its vessel fills.
+ * a bottle under a tap it rises in pitch as its vessel fills. Each is heard from where it happens (see placement),
+ * so ones well off screen are silent.
  */
 export class WaterSounds {
   private voices = new Map<Vessel, Trickle>();
@@ -13,25 +15,31 @@ export class WaterSounds {
   private plinkWait = 0;
 
   /**
-   * Once a frame, `dt` real seconds after the last: `drops` drops landed in vessels, and `streams` maps each vessel
-   * a stream ran into to its flow (by volume per sim second) and how full it now is, from 0 to 1.
+   * Once a frame, `dt` real seconds after the last: `drops` holds where each drop that landed in a vessel is heard
+   * from, and `streams` maps each vessel a stream ran into to its flow (by volume per sim second), how full it now
+   * is (0 to 1), and where it's heard from.
    */
-  update(dt: number, drops: number, streams: Map<Vessel, { flow: number; full: number }>): void {
-    if (drops === 0 && streams.size === 0 && this.voices.size === 0) return;
+  update(dt: number, drops: Placement[], streams: Map<Vessel, { flow: number; full: number; at: Placement }>): void {
+    if (drops.length === 0 && streams.size === 0 && this.voices.size === 0) return;
     const ac = audio();
     if (!ac) return;
     this.plinkWait -= dt;
-    for (let i = 0; i < Math.min(drops, 2) && this.plinkWait <= 0; i++) {
-      plink(ac, ac.currentTime + i * 0.6 * dt);
+    const audible = drops.filter((at) => at.gain > 0).sort((a, b) => b.gain - a.gain);
+    for (let i = 0; i < Math.min(audible.length, 2) && this.plinkWait <= 0; i++) {
+      plink(ac, ac.currentTime + i * 0.6 * dt, audible[i]);
       this.plinkWait = 0.07;
     }
-    // the loudest few streams get a voice
-    const loud = [...streams].filter(([, s]) => s.flow > 0).sort((a, b) => b[1].flow - a[1].flow).slice(0, MAX_VOICES);
-    const heard = new Set(loud.map(([v]) => v));
-    for (const [v, s] of loud) {
+    // the loudest few streams, as heard from here, get a voice
+    const loud = [...streams]
+      .map(([v, s]) => ({ v, s, heard: streamLevel(s.flow) * s.at.gain }))
+      .filter(({ heard }) => heard > 0)
+      .sort((a, b) => b.heard - a.heard)
+      .slice(0, MAX_VOICES);
+    const heard = new Set(loud.map(({ v }) => v));
+    for (const { v, s } of loud) {
       let t = this.voices.get(v);
-      if (!t) this.voices.set(v, (t = new Trickle(ac)));
-      t.set(streamLevel(s.flow), s.full, dt);
+      if (!t) this.voices.set(v, (t = new Trickle(ac, s.at)));
+      t.set(streamLevel(s.flow), s.full, s.at, dt);
     }
     for (const [v, t] of this.voices)
       if (!heard.has(v) && t.quiet(dt)) {
@@ -59,9 +67,11 @@ export function streamPitch(full: number): number {
 }
 
 /** A drop landing: a short sine whose pitch leaps upward as it dies, like a bubble ringing. */
-function plink(ac: AudioContext, at: number): void {
-  const dest = bus('drips');
-  if (!dest) return;
+function plink(ac: AudioContext, at: number, where: Placement): void {
+  const out = bus('drips');
+  if (!out) return;
+  const spot = new Spot(ac, out, where);
+  const dest = spot.input;
   const f = 700 + 500 * Math.random();
   const o = ac.createOscillator();
   o.frequency.setValueAtTime(f, at);
@@ -71,6 +81,7 @@ function plink(ac: AudioContext, at: number): void {
   g.gain.linearRampToValueAtTime(0.12, at + 0.003);
   g.gain.exponentialRampToValueAtTime(0.001, at + 0.11);
   o.connect(g).connect(dest);
+  o.onended = () => spot.disconnect();
   o.start(at);
   o.stop(at + 0.12);
 }
@@ -81,17 +92,21 @@ function plink(ac: AudioContext, at: number): void {
  */
 class Trickle {
   private out: GainNode;
+  private spot: Spot;
   private band: BiquadFilterNode;
   private sources: AudioScheduledSourceNode[] = [];
   private level = 0;
   private pitch = 0;
   private silentFor = 0;
 
-  constructor(private ac: AudioContext) {
-    const dest = bus('trickle')!;
+  constructor(
+    private ac: AudioContext,
+    where: Placement,
+  ) {
+    this.spot = new Spot(ac, bus('trickle')!, where);
     this.out = ac.createGain();
     this.out.gain.value = 0;
-    this.out.connect(dest);
+    this.out.connect(this.spot.input);
     // the rush
     const hiss = ac.createBufferSource();
     hiss.buffer = whiteNoise(ac);
@@ -121,10 +136,11 @@ class Trickle {
     this.sources = [hiss, wobble];
   }
 
-  /** Flow at `level` (0 to 1) into a vessel `full` of the way up, for the next `dt` real seconds. */
-  set(level: number, full: number, dt: number): void {
+  /** Flow at `level` (0 to 1) into a vessel `full` of the way up, heard from `where`, for the next `dt` real seconds. */
+  set(level: number, full: number, where: Placement, dt: number): void {
     const { ac } = this;
     const now = ac.currentTime;
+    this.spot.place(where);
     const pitch = streamPitch(full);
     if (level !== this.level) this.out.gain.setTargetAtTime(level, now, 0.06);
     if (Math.abs(pitch - this.pitch) > 0.5) this.band.frequency.setTargetAtTime(pitch, now, 0.1);
@@ -153,6 +169,7 @@ class Trickle {
     this.out.gain.cancelScheduledValues(now);
     this.out.gain.setTargetAtTime(0, now, 0.03);
     for (const s of this.sources) s.stop(now + 0.2);
+    this.sources[0].onended = () => this.spot.disconnect();
   }
 
   private bubble(at: number, f: number): void {

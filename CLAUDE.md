@@ -44,7 +44,9 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
     `volumes.ts`); `rumble.ts` is the spectrometer, `ambience.ts` the ship, `water.ts` drips and streams.
-    New sounds play into a channel's `bus()`, never straight to the destination, so the sliders reach them.
+    New sounds play into a channel's `bus()`, never straight to the destination, so the sliders reach them. A sound
+    on the bench goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),
+    so it fades and pans with where it is on screen.
 - `src/intro/log.ts`: the intro's console script, deterministic from a seed. `src/components/Intro.tsx` plays it.
 - `src/components/`: the React UI around the canvas: palette, the Chemistry and Appearance panels, the editor.
 

@@ -1,3 +1,4 @@
+import { CENTER, type Placement } from './place';
 import { CHANNELS, gainOf, storeVolumes, storedVolumes, type Channel, type Volumes } from './volumes';
 
 /**
@@ -44,6 +45,42 @@ export function audio(): AudioContext | null {
 /** Where a channel's sounds go (null without audio). */
 export function bus(ch: Exclude<Channel, 'master'>): AudioNode | null {
   return audio() ? buses![ch] : null;
+}
+
+/** A stereo panner plays a mono sound centered at √½ in each ear; this puts a centered sound back where it was. */
+const PAN_MAKEUP = Math.SQRT2;
+
+/**
+ * Where on the bench a sound comes from (see placement): connect the sound to `input`, and it plays into `dest`
+ * at that place's volume and pan, which glide as the place moves.
+ */
+export class Spot {
+  readonly input: GainNode;
+  private pan: StereoPannerNode;
+
+  constructor(
+    private ac: AudioContext,
+    dest: AudioNode,
+    at: Placement = CENTER,
+  ) {
+    this.input = ac.createGain();
+    this.pan = ac.createStereoPanner();
+    this.input.gain.value = at.gain * PAN_MAKEUP;
+    this.pan.pan.value = at.pan;
+    this.input.connect(this.pan).connect(dest);
+  }
+
+  place(at: Placement): void {
+    const now = this.ac.currentTime;
+    this.input.gain.setTargetAtTime(at.gain * PAN_MAKEUP, now, 0.05);
+    this.pan.pan.setTargetAtTime(at.pan, now, 0.05);
+  }
+
+  /** Let go of it, once nothing more will play through it. */
+  disconnect(): void {
+    this.input.disconnect();
+    this.pan.disconnect();
+  }
 }
 
 /** Move a slider, and remember it. */

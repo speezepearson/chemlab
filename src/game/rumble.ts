@@ -1,26 +1,31 @@
-import { audio, brownNoise, bus } from './audio';
+import { Spot, audio, brownNoise, bus } from './audio';
+import type { Placement } from './place';
 
 /**
  * A machine's sounds, driven live by whoever runs it (so they follow sim time, pauses included): a rumble,
  * synthesized from low-passed brown noise with a buzzing sawtooth under it, whose loudness and pitch follow a
  * level from 0 (silent) to 1; and a short, quiet, high major chord on cue. It plays on the spectrometer channel (see
- * audio.ts), and without audio it is silent.
+ * audio.ts), from wherever the machine is placed, and without audio it is silent.
  */
 export interface Rumble {
   /** Rumble at this level from now on, 0 to 1; 0 is silent. */
   level(level: number): void;
   /** Play the chime now. */
   chime(): void;
+  /** Where it's heard from, as the machine or the view moves (see placement). */
+  place(at: Placement): void;
   /** Fade the rumble out for good (a chime already playing finishes). */
   stop(): void;
 }
 
-const SILENT: Rumble = { level() {}, chime() {}, stop() {} };
+const SILENT: Rumble = { level() {}, chime() {}, place() {}, stop() {} };
 
-export function rumble(): Rumble {
+export function rumble(at: Placement): Rumble {
   const ac = audio();
-  const dest = bus('spectrometer');
-  if (!ac || !dest) return SILENT;
+  const out0 = bus('spectrometer');
+  if (!ac || !out0) return SILENT;
+  const spot = new Spot(ac, out0, at);
+  const dest = spot.input;
   const t0 = ac.currentTime;
 
   const noise = ac.createBufferSource();
@@ -59,6 +64,9 @@ export function rumble(): Rumble {
     chime() {
       chord(ac, dest, ac.currentTime);
     },
+    place(at) {
+      if (!stopped) spot.place(at);
+    },
     stop() {
       if (stopped) return;
       stopped = true;
@@ -67,6 +75,8 @@ export function rumble(): Rumble {
       out.gain.setTargetAtTime(0, now, 0.08);
       noise.stop(now + 0.5);
       buzz.stop(now + 0.5);
+      // after any chime has rung out
+      setTimeout(() => spot.disconnect(), 1000);
     },
   };
 }

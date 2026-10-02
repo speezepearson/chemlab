@@ -8,6 +8,7 @@ import { Flask, Vessel, fluidColor, glowColor, sustenance, transfer, volume, vol
 import { DEFAULT_PRESET, SPECTROMETER_AT, applyFill, type Preset } from './presets';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
+import { CENTER, placement, type Placement } from './place';
 import { rumble, type Rumble } from './rumble';
 import { WaterSounds } from './water';
 import {
@@ -181,8 +182,8 @@ export class GameEngine {
   private water = new WaterSounds();
   /** This frame's streams, for their sound: how much ran into each vessel, by volume. */
   private inflow = new Map<Vessel, number>();
-  /** How many drops landed in vessels this frame, for their sound. */
-  private landed = 0;
+  /** Where each drop that landed in a vessel this frame landed, for its sound. */
+  private landed: Point[] = [];
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -479,6 +480,18 @@ export class GameEngine {
     return { x: (r.x0 + r.x1) / 2, y: r.y0 - (lines ? 11 * lines + 10 : 9) * this.S };
   }
 
+  /** Where a sound at p in the world is heard from: full and centered in view, fading and panning off screen. */
+  private hear(p: Point): Placement {
+    const s = this.toScreen(p);
+    return placement(s.x, s.y, this.viewW, this.viewH);
+  }
+
+  /** Where a tool's machinery sounds from: the middle of its cabinet. */
+  private machineAt(t: Tool): Point {
+    const o = this.toolXY(t);
+    return { x: o.x, y: o.y + 60 * this.S };
+  }
+
   /** A point on the canvas, in CSS pixels, in world units. */
   private toWorld(p: Point): Point {
     return { x: this.cam.x + p.x / this.zoom, y: this.cam.y + p.y / this.zoom };
@@ -714,7 +727,7 @@ export class GameEngine {
         }
       } else if (e.button === 0) {
         if (t?.kind === 'spectrometer' && this.inToolRect(t, p, SPECTROMETER.button)) {
-          if (t.scan()) this.rumbles.set(t, rumble());
+          if (t.scan()) this.rumbles.set(t, rumble(this.hear(this.machineAt(t))));
         } else if (t) {
           const o = this.toolXY(t);
           this.toolDrag = { tool: t, off: { x: p.x - o.x, y: p.y - o.y }, from: { x: t.fx, y: t.fy } };
@@ -995,7 +1008,7 @@ export class GameEngine {
     this.open = this.mouths();
     this.spills.clear();
     this.inflow.clear();
-    this.landed = 0;
+    this.landed = [];
 
     // where the carried flask is, and what it's pouring into (null: the sink), if anything
     let pourInto: Vessel | null | undefined;
@@ -1100,7 +1113,7 @@ export class GameEngine {
           const m = mouthBelow(mouths, { x: d.x, y: from });
           if (m && m.y <= d.y) {
             this.fill(m.v, d.v);
-            this.landed++;
+            this.landed.push({ x: d.x, y: m.y });
           }
           return !(m && m.y <= d.y) && d.y < this.H;
         });
@@ -1131,6 +1144,7 @@ export class GameEngine {
     this.tools.forEach((t, j) => {
       const r = this.rumbles.get(t);
       if (!r) return;
+      r.place(this.hear(this.machineAt(t)));
       for (const at of SCAN_LIGHTS) if (scanFrom[j] < at && t.scanAge >= at) r.chime();
       r.level(simDt > 0 ? scanLevel(t.scanAge) : 0);
     });
@@ -1140,9 +1154,14 @@ export class GameEngine {
         this.rumbles.delete(t);
       }
 
-    const streams = new Map<Vessel, { flow: number; full: number }>();
-    for (const [v, amount] of this.inflow) streams.set(v, { flow: amount / simDt, full: volume(v) / v.cap });
-    this.water.update(dt, this.landed, streams);
+    // fluid's sounds, each heard from where it lands: a stream from the mouth it runs into
+    const streams = new Map<Vessel, { flow: number; full: number; at: Placement }>();
+    for (const [v, amount] of this.inflow) {
+      const m = this.open.find((mo) => mo.v === v);
+      const at = m ? this.hear({ x: (m.x0 + m.x1) / 2, y: m.y }) : CENTER;
+      streams.set(v, { flow: amount / simDt, full: volume(v) / v.cap, at });
+    }
+    this.water.update(dt, this.landed.map((p) => this.hear(p)), streams);
 
     // goal
     let tgt = 0;
