@@ -44,6 +44,8 @@ export interface SavedTool {
   tanks: SavedVessel[];
   /** Per spout, the drop hanging there, if any. */
   drops?: SavedVessel[];
+  /** A heater's tube, stretch by stretch (see Tool.tube). */
+  tube?: SavedVessel[];
   /** A spectrometer's last reading, if it's been run (see spectrum). */
   reading?: number[];
 }

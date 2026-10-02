@@ -78,7 +78,7 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
   - A `drawTool` branch in `engine.ts`.
   - `ICONS` and `ITEMS` in `Palette.tsx`, unless the tool is unique.
   - Tests and the README.
-  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `noValve`, `valves`, `sealed`, `maxFlow`, `label`.
+  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `noValve`, `valves`, `dial`, `sealed`, `maxFlow`, `label`.
 - **Unique tools** (`UNIQUE_TOOLS`: the spectrometer and the cryostabilizer reference) aren't in the palette and can't
   be put away. `uniqueTools()` keeps at most one of each and always adds a spectrometer.
 - **Saves** stay at format v1. New fields are optional and the loaders tolerate their absence. Species are stored by

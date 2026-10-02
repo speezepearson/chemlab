@@ -47,6 +47,16 @@ const ICONS: Record<string, ReactNode> = {
       <path className="glass" d="M1 3 H13 L8 11 H6 Z" />
     </>
   ),
+  heater: (
+    <>
+      <path className="pipe" d="M9 27 V37 M20 27 V37 M31 27 V37 M36 23 Q39 23 39 27 V37" />
+      <path className="glass" d="M1 3 H11 L7 8 H5 Z" />
+      <rect className="glass" x="2" y="18" width="35" height="9" rx="4.5" />
+      <path d="M4 22.5 Q5.5 20 7 22.5 T10 22.5 T13 22.5 T16 22.5 T19 22.5 T22 22.5 T25 22.5 T28 22.5 V12" style={{ stroke: '#b87333', strokeWidth: 1.2 }} />
+      <rect className="valve" x="22" y="4" width="14" height="9" rx="2" />
+      <circle className="valve" cx="29" cy="8.5" r="2.5" />
+    </>
+  ),
   scale: (
     <>
       <path className="pipe" d="M4 20 H36" />
@@ -73,6 +83,7 @@ const ITEMS = [
   ['separator', 'Separator'],
   ['splitter', 'Splitter'],
   ['sorter', 'Size sorter'],
+  ['heater', 'Resistive heater'],
   ['scale', 'Scale'],
   ['hose', 'Hose'],
 ] as const;

@@ -4,7 +4,7 @@ import { CAP } from './config';
 import { heatAt, temperature } from '../chem/reactions';
 import { Vessel, roomFor, volume } from './flask';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER_CELLS, HEATER_MAX_T, HEATER_RATE, HEATER_TAPS, HEATER_TRANSIT, heatBy, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
   SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
 } from './tools';
 
@@ -46,6 +46,106 @@ describe('pipette', () => {
     expect(volume(p.step(1)[0]!) / (CAP / 10 / 5 / 2)).toBeCloseTo(1, 4);
     p.valves[0] = 0;
     expect(p.step(1)[0]).toBeNull();
+  });
+});
+
+describe('resistive heater', () => {
+  /** A heater fed a steady room-temperature stream of R for `t` sim seconds, catching what leaves each spout. */
+  function run(valves: number[], t = 3 * HEATER_TRANSIT, feed = 0.25 * CAP) {
+    const ht = new Tool('heater', 0, 0, 0, valves);
+    const out = ht.shape.spouts.map(() => new Vessel(Infinity));
+    const src = filled(new Vessel(Infinity), R, CAP, 1);
+    let fed = 0;
+    for (let i = 0; i < t / 0.02; i++) {
+      fed += ht.tanks[0].addFrom(src, feed * 0.02);
+      ht.step(0.02).forEach((p, k) => p && out[k].addFrom(p, volume(p), true));
+    }
+    return { ht, out, fed };
+  }
+  const dial = (d: number, taps = [0, 0, 0]) => [...taps, d];
+  const held = (ht: Tool) => [...ht.tanks, ...ht.tube].reduce((n, v) => n + v.N, 0);
+
+  it('has three taps and a dial, all starting at 0', () => {
+    const ht = new Tool('heater', 0, 0, 0);
+    expect(ht.valves).toEqual([0, 0, 0, 0]);
+    expect(ht.shape.dial).toBe(3);
+    expect(ht.shape.spouts.length).toBe(4);
+    expect(ht.tube.length).toBe(HEATER_CELLS);
+  });
+
+  it('carries fluid the length of its tube in about HEATER_TRANSIT, and out the end', () => {
+    const ht = new Tool('heater', 0, 0, 0);
+    ht.tanks[0].setMolecules(R, CAP / 100);
+    // the first of it gets out a little early, as the stretches mix; most takes about the transit
+    let t = 0;
+    let out = 0;
+    for (; out < CAP / 200 && t < 20; t += 0.02) out += ht.step(0.02)[3]?.N ?? 0;
+    expect(t).toBeGreaterThan(0.8 * HEATER_TRANSIT);
+    expect(t).toBeLessThan(1.2 * HEATER_TRANSIT);
+  });
+
+  it('loses nothing but traces, and with the taps shut lets it all out the end', () => {
+    const { ht, out, fed } = run(dial(0.5));
+    expect(out[0].N + out[1].N + out[2].N).toBe(0);
+    // transfer drops a trace left behind (see TRACE), as the front of the stream spreads along the tube
+    expect(1 - (out[3].N + held(ht)) / fed).toBeLessThan(1e-4);
+  });
+
+  it("doesn't heat with the dial at 0", () => {
+    const { out } = run(dial(0));
+    expect(temperature(out[3])).toBeCloseTo(1, 6);
+  });
+
+  it('heats more with the dial further up', () => {
+    const T = [0.2, 0.5, 0.8].map((d) => temperature(run(dial(d)).out[3]));
+    expect(T[0]).toBeGreaterThan(1.05);
+    expect(T[1]).toBeGreaterThan(T[0]);
+    expect(T[2]).toBeGreaterThan(T[1]);
+    // but never past the wire
+    expect(T[2]).toBeLessThan(wireTemperature(0.8));
+  });
+
+  it('heats fluid more the longer it has been along the tube, so each tap runs hotter than the last', () => {
+    const { out } = run(dial(0.5, [0.05, 0.05, 0.05]));
+    const T = out.map((v) => temperature(v));
+    for (let k = 1; k < 4; k++) expect(T[k]).toBeGreaterThan(T[k - 1]);
+    // roughly as far toward the wire as its time in the tube says
+    const wire = wireTemperature(0.5);
+    HEATER_TAPS.forEach((c, k) => {
+      const share = 1 - Math.exp((-HEATER_RATE * HEATER_TRANSIT * (c + 1)) / HEATER_CELLS);
+      const ratio = (T[k] - 1) / (wire - 1) / share;
+      expect(ratio).toBeGreaterThan(0.85);
+      expect(ratio).toBeLessThan(1.15);
+    });
+  });
+
+  it('lets everything out of a wide-open tap, so none goes further', () => {
+    const { out } = run(dial(0.5, [0, 1, 0]));
+    expect(out[0].N).toBe(0);
+    expect(out[1].N).toBeGreaterThan(0);
+    expect(out[2].N + out[3].N).toBe(0);
+  });
+
+  it('feeds its tube at most a flask a second', () => {
+    const ht = new Tool('heater', 0, 0, 0);
+    filled(ht.tanks[0], R, ht.tanks[0].cap, 1);
+    ht.step(0.1);
+    expect(ht.tube.reduce((n, v) => n + v.N, 0) / (0.1 * MAX_FLOW)).toBeCloseTo(1, 6);
+  });
+
+  it('has a wire that is off at 0, about room temperature just above, and HEATER_MAX_T at 1', () => {
+    expect(wireTemperature(0)).toBe(0);
+    expect(wireTemperature(1e-6)).toBeCloseTo(1, 3);
+    expect(wireTemperature(0.5)).toBeCloseTo(Math.sqrt(HEATER_MAX_T));
+    expect(wireTemperature(1)).toBe(HEATER_MAX_T);
+  });
+
+  it('only heats: fluid hotter than the wire stays as hot', () => {
+    const v = filled(new Vessel(Infinity), R, CAP, 20);
+    heatBy(v, 10, 1);
+    expect(temperature(v)).toBeCloseTo(20, 6);
+    heatBy(v, 40, 1);
+    expect(temperature(v)).toBeCloseTo(20 + 20 * (1 - Math.exp(-HEATER_RATE)), 3);
   });
 });
 

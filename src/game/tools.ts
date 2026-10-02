@@ -1,6 +1,6 @@
 import { GROUP_PRIMARY, type Atom } from '../chem/atoms';
 import { THERMO } from '../chem/params';
-import { roundRandom, temperature, type Fluid } from '../chem/reactions';
+import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
 import { CAP } from './config';
 import { Vessel, roomFor, transfer, volume, type Point } from './flask';
@@ -120,11 +120,53 @@ export function scanLevel(age: number): number {
   return SCAN_PHASES.find((ph) => age < ph.end)?.level ?? 0;
 }
 
+/** How many stretches the heater's tube is cut into, each holding what passes through it as one mixed packet. */
+export const HEATER_CELLS = 24;
+/** How long fluid takes to run the length of the heater's tube, in sim seconds, however much is in it. */
+export const HEATER_TRANSIT = 6;
+/** How fast the heater's funnel drains into its tube, in atoms per sim second: one flask a second. */
+export const HEATER_FEED = MAX_FLOW;
+/** The stretches of the heater's tube that its three taps draw from: the ends of its first three quarters. */
+export const HEATER_TAPS = [5, 11, 17] as const;
+/**
+ * How fast fluid in the heater's tube heats toward the wire's temperature, per sim second: it closes
+ * 1 − e^(−rate·t) of the gap in t seconds, so 31% by the first tap, 53%, 68%, and 78% by the end.
+ */
+export const HEATER_RATE = 0.25;
+/** The wire's temperature with the dial turned all the way up. */
+export const HEATER_MAX_T = 100;
+
+/** The heater's tube, in local units: from x0 to x1 (cut into HEATER_CELLS equal stretches), centered at y, of radius r. */
+export const HEATER_TUBE = { x0: -144, x1: 144, y: 48, r: 7 };
+/** The middle of stretch c of the heater's tube, in local units. */
+export function heaterCellX(c: number): number {
+  return HEATER_TUBE.x0 + ((c + 0.5) * (HEATER_TUBE.x1 - HEATER_TUBE.x0)) / HEATER_CELLS;
+}
+/** The heater's control box, above the right end of its tube, with the dial (see SHAPES.heater.valves) on it. */
+export const HEATER_BOX = { x0: 100, x1: 140, y0: 2, y1: 36 };
+
+/**
+ * The heater's wire temperature for a dial setting from 0 to 1: off at 0 (it heats nothing), then rising
+ * geometrically from room temperature to HEATER_MAX_T, so a quarter turn is about 3 and halfway is 10.
+ */
+export function wireTemperature(dial: number): number {
+  return dial > 0 ? HEATER_MAX_T ** Math.min(1, dial) : 0;
+}
+
+/**
+ * Heat a packet of fluid by the wire for `h` sim seconds: it closes 1 − e^(−HEATER_RATE·h) of the gap to the
+ * wire's temperature, in whole quanta. The wire only ever heats: fluid hotter than it is left alone.
+ */
+export function heatBy(f: Fluid, wireT: number, h: number): void {
+  if (f.N <= 0 || wireT <= temperature(f)) return;
+  f.Q += roundRandom((heatAt(wireT, f.N) - f.Q) * (1 - Math.exp(-HEATER_RATE * h)));
+}
+
 /** The order of a spectrometer hexagon's sextants, clockwise from the top. */
 export const SEXTANT_ATOMS: readonly Atom[] = ['G', 'C', 'B', 'M', 'R', 'Y'];
 
 export type ToolKind =
-  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'spectrometer' | 'reference';
+  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'heater' | 'spectrometer' | 'reference';
 
 /** Tools there's only ever one of: not in the palette, and never put away. */
 export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectrometer', 'reference'];
@@ -152,6 +194,8 @@ export interface ToolShape {
   noValve?: boolean;
   /** Where the valves are, if not one under each tank's center at valveY: then there's one valve per entry. */
   valves?: Point[];
+  /** Which valve, if any, is a dial instead: it turns clockwise from down-left (0) to down-right (1). */
+  dial?: number;
   /** Whether the tanks are sealed on top, so nothing can be poured or fall into them. */
   sealed?: boolean;
   /** Spout flow with a valve fully open, in atoms per sim second, if not MAX_FLOW. */
@@ -228,6 +272,22 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: 104,
     box: { x0: -94, x1: 126, y0: -6, y1: 106 },
   },
+  heater: {
+    // a funnel over the left end of a long tube (see HEATER_TUBE) with a wire down its middle; three taps
+    // along it and its far end turning down are the spouts, and the dial on a box above its right end sets
+    // the wire's heat
+    tanks: [{ name: 'funnel', x0: -160, x1: -116 }],
+    tankH: 30,
+    tankCap: FUNNEL_CAP,
+    funnel: true,
+    valves: [...HEATER_TAPS.map((c) => ({ x: heaterCellX(c), y: 72 })), { x: 120, y: 20 }],
+    dial: HEATER_TAPS.length,
+    // as far apart as the separator's, with the end a little further on
+    spouts: [...HEATER_TAPS.map(heaterCellX), 158],
+    valveY: 72,
+    spoutY: 92,
+    box: { x0: -166, x1: 168, y0: -6, y1: 94 },
+  },
   reference: {
     // a hundred flasks' worth, sealed, draining a trickle through its valve
     tanks: [{ name: 'reference', x0: -20, x1: 20 }],
@@ -287,6 +347,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   separator: 'Separator',
   splitter: 'Splitter',
   sorter: 'Size sorter',
+  heater: 'Resistive heater',
   spectrometer: 'Mass spectrometer',
   reference: 'Cryostabilizer reference',
 };
@@ -316,6 +377,10 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
  *   share that goes right, from 0 (all left) to 1 (all right).
  * - A **size sorter** has a funnel like the splitter's, with no valve, draining down a chute through two
  *   screens and off its end, each with a spout under it (see SORTER_SCREENS).
+ * - A **resistive heater** has a funnel draining (at HEATER_FEED) into one end of a long tube, which carries
+ *   it to the other end in HEATER_TRANSIT and out a spout there, heating it all the way (see heatBy) with a
+ *   wire whose temperature its dial sets (see wireTemperature). Three taps along the tube, each a valve over
+ *   a spout, let fluid out sooner, less heated.
  * - A **cryostabilizer reference** is a sealed hundred flasks' worth of the target with a valve that lets out at most
  *   0.02 flask/s.
  * - A **mass spectrometer** has a small sample cup and no spouts. Running it (see scan) reads the sample's
@@ -326,6 +391,8 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
  */
 export class Tool {
   readonly tanks: Vessel[];
+  /** A heater's tube, stretch by stretch from the funnel's end (see HEATER_CELLS); empty for any other tool. */
+  readonly tube: Vessel[];
   /**
    * Per valve (one per tank unless the shape places them): 0 (closed) to 1 (MAX_FLOW). Closed by default, so a tool doesn't drip on everything it's carried
    * over. A splitter's one valve is instead the share going right, half by default.
@@ -354,6 +421,7 @@ export class Tool {
     valves: readonly number[] = [],
   ) {
     this.tanks = SHAPES[kind].tanks.map(() => new Vessel(SHAPES[kind].tankCap ?? TANK_CAP));
+    this.tube = Array.from({ length: kind === 'heater' ? HEATER_CELLS : 0 }, () => new Vessel(Infinity));
     const nValves = SHAPES[kind].valves?.length ?? this.tanks.length;
     this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' ? 0.5 : 0));
     this.out = this.shape.spouts.map(() => null);
@@ -378,6 +446,7 @@ export class Tool {
       }
       return (this.out = []);
     }
+    if (this.kind === 'heater') return this.heat(h);
     const funnel = this.kind === 'splitter' || this.kind === 'sorter';
     let packets = this.tanks.map((tank, k) => {
       const p = new Vessel(Infinity);
@@ -388,6 +457,27 @@ export class Tool {
     if (this.kind === 'separator') packets = separate(packets[0]);
     if (this.kind === 'splitter') packets = divide(packets[0], () => 1 - this.valves[0]);
     if (this.kind === 'sorter') packets = sieve(packets[0]);
+    this.out = packets.map((p) => (p.N > 0 ? p : null));
+    this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
+    return this.out;
+  }
+
+  /**
+   * A heater's step: each stretch of the tube passes h / (HEATER_TRANSIT / HEATER_CELLS) of itself on, the last
+   * out the end, and the funnel tops up the first; then each tap lets out what its valve allows from its
+   * stretch, and the wire heats what's left.
+   */
+  private heat(h: number): (Vessel | null)[] {
+    const { tube, valves } = this;
+    const packets = this.shape.spouts.map(() => new Vessel(Infinity));
+    const on = Math.min(1, (h * HEATER_CELLS) / HEATER_TRANSIT);
+    const last = tube.length - 1;
+    transfer(tube[last], packets[HEATER_TAPS.length], volume(tube[last]) * on);
+    for (let c = last - 1; c >= 0; c--) transfer(tube[c], tube[c + 1], volume(tube[c]) * on);
+    transfer(this.tanks[0], tube[0], HEATER_FEED * h);
+    HEATER_TAPS.forEach((c, j) => transfer(tube[c], packets[j], valves[j] * MAX_FLOW * h));
+    const wireT = wireTemperature(valves[this.shape.dial!]);
+    for (const v of tube) heatBy(v, wireT, h);
     this.out = packets.map((p) => (p.N > 0 ? p : null));
     this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
     return this.out;

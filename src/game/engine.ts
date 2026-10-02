@@ -12,8 +12,9 @@ import { CENTER, placement, type Placement } from './place';
 import { rumble, type Rumble } from './rumble';
 import { WaterSounds } from './water';
 import {
-  HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SHAPES, SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, cupFillHeight, drip,
-  UNIQUE_TOOLS, mouthBelow, scanLevel, tankX, type Mouth, type ToolKind,
+  HEATER_BOX, HEATER_CELLS, HEATER_FEED, HEATER_TRANSIT, HEATER_TUBE, HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SHAPES,
+  SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, cupFillHeight, drip, UNIQUE_TOOLS, mouthBelow, scanLevel,
+  tankX, type Mouth, type ToolKind,
 } from './tools';
 
 /** What the hover panel needs to show for one vessel: all of it in god mode, otherwise just its color. */
@@ -108,6 +109,15 @@ const SEP_BODY = { x0: -42, x1: 42, y0: 100, y1: 112 };
 const SHAKE = 2.5;
 /** A CRT's phosphor green. */
 const PHOSPHOR = '64, 255, 110';
+/** The heater's wire as its dial turns up, at even steps from 0 to 1: copper, then glowing red, orange, yellow, white. */
+const WIRE_RAMP: readonly RGB[] = [[184, 115, 51], [196, 62, 38], [255, 96, 30], [255, 192, 84], [255, 250, 236]];
+
+/** The heater's wire's color at dial setting d (see WIRE_RAMP). */
+function wireColor(d: number): RGB {
+  const x = Math.max(0, Math.min(1, d)) * (WIRE_RAMP.length - 1);
+  const i = Math.min(WIRE_RAMP.length - 2, Math.floor(x));
+  return WIRE_RAMP[i].map((c, k) => c + (WIRE_RAMP[i + 1][k] - c) * (x - i)) as RGB;
+}
 
 const FLASK_PATH = new Path2D(FLASK_PATH_DATA);
 
@@ -282,6 +292,7 @@ export class GameEngine {
       flasks: this.flasks.map((f) => ({ ...saveVessel(f), x: f.home.x / HOME_W, up: (L.floorY - f.home.y) / S, glass: f.glass })),
       tools: this.tools.map((t) => ({
         kind: t.kind, id: t.id, fx: t.fx, fy: t.fy, valves: [...t.valves], tanks: t.tanks.map(saveVessel), drops: t.drops.map(saveVessel),
+        ...(t.tube.length ? { tube: t.tube.map(saveVessel) } : {}),
         ...(t.reading ? { reading: [...t.reading] } : {}),
       })),
       scales: this.scales.map((sc) => ({
@@ -313,6 +324,7 @@ export class GameEngine {
         const t = new Tool(st.kind, st.id, st.fx, st.fy, st.valves ?? []);
         t.tanks.forEach((v, k) => st.tanks?.[k] && loadVessel(v, st.tanks[k]));
         t.drops.forEach((v, k) => st.drops?.[k] && loadVessel(v, st.drops[k]));
+        t.tube.forEach((v, k) => st.tube?.[k] && loadVessel(v, st.tube[k]));
         if (Array.isArray(st.reading) && st.reading.length === 18) t.reading = st.reading.map((x) => Math.max(0, Number(x) || 0));
         return t;
       });
@@ -383,7 +395,7 @@ export class GameEngine {
   }
 
   private vessels(): Vessel[] {
-    return [...this.flasks, ...this.tools.flatMap((t) => t.tanks), ...this.hoses.map((h) => h.funnel)];
+    return [...this.flasks, ...this.tools.flatMap((t) => [...t.tanks, ...t.tube]), ...this.hoses.map((h) => h.funnel)];
   }
 
   /* ---------------- layout ---------------- */
@@ -603,12 +615,18 @@ export class GameEngine {
    * and in between is partly open. Below the valve it closes, and left of it (past the down-left
    * diagonal) it opens, so a wild swing lands at the nearer end. A splitter's lever instead sweeps the
    * upper half: straight left sends everything left, straight right everything right, and below the
-   * valve it goes to the nearer side. Within VALVE_DEADZONE of the valve the angle is too jumpy to mean
-   * anything, so the lever stays put.
+   * valve it goes to the nearer side. A dial points at p, turning clockwise from down-left (0) to down-right (1),
+   * and straight below it goes to the nearer end. Within VALVE_DEADZONE of the valve the angle is too jumpy to
+   * mean anything, so the lever stays put.
    */
   private aimValve(t: Tool, k: number, p: Point): void {
     const vc = this.valveAt(t, k);
     if (Math.hypot(p.x - vc.x, p.y - vc.y) < VALVE_DEADZONE) return;
+    if (k === t.shape.dial) {
+      const cw = Math.atan2(p.x - vc.x, vc.y - p.y); // clockwise from straight up
+      t.valves[k] = Math.max(0, Math.min(1, (cw + 0.75 * Math.PI) / (1.5 * Math.PI)));
+      return;
+    }
     const a = Math.atan2(vc.y - p.y, p.x - vc.x); // counterclockwise from right
     if (t.kind === 'splitter') {
       t.valves[k] = a >= 0 ? 1 - a / Math.PI : a > -Math.PI / 2 ? 1 : 0;
@@ -1487,6 +1505,14 @@ export class GameEngine {
       const x = tankX(sh.tanks[0]);
       pipes([[x, sh.tankH!], [x, chuteY(x)]], 4);
       sh.spouts.forEach((x, k) => pipes([[x, k < sh.spouts.length - 1 ? chuteY(x) + 8 : SORTER_CHUTE.y1], [x, sh.spoutY - 4]], 4));
+    } else if (t.kind === 'heater') {
+      // the funnel's stem down into the tube, a pipe from the tube down through each tap, and the far end
+      // turning down into the last spout
+      const { x1, y, r } = HEATER_TUBE;
+      const end = sh.spouts[sh.spouts.length - 1];
+      pipes([[tankX(sh.tanks[0]), sh.tankH!], [tankX(sh.tanks[0]), y - r + 1]], 4);
+      for (const x of sh.spouts.slice(0, -1)) pipes([[x, y + r - 1], [x, sh.spoutY - 4]], 4);
+      pipes([[x1 + r - 1, y], [end - 4, y], [end, y + 4], [end, sh.spoutY - 4]], 4);
     } else if (t.kind === 'spectrometer') pipes([[0, sh.tankH!], [0, SPECTROMETER.body.y0]], 4);
     else pipes([[0, sh.tankH ?? TANK_H], [0, sh.spoutY - 4]], 4);
     for (const x of sh.spouts) ctx.fillRect(o.x + (x - 4) * S, o.y + (sh.spoutY - 6) * S, 8 * S, 6 * S);
@@ -1520,6 +1546,7 @@ export class GameEngine {
     });
     if (t.kind === 'exchanger') this.drawHelix(t);
     if (t.kind === 'sorter') this.drawChute(t);
+    if (t.kind === 'heater') this.drawHeater(t);
     if (t.kind === 'spectrometer') this.drawSpectrometer(t);
     if (t.kind === 'separator') {
       // the splitter: one pipe in, two out, with a divider between the outlets
@@ -1538,6 +1565,7 @@ export class GameEngine {
     }
 
     if (!sh.noValve) t.valves.forEach((_, k) => {
+      if (k === sh.dial) return this.drawDial(t, k);
       // valve: the lever points right when closed and up when open, toward where the pointer turned it;
       // a splitter's points toward the side that gets more, straight up for an even split
       const vc = this.valveAt(t, k);
@@ -1569,6 +1597,104 @@ export class GameEngine {
       ctx.lineWidth = 1.5;
       ctx.strokeRect(r.x0 - 5 * S, r.y0 - 5 * S, r.x1 - r.x0 + 10 * S, r.y1 - r.y0 + 10 * S);
     }
+  }
+
+  /**
+   * A heater's tube: glass, with what's in each stretch of it lying along its floor (as deep as that stretch
+   * holds when the funnel feeds it flat out), and the wire coiled down its middle, from copper to white-hot as
+   * the dial turns up; and the box the dial sits on, with the wire's lead running down into the tube.
+   */
+  private drawHeater(t: Tool): void {
+    const { ctx, S, theme } = this;
+    const o = this.toolXY(t);
+    const { x0, x1, y, r } = HEATER_TUBE;
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.scale(S, S);
+    const tube = new Path2D();
+    tube.roundRect(x0 - r, y - r, x1 - x0 + 2 * r, 2 * r, r);
+    // the fluid
+    ctx.save();
+    ctx.clip(tube);
+    const w = (x1 - x0) / HEATER_CELLS;
+    const full = (HEATER_FEED * HEATER_TRANSIT) / HEATER_CELLS;
+    t.tube.forEach((v, c) => {
+      if (v.N <= TRACE) return;
+      const d = 2 * r * Math.min(1, volume(v) / full);
+      // the ends run on into the tube's rounded caps
+      const a = c === 0 ? x0 - r : x0 + c * w;
+      const b = c === HEATER_CELLS - 1 ? x1 + r : x0 + (c + 1) * w;
+      ctx.fillStyle = fluidColor(v);
+      ctx.fillRect(a, y + r - d, b - a + 0.3, d);
+    });
+    ctx.restore();
+    ctx.fillStyle = theme.glasshi;
+    ctx.fill(tube);
+    // the box, and the wire's lead down from it into the tube
+    const dial = t.valves[t.shape.dial!];
+    const rgb = wireColor(dial);
+    const lead = HEATER_BOX.x0 + 32;
+    ctx.fillStyle = theme.bench;
+    ctx.strokeStyle = theme.pipe;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(HEATER_BOX.x0, HEATER_BOX.y0, HEATER_BOX.x1 - HEATER_BOX.x0, HEATER_BOX.y1 - HEATER_BOX.y0, 4);
+    ctx.fill();
+    ctx.stroke();
+    // the wire, coiled along the tube and up into the box, glowing as it heats
+    ctx.strokeStyle = css(rgb);
+    ctx.lineWidth = 1.3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (dial > 0) {
+      ctx.shadowColor = css(rgb, Math.min(1, 1.3 * dial));
+      ctx.shadowBlur = (2 + 8 * dial) * S * this.zoom * this.dpr;
+    }
+    ctx.beginPath();
+    ctx.moveTo(x0, y);
+    for (let x = x0; x <= lead; x += 0.75) ctx.lineTo(x, y + 2.6 * Math.sin(((x - x0) / 5) * Math.PI));
+    ctx.lineTo(lead, HEATER_BOX.y1);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = theme.glass;
+    ctx.lineWidth = 1.6 / S;
+    ctx.stroke(tube);
+    ctx.restore();
+  }
+
+  /**
+   * A dial, valve k: a knob on a ring of ticks running clockwise from down-left (off) to down-right (full), its
+   * pointer at its setting.
+   */
+  private drawDial(t: Tool, k: number): void {
+    const { ctx, S, theme } = this;
+    const vc = this.valveAt(t, k);
+    // canvas angles run clockwise from the right; the dial's from straight up
+    const at = (d: number) => -0.75 * Math.PI + 1.5 * Math.PI * d - Math.PI / 2;
+    ctx.strokeStyle = theme.muted;
+    ctx.lineWidth = 1 * S;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (let i = 0; i <= 6; i++) {
+      const a = at(i / 6);
+      ctx.moveTo(vc.x + 10.5 * S * Math.cos(a), vc.y + 10.5 * S * Math.sin(a));
+      ctx.lineTo(vc.x + 13 * S * Math.cos(a), vc.y + 13 * S * Math.sin(a));
+    }
+    ctx.stroke();
+    ctx.fillStyle = theme.bench;
+    ctx.strokeStyle = theme.pipe;
+    ctx.lineWidth = 2 * S;
+    ctx.beginPath();
+    ctx.arc(vc.x, vc.y, 8 * S, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    const a = at(t.valves[k]);
+    ctx.strokeStyle = theme.ink;
+    ctx.lineWidth = 2.2 * S;
+    ctx.beginPath();
+    ctx.moveTo(vc.x + 1.5 * S * Math.cos(a), vc.y + 1.5 * S * Math.sin(a));
+    ctx.lineTo(vc.x + 7 * S * Math.cos(a), vc.y + 7 * S * Math.sin(a));
+    ctx.stroke();
   }
 
   /**
@@ -2100,8 +2226,11 @@ export class GameEngine {
       if (z && z.kind !== 'scale') return true;
     }
     const tool = this.toolDrag?.tool;
-    const drains = (k: number) => tool!.kind === 'splitter' || tool!.kind === 'sorter' || tool!.valves[k] > 0;
+    const free = tool?.kind === 'splitter' || tool?.kind === 'sorter' || tool?.kind === 'heater';
+    const drains = (k: number) => free || tool!.valves[k] > 0;
     if (tool?.shape.spouts.length && tool.tanks.some((v, k) => v.N > TRACE && drains(k))) return true;
+    // a heater's tube runs whatever its valves say
+    if (tool?.tube.some((v) => v.N > TRACE)) return true;
     if (this.hoseDrag && this.hoseDrag.hose.funnel.N > TRACE) return true;
     const open = this.mouths(true);
     const catches = (from: Point, reach = Infinity) => {
