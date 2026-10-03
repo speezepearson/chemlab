@@ -6,8 +6,8 @@ import { VOLUME } from '../game/flask';
 import { CAP } from '../game/config';
 import { COOLING, restoreDefaultCooling } from '../game/cooling';
 import {
-  DRIP, HEATER, METER, SEPARATOR, restoreDefaultDrip, restoreDefaultHeater, restoreDefaultMeter, restoreDefaultSeparator,
-  separatorShares,
+  DRIP, HEATER, METER, SEPARATOR, SORTER, restoreDefaultDrip, restoreDefaultHeater, restoreDefaultMeter,
+  restoreDefaultSeparator, restoreDefaultSorter, separatorShares, sorterShares,
 } from '../game/tools';
 import { DragNumber } from './DragNumber';
 
@@ -161,6 +161,28 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
             </tr>
             <tr className="group">
               <td colSpan={4}>
+                <b>Size sorter</b> <span>from 0, an even three-way split, to 1, every size out its own spout</span>
+              </td>
+            </tr>
+            <tr>
+              <td colSpan={4}>
+                <label className="slider" title="0 splits every size evenly among the spouts; 1 sorts perfectly">
+                  <span>strength</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={SORTER.strength}
+                    onChange={(e) => edit(() => (SORTER.strength = +e.target.value))}
+                  />
+                  <output>{SORTER.strength.toFixed(2)}</output>
+                </label>
+                <span> each size goes {(100 * sorterShares()[0][0]).toFixed(1)}% out its own spout</span>
+              </td>
+            </tr>
+            <tr className="group">
+              <td colSpan={4}>
                 <b>Flow meter</b> <span>its reading closes 1 − e^(−t/τ) of the gap to a new flow in t seconds</span>
               </td>
             </tr>
@@ -182,6 +204,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
                 restoreDefaultCooling();
                 restoreDefaultMeter();
                 restoreDefaultSeparator();
+                restoreDefaultSorter();
               })
             }
           >

@@ -6,7 +6,7 @@ import { Vessel, roomFor, volume } from './flask';
 import { FLASK_OUTLINE, areaBelow } from './flaskShape';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PIPETTE_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
-  REFERENCE_CAP, SEPARATOR, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
+  REFERENCE_CAP, SEPARATOR, SORTER, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -336,7 +336,17 @@ describe('cryostabilizer reference', () => {
 describe('size sorter', () => {
   const RG = speciesIndex(['R', 'G', null], 1);
 
-  it('takes 70% of singles through the first screen, 95% of the rest and 70% of pairs through the second', () => {
+  const withStrength = (k: number, fn: () => void) => {
+    const before = SORTER.strength;
+    SORTER.strength = k;
+    try {
+      fn();
+    } finally {
+      SORTER.strength = before;
+    }
+  };
+  /** Each size's shares out the three spouts, sorting singles, pairs and triples at the current strength. */
+  function sort() {
     const so = new Tool('sorter', 0, 0, 0);
     const f = so.tanks[0];
     f.setMolecules(R, 6e7);
@@ -344,20 +354,36 @@ describe('size sorter', () => {
     f.setMolecules(TARGET, 2e7);
     f.setTemperature(3);
     const before = { N: f.N, Q: f.Q };
-    const outs = so.step(0.02);
+    const outs = so.step(0.02).map((v) => v ?? new Vessel(Infinity));
     expect(outs).toHaveLength(3);
-    const [a, b, c] = outs.map((v) => v!);
-    const drained = { R: a.n[R] + b.n[R] + c.n[R], RG: a.n[RG] + b.n[RG] + c.n[RG] };
-    expect(a.n[R] / drained.R).toBeCloseTo(0.7, 3);
-    expect(b.n[R] / drained.R).toBeCloseTo(0.3 * 0.95, 3);
-    expect(c.n[R] / drained.R).toBeCloseTo(0.3 * 0.05, 3);
-    expect([a.n[RG], b.n[RG] / drained.RG, c.n[RG] / drained.RG].map((x) => +x.toFixed(3))).toEqual([0, 0.7, 0.3]);
-    expect([a.n[TARGET], b.n[TARGET]]).toEqual([0, 0]);
-    expect(c.n[TARGET]).toBeGreaterThan(0);
     // nothing made or lost, and the heat goes with the atoms
-    expect(a.N + b.N + c.N + f.N).toBe(before.N);
-    expect(a.Q + b.Q + c.Q + f.Q).toBe(before.Q);
-    for (const v of [a, b, c]) expect(temperature(v)).toBeCloseTo(3, 2);
+    expect(outs.reduce((t, v) => t + v.N, 0) + f.N).toBe(before.N);
+    expect(outs.reduce((t, v) => t + v.Q, 0) + f.Q).toBe(before.Q);
+    return [R, RG, TARGET].map((sp) => {
+      const total = outs.reduce((t, v) => t + v.n[sp], 0);
+      return outs.map((v) => v.n[sp] / total);
+    });
+  }
+
+  it('sends each size out its own spout, 1/3 + 2/3·strength of it, and the rest evenly out the others', () => {
+    for (const k of [0.2, 0.55, 0.9]) {
+      withStrength(k, () => {
+        sort().forEach((shares, own) =>
+          shares.forEach((x, j) => expect(x).toBeCloseTo(j === own ? 1 / 3 + (2 / 3) * k : (1 - k) / 3, 2)),
+        );
+      });
+    }
+  });
+
+  it('splits every size evenly at strength 0, and sorts perfectly at 1', () => {
+    withStrength(0, () => sort().forEach((shares) => shares.forEach((x) => expect(x).toBeCloseTo(1 / 3, 2))));
+    withStrength(1, () => expect(sort()).toEqual([[1, 0, 0], [0, 1, 0], [0, 0, 1]]));
+  });
+
+  it('keeps the temperature of what it sorts', () => {
+    const so = new Tool('sorter', 0, 0, 0);
+    filled(so.tanks[0], R, FUNNEL_CAP, 3);
+    for (const v of so.step(0.02)) if (v) expect(temperature(v)).toBeCloseTo(3, 2);
   });
 
   it('drains its funnel at FUNNEL_RATE times how high the fluid stands, with no valve', () => {

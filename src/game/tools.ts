@@ -78,13 +78,23 @@ export const FUNNEL_CAP = CAP / 4;
 export const FUNNEL_RATE = 2 * MAX_FLOW;
 
 /**
- * The size sorter's screens, in the order fluid meets them: per screen, the share of the species of each size
- * (1, 2, 3 atoms) still on the chute that falls through. Whatever passes both goes out the chute's end.
+ * How well the size sorter sorts, editable from the Chemistry panel, from 0 (every size of molecule splits evenly
+ * among its three spouts) to 1 (singles all fall through the first screen, pairs the second, and triples go off the
+ * end). In between, each size goes 1/3 + 2/3·strength out its own spout and the rest evenly out the other two, so by
+ * default (0.55) 70% out its own and 15% out each of the others.
  */
-export const SORTER_SCREENS: readonly (readonly number[])[] = [
-  [0.7, 0, 0],
-  [0.95, 0.7, 0],
-];
+export const SORTER = { strength: 0.55 };
+const DEFAULT_SORTER = { ...SORTER };
+
+export function restoreDefaultSorter(): void {
+  Object.assign(SORTER, DEFAULT_SORTER);
+}
+
+/** For molecules of each size (1, 2, 3 atoms), the share going out each of the size sorter's spouts, in order. */
+export function sorterShares(): number[][] {
+  const k = Math.max(0, Math.min(1, SORTER.strength));
+  return [0, 1, 2].map((own) => [0, 1, 2].map((j) => (j === own ? 1 / 3 + (2 / 3) * k : (1 - k) / 3)));
+}
 
 /** How much the cryostabilizer reference holds, by volume: a hundred flasks. */
 export const REFERENCE_CAP = 100 * CAP;
@@ -671,16 +681,13 @@ export function spectrum(f: Fluid, cap: number): number[] {
   return out;
 }
 
-/** Pass a fluid over the size sorter's screens (see SORTER_SCREENS): what falls through each, then what's left. */
-export function sieve(f: Vessel): Vessel[] {
-  const out: Vessel[] = [];
-  let rest = f;
-  for (const screen of SORTER_SCREENS) {
-    const [through, over] = divide(rest, (s) => screen[SPECIES[s].size - 1]);
-    out.push(through);
-    rest = over;
-  }
-  return [...out, rest];
+/**
+ * Pass a fluid over the size sorter's screens (see sorterShares): what falls through the first, what falls through
+ * the second, and what goes off the end, in whole molecules, with heat in proportion.
+ */
+export function sieve(f: Fluid): Vessel[] {
+  const shares = sorterShares();
+  return split(f, 3, (s) => shares[SPECIES[s].size - 1]);
 }
 
 /** Split a fluid among the separator's outlets, left to right (see separatorShares), in whole molecules, heat in proportion. */
