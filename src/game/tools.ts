@@ -169,14 +169,43 @@ export function heatBy(f: Fluid, wireT: number, h: number): void {
   f.Q += roundRandom((heatAt(wireT, f.N) - f.Q) * (1 - Math.exp(-HEATER.rate * h)));
 }
 
+/**
+ * How the flow meter reads, editable from the Chemistry panel:
+ * - tau: how long, in sim seconds, its reading takes to close all but 1/e of the gap to a new flow. It averages
+ *   over about that long, so a steady drip reads as a steady trickle rather than flickering.
+ */
+export const METER = { tau: 1 };
+const DEFAULT_METER = { ...METER };
+
+export function restoreDefaultMeter(): void {
+  Object.assign(METER, DEFAULT_METER);
+}
+
+/** How many digits the meter's display has. */
+export const METER_DIGITS = 4;
+
+/**
+ * What the meter's display shows for a flow of `rate` (by volume, see VOLUME) per sim second: millions per second,
+ * to as many decimal places as its four digits leave room for, so 0.012, 1.234, 56.78, 999.9, 2000.
+ */
+export function meterText(rate: number): string {
+  const m = Math.max(0, rate) / 1e6;
+  for (let dp = METER_DIGITS - 1; dp >= 0; dp--) {
+    const t = m.toFixed(dp);
+    if (t.replace('.', '').length <= METER_DIGITS) return t;
+  }
+  return '9'.repeat(METER_DIGITS);
+}
+
 /** The order of a spectrometer hexagon's sextants, clockwise from the top. */
 export const SEXTANT_ATOMS: readonly Atom[] = ['G', 'C', 'B', 'M', 'R', 'Y'];
 
 export type ToolKind =
-  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'heater' | 'spectrometer' | 'reference';
+  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'heater' | 'spectrometer' | 'reference'
+  | 'meter';
 
 /** Tools there's only ever one of: not in the palette, and never put away. */
-export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectrometer', 'reference'];
+export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectrometer', 'reference', 'meter'];
 
 /**
  * A tool's geometry in local units: multiply by the stage scale and offset by
@@ -308,6 +337,18 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: 100,
     box: { x0: -40, x1: 40, y0: -26, y1: 102 },
   },
+  meter: {
+    // a funnel draining straight through a cabinet with a display (see METER_BODY) and out a spout
+    tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
+    tankH: 30,
+    tankCap: FUNNEL_CAP,
+    funnel: true,
+    noValve: true,
+    spouts: [0],
+    valveY: 30,
+    spoutY: 82,
+    box: { x0: -34, x1: 34, y0: -6, y1: 84 },
+  },
   spectrometer: {
     // a sample cup on a cabinet with a screen and a run button (see SPECTROMETER)
     tanks: [{ name: 'sample', x0: -12, x1: 12 }],
@@ -336,6 +377,9 @@ export const SPECTROMETER = {
   button: { x0: 28, x1: 62, y0: 84, y1: 98 },
 };
 
+/** The meter's cabinet, and its display, in local units. */
+export const METER_BODY = { x0: -31, x1: 31, y0: 36, y1: 64, display: { x0: -26, x1: 26, y0: 41, y1: 59 } };
+
 /** Horizontal center of a tank, which is also where its valve is. */
 export const tankX = (tk: { x0: number; x1: number }) => (tk.x0 + tk.x1) / 2;
 
@@ -355,6 +399,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   splitter: 'Splitter',
   sorter: 'Size sorter',
   heater: 'Resistive heater',
+  meter: 'Flow meter',
   spectrometer: 'Mass spectrometer',
   reference: 'Cryostabilizer reference',
 };
@@ -390,6 +435,8 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
  *   a spout, let fluid out sooner, less heated.
  * - A **cryostabilizer reference** is a sealed hundred flasks' worth of the target with a valve that lets out at most
  *   0.02 flask/s.
+ * - A **flow meter** has a funnel like the splitter's, with no valve, draining straight through to one spout, and
+ *   shows what flows out, averaged over about METER.tau (see rate and meterText).
  * - A **mass spectrometer** has a small sample cup and no spouts. Running it (see scan) reads the sample's
  *   spectrum onto a screen, then lids the cup and drains the sample away into the cabinet over the run.
  *
@@ -417,6 +464,8 @@ export class Tool {
   reading: number[] | null = null;
   /** Sim seconds since the spectrometer was last run (see SCAN_LIGHTS); Infinity if it isn't running. */
   scanAge = Infinity;
+  /** A meter's reading: what's flowed out of it, by volume per sim second, averaged over about METER.tau. */
+  rate = 0;
 
   constructor(
     readonly kind: ToolKind,
@@ -454,7 +503,7 @@ export class Tool {
       return (this.out = []);
     }
     if (this.kind === 'heater') return this.heat(h);
-    const funnel = this.kind === 'splitter' || this.kind === 'sorter';
+    const funnel = this.kind === 'splitter' || this.kind === 'sorter' || this.kind === 'meter';
     let packets = this.tanks.map((tank, k) => {
       const p = new Vessel(Infinity);
       transfer(tank, p, funnel ? FUNNEL_RATE * h : this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW) * this.level(k) * h);
@@ -466,6 +515,7 @@ export class Tool {
     if (this.kind === 'sorter') packets = sieve(packets[0]);
     this.out = packets.map((p) => (p.N > 0 ? p : null));
     this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
+    if (this.kind === 'meter') this.rate += (volume(packets[0]) / h - this.rate) * (1 - Math.exp(-h / Math.max(1e-9, METER.tau)));
     return this.out;
   }
 

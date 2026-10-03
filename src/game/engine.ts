@@ -6,14 +6,14 @@ import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadiu
 import { FLASK_OUTLINE, FLASK_PATH_DATA, areaBelow, fillLevel, tiltedOutline } from './flaskShape';
 import { cool, exposure, taper } from './cooling';
 import { Flask, Vessel, fluidColor, glowColor, sustenance, transfer, volume, volumeUnit, type Point } from './flask';
-import { DEFAULT_PRESET, SPECTROMETER_AT, applyFill, type Preset } from './presets';
+import { DEFAULT_PRESET, METER_AT, SPECTROMETER_AT, applyFill, type Preset } from './presets';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
 import { CENTER, placement, type Placement } from './place';
 import { rumble, type Rumble } from './rumble';
 import { WaterSounds } from './water';
 import {
-  HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SHAPES,
+  HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, METER_BODY, METER_DIGITS, meterText, HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SHAPES,
   SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, cupFillHeight, drip, UNIQUE_TOOLS, mouthBelow, scanLevel,
   tankX, type Mouth, type ToolKind,
 } from './tools';
@@ -371,8 +371,8 @@ export class GameEngine {
   }
 
   /**
-   * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a mass spectrometer:
-   * if there's none, one is added where it starts.
+   * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a mass spectrometer and a
+   * flow meter: if there's none, one is added where it starts.
    */
   private uniqueTools(): void {
     for (const kind of UNIQUE_TOOLS) {
@@ -381,6 +381,7 @@ export class GameEngine {
     }
     if (!this.tools.some((t) => t.kind === 'spectrometer'))
       this.tools.push(new Tool('spectrometer', this.nextToolId++, ...SPECTROMETER_AT));
+    if (!this.tools.some((t) => t.kind === 'meter')) this.tools.push(new Tool('meter', this.nextToolId++, ...METER_AT));
   }
 
   /** Make a new flask, scale or tool under the pointer (in client coordinates) and start carrying it. */
@@ -1688,6 +1689,7 @@ export class GameEngine {
     if (t.kind === 'sorter') this.drawChute(t);
     if (t.kind === 'heater') this.drawHeater(t);
     if (t.kind === 'spectrometer') this.drawSpectrometer(t);
+    if (t.kind === 'meter') this.drawMeter(t);
     if (t.kind === 'separator') {
       // the splitter: one pipe in, two out, with a divider between the outlets
       const { x0, x1, y0, y1 } = SEP_BODY;
@@ -2003,7 +2005,7 @@ export class GameEngine {
   /**
    * Text on a seven-segment display, right-aligned in `cells` digit cells ending at x, with its digits' tops at
    * y, in the current (local) units: lit segments glow, and unlit ones show faintly, as on a real display.
-   * Shows digits, '-', and the letters of "OUEr".
+   * Shows digits, '-', and the letters of "OUEr"; a '.' lights the decimal point after the digit before it.
    */
   private drawSevenSeg(text: string, x: number, y: number, cells: number, color: string, ghost: string): void {
     const { ctx } = this;
@@ -2019,13 +2021,28 @@ export class GameEngine {
       '0': 'abcdef', '1': 'bc', '2': 'abdeg', '3': 'abcdg', '4': 'bcfg', '5': 'acdfg', '6': 'acdefg', '7': 'abc',
       '8': 'abcdefg', '9': 'abcdfg', '-': 'g', O: 'abcdef', U: 'bcdef', E: 'adefg', r: 'eg', ' ': '',
     };
-    const chars = text.padStart(cells, ' ').slice(-cells);
+    // each cell is a character and whether the decimal point after it is lit
+    const parsed: { ch: string; dp: boolean }[] = [];
+    for (const ch of text) {
+      if (ch === '.' && parsed.length) parsed[parsed.length - 1].dp = true;
+      else parsed.push({ ch, dp: false });
+    }
+    while (parsed.length < cells) parsed.unshift({ ch: ' ', dp: false });
+    const shown = parsed.slice(-cells);
     ctx.save();
     ctx.lineCap = 'butt';
     ctx.lineWidth = T;
     for (let i = 0; i < cells; i++) {
-      const lit = LIT[chars[i]] ?? '';
+      const { ch, dp } = shown[i];
+      const lit = LIT[ch] ?? '';
       const left = x - (cells - i) * PITCH + (PITCH - W) / 2;
+      // the decimal point, at the foot of the gap after the digit
+      ctx.fillStyle = dp ? color : ghost;
+      ctx.shadowColor = dp ? color : 'transparent';
+      ctx.shadowBlur = dp ? 3 * this.S * this.zoom * this.dpr : 0;
+      ctx.beginPath();
+      ctx.arc(left + W + 1.6, y + H, T * 0.6, 0, Math.PI * 2);
+      ctx.fill();
       for (let k = 0; k < 7; k++) {
         const on = lit.includes('abcdefg'[k]);
         const [ax, ay, bx, by] = SEG[k];
@@ -2042,6 +2059,29 @@ export class GameEngine {
         ctx.stroke();
       }
     }
+    ctx.restore();
+  }
+
+  /** A flow meter's cabinet, with its reading (see meterText) on a seven-segment display like the scale's. */
+  private drawMeter(t: Tool): void {
+    const { ctx, S, theme } = this;
+    const o = this.toolXY(t);
+    const { display: d, ...b } = METER_BODY;
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.scale(S, S);
+    ctx.fillStyle = theme.bench;
+    ctx.strokeStyle = theme.pipe;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0, 5);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#050603';
+    ctx.beginPath();
+    ctx.roundRect(d.x0, d.y0, d.x1 - d.x0, d.y1 - d.y0, 3);
+    ctx.fill();
+    this.drawSevenSeg(meterText(t.rate), d.x1 - 2, d.y0 + 2.5, METER_DIGITS, 'yellowgreen', 'rgba(154, 205, 50, 0.08)');
     ctx.restore();
   }
 
@@ -2364,7 +2404,7 @@ export class GameEngine {
       if (z && z.kind !== 'scale') return true;
     }
     const tool = this.toolDrag?.tool;
-    const free = tool?.kind === 'splitter' || tool?.kind === 'sorter' || tool?.kind === 'heater';
+    const free = tool?.kind === 'splitter' || tool?.kind === 'sorter' || tool?.kind === 'heater' || tool?.kind === 'meter';
     const drains = (k: number) => free || tool!.valves[k] > 0;
     if (tool?.shape.spouts.length && tool.tanks.some((v, k) => v.N > TRACE && drains(k))) return true;
     // a heater's tube runs whatever its valves say

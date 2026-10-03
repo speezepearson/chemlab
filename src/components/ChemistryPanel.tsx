@@ -6,7 +6,7 @@ import { SPECIES, TARGET } from '../chem/species';
 import { VOLUME } from '../game/flask';
 import { CAP } from '../game/config';
 import { COOLING, restoreDefaultCooling } from '../game/cooling';
-import { DRIP, HEATER, restoreDefaultDrip, restoreDefaultHeater } from '../game/tools';
+import { DRIP, HEATER, METER, restoreDefaultDrip, restoreDefaultHeater, restoreDefaultMeter } from '../game/tools';
 import { DragNumber } from './DragNumber';
 import { RandomizerControls } from './RandomizerControls';
 
@@ -133,6 +133,12 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
             </tr>
             <NumberRow label="rate" min={0} value={COOLING.rate} onChange={(v) => edit(() => (COOLING.rate = v))} />
             <NumberRow label="ambient T" min={0} value={COOLING.ambient} onChange={(v) => edit(() => (COOLING.ambient = v))} />
+            <tr className="group">
+              <td colSpan={4}>
+                <b>Flow meter</b> <span>its reading closes 1 − e^(−t/τ) of the gap to a new flow in t seconds</span>
+              </td>
+            </tr>
+            <NumberRow label="averaging τ, s" min={0.001} value={METER.tau} onChange={(v) => edit(() => (METER.tau = v))} />
           </tbody>
         </table>
         <p>
@@ -150,6 +156,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
                 restoreDefaultDrip();
                 restoreDefaultHeater();
                 restoreDefaultCooling();
+                restoreDefaultMeter();
               })
             }
           >

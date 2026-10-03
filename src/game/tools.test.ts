@@ -4,7 +4,7 @@ import { CAP } from './config';
 import { heatAt, temperature } from '../chem/reactions';
 import { Vessel, roomFor, volume } from './flask';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, heatBy, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PIPETTE_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PIPETTE_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
   REFERENCE_CAP, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
 } from './tools';
 
@@ -158,6 +158,47 @@ describe('resistive heater', () => {
     expect(temperature(v)).toBeCloseTo(20, 6);
     heatBy(v, 40, 1);
     expect(temperature(v)).toBeCloseTo(20 + 20 * (1 - Math.exp(-HEATER.rate)), 3);
+  });
+});
+
+describe('flow meter', () => {
+  it('drains its funnel straight through at FUNNEL_RATE, with no valve', () => {
+    const m = new Tool('meter', 0, 0, 0);
+    expect(m.shape.noValve).toBe(true);
+    filled(m.tanks[0], R, FUNNEL_CAP, 2);
+    const out = m.step(0.02)[0]!;
+    expect(out.N / (FUNNEL_RATE * 0.02)).toBeCloseTo(1, 6);
+    expect(temperature(out)).toBeCloseTo(2, 6);
+  });
+
+  it('reads what flows through it, averaged over about METER.tau', () => {
+    const m = new Tool('meter', 0, 0, 0);
+    const feed = 0.25 * CAP; // per sim second
+    const src = filled(new Vessel(Infinity), R, CAP, 1);
+    for (let t = 0; t < METER.tau; t += 0.02) {
+      m.tanks[0].addFrom(src, feed * 0.02);
+      m.step(0.02);
+    }
+    // a time constant in: about 1 − 1/e of the way there
+    expect(m.rate / feed).toBeCloseTo(1 - Math.exp(-1), 1);
+    for (let t = 0; t < 10 * METER.tau; t += 0.02) {
+      m.tanks[0].addFrom(src, feed * 0.02);
+      m.step(0.02);
+    }
+    expect(m.rate / feed).toBeCloseTo(1, 3);
+    // and back down when it stops
+    for (let t = 0; t < 10 * METER.tau; t += 0.02) m.step(0.02);
+    expect(m.rate / feed).toBeLessThan(1e-3);
+  });
+
+  it(`shows millions per second in ${METER_DIGITS} digits, to as many decimals as fit`, () => {
+    expect(meterText(0)).toBe('0.000');
+    expect(meterText(12_345)).toBe('0.012');
+    expect(meterText(1_234_500)).toBe('1.234');
+    expect(meterText(56_784_000)).toBe('56.78');
+    expect(meterText(999_960_000)).toBe('1000');
+    expect(meterText(2e9)).toBe('2000');
+    expect(meterText(5e10)).toBe('9999');
   });
 });
 
