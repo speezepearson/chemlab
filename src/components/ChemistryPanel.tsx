@@ -7,7 +7,7 @@ import { CAP } from '../game/config';
 import { COOLING, restoreDefaultCooling } from '../game/cooling';
 import {
   DRIP, HEATER, METER, SEPARATOR, SORTER, restoreDefaultDrip, restoreDefaultHeater, restoreDefaultMeter,
-  restoreDefaultSeparator, restoreDefaultSorter, separatorShares, sorterShares,
+  restoreDefaultSeparator, restoreDefaultSorter, SEPARATOR_PERFECT, separatorShares, sorterShares,
 } from '../game/tools';
 import { DragNumber } from './DragNumber';
 
@@ -141,14 +141,14 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
             </tr>
             <tr>
               <td colSpan={4}>
-                <label className="slider" title="0 splits everything evenly five ways; higher sorts more cleanly">
+                <label className="slider" title="0 splits everything evenly five ways; higher sorts more cleanly, and the top is perfect">
                   <span>sharpness</span>
                   <input
                     type="range"
                     min={0}
-                    max={10}
+                    max={SEPARATOR_PERFECT}
                     step={0.1}
-                    value={SEPARATOR.sharpness}
+                    value={Math.min(SEPARATOR_PERFECT, SEPARATOR.sharpness)}
                     onChange={(e) => edit(() => (SEPARATOR.sharpness = +e.target.value))}
                   />
                   <output>{SEPARATOR.sharpness.toFixed(1)}</output>

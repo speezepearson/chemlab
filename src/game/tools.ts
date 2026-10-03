@@ -79,11 +79,11 @@ export const FUNNEL_RATE = 2 * MAX_FLOW;
 
 /**
  * How well the size sorter sorts, editable from the Chemistry panel, from 0 (every size of molecule splits evenly
- * among its three spouts) to 1 (singles all fall through the first screen, pairs the second, and triples go off the
- * end). In between, each size goes 1/3 + 2/3·strength out its own spout and the rest evenly out the other two, so by
- * default (0.55) 70% out its own and 15% out each of the others.
+ * among its three spouts) to 1, the default (singles all fall through the first screen, pairs the second, and
+ * triples go off the end). In between, each size goes 1/3 + 2/3·strength out its own spout and the rest evenly out
+ * the other two, so at 0.55, 70% out its own and 15% out each of the others.
  */
-export const SORTER = { strength: 0.55 };
+export const SORTER = { strength: 1 };
 const DEFAULT_SORTER = { ...SORTER };
 
 export function restoreDefaultSorter(): void {
@@ -541,16 +541,19 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
 
 /**
  * How sharply the separator sorts, editable from the Chemistry panel: each molecule goes to outlet j in proportion
- * to e^(−sharpness·(j − its own outlet)²) (see SEPARATOR_OUTLET). At 0 everything splits evenly five ways; by
- * default (3) a molecule goes 91% to its own outlet if it's one of the middle three, 95% if it's at an end, and the
- * rest mostly to the next outlet over.
+ * to e^(−sharpness·(j − its own outlet)²) (see SEPARATOR_OUTLET). At 0 everything splits evenly five ways; at 3 a
+ * molecule goes 91% to its own outlet if it's one of the middle three, 95% if it's at an end, and the rest mostly to
+ * the next outlet over; and from SEPARATOR_PERFECT up, which is the default, every molecule goes out its own.
  */
-export const SEPARATOR = { sharpness: 3 };
+export const SEPARATOR = { sharpness: 10 };
 const DEFAULT_SEPARATOR = { ...SEPARATOR };
 
 export function restoreDefaultSeparator(): void {
   Object.assign(SEPARATOR, DEFAULT_SEPARATOR);
 }
+
+/** The sharpness from which the separator sorts perfectly: the top of its slider. */
+export const SEPARATOR_PERFECT = 10;
 
 /** How many outlets the separator has, one per mix of primary and secondary atoms a molecule can have. */
 export const SEPARATOR_OUTLETS = 5;
@@ -574,7 +577,9 @@ export function separatorShares(): number[][] {
   const k = SEPARATOR.sharpness;
   if (shareCache.sharpness !== k) {
     const shares = Array.from({ length: SEPARATOR_OUTLETS }, (_, own) => {
-      const w = Array.from({ length: SEPARATOR_OUTLETS }, (_, j) => Math.exp(-k * (j - own) ** 2));
+      const w = Array.from({ length: SEPARATOR_OUTLETS }, (_, j) =>
+        k >= SEPARATOR_PERFECT ? +(j === own) : Math.exp(-k * (j - own) ** 2),
+      );
       const total = w.reduce((a, b) => a + b, 0);
       return w.map((x) => x / total);
     });

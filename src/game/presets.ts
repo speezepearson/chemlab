@@ -162,9 +162,9 @@ export const PRESETS: readonly Preset[] = [
     id: 'separator',
     name: 'Separator demo',
     description:
-      'A separator sorts red from cyan: each molecule goes mostly out the spout for its mix of primary and ' +
-      'secondary atoms, all primary at the far left and all secondary at the far right, with a little to the ' +
-      'spouts beside it. The dispensers below catch the two ends. Pour a result back through for a purer cut.',
+      'A separator sorts red from cyan: each molecule goes out the spout for its mix of primary and secondary ' +
+      'atoms, all primary at the far left and all secondary at the far right. The dispensers below catch the two ' +
+      'ends. Turn its sharpness down in the Chemistry panel and some leaks into the spouts beside them.',
     flasks: [],
     tools: [
       {

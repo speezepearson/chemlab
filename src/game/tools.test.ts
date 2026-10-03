@@ -6,7 +6,7 @@ import { Vessel, roomFor, volume } from './flask';
 import { FLASK_OUTLINE, areaBelow } from './flaskShape';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PIPETTE_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
-  RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, SEPARATOR, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
+  RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, SEPARATOR, SEPARATOR_PERFECT, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -698,6 +698,18 @@ describe('separator', () => {
         });
       });
     }
+  });
+
+  it('sorts perfectly from SEPARATOR_PERFECT up', () => {
+    withSharpness(SEPARATOR_PERFECT, () => {
+      const f = new Vessel(Infinity);
+      for (const sp of [R, tri('△RGY'), pair('R–Y'), tri('△RMY'), C]) f.n[sp] = CAP;
+      f.N = atomTotal(f);
+      const out = separate(f);
+      [R, tri('△RGY'), pair('R–Y'), tri('△RMY'), C].forEach((sp, own) =>
+        out.forEach((v, j) => expect(v.n[sp]).toBe(j === own ? CAP : 0)),
+      );
+    });
   });
 
   it('splits everything evenly five ways at sharpness 0', () => {
