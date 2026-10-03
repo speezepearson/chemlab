@@ -138,6 +138,13 @@ describe('resistive heater', () => {
     expect(out[2].N + out[3].N).toBe(0);
   });
 
+  it('feeds its tube from its funnel in proportion to how high the fluid stands in it', () => {
+    const ht = new Tool('heater', 0, 0, 0);
+    filled(ht.tanks[0], R, ht.tanks[0].cap / 4, 1);
+    ht.step(0.01);
+    expect(ht.tube.reduce((n, v) => n + v.N, 0) / (0.01 * HEATER.feed * 0.25)).toBeCloseTo(1, 4);
+  });
+
   it('feeds its tube at most HEATER.feed', () => {
     const ht = new Tool('heater', 0, 0, 0);
     filled(ht.tanks[0], R, ht.tanks[0].cap, 1);
@@ -259,7 +266,15 @@ describe('splitter', () => {
     return { sp, l, r };
   }
 
-  it('drains its funnel at FUNNEL_RATE, whatever the valve says', () => {
+  it('drains its funnel at FUNNEL_RATE times how high the fluid stands, so half full at half the rate', () => {
+    const sp = new Tool('splitter', 0, 0, 0);
+    filled(sp.tanks[0], R, FUNNEL_CAP / 2, 1);
+    expect(sp.level(0)).toBe(0.5);
+    const [l, r] = sp.step(0.01);
+    expect(((l?.N ?? 0) + (r?.N ?? 0)) / (FUNNEL_RATE * 0.5 * 0.01)).toBeCloseTo(1, 5);
+  });
+
+  it('drains a full funnel at FUNNEL_RATE, whatever the valve says', () => {
     for (const v of [0, 0.3, 1]) {
       const { sp, l, r } = run(v);
       const out = (l?.N ?? 0) + (r?.N ?? 0);
@@ -328,12 +343,14 @@ describe('size sorter', () => {
     for (const v of [a, b, c]) expect(temperature(v)).toBeCloseTo(3, 2);
   });
 
-  it('drains its funnel at FUNNEL_RATE, with no valve', () => {
-    const so = new Tool('sorter', 0, 0, 0);
-    filled(so.tanks[0], R, FUNNEL_CAP, 4);
-    const out = so.step(0.05).reduce((t, v) => t + (v?.N ?? 0), 0);
-    expect(out / (FUNNEL_RATE * 0.05)).toBeCloseTo(1, 6);
-    expect(so.shape.noValve).toBe(true);
+  it('drains its funnel at FUNNEL_RATE times how high the fluid stands, with no valve', () => {
+    for (const share of [1, 0.25]) {
+      const so = new Tool('sorter', 0, 0, 0);
+      filled(so.tanks[0], R, FUNNEL_CAP * share, 4);
+      const out = so.step(0.01).reduce((t, v) => t + (v?.N ?? 0), 0);
+      expect(out / (FUNNEL_RATE * share * 0.01)).toBeCloseTo(1, 5);
+      expect(so.shape.noValve).toBe(true);
+    }
   });
 });
 

@@ -69,7 +69,11 @@ export function drip(drop: Vessel, out: Vessel | null, h: number, rand = Math.ra
 
 /** How much a splitter's funnel holds, in atoms: just a buffer, like a hose's. */
 export const FUNNEL_CAP = CAP / 4;
-/** How fast a splitter's funnel drains, in atoms per sim second, whatever its valve is set to. */
+/**
+ * How fast a splitter's or size sorter's funnel drains when full, in atoms per sim second, whatever a splitter's
+ * valve is set to; it drains in proportion to how high its fluid stands (see Tool.level). The flow meter's drains at
+ * this rate however full it is.
+ */
 export const FUNNEL_RATE = 2 * MAX_FLOW;
 
 /**
@@ -516,10 +520,15 @@ export class Tool {
       return (this.out = []);
     }
     if (this.kind === 'heater') return this.heat(h);
-    const funnel = this.kind === 'splitter' || this.kind === 'sorter' || this.kind === 'meter';
     let packets = this.tanks.map((tank, k) => {
       const p = new Vessel(Infinity);
-      transfer(tank, p, funnel ? FUNNEL_RATE * h : this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW) * this.level(k) * h);
+      // a valve, or a funnel without one, lets out in proportion to how high the fluid stands; the meter's funnel
+      // drains at a fixed rate, so what it reads is just what's arriving
+      const rate =
+        this.kind === 'meter' ? FUNNEL_RATE
+        : this.kind === 'splitter' || this.kind === 'sorter' ? FUNNEL_RATE * this.level(k)
+        : this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW) * this.level(k);
+      transfer(tank, p, rate * h);
       return p;
     });
     if (this.kind === 'exchanger') counterflow(packets[0], packets[1], EXCHANGE_RATE * h);
@@ -544,7 +553,7 @@ export class Tool {
     const last = tube.length - 1;
     transfer(tube[last], packets[HEATER_TAPS.length], volume(tube[last]) * on);
     for (let c = last - 1; c >= 0; c--) transfer(tube[c], tube[c + 1], volume(tube[c]) * on);
-    transfer(this.tanks[0], tube[0], HEATER.feed * h);
+    transfer(this.tanks[0], tube[0], HEATER.feed * this.level(0) * h);
     HEATER_TAPS.forEach((c, j) => transfer(tube[c], packets[j], valves[j] * MAX_FLOW * h));
     const wireT = wireTemperature(valves[this.shape.dial!]);
     for (const v of tube) heatBy(v, wireT, h);
