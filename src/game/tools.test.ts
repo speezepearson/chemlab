@@ -221,8 +221,8 @@ describe('tank', () => {
   it('pours through its valve like any tank, by how high its fluid stands', () => {
     const tk = new Tool('tank', 0, 0, 0, [1]);
     filled(tk.tanks[0], R, 50 * CAP, 1);
-    expect(tk.level(0)).toBe(0.5);
-    expect(tk.step(0.01)[0]!.N / (MAX_FLOW * 0.5 * 0.01)).toBeCloseTo(1, 5);
+    const level = tk.level(0);
+    expect(tk.step(0.01)[0]!.N / (MAX_FLOW * level * 0.01)).toBeCloseTo(1, 5);
   });
 });
 
@@ -230,10 +230,13 @@ describe('dispenser', () => {
   it('dispenses valve × MAX_FLOW × how high its fluid stands, per sim second', () => {
     const d = new Tool('dispenser', 0, 0, 0, [0.5]);
     filled(d.tanks[0], R, 2 * CAP, 3);
-    expect(d.level(0)).toBe(0.5);
+    // half full, it stands a little over half as high, measured from the tip of its sump
+    const level = d.level(0);
+    expect(level).toBeGreaterThan(0.5);
+    expect(level).toBeLessThan(0.55);
     const out = d.step(0.1)[0]!;
     // whole molecules, so right to within a few parts per billion
-    expect(out.N / (0.5 * MAX_FLOW * 0.5 * 0.1)).toBeCloseTo(1, 6);
+    expect(out.N / (0.5 * MAX_FLOW * level * 0.1)).toBeCloseTo(1, 6);
     expect(temperature(out)).toBeCloseTo(3, 6);
     expect(d.tanks[0].N).toBeCloseTo(2 * CAP - out.N);
     expect(atomTotal(out) + atomTotal(d.tanks[0])).toBeCloseTo(2 * CAP);
@@ -249,16 +252,26 @@ describe('dispenser', () => {
     expect(d.step(0.1)).toEqual([null]);
   });
 
-  it('slows as it empties, exponentially, so a nearly empty tank trickles', () => {
+  it('measures its fluid from the tip of its sump, so a thin layer across the floor still drains steadily', () => {
+    const d = new Tool('dispenser', 0, 0, 0, [1]);
+    const { sump, tankH = 84 } = d.shape;
+    // a little more than the sump holds: a thin layer across the floor
+    filled(d.tanks[0], R, 0.02 * TANK_CAP, 1);
+    expect(d.level(0)).toBeGreaterThan(sump!.h / (tankH + sump!.h));
+    expect(d.level(0)).toBeLessThan((sump!.h + 3) / (tankH + sump!.h));
+    // down in the narrow sump, it stands far higher for how little there is than it would in a flat tank, so the
+    // last of it still drains quickly, and empties in a finite time
+    d.tanks[0].setMolecules(R, 0.001 * TANK_CAP);
+    expect(d.level(0)).toBeGreaterThan(5 * 0.001);
+  });
+
+  it('empties a full tank fully open in well under a minute, not trickling on', () => {
     const d = new Tool('dispenser', 0, 0, 0, [1]);
     filled(d.tanks[0], R, TANK_CAP, 1);
-    // drained by its own height, the tank empties as e^(−t·MAX_FLOW/TANK_CAP)
-    for (let t = 0; t < 2; t += 0.01) d.step(0.01);
-    expect(d.tanks[0].N / (TANK_CAP * Math.exp((-2 * MAX_FLOW) / TANK_CAP))).toBeCloseTo(1, 2);
-    const flow = (v: Vessel | null) => (v?.N ?? 0) / 0.01;
-    const before = flow(d.step(0.01)[0]);
-    for (let t = 0; t < 4; t += 0.01) d.step(0.01);
-    expect(flow(d.step(0.01)[0]) / before).toBeCloseTo(Math.exp((-4 * MAX_FLOW) / TANK_CAP), 2);
+    let t = 0;
+    for (; d.tanks[0].N > 0 && t < 120; t += 0.02) d.step(0.02);
+    expect(d.tanks[0].N).toBe(0);
+    expect(t).toBeLessThan(30);
   });
 
   it('empties completely in the end, rather than leaving a trace behind', () => {
@@ -621,11 +634,11 @@ describe('separator', () => {
     const x = new Tool('separator', 0, 0, 0, [0.5]);
     filled(x.tanks[0], B, CAP, 3);
     x.tanks[0].setMolecules(Y, CAP);
-    expect(x.level(0)).toBe(0.5);
+    const level = x.level(0);
     const out = x.step(0.1);
     expect(out).toHaveLength(SEPARATOR_OUTLETS);
-    expect(out.reduce((t, v) => t + (v?.N ?? 0), 0) / (0.5 * MAX_FLOW * 0.5 * 0.1)).toBeCloseTo(1, 6);
-    expect(x.flow.reduce((a, b) => a + b, 0)).toBeCloseTo(0.25);
+    expect(out.reduce((t, v) => t + (v?.N ?? 0), 0) / (0.5 * MAX_FLOW * level * 0.1)).toBeCloseTo(1, 6);
+    expect(x.flow.reduce((a, b) => a + b, 0)).toBeCloseTo(0.5 * level);
   });
 });
 

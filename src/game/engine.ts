@@ -13,7 +13,7 @@ import { CENTER, placement, type Placement } from './place';
 import { rumble, type Rumble } from './rumble';
 import { WaterSounds } from './water';
 import {
-  HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, METER_BODY, METER_DIGITS, meterText, HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SHAPES,
+  HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, METER_BODY, METER_DIGITS, SUMP_TIP, meterText, sumpFillHeight, HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SHAPES,
   SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, cupFillHeight, drip, UNIQUE_TOOLS, mouthBelow, scanLevel,
   tankX, type Mouth, type ToolKind,
 } from './tools';
@@ -479,6 +479,10 @@ export class GameEngine {
           const cupW = 2 * sh.cup.w;
           const h = cupFillHeight(share(v), W, H, cupW, sh.cup.h);
           const area = share(v) * (W * H + ((W + cupW) / 2) * sh.cup.h);
+          out.push([v, exposure(h, area / h)]);
+        } else if (sh.sump) {
+          const h = sumpFillHeight(share(v), W, H, sh.sump);
+          const area = share(v) * (W * H + ((sh.sump.w + SUMP_TIP) / 2) * sh.sump.h);
           out.push([v, exposure(h, area / h)]);
         } else {
           const { h, w } = taper(share(v), H, sh.funnel ? FUNNEL_STEM : W, W);
@@ -1610,21 +1614,31 @@ export class GameEngine {
     ctx.stroke(sides);
   }
 
-  /** An open-topped glass tank with a rounded floor, or a funnel narrowing to a stem; `lip` flares its rim. */
+  /**
+   * An open-topped glass tank with a rounded floor, or a funnel narrowing to a stem; `lip` flares its rim. A `sump`
+   * (see ToolShape.sump, in local units) is a narrow point under the floor's middle, which fills first.
+   */
   private drawTank(
     v: Vessel, x0: number, y0: number, x1: number, y1: number, funnel = false, lip = true, showFluid = true,
+    sump?: { w: number; h: number },
   ): void {
     const { ctx, S, theme } = this;
     const r = Math.min(6 * S, (x1 - x0) / 2);
+    const cx = (x0 + x1) / 2;
     const wall = new Path2D();
     wall.moveTo(x0, y0);
     if (funnel) {
-      const cx = (x0 + x1) / 2;
       wall.lineTo(cx - 3 * S, y1);
       wall.lineTo(cx + 3 * S, y1);
     } else {
       wall.lineTo(x0, y1 - r);
       wall.quadraticCurveTo(x0, y1, x0 + r, y1);
+      if (sump) {
+        wall.lineTo(cx - (sump.w / 2) * S, y1);
+        wall.lineTo(cx - (SUMP_TIP / 2) * S, y1 + sump.h * S);
+        wall.lineTo(cx + (SUMP_TIP / 2) * S, y1 + sump.h * S);
+        wall.lineTo(cx + (sump.w / 2) * S, y1);
+      }
       wall.lineTo(x1 - r, y1);
       wall.quadraticCurveTo(x1, y1, x1, y1 - r);
     }
@@ -1634,9 +1648,11 @@ export class GameEngine {
     if (showFluid && v.N > TRACE) {
       ctx.save();
       ctx.clip(inside);
-      const top = y1 - Math.min(1, volume(v) / v.cap) * (y1 - y0);
+      const share = Math.min(1, volume(v) / v.cap);
+      const bottom = y1 + (sump?.h ?? 0) * S;
+      const top = sump ? bottom - sumpFillHeight(share, (x1 - x0) / S, (y1 - y0) / S, sump) * S : y1 - share * (y1 - y0);
       ctx.fillStyle = fluidColor(v);
-      ctx.fillRect(x0, top, x1 - x0, y1 - top + 1);
+      ctx.fillRect(x0, top, x1 - x0, bottom - top + 1);
       ctx.restore();
     }
     ctx.fillStyle = theme.glasshi;
@@ -1705,16 +1721,17 @@ export class GameEngine {
       ctx.restore();
     };
 
-    // drain pipes and spouts, behind the tanks
+    // drain pipes and spouts, behind the tanks, from the bottom of the tanks (and their sumps)
+    const floor = (sh.tankH ?? TANK_H) + (sh.sump?.h ?? 0);
     ctx.fillStyle = theme.pipe;
     if (t.kind === 'exchanger')
       sh.tanks.forEach((tk, k) => {
         // down into the helix at one end, and out of it at the other
-        pipes([[tankX(tk), TANK_H], [tankX(tk), HELIX.y - HELIX.r]], 4);
+        pipes([[tankX(tk), floor], [tankX(tk), HELIX.y - HELIX.r]], 4);
         pipes([[sh.spouts[k], HELIX.y + HELIX.r], [sh.spouts[k], sh.spoutY - 4]], 4);
       });
     else if (t.kind === 'separator') {
-      pipes([[0, TANK_H], [0, SEP_BODY.y0]], 4);
+      pipes([[0, floor], [0, SEP_BODY.y0]], 4);
       for (const x of sh.spouts) pipes([[x, SEP_BODY.y1], [x, sh.spoutY - 4]], 4);
     } else if (t.kind === 'splitter') {
       // the stem down through the valve, then a fork out to the two spouts
@@ -1735,12 +1752,12 @@ export class GameEngine {
       for (const x of sh.spouts.slice(0, -1)) pipes([[x, y + r - 1], [x, sh.spoutY - 4]], 4);
       pipes([[x1 + r - 1, y], [end - 4, y], [end, y + 4], [end, sh.spoutY - 4]], 4);
     } else if (t.kind === 'spectrometer') pipes([[0, sh.tankH!], [0, SPECTROMETER.body.y0]], 4);
-    else pipes([[0, sh.tankH ?? TANK_H], [0, sh.spoutY - 4]], 4);
+    else pipes([[0, floor], [0, sh.spoutY - 4]], 4);
     for (const x of sh.spouts) ctx.fillRect(o.x + (x - 4) * S, o.y + (sh.spoutY - 6) * S, 8 * S, 6 * S);
     t.tanks.forEach((v, k) => {
       const r = this.tankRect(t, k);
       if (sh.cup) this.drawCupFluid(t, k);
-      this.drawTank(v, r.x0, r.y0, r.x1, r.y1, sh.funnel, !sh.cup, !sh.cup);
+      this.drawTank(v, r.x0, r.y0, r.x1, r.y1, sh.funnel, !sh.cup, !sh.cup, sh.sump);
       if (sh.cup) this.drawCup(t, k);
       if (sh.cup) this.drawGraduations(t, k);
       if (t.lidded) {
@@ -2155,17 +2172,21 @@ export class GameEngine {
     ctx.restore();
   }
 
-  /** Ten thin, faint lines across the big tank, one at each tenth of its height, the last at the brim. */
+  /**
+   * Ten thin, faint lines across the big tank, one at each tenth of its capacity as its fluid is drawn (see
+   * sumpFillHeight), the last at the brim.
+   */
   private drawTankGraduations(t: Tool): void {
-    const { ctx, theme } = this;
+    const { ctx, theme, S } = this;
     const r = this.tankRect(t, 0);
+    const sump = t.shape.sump!;
     ctx.save();
     ctx.strokeStyle = theme.glass;
     ctx.globalAlpha = 0.3;
     ctx.lineWidth = 0.6;
     ctx.beginPath();
     for (let i = 1; i <= 10; i++) {
-      const y = r.y1 - (i / 10) * (r.y1 - r.y0);
+      const y = r.y1 + sump.h * S - sumpFillHeight(i / 10, (r.x1 - r.x0) / S, (r.y1 - r.y0) / S, sump) * S;
       ctx.moveTo(r.x0, y);
       ctx.lineTo(r.x1, y);
     }

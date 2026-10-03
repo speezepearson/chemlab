@@ -126,6 +126,23 @@ export function cupFillHeight(share: number, tubeW: number, tubeH: number, mouth
   return tubeH + Math.min(cupH, y);
 }
 
+/** How wide a sump narrows to at its tip, where its valve is, in local units (see ToolShape.sump). */
+export const SUMP_TIP = 4;
+
+/**
+ * How high fluid filling `share` of a `w`-wide, `h`-deep tank with a sump under its floor (see ToolShape.sump) stands
+ * above the sump's tip, in local units. It's measured by area as drawn: the sump fills first, then the tank, so a
+ * full one stands h + sump.h high.
+ */
+export function sumpFillHeight(share: number, w: number, h: number, sump: { w: number; h: number }): number {
+  const sumpArea = ((sump.w + SUMP_TIP) / 2) * sump.h;
+  const a = Math.max(0, Math.min(1, share)) * (w * h + sumpArea);
+  if (a > sumpArea) return sump.h + Math.min(h, (a - sumpArea) / w);
+  // up the sump, the width grows from SUMP_TIP to sump.w, so the area to height y is SUMP_TIP·y + k·y²
+  const k = (sump.w - SUMP_TIP) / (2 * sump.h);
+  return k > 0 ? (Math.sqrt(SUMP_TIP * SUMP_TIP + 4 * k * a) - SUMP_TIP) / (2 * k) : a / SUMP_TIP;
+}
+
 /** How much a spectrometer's sample cup holds, by volume: a thousandth of a flask, 1M. */
 export const SAMPLE_CAP = CAP / 1000;
 /** Sim seconds into a spectrometer run at which each of its three hexagons lights up; the run ends with the last. */
@@ -248,6 +265,13 @@ export interface ToolShape {
    * tank's center, `h` above the tank's top.
    */
   cup?: { w: number; h: number };
+  /**
+   * A narrow point under each tank's flat floor, `w` wide at the floor and `h` deep, narrowing to SUMP_TIP, which its
+   * valve drains from. A valve pours by how high the fluid stands above the tip (see Tool.level), so with a sump the
+   * last of it, down in the narrow point, still drains quickly, rather than a thin layer across the whole floor
+   * trickling out ever more slowly.
+   */
+  sump?: { w: number; h: number };
   /** Whether the tool has no valves to turn. */
   noValve?: boolean;
   /** Where the valves are, if not one under each tank's center at valveY: then there's one valve per entry. */
@@ -276,6 +300,7 @@ export interface ToolShape {
 export const SHAPES: Record<ToolKind, ToolShape> = {
   dispenser: {
     tanks: [{ name: 'tank', x0: -30, x1: 30 }],
+    sump: { w: 14, h: 7 },
     spouts: [0],
     valveY: 98,
     spoutY: 114,
@@ -297,9 +322,10 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
       { name: 'A', x0: -64, x1: -6 },
       { name: 'B', x0: 6, x1: 64 },
     ],
+    sump: { w: 14, h: 7 },
     // the streams cross over in the exchanger, so each leaves on the other side
     spouts: [35, -35],
-    valveY: 94,
+    valveY: 97,
     spoutY: 136,
     box: { x0: -68, x1: 68, y0: -6, y1: 138 },
   },
@@ -308,8 +334,9 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     // one outlet per mix of primary and secondary (see SEPARATOR_OUTLET), far enough apart for a flask, or a
     // tool's tank, under each
     spouts: [-144, -72, 0, 72, 144],
+    sump: { w: 14, h: 7 },
     flippable: true,
-    valveY: 93,
+    valveY: 96,
     spoutY: 126,
     // the manifold under it (see the engine's SEP_BODY), with a handle on its left end
     box: { x0: -160, x1: 154, y0: -6, y1: 128 },
@@ -361,6 +388,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tanks: [{ name: 'reference', x0: -20, x1: 20 }],
     tankH: 70,
     tankCap: REFERENCE_CAP,
+    sump: { w: 12, h: 7 },
     sealed: true,
     maxFlow: 0.02 * MAX_FLOW,
     label: ['cryostabilizer', 'reference'],
@@ -374,10 +402,11 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tanks: [{ name: 'tank', x0: -BIG_TANK_W / 2, x1: BIG_TANK_W / 2 }],
     tankH: BIG_TANK_H,
     tankCap: BIG_TANK_CAP,
+    sump: { w: 30, h: 20 },
     spouts: [0],
-    valveY: BIG_TANK_H + 14,
-    spoutY: BIG_TANK_H + 30,
-    box: { x0: -BIG_TANK_W / 2 - 4, x1: BIG_TANK_W / 2 + 4, y0: -6, y1: BIG_TANK_H + 32 },
+    valveY: BIG_TANK_H + 28,
+    spoutY: BIG_TANK_H + 44,
+    box: { x0: -BIG_TANK_W / 2 - 4, x1: BIG_TANK_W / 2 + 4, y0: -6, y1: BIG_TANK_H + 46 },
   },
   meter: {
     // a funnel draining straight through a cabinet with a display (see METER_BODY) and out a spout
@@ -631,15 +660,17 @@ export class Tool {
 
   /**
    * How high the fluid in tank k stands, as a share of the tank's full height, as it's drawn: in step with how full
-   * it is, except in a tank with a cup on top (see cupFillHeight), whose narrow tube fills first.
+   * it is, except in a tank with a cup on top (see cupFillHeight), whose narrow tube fills first, or a sump below
+   * (see sumpFillHeight), which fills first and is measured from its tip.
    */
   level(k: number): number {
     const v = this.tanks[k];
     const share = Math.min(1, volume(v) / v.cap);
-    const { cup, tanks, tankH = TANK_H } = this.shape;
-    if (!cup) return share;
+    const { cup, sump, tanks, tankH = TANK_H } = this.shape;
     const w = tanks[k].x1 - tanks[k].x0;
-    return cupFillHeight(share, w, tankH, 2 * cup.w, cup.h) / (tankH + cup.h);
+    if (sump) return sumpFillHeight(share, w, tankH, sump) / (tankH + sump.h);
+    if (cup) return cupFillHeight(share, w, tankH, 2 * cup.w, cup.h) / (tankH + cup.h);
+    return share;
   }
 
   /** Whether a spectrometer run is under way, with hexagons still to light. */
