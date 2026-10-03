@@ -46,6 +46,8 @@ export interface SavedTool {
   drops?: SavedVessel[];
   /** A heater's tube, stretch by stretch (see Tool.tube). */
   tube?: SavedVessel[];
+  /** Whether it's flipped left to right (see Tool.flipped). */
+  flipped?: boolean;
   /** A spectrometer's last reading, if it's been run (see spectrum). */
   reading?: number[];
 }

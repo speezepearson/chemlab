@@ -189,6 +189,8 @@ export class GameEngine {
   /** The scale whose tare key is held down, to draw it pressed. */
   private tarePress: Scale | null = null;
   private valveDrag: { tool: Tool; k: number } | null = null;
+  /** The flipped tool drawTool is drawing just now, on a mirrored canvas (see lx); null the rest of the time. */
+  private mirrored: Tool | null = null;
   private hover: Flask | null = null;
   private hoverTool: Tool | null = null;
   private hoverTank: Vessel | null = null;
@@ -310,6 +312,7 @@ export class GameEngine {
       tools: this.tools.map((t) => ({
         kind: t.kind, id: t.id, fx: t.fx, fy: t.fy, valves: [...t.valves], tanks: t.tanks.map(saveVessel), drops: t.drops.map(saveVessel),
         ...(t.tube.length ? { tube: t.tube.map(saveVessel) } : {}),
+        ...(t.flipped ? { flipped: true } : {}),
         ...(t.reading ? { reading: [...t.reading] } : {}),
       })),
       scales: this.scales.map((sc) => ({
@@ -342,6 +345,7 @@ export class GameEngine {
         t.tanks.forEach((v, k) => st.tanks?.[k] && loadVessel(v, st.tanks[k]));
         t.drops.forEach((v, k) => st.drops?.[k] && loadVessel(v, st.drops[k]));
         t.tube.forEach((v, k) => st.tube?.[k] && loadVessel(v, st.tube[k]));
+        t.flipped = !!st.flipped && !!t.shape.flippable;
         if (Array.isArray(st.reading) && st.reading.length === 18) t.reading = st.reading.map((x) => Math.max(0, Number(x) || 0));
         return t;
       });
@@ -688,7 +692,22 @@ export class GameEngine {
   /** A point in a tool's local units, in stage coordinates. */
   private onTool(t: Tool, p: Point): Point {
     const o = this.toolXY(t);
-    return { x: o.x + p.x * this.S, y: o.y + p.y * this.S };
+    return { x: o.x + this.lx(t, p.x) * this.S, y: o.y + p.y * this.S };
+  }
+
+  /**
+   * A local x on a tool as it stands: negated if it's flipped. While drawTool draws a flipped tool, the canvas
+   * itself is mirrored, so then it's left as is.
+   */
+  private lx(t: Tool, x: number): number {
+    return t.flipped && this.mirrored !== t ? -x : x;
+  }
+
+  /** A span of local x on a tool as it stands, left to right (see lx). */
+  private spanOn(t: Tool, x0: number, x1: number): [number, number] {
+    const a = this.lx(t, x0);
+    const b = this.lx(t, x1);
+    return a < b ? [a, b] : [b, a];
   }
 
   /** The tip of spout j, where fluid leaves the tool, in stage coordinates. */
@@ -698,9 +717,10 @@ export class GameEngine {
 
   /** Whether p is inside a rectangle given in a tool's local units. */
   private inToolRect(t: Tool, p: Point, r: { x0: number; x1: number; y0: number; y1: number }): boolean {
-    const a = this.onTool(t, { x: r.x0, y: r.y0 });
-    const b = this.onTool(t, { x: r.x1, y: r.y1 });
-    return p.x > a.x && p.x < b.x && p.y > a.y && p.y < b.y;
+    const o = this.toolXY(t);
+    const [x0, x1] = this.spanOn(t, r.x0, r.x1);
+    const { S } = this;
+    return p.x > o.x + x0 * S && p.x < o.x + x1 * S && p.y > o.y + r.y0 * S && p.y < o.y + r.y1 * S;
   }
 
   /** Where valve k is: as the shape places it, or under tank k. */
@@ -746,8 +766,24 @@ export class GameEngine {
   private tankRect(t: Tool, k: number): { x0: number; x1: number; y0: number; y1: number } {
     const o = this.toolXY(t);
     const { S } = this;
-    const tk = t.shape.tanks[k];
-    return { x0: o.x + tk.x0 * S, x1: o.x + tk.x1 * S, y0: o.y, y1: o.y + (t.shape.tankH ?? TANK_H) * S };
+    const [x0, x1] = this.spanOn(t, t.shape.tanks[k].x0, t.shape.tanks[k].x1);
+    return { x0: o.x + x0 * S, x1: o.x + x1 * S, y0: o.y, y1: o.y + (t.shape.tankH ?? TANK_H) * S };
+  }
+
+  /**
+   * Flip a tool left to right (see Tool.flipped), about the middle of its box, so it stays where it is. Does
+   * nothing, returning false, if its shape isn't flippable.
+   */
+  private flip(t: Tool): boolean {
+    if (!t.shape.flippable) return false;
+    const b = t.shape.box;
+    // the box's middle is at c now and will be at −c, so move the tool 2c to keep it put
+    const shift = 2 * this.lx(t, (b.x0 + b.x1) / 2) * this.S;
+    t.flipped = !t.flipped;
+    t.fx += shift / HOME_W;
+    if (this.toolDrag?.tool === t) this.toolDrag.off.x -= shift;
+    this.updateHover();
+    return true;
   }
 
   /** Move a tool, keeping it above the sink. */
@@ -997,6 +1033,15 @@ export class GameEngine {
       this.pointer = { x: -1, y: -1 };
       this.updateHover();
     });
+    // F flips the tool being carried, or else the one under the pointer
+    onWindow('keydown', (e) => {
+      if (e.key !== 'f' && e.key !== 'F') return;
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+      const el = e.target;
+      if (el instanceof HTMLElement && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return;
+      const t = this.toolDrag?.tool ?? this.hoverTool;
+      if (t && this.flip(t)) e.preventDefault();
+    });
     on('contextmenu', (e) => e.preventDefault());
     // the right button pours while carrying, which shouldn't open a menu wherever it's clicked
     onWindow('contextmenu', (e) => {
@@ -1067,9 +1112,10 @@ export class GameEngine {
       const t = this.tools[i];
       const o = this.toolXY(t);
       const b = t.shape.box;
+      const [bx0, bx1] = this.spanOn(t, b.x0, b.x1);
       // the box holds everything but valve levers, which reach a little past it
       const m = 15 * S;
-      const inBox = p.x > o.x + b.x0 * S - m && p.x < o.x + b.x1 * S + m && p.y > o.y + b.y0 * S - m && p.y < o.y + b.y1 * S + m;
+      const inBox = p.x > o.x + bx0 * S - m && p.x < o.x + bx1 * S + m && p.y > o.y + b.y0 * S - m && p.y < o.y + b.y1 * S + m;
       if (inBox && this.drawnAt(p, () => this.drawTool(t))) return t;
     }
     return null;
@@ -1607,7 +1653,41 @@ export class GameEngine {
     ctx.stroke();
   }
 
+  /**
+   * Draw a tool, mirrored about its center line if it's flipped: the canvas is mirrored while it's drawn, so the
+   * drawing code needn't know, except to keep valves and writing the right way round (see upright).
+   */
   private drawTool(t: Tool): void {
+    if (!t.flipped) return this.drawToolAsIs(t);
+    const { ctx } = this;
+    const o = this.toolXY(t);
+    ctx.save();
+    ctx.translate(2 * o.x, 0);
+    ctx.scale(-1, 1);
+    this.mirrored = t;
+    try {
+      this.drawToolAsIs(t);
+    } finally {
+      this.mirrored = null;
+      ctx.restore();
+    }
+  }
+
+  /** Draw something at x the right way round, even on a flipped tool (see drawTool): a valve, or writing. */
+  private upright(x: number, draw: () => void): void {
+    if (!this.mirrored) return draw();
+    const { ctx } = this;
+    ctx.save();
+    ctx.translate(2 * x, 0);
+    ctx.scale(-1, 1);
+    try {
+      draw();
+    } finally {
+      ctx.restore();
+    }
+  }
+
+  private drawToolAsIs(t: Tool): void {
     const { ctx, S, theme } = this;
     const o = this.toolXY(t);
     const sh = t.shape;
@@ -1683,7 +1763,7 @@ export class GameEngine {
       ctx.fillStyle = theme.muted;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'alphabetic';
-      ctx.fillText(v.label, at.x, at.y);
+      this.upright(at.x, () => ctx.fillText(v.label, at.x, at.y));
     });
     if (t.kind === 'exchanger') this.drawHelix(t);
     if (t.kind === 'sorter') this.drawChute(t);
@@ -1704,9 +1784,18 @@ export class GameEngine {
       ctx.moveTo(o.x, o.y + (y0 + 5) * S);
       ctx.lineTo(o.x, o.y + y1 * S);
       ctx.stroke();
+      // a handle on its left end, so it doesn't look the same flipped (it says nothing about which side gets what)
+      ctx.lineWidth = 2.5 * S;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(o.x + x0 * S, o.y + (y0 + 3) * S);
+      ctx.lineTo(o.x + (x0 - 6) * S, o.y + (y0 + 3) * S);
+      ctx.lineTo(o.x + (x0 - 6) * S, o.y + (y1 - 3) * S);
+      ctx.lineTo(o.x + x0 * S, o.y + (y1 - 3) * S);
+      ctx.stroke();
     }
 
-    if (!sh.noValve) t.valves.forEach((_, k) => {
+    if (!sh.noValve) t.valves.forEach((_, k) => this.upright(this.valveAt(t, k).x, () => {
       if (k === sh.dial) return this.drawDial(t, k);
       // valve: the lever points right when closed and up when open, toward where the pointer turned it;
       // a splitter's points toward the side that gets more, straight up for an even split
@@ -1726,7 +1815,7 @@ export class GameEngine {
       ctx.arc(vc.x, vc.y, 5 * S, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-    });
+    }));
 
     ctx.fillStyle = theme.muted;
     if (t.tanks.length > 1) {

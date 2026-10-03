@@ -80,12 +80,15 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
 - **`drawTool` is also the hit test.** `hitTool` draws a tool into a few offscreen pixels around the pointer (see
   `drawnAt`) and counts it as hit if anything lands there. So `drawTool` and its helpers must draw through `this.ctx`
   (never a canvas captured elsewhere), never set an absolute transform, and change no state.
+- **Flipped tools** are drawn on a mirrored canvas, so drawing code works in unflipped local units, and the geometry
+  helpers (`onTool`, `tankRect`, `inToolRect`, via `lx`) mirror only outside drawing. Valves and writing must go
+  through `upright()` so they read the same either way.
 - **Adding a tool kind** touches all of these:
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - A `drawTool` branch in `engine.ts`.
   - `ICONS` and `ITEMS` in `Palette.tsx`, unless the tool is unique.
   - Tests and the README.
-  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `noValve`, `valves`, `dial`, `sealed`, `maxFlow`, `label`.
+  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `noValve`, `valves`, `dial`, `flippable`, `sealed`, `maxFlow`, `label`.
 - **Unique tools** (`UNIQUE_TOOLS`: the spectrometer, the cryostabilizer reference and the flow meter) aren't in the
   palette and can't be put away. `uniqueTools()` keeps at most one of each and always adds a spectrometer and a meter.
 - **Saves** stay at format v1. New fields are optional and the loaders tolerate their absence. Species are stored by

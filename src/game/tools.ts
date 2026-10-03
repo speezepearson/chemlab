@@ -232,6 +232,11 @@ export interface ToolShape {
   valves?: Point[];
   /** Which valve, if any, is a dial instead: it turns clockwise from down-left (0) to down-right (1). */
   dial?: number;
+  /**
+   * Whether it can be flipped left to right (see Tool.flipped). Only tools that work differently flipped can be;
+   * one that's its own mirror image, in what it does if not in every detail, can't.
+   */
+  flippable?: boolean;
   /** Whether the tanks are sealed on top, so nothing can be poured or fall into them. */
   sealed?: boolean;
   /** Spout flow with a valve fully open and the tank full, in atoms per sim second, if not MAX_FLOW. */
@@ -280,6 +285,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tanks: [{ name: 'tank', x0: -30, x1: 30 }],
     // far enough apart for a flask, or a tool's tank, under each
     spouts: [-36, 36],
+    flippable: true,
     valveY: 93,
     spoutY: 126,
     box: { x0: -44, x1: 44, y0: -6, y1: 128 },
@@ -302,6 +308,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tankCap: FUNNEL_CAP,
     funnel: true,
     noValve: true,
+    flippable: true,
     // as far apart as the separator's
     spouts: [-24, 48, 120],
     valveY: 30,
@@ -318,6 +325,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     funnel: true,
     valves: [...HEATER_TAPS.map((c) => ({ x: heaterCellX(c), y: 72 })), { x: 120, y: 20 }],
     dial: HEATER_TAPS.length,
+    flippable: true,
     // as far apart as the separator's, with the end a little further on
     spouts: [...HEATER_TAPS.map(heaterCellX), 158],
     valveY: 72,
@@ -466,6 +474,11 @@ export class Tool {
   scanAge = Infinity;
   /** A meter's reading: what's flowed out of it, by volume per sim second, averaged over about METER.tau. */
   rate = 0;
+  /**
+   * Whether it's flipped left to right, if its shape is flippable: everything about it is mirrored (its local x
+   * negated) except its valves' levers and any writing, which read the same either way.
+   */
+  flipped = false;
 
   constructor(
     readonly kind: ToolKind,
