@@ -111,8 +111,8 @@ const MAX_ZOOM = 4;
 const MIN_ZOOM = 0.05;
 /** How much a pixel of scroll zooms: the zoom is multiplied by e^(−this·Δy). */
 const ZOOM_PER_PX = 0.0015;
-/** The separator's splitter, below its valve, in local units. */
-const SEP_BODY = { x0: -42, x1: 42, y0: 100, y1: 112 };
+/** The separator's manifold, below its valve, spanning its five spouts, in local units. */
+const SEP_BODY = { x0: -150, x1: 150, y0: 100, y1: 112 };
 /** How far a spectrometer shakes at the height of its run, in world units. */
 const SHAKE = 2.5;
 /** A CRT's phosphor green. */
@@ -1772,7 +1772,7 @@ export class GameEngine {
     if (t.kind === 'meter') this.drawMeter(t);
     if (t.kind === 'tank') this.drawTankGraduations(t);
     if (t.kind === 'separator') {
-      // the splitter: one pipe in, two out, with a divider between the outlets
+      // the manifold: one pipe in, five out, with a divider between each two outlets
       const { x0, x1, y0, y1 } = SEP_BODY;
       ctx.fillStyle = theme.bench;
       ctx.strokeStyle = theme.pipe;
@@ -1782,8 +1782,11 @@ export class GameEngine {
       ctx.fill();
       ctx.stroke();
       ctx.beginPath();
-      ctx.moveTo(o.x, o.y + (y0 + 5) * S);
-      ctx.lineTo(o.x, o.y + y1 * S);
+      for (let k = 1; k < sh.spouts.length; k++) {
+        const x = (sh.spouts[k - 1] + sh.spouts[k]) / 2;
+        ctx.moveTo(o.x + x * S, o.y + (y0 + 5) * S);
+        ctx.lineTo(o.x + x * S, o.y + y1 * S);
+      }
       ctx.stroke();
       // a handle on its left end, so it doesn't look the same flipped (it says nothing about which side gets what)
       ctx.lineWidth = 2.5 * S;

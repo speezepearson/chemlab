@@ -6,7 +6,10 @@ import { SPECIES, TARGET } from '../chem/species';
 import { VOLUME } from '../game/flask';
 import { CAP } from '../game/config';
 import { COOLING, restoreDefaultCooling } from '../game/cooling';
-import { DRIP, HEATER, METER, restoreDefaultDrip, restoreDefaultHeater, restoreDefaultMeter } from '../game/tools';
+import {
+  DRIP, HEATER, METER, SEPARATOR, restoreDefaultDrip, restoreDefaultHeater, restoreDefaultMeter, restoreDefaultSeparator,
+  separatorShares,
+} from '../game/tools';
 import { DragNumber } from './DragNumber';
 import { RandomizerControls } from './RandomizerControls';
 
@@ -135,6 +138,31 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
             <NumberRow label="ambient T" min={0} value={COOLING.ambient} onChange={(v) => edit(() => (COOLING.ambient = v))} />
             <tr className="group">
               <td colSpan={4}>
+                <b>Separator</b> <span>a molecule goes to outlet j ∝ e^(−sharpness·(j − its own)²)</span>
+              </td>
+            </tr>
+            <tr>
+              <td colSpan={4}>
+                <label className="slider" title="0 splits everything evenly five ways; higher sorts more cleanly">
+                  <span>sharpness</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={10}
+                    step={0.1}
+                    value={SEPARATOR.sharpness}
+                    onChange={(e) => edit(() => (SEPARATOR.sharpness = +e.target.value))}
+                  />
+                  <output>{SEPARATOR.sharpness.toFixed(1)}</output>
+                </label>
+                <span>
+                  {' '}
+                  middle outlets keep {(100 * separatorShares()[2][2]).toFixed(0)}%, ends {(100 * separatorShares()[0][0]).toFixed(0)}%
+                </span>
+              </td>
+            </tr>
+            <tr className="group">
+              <td colSpan={4}>
                 <b>Flow meter</b> <span>its reading closes 1 − e^(−t/τ) of the gap to a new flow in t seconds</span>
               </td>
             </tr>
@@ -157,6 +185,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
                 restoreDefaultHeater();
                 restoreDefaultCooling();
                 restoreDefaultMeter();
+                restoreDefaultSeparator();
               })
             }
           >

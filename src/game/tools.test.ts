@@ -6,7 +6,7 @@ import { Vessel, roomFor, volume } from './flask';
 import { FLASK_OUTLINE, areaBelow } from './flaskShape';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PIPETTE_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
-  REFERENCE_CAP, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
+  REFERENCE_CAP, SEPARATOR, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -528,34 +528,78 @@ describe('mouthBelow', () => {
 describe('separator', () => {
   const B = singleOf('B');
   const Y = singleOf('Y');
+  const C = singleOf('C');
   const tri = (name: string) => SPECIES.find((s) => s.name === name)!.i;
+  const pair = (name: string) => SPECIES.find((s) => s.name === name)!.i;
+  const withSharpness = (k: number, fn: () => void) => {
+    const before = SEPARATOR.sharpness;
+    SEPARATOR.sharpness = k;
+    try {
+      fn();
+    } finally {
+      SEPARATOR.sharpness = before;
+    }
+  };
 
-  it('splits each species left : right as e^primaries : e^secondaries', () => {
-    const f = new Vessel(Infinity);
-    for (const s of [R, singleOf('C'), tri('△RGB'), tri('△RGY'), tri('R–M–B')]) f.n[s] = CAP;
-    f.N = atomTotal(f);
-    const [l, r] = separate(f);
-    expect(l.n[R] / r.n[R]).toBeCloseTo(Math.E);
-    expect(l.n[singleOf('C')] / r.n[singleOf('C')]).toBeCloseTo(1 / Math.E);
-    expect(l.n[tri('△RGB')] / r.n[tri('△RGB')]).toBeCloseTo(Math.exp(3));
-    expect(l.n[tri('△RGY')] / r.n[tri('△RGY')]).toBeCloseTo(Math.exp(2 - 1));
-    expect(l.n[tri('R–M–B')] / r.n[tri('R–M–B')]).toBeCloseTo(Math.exp(2 - 1));
-    expect(l.N + r.N).toBeCloseTo(f.N);
-    expect(l.N).toBeCloseTo(atomTotal(l));
+  it('gives each molecule its own outlet by its share of primary atoms: all, ⅔, ½, ⅓, none', () => {
+    expect(SEPARATOR_OUTLET[R]).toBe(0);
+    expect(SEPARATOR_OUTLET[tri('△RGB')]).toBe(0);
+    expect(SEPARATOR_OUTLET[pair('R–G')]).toBe(0);
+    expect(SEPARATOR_OUTLET[tri('△RGY')]).toBe(1);
+    expect(SEPARATOR_OUTLET[pair('R–Y')]).toBe(2);
+    expect(SEPARATOR_OUTLET[tri('△RMY')]).toBe(3);
+    expect(SEPARATOR_OUTLET[C]).toBe(4);
+    expect(SEPARATOR_OUTLET[pair('C–M')]).toBe(4);
   });
 
-  it('drains its tank at the valve rate times its level, out of both spouts, keeping the temperature', () => {
+  it('sends most of each molecule out its own outlet, the rest mostly next door, and more so the sharper it is', () => {
+    const f = new Vessel(Infinity);
+    for (const sp of [R, tri('△RGY'), pair('R–Y'), tri('△RMY'), C]) f.n[sp] = CAP;
+    f.N = atomTotal(f);
+    let last = 0;
+    for (const k of [1, 3, 6]) {
+      withSharpness(k, () => {
+        const out = separate(f);
+        expect(out).toHaveLength(SEPARATOR_OUTLETS);
+        const ownShare = out[2].n[pair('R–Y')] / CAP;
+        expect(ownShare).toBeGreaterThan(last);
+        last = ownShare;
+        [R, tri('△RGY'), pair('R–Y'), tri('△RMY'), C].forEach((sp, own) => {
+          const shares = out.map((v) => v.n[sp] / CAP);
+          expect(Math.max(...shares)).toBe(shares[own]);
+          for (let j = 0; j < SEPARATOR_OUTLETS; j++)
+            if (Math.abs(j - own) > 1) expect(shares[j]).toBeLessThan(shares[own - Math.sign(own - j)] + 1e-9);
+          expect(shares.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 12);
+        });
+      });
+    }
+  });
+
+  it('splits everything evenly five ways at sharpness 0', () => {
+    withSharpness(0, () => {
+      const f = filled(new Vessel(Infinity), R, CAP, 1);
+      for (const v of separate(f)) expect(v.n[R] / CAP).toBeCloseTo(1 / SEPARATOR_OUTLETS, 4);
+    });
+  });
+
+  it('conserves molecules and heat, which goes with the atoms', () => {
+    const f = filled(new Vessel(Infinity), R, CAP, 3);
+    f.setMolecules(Y, CAP / 3);
+    const out = separate(f);
+    expect(out.reduce((t, v) => t + v.N, 0)).toBe(f.N);
+    expect(out.reduce((t, v) => t + v.Q, 0)).toBe(f.Q);
+    for (const v of out) if (v.N > 1e6) expect(temperature(v)).toBeCloseTo(temperature(f), 3);
+  });
+
+  it('drains its tank at the valve rate times its level, out of all five spouts', () => {
     const x = new Tool('separator', 0, 0, 0, [0.5]);
     filled(x.tanks[0], B, CAP, 3);
     x.tanks[0].setMolecules(Y, CAP);
     expect(x.level(0)).toBe(0.5);
-    const [l, r] = x.step(0.1);
-    expect((l!.N + r!.N) / (0.5 * MAX_FLOW * 0.5 * 0.1)).toBeCloseTo(1, 6);
-    expect(temperature(l!)).toBe(3);
-    // B leaves left e : 1, Y leaves left 1 : e, so from equal amounts the left outlet is e : 1 B to Y
-    expect(l!.n[B] / l!.n[Y]).toBeCloseTo(Math.E);
-    expect(r!.n[Y] / r!.n[B]).toBeCloseTo(Math.E);
-    expect(x.flow[0] + x.flow[1]).toBeCloseTo(0.25);
+    const out = x.step(0.1);
+    expect(out).toHaveLength(SEPARATOR_OUTLETS);
+    expect(out.reduce((t, v) => t + (v?.N ?? 0), 0) / (0.5 * MAX_FLOW * 0.5 * 0.1)).toBeCloseTo(1, 6);
+    expect(x.flow.reduce((a, b) => a + b, 0)).toBeCloseTo(0.25);
   });
 });
 

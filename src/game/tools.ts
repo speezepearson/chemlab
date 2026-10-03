@@ -295,12 +295,14 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   },
   separator: {
     tanks: [{ name: 'tank', x0: -30, x1: 30 }],
-    // far enough apart for a flask, or a tool's tank, under each
-    spouts: [-36, 36],
+    // one outlet per mix of primary and secondary (see SEPARATOR_OUTLET), far enough apart for a flask, or a
+    // tool's tank, under each
+    spouts: [-144, -72, 0, 72, 144],
     flippable: true,
     valveY: 93,
     spoutY: 126,
-    box: { x0: -44, x1: 44, y0: -6, y1: 128 },
+    // the manifold under it (see the engine's SEP_BODY), with a handle on its left end
+    box: { x0: -160, x1: 154, y0: -6, y1: 128 },
   },
   splitter: {
     tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
@@ -436,14 +438,48 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
 };
 
 /**
- * The separator splits each species between its outlets by color: a molecule
- * with p primary atoms (R, G, B) and s secondary ones (C, M, Y) leaves
- * left : right in the ratio e^p : e^s. LEFT_SHARE[species] is its left fraction.
+ * How sharply the separator sorts, editable from the Chemistry panel: each molecule goes to outlet j in proportion
+ * to e^(−sharpness·(j − its own outlet)²) (see SEPARATOR_OUTLET). At 0 everything splits evenly five ways; by
+ * default (3) a molecule goes 91% to its own outlet if it's one of the middle three, 95% if it's at an end, and the
+ * rest mostly to the next outlet over.
  */
-export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
+export const SEPARATOR = { sharpness: 3 };
+const DEFAULT_SEPARATOR = { ...SEPARATOR };
+
+export function restoreDefaultSeparator(): void {
+  Object.assign(SEPARATOR, DEFAULT_SEPARATOR);
+}
+
+/** How many outlets the separator has, one per mix of primary and secondary atoms a molecule can have. */
+export const SEPARATOR_OUTLETS = 5;
+
+/**
+ * Each species' own outlet on the separator, left to right, by the share of its atoms that are primary (R, G, B):
+ * all of them (0), two in three (1), half (2), one in three (3), none (4).
+ */
+export const SEPARATOR_OUTLET: Uint8Array = Uint8Array.from(SPECIES, (sp) => {
   const p = sp.atoms.filter((a) => a && GROUP_PRIMARY.includes(a)).length;
-  return Math.exp(p) / (Math.exp(p) + Math.exp(sp.size - p));
+  if (p === sp.size) return 0;
+  if (p === 0) return 4;
+  if (2 * p === sp.size) return 2;
+  return 3 * p === 2 * sp.size ? 1 : 3;
 });
+
+let shareCache = { sharpness: NaN, shares: [] as number[][] };
+
+/** For each of its own outlets, the shares a molecule sends to each outlet, at the current SEPARATOR.sharpness. */
+export function separatorShares(): number[][] {
+  const k = SEPARATOR.sharpness;
+  if (shareCache.sharpness !== k) {
+    const shares = Array.from({ length: SEPARATOR_OUTLETS }, (_, own) => {
+      const w = Array.from({ length: SEPARATOR_OUTLETS }, (_, j) => Math.exp(-k * (j - own) ** 2));
+      const total = w.reduce((a, b) => a + b, 0);
+      return w.map((x) => x / total);
+    });
+    shareCache = { sharpness: k, shares };
+  }
+  return shareCache.shares;
+}
 
 /**
  * Something with tanks on top, each draining through its own valve, and
@@ -453,8 +489,8 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
  *   through a little funnel on top, that lets out PIPETTE_FLOW full and fully open.
  * - A **heat exchanger** has two tanks, whose streams pass each other in
  *   counterflow on the way to their spouts, trading heat but never mixing.
- * - A **separator** has one tank and two spouts, and splits what drains
- *   between them by color (see LEFT_SHARE).
+ * - A **separator** has one tank and five spouts, and sorts what drains
+ *   among them by its mix of primary and secondary colors (see separate).
  * - A **splitter** has a small funnel that drains straight through (at
  *   FUNNEL_RATE) to two spouts. Its valve doesn't open or close: it sets the
  *   share that goes right, from 0 (all left) to 1 (all right).
@@ -647,9 +683,35 @@ export function sieve(f: Vessel): Vessel[] {
   return [...out, rest];
 }
 
-/** Split a fluid between the separator's left and right outlets by LEFT_SHARE, in whole molecules, heat in proportion. */
-export function separate(f: Fluid): [Vessel, Vessel] {
-  return divide(f, (s) => LEFT_SHARE[s]);
+/** Split a fluid among the separator's outlets, left to right (see separatorShares), in whole molecules, heat in proportion. */
+export function separate(f: Fluid): Vessel[] {
+  const shares = separatorShares();
+  return split(f, SEPARATOR_OUTLETS, (s) => shares[SEPARATOR_OUTLET[s]]);
+}
+
+/**
+ * Split a fluid `n` ways, sending `shares(s)[j]` of species s to the j-th, in whole molecules (the last takes
+ * whatever rounding leaves), with heat in proportion to atoms.
+ */
+export function split(f: Fluid, n: number, shares: (s: number) => readonly number[]): Vessel[] {
+  const out = Array.from({ length: n }, () => new Vessel(Infinity));
+  for (let s = 0; s < NS; s++) {
+    if (!f.n[s]) continue;
+    const sh = shares(s);
+    let left = f.n[s];
+    for (let j = 0; j < n; j++) {
+      const m = j === n - 1 ? left : Math.min(left, roundRandom(f.n[s] * sh[j]));
+      left -= m;
+      out[j].n[s] += m;
+      out[j].N += m * SPECIES[s].size;
+    }
+  }
+  let Q = f.Q;
+  for (let j = 0; j < n; j++) {
+    out[j].Q = j === n - 1 ? Q : f.N > 0 ? Math.min(Q, roundRandom((f.Q * out[j].N) / f.N)) : 0;
+    Q -= out[j].Q;
+  }
+  return out;
 }
 
 /** Split a fluid into left and right, sending `leftShare(s)` of species s left, in whole molecules, heat in proportion. */

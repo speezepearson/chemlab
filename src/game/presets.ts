@@ -96,10 +96,11 @@ export const WASH_PRESET: Preset = {
   id: 'wash',
   name: 'Wash route (sandbox)',
   description:
-    'Midway through the intended route, to tinker with: the separator holds △RGY (from ½ flask of nearly even R ' +
-    'and G and 1½ of 2 : 1 C and Y, settled at T = 1) plus 1½ flasks of blue, heated to T = 12. Its left spout is ' +
-    'hosed back into its own tank, so each pass strips out yellow, and hot blue drips in from the tank above. ' +
-    'Whatever goes right collects in the catch tank below. Picking this preset also restores the default chemistry.',
+    'A sandbox to tinker with: the separator holds △RGY (from ½ flask of nearly even R and G and 1½ of 2 : 1 C ' +
+    'and Y, settled at T = 1) plus 1½ flasks of blue, heated to T = 12. Its two left spouts (all primary, and two ' +
+    'in three primary) are hosed back into its own tank, and hot blue drips in from the tank above. Whatever goes ' +
+    'out the far right spout (all secondary) collects in the catch tank below. Picking this preset also restores ' +
+    'the default chemistry.',
   flasks: [],
   tools: [
     {
@@ -110,10 +111,13 @@ export const WASH_PRESET: Preset = {
       kind: 'dispenser', at: [WASH_AT[0], 0.14], valves: [0.003],
       tanks: [{ contents: [atomsOf(singleOf('B'), 4 * CAP)], T: WASH_T }],
     },
-    // under the separator's right spout, 36 local units right of its center
-    { kind: 'dispenser', at: [WASH_AT[0] + 36 / HOME_W, WASH_AT[1] + 0.25] },
+    // under the separator's far right spout, 144 local units right of its center
+    { kind: 'dispenser', at: [WASH_AT[0] + 144 / HOME_W, WASH_AT[1] + 0.25] },
   ],
-  hoses: [{ from: { tool: 0, spout: 0 }, to: { tool: 0, dx: -20 } }],
+  hoses: [
+    { from: { tool: 0, spout: 0 }, to: { tool: 0, dx: -20 } },
+    { from: { tool: 0, spout: 1 }, to: { tool: 0, dx: -6 } },
+  ],
   defaultChem: true,
 };
 
@@ -129,8 +133,8 @@ export const PRESETS: readonly Preset[] = [
     tools: [
       // over the fourth flask, so opening its valve drips into it
       { kind: 'reference', at: [0.44, 0.55], tanks: [{ contents: [{ species: TARGET, molecules: REFERENCE_CAP }], T: T_ROOM }] },
-      { kind: 'separator', at: [0.1, 0.3] },
-      { kind: 'dispenser', at: [0.3, 0.3] },
+      { kind: 'separator', at: [0.2, 0.3] },
+      { kind: 'dispenser', at: [0.47, 0.3] },
       { kind: 'exchanger', at: [0.62, 0.3] },
     ],
     scales: [[0.86, 0.62]],
@@ -152,16 +156,17 @@ export const PRESETS: readonly Preset[] = [
     id: 'separator',
     name: 'Separator demo',
     description:
-      'A separator splits red and cyan into two dispensers below: each molecule leaves left : right as ' +
-      'e^(primary atoms) : e^(secondary atoms). Pour a result back through for a purer cut.',
+      'A separator sorts red from cyan: each molecule goes mostly out the spout for its mix of primary and ' +
+      'secondary atoms, all primary at the far left and all secondary at the far right, with a little to the ' +
+      'spouts beside it. The dispensers below catch the two ends. Pour a result back through for a purer cut.',
     flasks: [],
     tools: [
       {
         kind: 'separator', at: [0.3, 0.2], valves: [0.3],
         tanks: [{ contents: [atomsOf(singleOf('R'), 2 * CAP), atomsOf(singleOf('C'), 2 * CAP)], T: T_ROOM }],
       },
-      { kind: 'dispenser', at: [0.3 - 0.047, 0.5] },
-      { kind: 'dispenser', at: [0.3 + 0.047, 0.5] },
+      { kind: 'dispenser', at: [0.3 - 0.144, 0.5] },
+      { kind: 'dispenser', at: [0.3 + 0.144, 0.5] },
     ],
   },
   WASH_PRESET,

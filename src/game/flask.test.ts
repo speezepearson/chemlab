@@ -67,10 +67,10 @@ describe('whole numbers', () => {
     expect(a.Q + b.Q).toBe(Q0);
     expect(atomTotal(a) + atomTotal(b)).toBe(N0);
 
-    const [l, r] = separate(b);
-    expect(whole(l) && whole(r)).toBe(true);
-    expect(l.N + r.N).toBe(b.N);
-    expect(l.Q + r.Q).toBe(b.Q);
+    const parts = separate(b);
+    expect(parts.every(whole)).toBe(true);
+    expect(parts.reduce((t, v) => t + v.N, 0)).toBe(b.N);
+    expect(parts.reduce((t, v) => t + v.Q, 0)).toBe(b.Q);
   });
 
   it('round setMolecules to a whole count', () => {
