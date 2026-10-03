@@ -1,6 +1,6 @@
 import { temperature, type Fluid, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
-import { CAP, FILL_RATE, GOAL_ATOMS, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
+import { CAP, FILL_RATE, GOAL_VOLUME, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { FAUCETS, faucetOutput, faucetTarget, type Faucet } from './faucets';
 import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
 import { FLASK_OUTLINE, FLASK_PATH_DATA, areaBelow, fillLevel, tiltedOutline } from './flaskShape';
@@ -42,7 +42,7 @@ export interface Inspection {
 }
 
 export interface EngineCallbacks {
-  /** The receptacle has taken GOAL_ATOMS of the target. */
+  /** The receptacle has taken GOAL_VOLUME of the target. */
   onWin(): void;
   /** Throttled to ~10 Hz; null when nothing is inspected. */
   onInspect(info: Inspection | null): void;
@@ -212,7 +212,7 @@ export class GameEngine {
   private rumbles = new Map<Tool, Rumble>();
   /** Each receptacle's sounds, through its cycle (see Tool.press). */
   private beepers = new Map<Tool, Beeper>();
-  /** Target atoms the receptacle has taken, all told: what counts toward the goal. */
+  /** The target the receptacle has taken, all told, by volume: what counts toward the goal. */
   private delivered = 0;
   private water = new WaterSounds();
   /** This frame's streams, for their sound: how much ran into each vessel, by volume. */
@@ -1429,7 +1429,7 @@ export class GameEngine {
       this.delivered += t.flushed;
       t.flushed = 0;
     }
-    if (this.delivered >= GOAL_ATOMS && !this.won) {
+    if (this.delivered >= GOAL_VOLUME && !this.won) {
       this.won = true;
       this.cb.onWin();
     }

@@ -143,8 +143,11 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
   return k > 0 ? (Math.sqrt(SUMP_TIP * SUMP_TIP + 4 * k * a) - SUMP_TIP) / (2 * k) : a / SUMP_TIP;
 }
 
-/** How much the receptacle holds, by volume: twenty flasks. */
-export const RECEPTACLE_CAP = 20 * CAP;
+/**
+ * How much the receptacle holds, by volume: a little over twice the cryostabilizer reference, so the reference
+ * alone can't fill it, and one good load of it is enough to win (see GOAL_VOLUME).
+ */
+export const RECEPTACLE_CAP = 210 * CAP;
 /**
  * A receptacle's cycle, in sim seconds: it thinks, beeping and blinking, then flushes what it took down its hose, or
  * pours out what it refused through its reject valve, evenly over the time given.
@@ -602,7 +605,7 @@ export function separatorShares(): number[][] {
  *   0.02 flask/s.
  * - A **tank** is a dispenser holding a hundred flasks, drawn as big as a hundred flasks, with ten faint
  *   graduations across it.
- * - A **receptacle** is where cryostabilizer goes: a big vessel, which stays put, with a button. Pressing it (see
+ * - A **receptacle** is where cryostabilizer goes: a vessel of RECEPTACLE_CAP, which stays put, with a button. Pressing it (see
  *   press) lids the vessel and thinks for a moment, beeping; then, if what's inside is more than GOAL_PURITY target,
  *   it flushes it down its hose, counting toward the goal, and otherwise pours it out its one spout.
  * - A **flow meter** has a funnel like the splitter's, with no valve, draining straight through to one spout, and
@@ -642,7 +645,7 @@ export class Tool {
   beeps: Beep[] = [];
   /** A receptacle's last verdict, shown on its lamp until it's pressed again; null before it's first pressed. */
   verdict: 'pass' | 'fail' | null = null;
-  /** Target atoms a receptacle has flushed down its hose and not yet counted toward the goal (see the engine). */
+  /** The target a receptacle has flushed down its hose, by volume, not yet counted toward the goal (see the engine). */
   flushed = 0;
   /**
    * Whether it's flipped left to right, if its shape is flippable: everything about it is mirrored (its local x
@@ -792,7 +795,7 @@ export class Tool {
     const left = RECEPTACLE_TIMES[c.phase] - (c.age - h);
     const p = new Vessel(Infinity);
     transfer(tank, p, left <= h ? volume(tank) : (volume(tank) * h) / left);
-    if (c.phase === 'flush') this.flushed += p.n[TARGET] * SPECIES[TARGET].size;
+    if (c.phase === 'flush') this.flushed += p.n[TARGET] * roomFor(TARGET);
     else if (p.N > 0) {
       this.out = [p];
       this.flow = [volume(p) / (MAX_FLOW * h)];

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SPECIES, TARGET, singleOf, speciesIndex } from '../chem/species';
-import { CAP, GOAL_PURITY } from './config';
+import { CAP, GOAL_PURITY, GOAL_VOLUME } from './config';
 import { heatAt, temperature } from '../chem/reactions';
 import { Vessel, roomFor, volume } from './flask';
 import { FLASK_OUTLINE, areaBelow } from './flaskShape';
@@ -248,9 +248,11 @@ describe('receptacle', () => {
     return { r, before, flushed, poured, t, phases };
   }
 
-  it('holds twenty flasks, and stays put', () => {
+  it('holds a little over twice the reference, and stays put', () => {
     const r = new Tool('receptacle', 0, 0, 0);
     expect(r.tanks[0].cap).toBe(RECEPTACLE_CAP);
+    expect(RECEPTACLE_CAP / REFERENCE_CAP).toBeGreaterThan(2);
+    expect(RECEPTACLE_CAP / REFERENCE_CAP).toBeLessThan(2.5);
     expect(r.shape.fixed).toBe(true);
     expect(r.lidded).toBe(false);
   });
@@ -261,7 +263,8 @@ describe('receptacle', () => {
     const { r, flushed, poured, t, phases } = run(atoms, impurity);
     expect(r.verdict).toBe('pass');
     expect([...phases]).toEqual(['think', 'flush']);
-    expect(flushed).toBeCloseTo(atoms, -3);
+    // by volume: molecules, or atoms if VOLUME says so
+    expect(flushed).toBeCloseTo((atoms / 3) * roomFor(TARGET), -3);
     expect(poured).toBe(0);
     expect(r.tanks[0].N).toBe(0);
     expect(t).toBeCloseTo(RECEPTACLE_TIMES.think + RECEPTACLE_TIMES.flush, 1);
@@ -278,6 +281,19 @@ describe('receptacle', () => {
     expect(poured).toBe(before);
     expect(t).toBeCloseTo(RECEPTACLE_TIMES.think + RECEPTACLE_TIMES.reject, 1);
     expect(r.lidded).toBe(false);
+  });
+
+  it('wins in one good load, full, even if what it holds besides the target is all single atoms', () => {
+    // fill it by volume with as many R atoms as a pass allows
+    const room = RECEPTACLE_CAP;
+    const t = Math.ceil(room / (roomFor(TARGET) + roomFor(R) * 3 * (1 / GOAL_PURITY - 1)));
+    const { r, flushed } = run(3 * t, Math.floor((room - t * roomFor(TARGET)) / roomFor(R)));
+    expect(r.verdict).toBe('pass');
+    expect(flushed).toBeGreaterThanOrEqual(GOAL_VOLUME);
+  });
+
+  it("can't be filled to the goal from the cryostabilizer reference alone", () => {
+    expect(REFERENCE_CAP).toBeLessThan(GOAL_VOLUME);
   });
 
   it('refuses an empty vessel, and ignores its button mid-cycle', () => {
