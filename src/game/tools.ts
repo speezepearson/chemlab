@@ -453,9 +453,9 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     noValve: true,
     fixed: true,
     spouts: [34],
-    valveY: 138,
-    spoutY: 152,
-    box: { x0: -58, x1: 58, y0: -6, y1: 154 },
+    valveY: 158,
+    spoutY: 172,
+    box: { x0: -58, x1: 58, y0: -6, y1: 174 },
   },
   meter: {
     // a funnel draining straight through a cabinet with a display (see METER_BODY) and out a spout
@@ -498,11 +498,12 @@ export const SPECTROMETER = {
 };
 
 /**
- * The receptacle's cabinet, in local units: a row of lamps that blink while it thinks, a verdict lamp, and its
- * button; and where its hose leaves the cabinet's foot.
+ * The receptacle's cabinet, in local units: a row of lamps that blink while it thinks, a verdict lamp, its button,
+ * and a screen showing how much it's taken of what's needed; and where its hose leaves the cabinet's foot.
  */
 export const RECEPTACLE_BODY = {
-  x0: -54, x1: 54, y0: 84, y1: 126,
+  x0: -54, x1: 54, y0: 84, y1: 146,
+  screen: { x0: -48, x1: 48, y0: 125, y1: 141 },
   lamps: { x0: -44, dx: 11, y: 96, r: 3.2 },
   verdict: { x: 34, y: 96, r: 5 },
   button: { x0: -44, x1: 4, y0: 106, y1: 119 },

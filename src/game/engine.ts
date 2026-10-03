@@ -1,6 +1,6 @@
 import { temperature, type Fluid, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
-import { CAP, FILL_RATE, GOAL_VOLUME, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
+import { CAP, FILL_RATE, FLASK_L, GOAL_L, GOAL_VOLUME, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { FAUCETS, faucetOutput, faucetTarget, type Faucet } from './faucets';
 import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
 import { FLASK_OUTLINE, FLASK_PATH_DATA, areaBelow, fillLevel, tiltedOutline } from './flaskShape';
@@ -2243,13 +2243,14 @@ export class GameEngine {
 
   /**
    * A receptacle's cabinet: a row of lamps that blink with its thinking (each beep lights one for a moment), a
-   * verdict lamp, green or red, its button (sunk in through a cycle), and the reject valve under it, which opens
-   * while it pours out what it refused.
+   * verdict lamp, green or red, its button (sunk in through a cycle), a green-on-black screen like the
+   * spectrometer's showing the litres it's taken so far of the litres needed, and the reject valve under it, which
+   * opens while it pours out what it refused.
    */
   private drawReceptacle(t: Tool): void {
     const { ctx, S, theme } = this;
     const o = this.toolXY(t);
-    const { lamps, verdict, button, ...b } = RECEPTACLE_BODY;
+    const { lamps, verdict, button, screen: sc, ...b } = RECEPTACLE_BODY;
     const COLORS = ['#ffb43a', '#54d0ff', '#ff5a4f', '#7dff6a', '#b48cff', '#fff4c2'];
     ctx.save();
     ctx.translate(o.x, o.y);
@@ -2283,6 +2284,28 @@ export class GameEngine {
     const busy = this.drag || this.toolDrag || this.valveDrag || this.scaleDrag || this.hoseDrag;
     const hot = !busy && !c && this.inToolRect(t, this.pointer, button);
     this.drawKey(button, !!c, hot);
+
+    // the screen: accepted / required, in litres
+    const glass = new Path2D();
+    glass.roundRect(sc.x0, sc.y0, sc.x1 - sc.x0, sc.y1 - sc.y0, 3);
+    ctx.fillStyle = '#040a06';
+    ctx.fill(glass);
+    ctx.save();
+    ctx.clip(glass);
+    const accepted = (this.delivered / CAP) * FLASK_L;
+    ctx.fillStyle = ctx.shadowColor = `rgba(${PHOSPHOR}, 0.9)`;
+    ctx.shadowBlur = glow(2);
+    ctx.font = '8.5px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`${accepted.toFixed(3)} L / ${GOAL_L.toFixed(3)} L`, (sc.x0 + sc.x1) / 2, (sc.y0 + sc.y1) / 2 + 0.5);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+    for (let y = sc.y0; y < sc.y1; y += 1.5) ctx.fillRect(sc.x0, y, sc.x1 - sc.x0, 0.6);
+    ctx.restore();
+    ctx.strokeStyle = theme.pipe;
+    ctx.lineWidth = 1.2;
+    ctx.stroke(glass);
     ctx.restore();
     // the reject valve: closed (pointing right) but while it pours
     const vc = this.onTool(t, { x: t.shape.spouts[0], y: t.shape.valveY });
