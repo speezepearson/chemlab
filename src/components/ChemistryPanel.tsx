@@ -157,7 +157,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
                 </label>
                 <span>
                   {' '}
-                  middle outlets keep {(100 * separatorShares()[2][2]).toFixed(0)}%, ends {(100 * separatorShares()[0][0]).toFixed(0)}%
+                  middle outlets keep {(100 * separatorShares()[2][2]).toFixed(1)}%, ends {(100 * separatorShares()[0][0]).toFixed(1)}%
                 </span>
               </td>
             </tr>
