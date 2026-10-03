@@ -1770,6 +1770,7 @@ export class GameEngine {
     if (t.kind === 'heater') this.drawHeater(t);
     if (t.kind === 'spectrometer') this.drawSpectrometer(t);
     if (t.kind === 'meter') this.drawMeter(t);
+    if (t.kind === 'tank') this.drawTankGraduations(t);
     if (t.kind === 'separator') {
       // the splitter: one pipe in, two out, with a divider between the outlets
       const { x0, x1, y0, y1 } = SEP_BODY;
@@ -2148,6 +2149,24 @@ export class GameEngine {
         ctx.stroke();
       }
     }
+    ctx.restore();
+  }
+
+  /** Ten thin, faint lines across the big tank, one at each tenth of its height, the last at the brim. */
+  private drawTankGraduations(t: Tool): void {
+    const { ctx, theme } = this;
+    const r = this.tankRect(t, 0);
+    ctx.save();
+    ctx.strokeStyle = theme.glass;
+    ctx.globalAlpha = 0.3;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    for (let i = 1; i <= 10; i++) {
+      const y = r.y1 - (i / 10) * (r.y1 - r.y0);
+      ctx.moveTo(r.x0, y);
+      ctx.lineTo(r.x1, y);
+    }
+    ctx.stroke();
     ctx.restore();
   }
 

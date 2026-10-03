@@ -66,6 +66,14 @@ const ICONS: Record<string, ReactNode> = {
       <rect x="26" y="25" width="6" height="5" rx="1.2" style={{ fill: '#d8443b', stroke: 'none' }} />
     </>
   ),
+  tank: (
+    <>
+      <path className="pipe" d="M20 29 V37" />
+      <rect className="glass" x="3" y="6" width="34" height="23" rx="2" />
+      <path d="M4 11 H36 M4 16 H36 M4 20.5 H36 M4 25 H36" style={{ stroke: 'var(--glass)', strokeWidth: 0.5, opacity: 0.5 }} />
+      <circle className="valve" cx="20" cy="33" r="2.5" />
+    </>
+  ),
   hose: (
     <>
       <path className="pipe" d="M10 12 C10 34 30 12 30 30" />
@@ -86,10 +94,11 @@ const ITEMS = [
   ['heater', 'Resistive heater'],
   ['scale', 'Scale'],
   ['hose', 'Hose'],
+  ['tank', 'Tank'],
 ] as const;
 
-/** The key that puts down each item, in ITEMS order: 1 to 9, then 0. */
-const hotkey = (i: number) => String((i + 1) % 10);
+/** The key that puts down each item, in ITEMS order: along the number row, 1 to 9, then 0 and -. */
+const hotkey = (i: number) => '1234567890-'[i] ?? '';
 
 /** Whether a key press is meant for a text field, not the bench. */
 const typing = (t: EventTarget | null) =>

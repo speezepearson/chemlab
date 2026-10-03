@@ -3,6 +3,7 @@ import { SPECIES, TARGET, singleOf, speciesIndex } from '../chem/species';
 import { CAP } from './config';
 import { heatAt, temperature } from '../chem/reactions';
 import { Vessel, roomFor, volume } from './flask';
+import { FLASK_OUTLINE, areaBelow } from './flaskShape';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PIPETTE_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
   REFERENCE_CAP, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
@@ -206,6 +207,22 @@ describe('flow meter', () => {
     expect(meterText(999_960_000)).toBe('1000');
     expect(meterText(2e9)).toBe('2000');
     expect(meterText(5e10)).toBe('9999');
+  });
+});
+
+describe('tank', () => {
+  it('holds a hundred flasks, and is drawn as big as a hundred flasks', () => {
+    const tk = new Tool('tank', 0, 0, 0);
+    expect(tk.tanks[0].cap).toBe(100 * CAP);
+    const { x0, x1 } = tk.shape.tanks[0];
+    expect(((x1 - x0) * tk.shape.tankH!) / areaBelow(FLASK_OUTLINE, 0)).toBeCloseTo(100, 6);
+  });
+
+  it('pours through its valve like any tank, by how high its fluid stands', () => {
+    const tk = new Tool('tank', 0, 0, 0, [1]);
+    filled(tk.tanks[0], R, 50 * CAP, 1);
+    expect(tk.level(0)).toBe(0.5);
+    expect(tk.step(0.01)[0]!.N / (MAX_FLOW * 0.5 * 0.01)).toBeCloseTo(1, 5);
   });
 });
 

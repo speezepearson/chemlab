@@ -4,6 +4,7 @@ import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions'
 import { NS, SPECIES } from '../chem/species';
 import { CAP } from './config';
 import { Vessel, roomFor, transfer, volume, type Point } from './flask';
+import { FLASK_OUTLINE, areaBelow } from './flaskShape';
 
 /** Capacity of each tank on a tool, in atoms. */
 export const TANK_CAP = 4 * CAP;
@@ -87,6 +88,13 @@ export const SORTER_SCREENS: readonly (readonly number[])[] = [
 
 /** How much the cryostabilizer reference holds, by volume: a hundred flasks. */
 export const REFERENCE_CAP = 100 * CAP;
+/** How much the big tank holds, by volume: a hundred flasks. */
+export const BIG_TANK_CAP = 100 * CAP;
+/** The big tank's inside width, in local units: wide, so it isn't too tall. */
+export const BIG_TANK_W = 560;
+/** The big tank's inside height, in local units: enough that it's drawn as big as a hundred flasks are. */
+export const BIG_TANK_H = (100 * areaBelow(FLASK_OUTLINE, 0)) / BIG_TANK_W;
+
 /** How much a pipette holds, by volume: a tenth of a flask. */
 export const PIPETTE_CAP = CAP / 10;
 /** A pipette's flow, full and fully open, in atoms per sim second: a fifth of what it holds. */
@@ -206,7 +214,7 @@ export const SEXTANT_ATOMS: readonly Atom[] = ['G', 'C', 'B', 'M', 'R', 'Y'];
 
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'heater' | 'spectrometer' | 'reference'
-  | 'meter';
+  | 'meter' | 'tank';
 
 /** Tools there's only ever one of: not in the palette, and never put away. */
 export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectrometer', 'reference', 'meter'];
@@ -349,6 +357,16 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: 100,
     box: { x0: -40, x1: 40, y0: -26, y1: 102 },
   },
+  tank: {
+    // a hundred flasks' worth, drawn as big as a hundred flasks, with ten faint graduations across it
+    tanks: [{ name: 'tank', x0: -BIG_TANK_W / 2, x1: BIG_TANK_W / 2 }],
+    tankH: BIG_TANK_H,
+    tankCap: BIG_TANK_CAP,
+    spouts: [0],
+    valveY: BIG_TANK_H + 14,
+    spoutY: BIG_TANK_H + 30,
+    box: { x0: -BIG_TANK_W / 2 - 4, x1: BIG_TANK_W / 2 + 4, y0: -6, y1: BIG_TANK_H + 32 },
+  },
   meter: {
     // a funnel draining straight through a cabinet with a display (see METER_BODY) and out a spout
     tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
@@ -412,6 +430,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   sorter: 'Size sorter',
   heater: 'Resistive heater',
   meter: 'Flow meter',
+  tank: 'Tank',
   spectrometer: 'Mass spectrometer',
   reference: 'Cryostabilizer reference',
 };
@@ -447,6 +466,8 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
  *   a spout, let fluid out sooner, less heated.
  * - A **cryostabilizer reference** is a sealed hundred flasks' worth of the target with a valve that lets out at most
  *   0.02 flask/s.
+ * - A **tank** is a dispenser holding a hundred flasks, drawn as big as a hundred flasks, with ten faint
+ *   graduations across it.
  * - A **flow meter** has a funnel like the splitter's, with no valve, draining straight through to one spout, and
  *   shows what flows out, averaged over about METER.tau (see rate and meterText).
  * - A **mass spectrometer** has a small sample cup and no spouts. Running it (see scan) reads the sample's
