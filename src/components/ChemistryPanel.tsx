@@ -1,6 +1,5 @@
 import { useReducer } from 'react';
 import { THERMO, T_ROOM, restoreDefaultChem, type BondParams } from '../chem/params';
-import { RANDOMIZER, randomizeBonds } from '../chem/randomize';
 import type { ReactionNetwork } from '../chem/reactions';
 import { SPECIES, TARGET } from '../chem/species';
 import { VOLUME } from '../game/flask';
@@ -11,7 +10,6 @@ import {
   separatorShares,
 } from '../game/tools';
 import { DragNumber } from './DragNumber';
-import { RandomizerControls } from './RandomizerControls';
 
 const FIELDS: (keyof BondParams)[] = ['E', 'Ea', 'A'];
 
@@ -173,9 +171,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
           Drag a number sideways to scale it; double-click a bond energy to flip its sign, or any other number to type
           it (0 included). Target: {SPECIES[TARGET].name}, T_room = {T_ROOM}.
         </p>
-        <RandomizerControls E={RANDOMIZER.E} Ea={RANDOMIZER.Ea} />
         <div className="actions">
-          <button onClick={() => edit(() => randomizeBonds(p, RANDOMIZER.E, RANDOMIZER.Ea))}>Randomize E, Ea</button>
           <button
             onClick={() =>
               edit(() => {

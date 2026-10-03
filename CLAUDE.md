@@ -36,7 +36,7 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
 
 - `src/chem/`: the chemistry.
   - `species.ts` defines the 50 species.
-  - `params.ts` holds the bond parameters, and `randomize.ts` the bond randomizer.
+  - `params.ts` holds the bond parameters.
   - `reactions.ts` is Arrhenius kinetics on whole molecules.
   - `equilibrium.ts` is the exact full-equilibrium solver, for the presets' and the route's settled mixes. Faucets
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
