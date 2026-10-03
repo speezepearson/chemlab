@@ -19,6 +19,8 @@ export interface SaveState {
   /** Where each faucet joins its pipe, as fractions of the home area (see HOME_W); where they start if left out. */
   faucets?: { x: number; y: number }[];
   chem?: { bonds: ChemParams['bonds']; swapA: number; heatCap: number };
+  /** The target the receptacle has taken so far, by volume, toward the goal; none if left out. */
+  delivered?: number;
 }
 
 /** Contents by species name (names outlast reorderings of the species list), and whole quanta of heat. */
@@ -44,6 +46,10 @@ export interface SavedTool {
   tanks: SavedVessel[];
   /** Per spout, the drop hanging there, if any. */
   drops?: SavedVessel[];
+  /** A heater's tube, stretch by stretch (see Tool.tube). */
+  tube?: SavedVessel[];
+  /** Whether it's flipped left to right (see Tool.flipped). */
+  flipped?: boolean;
   /** A spectrometer's last reading, if it's been run (see spectrum). */
   reading?: number[];
 }
