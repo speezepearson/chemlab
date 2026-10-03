@@ -411,6 +411,41 @@ export class GameEngine {
     this.updateHover();
   }
 
+  /**
+   * Put a new flask, scale, hose or tool down under the pointer, as a hotkey does: where it would land if it were
+   * dragged out of the palette and let go there, without carrying it. Does nothing, returning false, while the
+   * pointer is off the bench or something is being carried.
+   */
+  placeAt(kind: 'flask' | 'scale' | 'hose' | ToolKind): boolean {
+    const p = this.pointer;
+    const busy = this.drag || this.toolDrag || this.valveDrag || this.scaleDrag || this.hoseDrag || this.faucetDrag;
+    if (busy || this.panDrag || (p.x === -1 && p.y === -1)) return false;
+    const { S } = this;
+    if (kind === 'hose') {
+      const h = new Hose({ x: 0, y: 0 }, { x: 0, y: 0 });
+      this.moveHoseEnd(h, 'inlet', p);
+      this.moveHoseEnd(h, 'outlet', { x: p.x + 60 * S, y: p.y + 30 * S });
+      this.hoses.push(h);
+    } else if (kind === 'flask') {
+      const f = new Flask(this.clampRest({ x: p.x, y: p.y - 35 * S }), CAP);
+      f.glass = glassGrams(this.flasks.length);
+      this.flasks.push(f);
+      const zone = this.zoneAt(p, f);
+      if (zone?.kind === 'scale') zone.scale.put(f, zone.dx);
+      this.settle();
+    } else if (kind === 'scale') {
+      const sc = new Scale(0, 0);
+      this.placeScale(sc, p);
+      this.scales.push(sc);
+    } else {
+      const t = new Tool(kind, this.nextToolId++, 0, 0);
+      this.place(t, { x: p.x, y: p.y - 40 * S });
+      this.tools.push(t);
+    }
+    this.updateHover();
+    return true;
+  }
+
   private vessels(): Vessel[] {
     return [...this.flasks, ...this.tools.flatMap((t) => [...t.tanks, ...t.tube]), ...this.hoses.map((h) => h.funnel)];
   }

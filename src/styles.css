@@ -92,7 +92,8 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
   width:64px;flex:none;display:flex;flex-direction:column;gap:6px;padding:10px 8px;
   border-right:1px solid var(--line);touch-action:none;user-select:none;-webkit-user-select:none;
 }
-.palette button{padding:4px;cursor:grab;display:flex;justify-content:center}
+.palette button{padding:4px;cursor:grab;display:flex;justify-content:center;position:relative}
+.palette .key{position:absolute;right:3px;bottom:1px;font-size:9px;line-height:1;color:var(--muted);pointer-events:none}
 .palette svg{width:40px;height:40px;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .palette .glass{fill:var(--glasshi);stroke:var(--glass)}
 .palette .pipe{stroke:var(--pipe);stroke-width:3}

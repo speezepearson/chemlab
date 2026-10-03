@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import type { GameEngine } from '../game/engine';
 
 /** Small drawings of each item, echoing how the bench draws it, in a 40 × 40 box. */
@@ -88,16 +88,37 @@ const ITEMS = [
   ['hose', 'Hose'],
 ] as const;
 
-/** Prototypes to drag onto the bench to make more of them. Dropping anything back here puts it away. */
+/** The key that puts down each item, in ITEMS order: 1 to 9, then 0. */
+const hotkey = (i: number) => String((i + 1) % 10);
+
+/** Whether a key press is meant for a text field, not the bench. */
+const typing = (t: EventTarget | null) =>
+  t instanceof HTMLElement && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
+
+/**
+ * Prototypes to drag onto the bench to make more of them. Dropping anything back here puts it away. Each has a
+ * number key too, which puts a new one down under the pointer.
+ */
 export function Palette({ engine }: { engine: GameEngine }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || typing(e.target)) return;
+      const i = ITEMS.findIndex((_, j) => hotkey(j) === e.key);
+      if (i >= 0 && engine.placeAt(ITEMS[i][0])) e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [engine]);
+
   return (
     <aside className="palette" aria-label="equipment" title="Drag out to add. Drop here to put away.">
-      {ITEMS.map(([kind, label]) => (
+      {ITEMS.map(([kind, label], i) => (
         <button
           key={kind}
           aria-label={label}
+          aria-keyshortcuts={hotkey(i)}
           // no name in the tooltip: working out what each tool does is part of the game
-          title="Drag onto the bench for a new one, or back here to put one away"
+          title={`Drag onto the bench for a new one, or back here to put one away. Press ${hotkey(i)} to put one under the pointer.`}
           onPointerDown={(e) => {
             e.preventDefault();
             engine.spawn(kind, e.clientX, e.clientY);
@@ -106,6 +127,9 @@ export function Palette({ engine }: { engine: GameEngine }) {
           <svg viewBox="0 0 40 40" aria-hidden="true">
             {ICONS[kind]}
           </svg>
+          <span className="key" aria-hidden="true">
+            {hotkey(i)}
+          </span>
         </button>
       ))}
     </aside>
