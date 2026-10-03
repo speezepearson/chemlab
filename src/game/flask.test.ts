@@ -2,17 +2,20 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { SPECIES, TARGET, singleOf, speciesIndex } from '../chem/species';
 import { Flask, VOLUME, Vessel, sustenance, transfer, volume } from './flask';
 import { separate } from './tools';
+import { GOAL_PURITY } from './config';
 
 const atomTotal = (f: Flask) => SPECIES.reduce((t, s) => t + f.n[s.i] * s.size, 0);
 
 describe('sustenance', () => {
-  it('counts the target only in vessels at least 99% pure', () => {
+  it('counts the target only in vessels more than GOAL_PURITY pure', () => {
     const f = new Flask({ x: 0, y: 0 }, 1e6);
     f.setMolecules(TARGET, 1000);
     expect(sustenance(f)).toBe(3000);
-    f.setMolecules(singleOf('R'), 30); // exactly 99%
+    // R atoms that bring it to exactly GOAL_PURITY, then one fewer
+    const atGoal = Math.round(3000 / GOAL_PURITY - 3000);
+    f.setMolecules(singleOf('R'), atGoal - 1);
     expect(sustenance(f)).toBe(3000);
-    f.setMolecules(singleOf('R'), 31);
+    f.setMolecules(singleOf('R'), atGoal);
     expect(sustenance(f)).toBe(0);
     expect(sustenance(new Flask({ x: 0, y: 0 }, 10))).toBe(0);
   });

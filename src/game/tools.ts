@@ -1,9 +1,9 @@
 import { GROUP_PRIMARY, type Atom } from '../chem/atoms';
 import { THERMO } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
-import { NS, SPECIES } from '../chem/species';
+import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP } from './config';
-import { Vessel, roomFor, transfer, volume, type Point } from './flask';
+import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_OUTLINE, areaBelow } from './flaskShape';
 
 /** Capacity of each tank on a tool, in atoms. */
@@ -143,6 +143,37 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
   return k > 0 ? (Math.sqrt(SUMP_TIP * SUMP_TIP + 4 * k * a) - SUMP_TIP) / (2 * k) : a / SUMP_TIP;
 }
 
+/** How much the receptacle holds, by volume: twenty flasks. */
+export const RECEPTACLE_CAP = 20 * CAP;
+/**
+ * A receptacle's cycle, in sim seconds: it thinks, beeping and blinking, then flushes what it took down its hose, or
+ * pours out what it refused through its reject valve, evenly over the time given.
+ */
+export const RECEPTACLE_TIMES = { think: 1.6, flush: 1.5, reject: 2.5 };
+/** How many lamps blink on a receptacle while it thinks. */
+export const RECEPTACLE_LAMPS = 6;
+/** The pitches a receptacle beeps at while it thinks, in Hz: a pentatonic scale, high up. */
+const BEEP_PITCHES = [880, 1047, 1175, 1397, 1568, 1760, 2093, 2349];
+
+/** One beep in a receptacle's thinking: when, which lamp it lights, and at what pitch. */
+export interface Beep {
+  t: number;
+  lamp: number;
+  freq: number;
+}
+
+/** A random run of beeps for a receptacle to think with, every 0.07 to 0.15 s across RECEPTACLE_TIMES.think. */
+export function beepPattern(rand = Math.random): Beep[] {
+  const out: Beep[] = [];
+  for (let t = 0.05; t < RECEPTACLE_TIMES.think - 0.1; t += 0.07 + 0.08 * rand())
+    out.push({
+      t,
+      lamp: Math.floor(rand() * RECEPTACLE_LAMPS),
+      freq: BEEP_PITCHES[Math.floor(rand() * BEEP_PITCHES.length)],
+    });
+  return out;
+}
+
 /** How much a spectrometer's sample cup holds, by volume: a thousandth of a flask, 1M. */
 export const SAMPLE_CAP = CAP / 1000;
 /** Sim seconds into a spectrometer run at which each of its three hexagons lights up; the run ends with the last. */
@@ -241,10 +272,10 @@ export const SEXTANT_ATOMS: readonly Atom[] = ['G', 'C', 'B', 'M', 'R', 'Y'];
 
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'heater' | 'spectrometer' | 'reference'
-  | 'meter' | 'tank';
+  | 'meter' | 'tank' | 'receptacle';
 
 /** Tools there's only ever one of: not in the palette, and never put away. */
-export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectrometer', 'reference', 'meter'];
+export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectrometer', 'reference', 'meter', 'receptacle'];
 
 /**
  * A tool's geometry in local units: multiply by the stage scale and offset by
@@ -283,6 +314,8 @@ export interface ToolShape {
    * one that's its own mirror image, in what it does if not in every detail, can't.
    */
   flippable?: boolean;
+  /** Whether it stays where it is: it can't be picked up and carried. */
+  fixed?: boolean;
   /** Whether the tanks are sealed on top, so nothing can be poured or fall into them. */
   sealed?: boolean;
   /** Spout flow with a valve fully open and the tank full, in atoms per sim second, if not MAX_FLOW. */
@@ -408,6 +441,19 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: BIG_TANK_H + 44,
     box: { x0: -BIG_TANK_W / 2 - 4, x1: BIG_TANK_W / 2 + 4, y0: -6, y1: BIG_TANK_H + 46 },
   },
+  receptacle: {
+    // a big vessel on a cabinet of lamps with a button (see RECEPTACLE_BODY), a hose running from the cabinet's
+    // foot straight down off the bench, and a reject valve beside it over the one spout
+    tanks: [{ name: 'receptacle', x0: -46, x1: 46 }],
+    tankH: 80,
+    tankCap: RECEPTACLE_CAP,
+    noValve: true,
+    fixed: true,
+    spouts: [34],
+    valveY: 138,
+    spoutY: 152,
+    box: { x0: -58, x1: 58, y0: -6, y1: 154 },
+  },
   meter: {
     // a funnel draining straight through a cabinet with a display (see METER_BODY) and out a spout
     tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
@@ -448,6 +494,18 @@ export const SPECTROMETER = {
   button: { x0: 28, x1: 62, y0: 84, y1: 98 },
 };
 
+/**
+ * The receptacle's cabinet, in local units: a row of lamps that blink while it thinks, a verdict lamp, and its
+ * button; and where its hose leaves the cabinet's foot.
+ */
+export const RECEPTACLE_BODY = {
+  x0: -54, x1: 54, y0: 84, y1: 126,
+  lamps: { x0: -44, dx: 11, y: 96, r: 3.2 },
+  verdict: { x: 34, y: 96, r: 5 },
+  button: { x0: -44, x1: 4, y0: 106, y1: 119 },
+  hoseX: -16,
+};
+
 /** The meter's cabinet, and its display, in local units. */
 export const METER_BODY = { x0: -31, x1: 31, y0: 36, y1: 64, display: { x0: -26, x1: 26, y0: 41, y1: 59 } };
 
@@ -472,6 +530,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   heater: 'Resistive heater',
   meter: 'Flow meter',
   tank: 'Tank',
+  receptacle: 'Receptacle',
   spectrometer: 'Mass spectrometer',
   reference: 'Cryostabilizer reference',
 };
@@ -543,6 +602,9 @@ export function separatorShares(): number[][] {
  *   0.02 flask/s.
  * - A **tank** is a dispenser holding a hundred flasks, drawn as big as a hundred flasks, with ten faint
  *   graduations across it.
+ * - A **receptacle** is where cryostabilizer goes: a big vessel, which stays put, with a button. Pressing it (see
+ *   press) lids the vessel and thinks for a moment, beeping; then, if what's inside is more than GOAL_PURITY target,
+ *   it flushes it down its hose, counting toward the goal, and otherwise pours it out its one spout.
  * - A **flow meter** has a funnel like the splitter's, with no valve, draining straight through to one spout, and
  *   shows what flows out, averaged over about METER.tau (see rate and meterText).
  * - A **mass spectrometer** has a small sample cup and no spouts. Running it (see scan) reads the sample's
@@ -574,6 +636,14 @@ export class Tool {
   scanAge = Infinity;
   /** A meter's reading: what's flowed out of it, by volume per sim second, averaged over about METER.tau. */
   rate = 0;
+  /** A receptacle's cycle, from pressing its button until it opens again (see press); null while it's open. */
+  cycle: { phase: 'think' | 'flush' | 'reject'; age: number } | null = null;
+  /** The beeps of a receptacle's thinking (see beepPattern), for its lamps and its sound. */
+  beeps: Beep[] = [];
+  /** A receptacle's last verdict, shown on its lamp until it's pressed again; null before it's first pressed. */
+  verdict: 'pass' | 'fail' | null = null;
+  /** Target atoms a receptacle has flushed down its hose and not yet counted toward the goal (see the engine). */
+  flushed = 0;
   /**
    * Whether it's flipped left to right, if its shape is flippable: everything about it is mirrored (its local x
    * negated) except its valves' levers and any writing, which read the same either way.
@@ -616,6 +686,7 @@ export class Tool {
       return (this.out = []);
     }
     if (this.kind === 'heater') return this.heat(h);
+    if (this.kind === 'receptacle') return this.receive(h);
     let packets = this.tanks.map((tank, k) => {
       const p = new Vessel(Infinity);
       // a valve, or a funnel without one, lets out in proportion to how high the fluid stands; the meter's funnel
@@ -678,9 +749,56 @@ export class Tool {
     return this.scanAge < SCAN_LIGHTS[SCAN_LIGHTS.length - 1];
   }
 
-  /** Whether the tanks are lidded, so nothing can be poured or fall in: always if sealed, and a spectrometer's while it runs. */
+  /**
+   * Whether the tanks are lidded, so nothing can be poured or fall in: always if sealed, a spectrometer's while it
+   * runs, and a receptacle's through its cycle.
+   */
   get lidded(): boolean {
-    return !!this.shape.sealed || (this.kind === 'spectrometer' && this.scanning);
+    return !!this.shape.sealed || (this.kind === 'spectrometer' && this.scanning) || !!this.cycle;
+  }
+
+  /**
+   * Press a receptacle's button: lid it and start it thinking (see receive), with a new pattern of beeps. Does
+   * nothing, returning false, while a cycle is under way.
+   */
+  press(): boolean {
+    if (this.kind !== 'receptacle' || this.cycle) return false;
+    this.cycle = { phase: 'think', age: 0 };
+    this.beeps = beepPattern();
+    this.verdict = null;
+    return true;
+  }
+
+  /**
+   * A receptacle's step. Open, it just holds what's poured in. Thinking, it waits out RECEPTACLE_TIMES.think, then
+   * judges what it holds: more than GOAL_PURITY target, and it flushes it down its hose (counting the target in
+   * flushed), else it pours it out its spout, each evenly over its time in RECEPTACLE_TIMES. Then it opens again.
+   */
+  private receive(h: number): (Vessel | null)[] {
+    const tank = this.tanks[0];
+    const c = this.cycle;
+    this.out = [null];
+    this.flow = [0];
+    if (!c) return this.out;
+    c.age += h;
+    if (c.phase === 'think') {
+      if (c.age >= RECEPTACLE_TIMES.think) {
+        this.verdict = sustenance(tank) > 0 ? 'pass' : 'fail';
+        this.cycle = { phase: this.verdict === 'pass' ? 'flush' : 'reject', age: 0 };
+      }
+      return this.out;
+    }
+    // evenly, so it's empty just as the time's up
+    const left = RECEPTACLE_TIMES[c.phase] - (c.age - h);
+    const p = new Vessel(Infinity);
+    transfer(tank, p, left <= h ? volume(tank) : (volume(tank) * h) / left);
+    if (c.phase === 'flush') this.flushed += p.n[TARGET] * SPECIES[TARGET].size;
+    else if (p.N > 0) {
+      this.out = [p];
+      this.flow = [volume(p) / (MAX_FLOW * h)];
+    }
+    if (c.age >= RECEPTACLE_TIMES[c.phase]) this.cycle = null;
+    return this.out;
   }
 
   /**

@@ -83,10 +83,10 @@ export class Vessel implements Fluid {
   }
 }
 
-/** Atoms of the target in a fluid that counts toward the goal: all of them if it's at least GOAL_PURITY target, else none. */
+/** Atoms of the target in a fluid the receptacle takes: all of them if it's more than GOAL_PURITY target, else none. */
 export function sustenance(f: Fluid): number {
   const t = f.n[TARGET] * SPECIES[TARGET].size;
-  return f.N > 0 && t >= GOAL_PURITY * f.N ? t : 0;
+  return f.N > 0 && t > GOAL_PURITY * f.N ? t : 0;
 }
 
 /** A flask on the shelf. It lives in a slot (`home`) and can be picked up and carried. */

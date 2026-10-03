@@ -19,6 +19,8 @@ export interface SaveState {
   /** Where each faucet joins its pipe, as fractions of the home area (see HOME_W); where they start if left out. */
   faucets?: { x: number; y: number }[];
   chem?: { bonds: ChemParams['bonds']; swapA: number; heatCap: number };
+  /** Target atoms the receptacle has taken so far, toward the goal; none if left out. */
+  delivered?: number;
 }
 
 /** Contents by species name (names outlast reorderings of the species list), and whole quanta of heat. */

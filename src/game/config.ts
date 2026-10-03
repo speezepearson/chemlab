@@ -3,12 +3,12 @@ export const POUR_RATE = (7 / 30) * CAP; // atoms/s, flask to flask
 export const FILL_RATE = (11 / 30) * CAP; // atoms/s, from faucet
 export const N_FLASKS = 8;
 /**
- * Target atoms to win: five times what the cryostabilizer reference starts with (a hundred flasks of triangles),
- * so the reference is a fifth of the way there.
+ * Target atoms to win, delivered through the receptacle: five times what the cryostabilizer reference starts with
+ * (a hundred flasks of triangles), so the reference is a fifth of the way there.
  */
 export const GOAL_ATOMS = 1500 * CAP;
-/** Only a vessel at least this pure in the target (by atoms) counts toward the goal. */
-export const GOAL_PURITY = 0.99;
+/** The receptacle takes only fluid more than this pure in the target (by atoms). */
+export const GOAL_PURITY = 0.95;
 /** Amounts of fluid below this many atoms count as nothing: too little to see or pour. */
 export const TRACE = CAP * 1e-6;
 /**

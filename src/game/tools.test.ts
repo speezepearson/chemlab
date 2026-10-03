@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { SPECIES, TARGET, singleOf, speciesIndex } from '../chem/species';
-import { CAP } from './config';
+import { CAP, GOAL_PURITY } from './config';
 import { heatAt, temperature } from '../chem/reactions';
 import { Vessel, roomFor, volume } from './flask';
 import { FLASK_OUTLINE, areaBelow } from './flaskShape';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PIPETTE_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
-  REFERENCE_CAP, SEPARATOR, SORTER, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
+  RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, SEPARATOR, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -223,6 +223,76 @@ describe('tank', () => {
     filled(tk.tanks[0], R, 50 * CAP, 1);
     const level = tk.level(0);
     expect(tk.step(0.01)[0]!.N / (MAX_FLOW * level * 0.01)).toBeCloseTo(1, 5);
+  });
+});
+
+describe('receptacle', () => {
+  /** A receptacle holding `atoms` of the target and `impurity` atoms of R, pressed and run to the end of its cycle. */
+  function run(atoms: number, impurity: number) {
+    const r = new Tool('receptacle', 0, 0, 0);
+    r.tanks[0].setMolecules(TARGET, atoms / 3);
+    r.tanks[0].setMolecules(R, impurity);
+    const before = r.tanks[0].N;
+    expect(r.press()).toBe(true);
+    let flushed = 0;
+    let poured = 0;
+    let t = 0;
+    const phases = new Set<string>();
+    for (; r.cycle && t < 20; t += 0.02) {
+      phases.add(r.cycle.phase);
+      expect(r.lidded).toBe(true);
+      poured += r.step(0.02)[0]?.N ?? 0;
+      flushed += r.flushed;
+      r.flushed = 0;
+    }
+    return { r, before, flushed, poured, t, phases };
+  }
+
+  it('holds twenty flasks, and stays put', () => {
+    const r = new Tool('receptacle', 0, 0, 0);
+    expect(r.tanks[0].cap).toBe(RECEPTACLE_CAP);
+    expect(r.shape.fixed).toBe(true);
+    expect(r.lidded).toBe(false);
+  });
+
+  it(`flushes what's more than ${100 * GOAL_PURITY}% target down its hose, counting the target, then opens`, () => {
+    const atoms = 3 * CAP;
+    const impurity = Math.floor(atoms * (1 / GOAL_PURITY - 1)) - 1000;
+    const { r, flushed, poured, t, phases } = run(atoms, impurity);
+    expect(r.verdict).toBe('pass');
+    expect([...phases]).toEqual(['think', 'flush']);
+    expect(flushed).toBeCloseTo(atoms, -3);
+    expect(poured).toBe(0);
+    expect(r.tanks[0].N).toBe(0);
+    expect(t).toBeCloseTo(RECEPTACLE_TIMES.think + RECEPTACLE_TIMES.flush, 1);
+    expect(r.lidded).toBe(false);
+  });
+
+  it(`pours out anything else through its spout, counting nothing, then opens`, () => {
+    const atoms = 3 * CAP;
+    const impurity = Math.ceil(atoms * (1 / GOAL_PURITY - 1)) + 1000;
+    const { r, before, flushed, poured, t, phases } = run(atoms, impurity);
+    expect(r.verdict).toBe('fail');
+    expect([...phases]).toEqual(['think', 'reject']);
+    expect(flushed).toBe(0);
+    expect(poured).toBe(before);
+    expect(t).toBeCloseTo(RECEPTACLE_TIMES.think + RECEPTACLE_TIMES.reject, 1);
+    expect(r.lidded).toBe(false);
+  });
+
+  it('refuses an empty vessel, and ignores its button mid-cycle', () => {
+    const r = new Tool('receptacle', 0, 0, 0);
+    expect(r.press()).toBe(true);
+    expect(r.press()).toBe(false);
+    for (let t = 0; t < RECEPTACLE_TIMES.think + 0.1; t += 0.02) r.step(0.02);
+    expect(r.verdict).toBe('fail');
+  });
+
+  it('beeps in a random pattern through its thinking, a few times a second', () => {
+    const beeps = beepPattern();
+    expect(beeps.length).toBeGreaterThan(5);
+    for (const b of beeps) expect(b.t).toBeLessThan(RECEPTACLE_TIMES.think);
+    expect(new Set(beeps.map((b) => b.lamp)).size).toBeGreaterThan(1);
   });
 });
 

@@ -5,15 +5,17 @@ import { FAUCETS, faucetOutput, faucetTarget, type Faucet } from './faucets';
 import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
 import { FLASK_OUTLINE, FLASK_PATH_DATA, areaBelow, fillLevel, tiltedOutline } from './flaskShape';
 import { cool, exposure, taper } from './cooling';
-import { Flask, Vessel, fluidColor, glowColor, sustenance, transfer, volume, volumeUnit, type Point } from './flask';
-import { DEFAULT_PRESET, METER_AT, SPECTROMETER_AT, applyFill, type Preset } from './presets';
+import { Flask, Vessel, fluidColor, glowColor, transfer, volume, volumeUnit, type Point } from './flask';
+import { DEFAULT_PRESET, METER_AT, RECEPTACLE_AT, SPECTROMETER_AT, applyFill, type Preset } from './presets';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
 import { CENTER, placement, type Placement } from './place';
 import { rumble, type Rumble } from './rumble';
+import { beeper, type Beeper } from './beeper';
 import { WaterSounds } from './water';
 import {
-  HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, METER_BODY, METER_DIGITS, SUMP_TIP, meterText, sumpFillHeight, HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SHAPES,
+  HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, METER_BODY, METER_DIGITS, RECEPTACLE_BODY, RECEPTACLE_LAMPS,
+  RECEPTACLE_TIMES, SUMP_TIP, meterText, sumpFillHeight, HELIX, Hose, MAX_FLOW, SCAN_LIGHTS, SHAPES,
   SORTER_CHUTE, SPECTROMETER, TANK_H, TOOL_NAMES, Tool, chuteY, cupFillHeight, drip, UNIQUE_TOOLS, mouthBelow, scanLevel,
   tankX, type Mouth, type ToolKind,
 } from './tools';
@@ -40,8 +42,7 @@ export interface Inspection {
 }
 
 export interface EngineCallbacks {
-  /** Target atoms across all vessels at least GOAL_PURITY pure, rounded to a thousandth of the goal. Called only when it changes. */
-  onProgress(targetAtoms: number): void;
+  /** The receptacle has taken GOAL_ATOMS of the target. */
   onWin(): void;
   /** Throttled to ~10 Hz; null when nothing is inspected. */
   onInspect(info: Inspection | null): void;
@@ -199,7 +200,6 @@ export class GameEngine {
   private faucetFlows: { fa: FaucetLayout; m: Mouth }[] = [];
   private pointer: Point = { x: -1, y: -1 };
   private won = false;
-  private lastProgress = -1;
   private inspected: Vessel | null = null;
   private lastInspect = 0;
   private theme = {} as Theme;
@@ -210,6 +210,10 @@ export class GameEngine {
   private nextToolId = 0;
   /** Running spectrometers' sounds. */
   private rumbles = new Map<Tool, Rumble>();
+  /** Each receptacle's sounds, through its cycle (see Tool.press). */
+  private beepers = new Map<Tool, Beeper>();
+  /** Target atoms the receptacle has taken, all told: what counts toward the goal. */
+  private delivered = 0;
   private water = new WaterSounds();
   /** This frame's streams, for their sound: how much ran into each vessel, by volume. */
   private inflow = new Map<Vessel, number>();
@@ -299,7 +303,7 @@ export class GameEngine {
     this.falling = [];
     this.drag = this.toolDrag = this.valveDrag = this.scaleDrag = this.hoseDrag = this.faucetDrag = null;
     this.hover = this.hoverTool = this.hoverTank = null;
-    this.lastProgress = -1;
+    this.delivered = 0;
   }
 
   /** Everything on the bench, plus the chemistry parameters, for saving. */
@@ -321,6 +325,7 @@ export class GameEngine {
       })),
       hoses: this.hoses.map((h) => ({ inlet: { ...h.inlet }, outlet: { ...h.outlet }, funnel: saveVessel(h.funnel), drop: saveVessel(h.drop) })),
       faucets: L.faucets.map((fa) => ({ x: fa.fx, y: fa.fy })),
+      delivered: this.delivered,
       chem: saveChem(this.chem.params),
     };
   }
@@ -367,16 +372,16 @@ export class GameEngine {
     for (const sc of this.scales) this.placeScale(sc, this.scaleXY(sc));
     this.settle();
     this.placeFaucets(s.faucets);
+    this.delivered = Number.isFinite(s.delivered) ? Math.max(0, s.delivered!) : 0;
     this.won = false;
     this.falling = [];
     this.drag = this.toolDrag = this.valveDrag = this.scaleDrag = this.hoseDrag = this.faucetDrag = null;
     this.hover = this.hoverTool = this.hoverTank = null;
-    this.lastProgress = -1;
   }
 
   /**
-   * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a mass spectrometer and a
-   * flow meter: if there's none, one is added where it starts.
+   * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a mass spectrometer, a flow
+   * meter and a receptacle: if there's none, one is added where it starts.
    */
   private uniqueTools(): void {
     for (const kind of UNIQUE_TOOLS) {
@@ -386,6 +391,8 @@ export class GameEngine {
     if (!this.tools.some((t) => t.kind === 'spectrometer'))
       this.tools.push(new Tool('spectrometer', this.nextToolId++, ...SPECTROMETER_AT));
     if (!this.tools.some((t) => t.kind === 'meter')) this.tools.push(new Tool('meter', this.nextToolId++, ...METER_AT));
+    if (!this.tools.some((t) => t.kind === 'receptacle'))
+      this.tools.push(new Tool('receptacle', this.nextToolId++, ...RECEPTACLE_AT));
   }
 
   /** Make a new flask, scale or tool under the pointer (in client coordinates) and start carrying it. */
@@ -890,9 +897,14 @@ export class GameEngine {
           c.setPointerCapture(e.pointerId);
         }
       } else if (e.button === 0) {
-        if (t?.kind === 'spectrometer' && this.inToolRect(t, p, SPECTROMETER.button)) {
+        if (t?.kind === 'receptacle' && this.inToolRect(t, p, RECEPTACLE_BODY.button)) {
+          if (t.press()) {
+            this.beepers.get(t)?.stop();
+            this.beepers.set(t, beeper(this.hear(this.machineAt(t))));
+          }
+        } else if (t?.kind === 'spectrometer' && this.inToolRect(t, p, SPECTROMETER.button)) {
           if (t.scan()) this.rumbles.set(t, rumble(this.hear(this.machineAt(t))));
-        } else if (t) {
+        } else if (t && !t.shape.fixed) {
           const o = this.toolXY(t);
           this.toolDrag = { tool: t, off: { x: p.x - o.x, y: p.y - o.y }, from: { x: t.fx, y: t.fy } };
           this.tools.splice(this.tools.indexOf(t), 1);
@@ -1280,6 +1292,7 @@ export class GameEngine {
     this.pouring = simDt > 0 && pourInto !== undefined;
 
     const scanFrom = this.tools.map((t) => t.scanAge);
+    const cycleFrom = this.tools.map((t) => t.cycle && { ...t.cycle });
 
     // everything that moves fluid, and chemistry, on sim time, interleaved so a drip meets the reaction it
     // feeds, and a faucet keeps up with the valve draining what it fills
@@ -1381,6 +1394,27 @@ export class GameEngine {
         this.rumbles.delete(t);
       }
 
+    // receptacle cycles go by sim time too: a blip for each beep of its thinking that came round this frame, its
+    // verdict as the thinking ends, and the rush of a flush, silent while paused
+    this.tools.forEach((t, j) => {
+      const b = this.beepers.get(t);
+      const from = cycleFrom[j];
+      if (!b) return;
+      b.place(this.hear(this.machineAt(t)));
+      if (from?.phase === 'think') {
+        const until = t.cycle?.phase === 'think' ? t.cycle.age : Infinity;
+        for (const beep of t.beeps) if (beep.t > from.age && beep.t <= until) b.beep(beep.freq);
+        if (t.cycle?.phase !== 'think') b.verdict(t.verdict === 'pass');
+      }
+      const c = t.cycle;
+      b.flush(simDt > 0 && c?.phase === 'flush' ? 1 - (0.6 * c.age) / RECEPTACLE_TIMES.flush : 0);
+    });
+    for (const [t, b] of this.beepers)
+      if (!this.tools.includes(t) || !t.cycle) {
+        b.stop(); // done, or the bench was replaced
+        this.beepers.delete(t);
+      }
+
     // fluid's sounds, each heard from where it lands: a stream from the mouth it runs into
     const streams = new Map<Vessel, { flow: number; full: number; at: Placement }>();
     for (const [v, amount] of this.inflow) {
@@ -1390,16 +1424,12 @@ export class GameEngine {
     }
     this.water.update(dt, this.landed.map((p) => this.hear(p)), streams);
 
-    // goal
-    let tgt = 0;
-    for (const v of vessels) tgt += sustenance(v);
-    const q = GOAL_ATOMS / 1000;
-    const rounded = Math.round(tgt / q) * q;
-    if (rounded !== this.lastProgress) {
-      this.lastProgress = rounded;
-      this.cb.onProgress(rounded);
+    // goal: what the receptacle has flushed down its hose
+    for (const t of this.tools) {
+      this.delivered += t.flushed;
+      t.flushed = 0;
     }
-    if (tgt >= GOAL_ATOMS && !this.won) {
+    if (this.delivered >= GOAL_ATOMS && !this.won) {
       this.won = true;
       this.cb.onWin();
     }
@@ -1752,6 +1782,22 @@ export class GameEngine {
       for (const x of sh.spouts.slice(0, -1)) pipes([[x, y + r - 1], [x, sh.spoutY - 4]], 4);
       pipes([[x1 + r - 1, y], [end - 4, y], [end, y + 4], [end, sh.spoutY - 4]], 4);
     } else if (t.kind === 'spectrometer') pipes([[0, sh.tankH!], [0, SPECTROMETER.body.y0]], 4);
+    else if (t.kind === 'receptacle') {
+      // the hose, from the cabinet's foot straight down off the bench, showing a flush going down it
+      const x = RECEPTACLE_BODY.hoseX;
+      const down = (this.H - o.y) / S;
+      pipes([[x, RECEPTACLE_BODY.y1], [x, down]], 9);
+      ctx.save();
+      ctx.strokeStyle = t.cycle?.phase === 'flush' && t.tanks[0].N > TRACE ? fluidColor(t.tanks[0]) : theme.bench;
+      ctx.lineWidth = 5 * S;
+      ctx.beginPath();
+      ctx.moveTo(o.x + x * S, o.y + (RECEPTACLE_BODY.y1 + 1) * S);
+      ctx.lineTo(o.x + x * S, o.y + down * S);
+      ctx.stroke();
+      ctx.restore();
+      // and the reject pipe, from the vessel's floor down through the cabinet to the reject valve and spout
+      pipes([[sh.spouts[0], sh.tankH!], [sh.spouts[0], sh.spoutY - 4]], 4);
+    }
     else pipes([[0, floor], [0, sh.spoutY - 4]], 4);
     for (const x of sh.spouts) ctx.fillRect(o.x + (x - 4) * S, o.y + (sh.spoutY - 6) * S, 8 * S, 6 * S);
     t.tanks.forEach((v, k) => {
@@ -1787,6 +1833,7 @@ export class GameEngine {
     if (t.kind === 'heater') this.drawHeater(t);
     if (t.kind === 'spectrometer') this.drawSpectrometer(t);
     if (t.kind === 'meter') this.drawMeter(t);
+    if (t.kind === 'receptacle') this.drawReceptacle(t);
     if (t.kind === 'tank') this.drawTankGraduations(t);
     if (t.kind === 'separator') {
       // the manifold: one pipe in, five out, with a divider between each two outlets
@@ -2192,6 +2239,70 @@ export class GameEngine {
     }
     ctx.stroke();
     ctx.restore();
+  }
+
+  /**
+   * A receptacle's cabinet: a row of lamps that blink with its thinking (each beep lights one for a moment), a
+   * verdict lamp, green or red, its button (sunk in through a cycle), and the reject valve under it, which opens
+   * while it pours out what it refused.
+   */
+  private drawReceptacle(t: Tool): void {
+    const { ctx, S, theme } = this;
+    const o = this.toolXY(t);
+    const { lamps, verdict, button, ...b } = RECEPTACLE_BODY;
+    const COLORS = ['#ffb43a', '#54d0ff', '#ff5a4f', '#7dff6a', '#b48cff', '#fff4c2'];
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.scale(S, S);
+    ctx.fillStyle = theme.bench;
+    ctx.strokeStyle = theme.pipe;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0, 6);
+    ctx.fill();
+    ctx.stroke();
+    const glow = (local: number) => local * S * this.zoom * this.dpr;
+    const lamp = (x: number, y: number, r: number, color: string | null) => {
+      ctx.save();
+      ctx.fillStyle = color ?? theme.pipe;
+      if (color) {
+        ctx.shadowColor = color;
+        ctx.shadowBlur = glow(6);
+      }
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    };
+    // a lamp is lit for a moment after each beep that lights it
+    const c = t.cycle;
+    const lit = (i: number) =>
+      c?.phase === 'think' && t.beeps.some((bp) => bp.lamp === i && bp.t <= c.age && c.age - bp.t < 0.12);
+    for (let i = 0; i < RECEPTACLE_LAMPS; i++) lamp(lamps.x0 + i * lamps.dx, lamps.y, lamps.r, lit(i) ? COLORS[i] : null);
+    lamp(verdict.x, verdict.y, verdict.r, t.verdict === 'pass' ? '#5cff7a' : t.verdict === 'fail' ? '#ff4a3d' : null);
+    const busy = this.drag || this.toolDrag || this.valveDrag || this.scaleDrag || this.hoseDrag;
+    const hot = !busy && !c && this.inToolRect(t, this.pointer, button);
+    this.drawKey(button, !!c, hot);
+    ctx.restore();
+    // the reject valve: closed (pointing right) but while it pours
+    const vc = this.onTool(t, { x: t.shape.spouts[0], y: t.shape.valveY });
+    this.upright(vc.x, () => {
+      const a = c?.phase === 'reject' ? -Math.PI / 2 : 0;
+      ctx.strokeStyle = theme.ink;
+      ctx.lineWidth = 3 * S;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(vc.x, vc.y);
+      ctx.lineTo(vc.x + 11 * S * Math.cos(a), vc.y + 11 * S * Math.sin(a));
+      ctx.stroke();
+      ctx.fillStyle = theme.bench;
+      ctx.strokeStyle = theme.pipe;
+      ctx.lineWidth = 2 * S;
+      ctx.beginPath();
+      ctx.arc(vc.x, vc.y, 4.5 * S, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
   }
 
   /** A flow meter's cabinet, with its reading (see meterText) on a seven-segment display like the scale's. */

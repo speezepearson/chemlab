@@ -4,7 +4,7 @@
  * that, and the bottom is silent. Each starts where it sounds right (DEFAULT_VOLUMES). Kept in local storage, not
  * in saves: it's a preference.
  */
-export const CHANNELS = ['master', 'hum', 'klaxon', 'alarm', 'drips', 'trickle', 'spectrometer'] as const;
+export const CHANNELS = ['master', 'hum', 'klaxon', 'alarm', 'drips', 'trickle', 'spectrometer', 'receptacle'] as const;
 export type Channel = (typeof CHANNELS)[number];
 
 export const CHANNEL_NAMES: Record<Channel, string> = {
@@ -15,6 +15,7 @@ export const CHANNEL_NAMES: Record<Channel, string> = {
   drips: 'drips',
   trickle: 'streams',
   spectrometer: 'spectrometer',
+  receptacle: 'receptacle',
 };
 
 export type Volumes = Record<Channel, number>;
@@ -31,6 +32,7 @@ export const DEFAULT_VOLUMES: Readonly<Volumes> = {
   drips: MIDDLE,
   trickle: MIDDLE,
   spectrometer: MIDDLE,
+  receptacle: MIDDLE,
 };
 
 export function defaultVolumes(): Volumes {

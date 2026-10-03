@@ -47,7 +47,7 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
   - `cooling.ts` is Newtonian cooling to the room; the engine works out each vessel's exposure from how it's drawn.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
-    `volumes.ts`); `rumble.ts` is the spectrometer, `ambience.ts` the ship, `water.ts` drips and streams.
+    `volumes.ts`); `rumble.ts` is the spectrometer, `beeper.ts` the receptacle, `ambience.ts` the ship, `water.ts` drips and streams.
     New sounds play into a channel's `bus()`, never straight to the destination, so the sliders reach them. A sound
     on the bench goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),
     so it fades and pans with where it is on screen.
@@ -88,9 +88,12 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
   - A `drawTool` branch in `engine.ts`.
   - `ICONS` and `ITEMS` in `Palette.tsx`, unless the tool is unique.
   - Tests and the README.
-  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `flippable`, `sealed`, `maxFlow`, `label`.
-- **Unique tools** (`UNIQUE_TOOLS`: the spectrometer, the cryostabilizer reference and the flow meter) aren't in the
-  palette and can't be put away. `uniqueTools()` keeps at most one of each and always adds a spectrometer and a meter.
+  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `flippable`, `fixed`, `sealed`, `maxFlow`, `label`.
+- **Unique tools** (`UNIQUE_TOOLS`: the spectrometer, the cryostabilizer reference, the flow meter and the receptacle)
+  aren't in the palette and can't be put away. `uniqueTools()` keeps at most one of each and always adds a
+  spectrometer, a meter and a receptacle. The receptacle is also `fixed`: it can't be carried at all.
+- **The goal** is what the receptacle flushes (`Tool.flushed`, gathered into the engine's `delivered`, which is
+  saved), not what's lying around in vessels.
 - **Saves** stay at format v1. New fields are optional and the loaders tolerate their absence. Species are stored by
   name.
 

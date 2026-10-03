@@ -11,8 +11,6 @@ import { InfoPanel } from './components/InfoPanel';
 import { Palette } from './components/Palette';
 import { SpeedControl } from './components/SpeedControl';
 import { ambience } from './game/ambience';
-import { GOAL_ATOMS, GOAL_PURITY } from './game/config';
-import { fmtCount } from './game/format';
 import { GameEngine, type Inspection } from './game/engine';
 import { DEFAULT_PRESET, PRESETS } from './game/presets';
 import { decodeSave, encodeSave, storeSave, storedSave, type SaveState } from './game/save';
@@ -42,7 +40,6 @@ export function App() {
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [speed, setSpeed] = useState(1);
   const [god, setGod] = useState(true);
-  const [progress, setProgress] = useState(0);
   const [won, setWon] = useState(false);
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [saved] = useState(storedSave);
@@ -72,7 +69,6 @@ export function App() {
 
   useEffect(() => {
     const e = new GameEngine(canvasRef.current!, stageRef.current!, network, {
-      onProgress: setProgress,
       onWin: () => setWon(true),
       onInspect: setInspection,
       onEdit: setEditing,
@@ -154,14 +150,7 @@ export function App() {
     <>
       <header>
         <h1>Slurry Lab</h1>
-        <div className="goal">
-          <span>
-            {Math.round(100 * GOAL_PURITY)}+% pure cryostabilizer {fmtCount(progress)} / {fmtCount(GOAL_ATOMS)}
-          </span>
-          <div className="bar">
-            <i style={{ width: `${Math.min(100, (100 * progress) / GOAL_ATOMS)}%` }} />
-          </div>
-        </div>
+        <div className="spacer" />
         <div className="controls">
           <SpeedControl value={speed} onChange={setSpeed} />
           <label className="tog">
