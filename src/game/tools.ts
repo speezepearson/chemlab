@@ -452,10 +452,11 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tankCap: RECEPTACLE_CAP,
     noValve: true,
     fixed: true,
+    label: ['cryostabilizer', 'receptacle'],
     spouts: [34],
     valveY: 158,
     spoutY: 172,
-    box: { x0: -58, x1: 58, y0: -6, y1: 174 },
+    box: { x0: -58, x1: 58, y0: -26, y1: 174 },
   },
   meter: {
     // a funnel draining straight through a cabinet with a display (see METER_BODY) and out a spout
