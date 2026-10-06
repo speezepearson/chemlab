@@ -24,7 +24,7 @@ export const SPECTROMETER_AT: [number, number] = [0.88, 0.3];
  * Where the one and only receptacle stands, the same way: there's always exactly one of it too. Its hose runs down
  * between the last two flasks on the shelf.
  */
-export const RECEPTACLE_AT: [number, number] = [0.875, 0.5];
+export const RECEPTACLE_AT: [number, number] = [0.875, 0.54];
 
 /** Where the one and only flow meter starts, the same way: there's always exactly one of it too. */
 export const METER_AT: [number, number] = [0.53, 0.55];
