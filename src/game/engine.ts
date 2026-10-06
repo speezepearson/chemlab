@@ -2245,7 +2245,7 @@ export class GameEngine {
    * A receptacle's cabinet: a row of lamps that blink with its thinking (each beep lights one for a moment), a
    * verdict lamp, green or red, its button (sunk in through a cycle), a green-on-black screen like the
    * spectrometer's showing the litres it's taken so far of the litres needed, and the reject valve under it, which
-   * opens while it pours out what it refused.
+   * has no handle: it opens itself to pour out what the receptacle refused.
    */
   private drawReceptacle(t: Tool): void {
     const { ctx, S, theme } = this;
@@ -2307,25 +2307,15 @@ export class GameEngine {
     ctx.lineWidth = 1.2;
     ctx.stroke(glass);
     ctx.restore();
-    // the reject valve: closed (pointing right) but while it pours
+    // the reject valve: just its body, with no handle, since only the receptacle opens it
     const vc = this.onTool(t, { x: t.shape.spouts[0], y: t.shape.valveY });
-    this.upright(vc.x, () => {
-      const a = c?.phase === 'reject' ? -Math.PI / 2 : 0;
-      ctx.strokeStyle = theme.ink;
-      ctx.lineWidth = 3 * S;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(vc.x, vc.y);
-      ctx.lineTo(vc.x + 11 * S * Math.cos(a), vc.y + 11 * S * Math.sin(a));
-      ctx.stroke();
-      ctx.fillStyle = theme.bench;
-      ctx.strokeStyle = theme.pipe;
-      ctx.lineWidth = 2 * S;
-      ctx.beginPath();
-      ctx.arc(vc.x, vc.y, 4.5 * S, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    });
+    ctx.fillStyle = theme.bench;
+    ctx.strokeStyle = theme.pipe;
+    ctx.lineWidth = 2 * S;
+    ctx.beginPath();
+    ctx.arc(vc.x, vc.y, 4.5 * S, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
   }
 
   /** A flow meter's cabinet, with its reading (see meterText) on a seven-segment display like the scale's. */
