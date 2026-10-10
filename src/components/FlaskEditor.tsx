@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from 'react';
+import { useEffect, useReducer, useState } from 'react';
 import { temperature } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP } from '../game/config';
@@ -10,6 +10,12 @@ import { MAX_LABEL } from './LabelEditor';
 
 /** Molecules of a species added from the "add species" menu. */
 const ADDED = CAP / 30;
+/** The most reactions listed at once; the rest are only counted. */
+const REACTIONS_SHOWN = 15;
+/** Whether the reactions list is showing, kept from one opening of the editor to the next. */
+let reactionsOn = false;
+
+const side = (species: number[]) => species.map((s) => SPECIES[s].name).join(' + ');
 /** A molecule count in full, every digit: 1,234,567. */
 const exact = (n: number) => n.toLocaleString('en');
 
@@ -20,6 +26,7 @@ const exact = (n: number) => n.toLocaleString('en');
  */
 export function FlaskEditor({ engine, id, onClose }: { engine: GameEngine; id: string; onClose(): void }) {
   const [, rerender] = useReducer((x: number) => x + 1, 0);
+  const [showReactions, setShowReactions] = useState(reactionsOn);
 
   useEffect(() => {
     const id = setInterval(rerender, 100);
@@ -130,8 +137,55 @@ export function FlaskEditor({ engine, id, onClose }: { engine: GameEngine; id: s
         >
           Equilibrate
         </button>
+        <button
+          aria-pressed={showReactions}
+          className={showReactions ? 'on' : undefined}
+          onClick={() => setShowReactions((reactionsOn = !showReactions))}
+        >
+          Reactions
+        </button>
       </div>
-      <p className="muted">Drag a number to scale it, or double-click to type. It keeps reacting while you edit. Equilibrate runs every reaction to its end at once, even ones too slow ever to happen.</p>
+      {showReactions && <Reactions engine={engine} id={id} />}
+      <p className="muted">Drag a number to scale it, or double-click to type. It keeps reacting while you edit. Equilibrate runs every reaction to its end at once, even ones too slow ever to happen. Reactions lists what's reacting, each net of its reverse, in events per sim second.</p>
     </div>
+  );
+}
+
+/** What's reacting in the vessel right now, busiest first, each net of its reverse, in events per sim second. */
+function Reactions({ engine, id }: { engine: GameEngine; id: string }) {
+  const all = engine.reactions(id);
+  return (
+    <table className="rx">
+      <thead>
+        <tr>
+          <th>reaction</th>
+          <th>per s</th>
+        </tr>
+      </thead>
+      <tbody>
+        {all.slice(0, REACTIONS_SHOWN).map((r) => (
+          <tr key={`${r.from}>${r.to}`}>
+            <td>
+              {side(r.from)} → {side(r.to)}
+            </td>
+            <td>{fmtCount(r.rate)}</td>
+          </tr>
+        ))}
+        {all.length > REACTIONS_SHOWN && (
+          <tr>
+            <td className="muted" colSpan={2}>
+              and {all.length - REACTIONS_SHOWN} more
+            </td>
+          </tr>
+        )}
+        {!all.length && (
+          <tr>
+            <td className="muted" colSpan={2}>
+              nothing
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
   );
 }

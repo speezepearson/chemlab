@@ -1,4 +1,4 @@
-import { temperature, type Fluid, type ReactionNetwork } from '../chem/reactions';
+import { temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
 import { equilibrate } from '../chem/equilibrium';
 import { CAP, FILL_RATE, FLASK_L, GOAL_L, GOAL_VOLUME, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
@@ -308,6 +308,12 @@ export class GameEngine {
     if (!v) return;
     equilibrate(v, this.chem.U, temperature(v));
     this.overflow(v);
+  }
+
+  /** God mode: what's reacting in a vessel (by id, as for vessel) right now, busiest first (see netRates). */
+  reactions(id: string): NetReaction[] {
+    const v = this.vessel(id)?.vessel;
+    return v ? this.chem.netRates(v) : [];
   }
 
   /** Restart from the current preset. */

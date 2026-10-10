@@ -97,6 +97,32 @@ describe('reactions', () => {
   });
 });
 
+describe('net rates', () => {
+  const net = new ReactionNetwork(testChemParams());
+
+  it('lists what is reacting, busiest first, each the way it is going on net', () => {
+    const f = fluid([single('R', 3), single('G', 2)]);
+    const rates = net.netRates(f);
+    const RG = speciesIndex(['R', 'G', null], 1);
+    expect(rates[0]).toMatchObject({ from: [singleOf('R'), singleOf('G')].sort((a, b) => a - b), to: [RG] });
+    for (let i = 0; i < rates.length; i++) {
+      expect(rates[i].rate).toBeGreaterThan(0);
+      if (i) expect(rates[i].rate).toBeLessThanOrEqual(rates[i - 1].rate);
+    }
+    // with the bond formed, the same reaction runs the other way when it's hot enough to break it
+    const hot = fluid([[RG, 2]], 200);
+    expect(net.netRates(hot)[0]).toMatchObject({ from: [RG], to: [singleOf('R'), singleOf('G')].sort((a, b) => a - b) });
+  });
+
+  it('nets every reaction against its reverse, so nothing is going on at equilibrium', () => {
+    const atoms = ATOMS.map((a) => ({ R: 2, G: 1, C: 1, Y: 3 } as Partial<Record<Atom, number>>)[a] ?? 0);
+    const N = 1e9;
+    const n = equilibrium(atoms.map((v) => (v / 7) * N), net.U, 1.5);
+    const f: Fluid = { n, N, Q: heatAt(1.5, N) };
+    for (const r of net.netRates(f)) expect(r.rate).toBeLessThan(N * 1e-6);
+  });
+});
+
 describe('equilibrium', () => {
   const net = new ReactionNetwork(testChemParams());
   const atoms = (counts: Partial<Record<Atom, number>>) => ATOMS.map((a) => counts[a] ?? 0);
