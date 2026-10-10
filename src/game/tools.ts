@@ -1,13 +1,18 @@
 import { GROUP_PRIMARY, type Atom } from '../chem/atoms';
 import { THERMO } from '../chem/params';
-import { roundRandom, temperature, type Fluid } from '../chem/reactions';
-import { NS, SPECIES } from '../chem/species';
+import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
+import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP } from './config';
-import { Vessel, roomFor, transfer, volume, type Point } from './flask';
+import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
+import { FLASK_OUTLINE, areaBelow } from './flaskShape';
 
 /** Capacity of each tank on a tool, in atoms. */
 export const TANK_CAP = 4 * CAP;
-/** Spout flow with the valve fully open, in atoms per sim second (one flask per second). */
+/**
+ * Spout flow with the valve fully open and the tank full, in atoms per sim second (one flask per second). A valve
+ * lets out its openness times this, times how high the fluid stands, as a share of the tank's height (see
+ * Tool.level), so a nearly empty tank trickles.
+ */
 export const MAX_FLOW = CAP;
 /** Height of every tank, in local units. */
 export const TANK_H = 84;
@@ -65,24 +70,45 @@ export function drip(drop: Vessel, out: Vessel | null, h: number, rand = Math.ra
 
 /** How much a splitter's funnel holds, in atoms: just a buffer, like a hose's. */
 export const FUNNEL_CAP = CAP / 4;
-/** How fast a splitter's funnel drains, in atoms per sim second, whatever its valve is set to. */
+/**
+ * How fast a splitter's or size sorter's funnel drains when full, in atoms per sim second, whatever a splitter's
+ * valve is set to; it drains in proportion to how high its fluid stands (see Tool.level). The flow meter's drains at
+ * this rate however full it is.
+ */
 export const FUNNEL_RATE = 2 * MAX_FLOW;
 
 /**
- * The size sorter's screens, in the order fluid meets them: per screen, the share of the species of each size
- * (1, 2, 3 atoms) still on the chute that falls through. Whatever passes both goes out the chute's end.
+ * How well the size sorter sorts, editable from the Chemistry panel, from 0 (every size of molecule splits evenly
+ * among its three spouts) to 1, the default (singles all fall through the first screen, pairs the second, and
+ * triples go off the end). In between, each size goes 1/3 + 2/3·strength out its own spout and the rest evenly out
+ * the other two, so at 0.55, 70% out its own and 15% out each of the others.
  */
-export const SORTER_SCREENS: readonly (readonly number[])[] = [
-  [0.7, 0, 0],
-  [0.95, 0.7, 0],
-];
+export const SORTER = { strength: 1 };
+const DEFAULT_SORTER = { ...SORTER };
+
+export function restoreDefaultSorter(): void {
+  Object.assign(SORTER, DEFAULT_SORTER);
+}
+
+/** For molecules of each size (1, 2, 3 atoms), the share going out each of the size sorter's spouts, in order. */
+export function sorterShares(): number[][] {
+  const k = Math.max(0, Math.min(1, SORTER.strength));
+  return [0, 1, 2].map((own) => [0, 1, 2].map((j) => (j === own ? 1 / 3 + (2 / 3) * k : (1 - k) / 3)));
+}
 
 /** How much the cryostabilizer reference holds, by volume: a hundred flasks. */
 export const REFERENCE_CAP = 100 * CAP;
+/** How much the big tank holds, by volume: a hundred flasks. */
+export const BIG_TANK_CAP = 100 * CAP;
+/** The big tank's inside width, in local units: wide, so it isn't too tall. */
+export const BIG_TANK_W = 560;
+/** The big tank's inside height, in local units: enough that it's drawn as big as a hundred flasks are. */
+export const BIG_TANK_H = (100 * areaBelow(FLASK_OUTLINE, 0)) / BIG_TANK_W;
+
 /** How much a pipette holds, by volume: a tenth of a flask. */
 export const PIPETTE_CAP = CAP / 10;
-/** How long a pipette takes to empty with its valve fully open, in sim seconds. */
-export const PIPETTE_EMPTY_S = 5;
+/** A pipette's flow, full and fully open, in atoms per sim second: a fifth of what it holds. */
+export const PIPETTE_FLOW = PIPETTE_CAP / 5;
 /**
  * How high fluid filling `share` of a tank with a cup (see ToolShape.cup) stands above the tank's floor, in local
  * units. It's drawn across tube and cup together, in proportion to their area, so a full one is full to the cup's
@@ -98,6 +124,57 @@ export function cupFillHeight(share: number, tubeW: number, tubeH: number, mouth
   const rest = a - tube;
   const y = k > 0 ? (Math.sqrt(tubeW * tubeW + 4 * k * rest) - tubeW) / (2 * k) : rest / tubeW;
   return tubeH + Math.min(cupH, y);
+}
+
+/** How wide a sump narrows to at its tip, where its valve is, in local units (see ToolShape.sump). */
+export const SUMP_TIP = 4;
+
+/**
+ * How high fluid filling `share` of a `w`-wide, `h`-deep tank with a sump under its floor (see ToolShape.sump) stands
+ * above the sump's tip, in local units. It's measured by area as drawn: the sump fills first, then the tank, so a
+ * full one stands h + sump.h high.
+ */
+export function sumpFillHeight(share: number, w: number, h: number, sump: { w: number; h: number }): number {
+  const sumpArea = ((sump.w + SUMP_TIP) / 2) * sump.h;
+  const a = Math.max(0, Math.min(1, share)) * (w * h + sumpArea);
+  if (a > sumpArea) return sump.h + Math.min(h, (a - sumpArea) / w);
+  // up the sump, the width grows from SUMP_TIP to sump.w, so the area to height y is SUMP_TIP·y + k·y²
+  const k = (sump.w - SUMP_TIP) / (2 * sump.h);
+  return k > 0 ? (Math.sqrt(SUMP_TIP * SUMP_TIP + 4 * k * a) - SUMP_TIP) / (2 * k) : a / SUMP_TIP;
+}
+
+/**
+ * How much the receptacle holds, by volume: a little over twice the cryostabilizer reference, so the reference
+ * alone can't fill it, and one good load of it is enough to win (see GOAL_VOLUME).
+ */
+export const RECEPTACLE_CAP = 210 * CAP;
+/**
+ * A receptacle's cycle, in sim seconds: it thinks, beeping and blinking, then flushes what it took down its hose, or
+ * pours out what it refused through its reject valve, evenly over the time given.
+ */
+export const RECEPTACLE_TIMES = { think: 1.6, flush: 1.5, reject: 2.5 };
+/** How many lamps blink on a receptacle while it thinks. */
+export const RECEPTACLE_LAMPS = 6;
+/** The pitches a receptacle beeps at while it thinks, in Hz: a pentatonic scale, high up. */
+const BEEP_PITCHES = [880, 1047, 1175, 1397, 1568, 1760, 2093, 2349];
+
+/** One beep in a receptacle's thinking: when, which lamp it lights, and at what pitch. */
+export interface Beep {
+  t: number;
+  lamp: number;
+  freq: number;
+}
+
+/** A random run of beeps for a receptacle to think with, every 0.07 to 0.15 s across RECEPTACLE_TIMES.think. */
+export function beepPattern(rand = Math.random): Beep[] {
+  const out: Beep[] = [];
+  for (let t = 0.05; t < RECEPTACLE_TIMES.think - 0.1; t += 0.07 + 0.08 * rand())
+    out.push({
+      t,
+      lamp: Math.floor(rand() * RECEPTACLE_LAMPS),
+      freq: BEEP_PITCHES[Math.floor(rand() * BEEP_PITCHES.length)],
+    });
+  return out;
 }
 
 /** How much a spectrometer's sample cup holds, by volume: a thousandth of a flask, 1M. */
@@ -120,14 +197,88 @@ export function scanLevel(age: number): number {
   return SCAN_PHASES.find((ph) => age < ph.end)?.level ?? 0;
 }
 
+/** How many stretches the heater's tube is cut into, each holding what passes through it as one mixed packet. */
+export const HEATER_CELLS = 24;
+/** The stretches of the heater's tube that its three taps draw from: the ends of its first three quarters. */
+export const HEATER_TAPS = [5, 11, 17] as const;
+/**
+ * How the resistive heater behaves, editable from the Chemistry panel:
+ * - feed: how fast its funnel drains into its tube, in atoms per sim second (one flask a second);
+ * - transit: how long fluid takes to run the length of the tube, in sim seconds, however much is in it;
+ * - rate: how fast fluid in the tube heats toward the wire's temperature, per sim second: it closes
+ *   1 − e^(−rate·t) of the gap in t seconds, so by default 31% by the first tap, 53%, 68%, and 78% by the end;
+ * - maxT: the wire's temperature with the dial turned all the way up.
+ */
+export const HEATER = { feed: MAX_FLOW, transit: 6, rate: 0.25, maxT: 100 };
+const DEFAULT_HEATER = { ...HEATER };
+
+export function restoreDefaultHeater(): void {
+  Object.assign(HEATER, DEFAULT_HEATER);
+}
+
+/** The heater's tube, in local units: from x0 to x1 (cut into HEATER_CELLS equal stretches), centered at y, of radius r. */
+export const HEATER_TUBE = { x0: -144, x1: 144, y: 48, r: 7 };
+/** The middle of stretch c of the heater's tube, in local units. */
+export function heaterCellX(c: number): number {
+  return HEATER_TUBE.x0 + ((c + 0.5) * (HEATER_TUBE.x1 - HEATER_TUBE.x0)) / HEATER_CELLS;
+}
+/** The heater's control box, above the right end of its tube, with the dial (see SHAPES.heater.valves) on it. */
+export const HEATER_BOX = { x0: 100, x1: 140, y0: 2, y1: 36 };
+
+/**
+ * The heater's wire temperature for a dial setting from 0 to 1: off at 0 (it heats nothing), then rising
+ * geometrically from room temperature to HEATER.maxT, so by default a quarter turn is about 3 and halfway is 10.
+ */
+export function wireTemperature(dial: number): number {
+  return dial > 0 ? HEATER.maxT ** Math.min(1, dial) : 0;
+}
+
+/**
+ * Heat a packet of fluid by the wire for `h` sim seconds: it closes 1 − e^(−HEATER.rate·h) of the gap to the
+ * wire's temperature, in whole quanta. The wire only ever heats: fluid hotter than it is left alone.
+ */
+export function heatBy(f: Fluid, wireT: number, h: number): void {
+  if (f.N <= 0 || wireT <= temperature(f)) return;
+  f.Q += roundRandom((heatAt(wireT, f.N) - f.Q) * (1 - Math.exp(-HEATER.rate * h)));
+}
+
+/**
+ * How the flow meter reads, editable from the Chemistry panel:
+ * - tau: how long, in sim seconds, its reading takes to close all but 1/e of the gap to a new flow. It averages
+ *   over about that long, so a steady drip reads as a steady trickle rather than flickering.
+ */
+export const METER = { tau: 1 };
+const DEFAULT_METER = { ...METER };
+
+export function restoreDefaultMeter(): void {
+  Object.assign(METER, DEFAULT_METER);
+}
+
+/** How many digits the meter's display has. */
+export const METER_DIGITS = 4;
+
+/**
+ * What the meter's display shows for a flow of `rate` (by volume, see VOLUME) per sim second: millions per second,
+ * to as many decimal places as its four digits leave room for, so 0.012, 1.234, 56.78, 999.9, 2000.
+ */
+export function meterText(rate: number): string {
+  const m = Math.max(0, rate) / 1e6;
+  for (let dp = METER_DIGITS - 1; dp >= 0; dp--) {
+    const t = m.toFixed(dp);
+    if (t.replace('.', '').length <= METER_DIGITS) return t;
+  }
+  return '9'.repeat(METER_DIGITS);
+}
+
 /** The order of a spectrometer hexagon's sextants, clockwise from the top. */
 export const SEXTANT_ATOMS: readonly Atom[] = ['G', 'C', 'B', 'M', 'R', 'Y'];
 
 export type ToolKind =
-  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'spectrometer' | 'reference';
+  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'heater' | 'spectrometer' | 'reference'
+  | 'meter' | 'tank' | 'receptacle';
 
 /** Tools there's only ever one of: not in the palette, and never put away. */
-export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectrometer', 'reference'];
+export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectrometer', 'reference', 'meter', 'receptacle'];
 
 /**
  * A tool's geometry in local units: multiply by the stage scale and offset by
@@ -148,11 +299,29 @@ export interface ToolShape {
    * tank's center, `h` above the tank's top.
    */
   cup?: { w: number; h: number };
+  /**
+   * A narrow point under each tank's flat floor, `w` wide at the floor and `h` deep, narrowing to SUMP_TIP, which its
+   * valve drains from. A valve pours by how high the fluid stands above the tip (see Tool.level), so with a sump the
+   * last of it, down in the narrow point, still drains quickly, rather than a thin layer across the whole floor
+   * trickling out ever more slowly.
+   */
+  sump?: { w: number; h: number };
   /** Whether the tool has no valves to turn. */
   noValve?: boolean;
+  /** Where the valves are, if not one under each tank's center at valveY: then there's one valve per entry. */
+  valves?: Point[];
+  /** Which valve, if any, is a dial instead: it turns clockwise from down-left (0) to down-right (1). */
+  dial?: number;
+  /**
+   * Whether it can be flipped left to right (see Tool.flipped). Only tools that work differently flipped can be;
+   * one that's its own mirror image, in what it does if not in every detail, can't.
+   */
+  flippable?: boolean;
+  /** Whether it stays where it is: it can't be picked up and carried. */
+  fixed?: boolean;
   /** Whether the tanks are sealed on top, so nothing can be poured or fall into them. */
   sealed?: boolean;
-  /** Spout flow with a valve fully open, in atoms per sim second, if not MAX_FLOW. */
+  /** Spout flow with a valve fully open and the tank full, in atoms per sim second, if not MAX_FLOW. */
   maxFlow?: number;
   /** Text shown above the tool, one entry per line. */
   label?: string[];
@@ -167,6 +336,7 @@ export interface ToolShape {
 export const SHAPES: Record<ToolKind, ToolShape> = {
   dispenser: {
     tanks: [{ name: 'tank', x0: -30, x1: 30 }],
+    sump: { w: 14, h: 7 },
     spouts: [0],
     valveY: 98,
     spoutY: 114,
@@ -177,7 +347,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tanks: [{ name: 'tube', x0: -5, x1: 5 }],
     tankCap: PIPETTE_CAP,
     cup: { w: 14, h: 14 },
-    maxFlow: PIPETTE_CAP / PIPETTE_EMPTY_S,
+    maxFlow: PIPETTE_FLOW,
     spouts: [0],
     valveY: 98,
     spoutY: 114,
@@ -188,19 +358,24 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
       { name: 'A', x0: -64, x1: -6 },
       { name: 'B', x0: 6, x1: 64 },
     ],
+    sump: { w: 14, h: 7 },
     // the streams cross over in the exchanger, so each leaves on the other side
     spouts: [35, -35],
-    valveY: 94,
+    valveY: 97,
     spoutY: 136,
     box: { x0: -68, x1: 68, y0: -6, y1: 138 },
   },
   separator: {
     tanks: [{ name: 'tank', x0: -30, x1: 30 }],
-    // far enough apart for a flask, or a tool's tank, under each
-    spouts: [-36, 36],
-    valveY: 93,
+    // one outlet per mix of primary and secondary (see SEPARATOR_OUTLET), far enough apart for a flask, or a
+    // tool's tank, under each
+    spouts: [-144, -72, 0, 72, 144],
+    sump: { w: 14, h: 7 },
+    flippable: true,
+    valveY: 96,
     spoutY: 126,
-    box: { x0: -44, x1: 44, y0: -6, y1: 128 },
+    // the manifold under it (see the engine's SEP_BODY), with a handle on its left end
+    box: { x0: -160, x1: 154, y0: -6, y1: 128 },
   },
   splitter: {
     tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
@@ -220,17 +395,36 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tankCap: FUNNEL_CAP,
     funnel: true,
     noValve: true,
+    flippable: true,
     // as far apart as the separator's
     spouts: [-24, 48, 120],
     valveY: 30,
     spoutY: 104,
     box: { x0: -94, x1: 126, y0: -6, y1: 106 },
   },
+  heater: {
+    // a funnel over the left end of a long tube (see HEATER_TUBE) with a wire down its middle; three taps
+    // along it and its far end turning down are the spouts, and the dial on a box above its right end sets
+    // the wire's heat
+    tanks: [{ name: 'funnel', x0: -160, x1: -116 }],
+    tankH: 30,
+    tankCap: FUNNEL_CAP,
+    funnel: true,
+    valves: [...HEATER_TAPS.map((c) => ({ x: heaterCellX(c), y: 72 })), { x: 120, y: 20 }],
+    dial: HEATER_TAPS.length,
+    flippable: true,
+    // as far apart as the separator's, with the end a little further on
+    spouts: [...HEATER_TAPS.map(heaterCellX), 158],
+    valveY: 72,
+    spoutY: 92,
+    box: { x0: -166, x1: 168, y0: -6, y1: 94 },
+  },
   reference: {
     // a hundred flasks' worth, sealed, draining a trickle through its valve
     tanks: [{ name: 'reference', x0: -20, x1: 20 }],
     tankH: 70,
     tankCap: REFERENCE_CAP,
+    sump: { w: 12, h: 7 },
     sealed: true,
     maxFlow: 0.02 * MAX_FLOW,
     label: ['cryostabilizer', 'reference'],
@@ -238,6 +432,43 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     valveY: 84,
     spoutY: 100,
     box: { x0: -40, x1: 40, y0: -26, y1: 102 },
+  },
+  tank: {
+    // a hundred flasks' worth, drawn as big as a hundred flasks, with ten faint graduations across it
+    tanks: [{ name: 'tank', x0: -BIG_TANK_W / 2, x1: BIG_TANK_W / 2 }],
+    tankH: BIG_TANK_H,
+    tankCap: BIG_TANK_CAP,
+    sump: { w: 30, h: 20 },
+    spouts: [0],
+    valveY: BIG_TANK_H + 28,
+    spoutY: BIG_TANK_H + 44,
+    box: { x0: -BIG_TANK_W / 2 - 4, x1: BIG_TANK_W / 2 + 4, y0: -6, y1: BIG_TANK_H + 46 },
+  },
+  receptacle: {
+    // a big vessel on a cabinet of lamps with a button (see RECEPTACLE_BODY), a hose running from the cabinet's
+    // foot straight down off the bench, and a reject valve beside it over the one spout
+    tanks: [{ name: 'receptacle', x0: -46, x1: 46 }],
+    tankH: 80,
+    tankCap: RECEPTACLE_CAP,
+    noValve: true,
+    fixed: true,
+    label: ['cryostabilizer', 'receptacle'],
+    spouts: [34],
+    valveY: 158,
+    spoutY: 172,
+    box: { x0: -58, x1: 58, y0: -26, y1: 174 },
+  },
+  meter: {
+    // a funnel draining straight through a cabinet with a display (see METER_BODY) and out a spout
+    tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
+    tankH: 30,
+    tankCap: FUNNEL_CAP,
+    funnel: true,
+    noValve: true,
+    spouts: [0],
+    valveY: 30,
+    spoutY: 82,
+    box: { x0: -34, x1: 34, y0: -6, y1: 84 },
   },
   spectrometer: {
     // a sample cup on a cabinet with a screen and a run button (see SPECTROMETER)
@@ -267,6 +498,22 @@ export const SPECTROMETER = {
   button: { x0: 28, x1: 62, y0: 84, y1: 98 },
 };
 
+/**
+ * The receptacle's cabinet, in local units: a row of lamps that blink while it thinks, a verdict lamp, its button,
+ * and a screen showing how much it's taken of what's needed; and where its hose leaves the cabinet's foot.
+ */
+export const RECEPTACLE_BODY = {
+  x0: -54, x1: 54, y0: 84, y1: 146,
+  screen: { x0: -48, x1: 48, y0: 125, y1: 141 },
+  lamps: { x0: -44, dx: 11, y: 96, r: 3.2 },
+  verdict: { x: 34, y: 96, r: 5 },
+  button: { x0: -44, x1: 4, y0: 106, y1: 119 },
+  hoseX: -16,
+};
+
+/** The meter's cabinet, and its display, in local units. */
+export const METER_BODY = { x0: -31, x1: 31, y0: 36, y1: 64, display: { x0: -26, x1: 26, y0: 41, y1: 59 } };
+
 /** Horizontal center of a tank, which is also where its valve is. */
 export const tankX = (tk: { x0: number; x1: number }) => (tk.x0 + tk.x1) / 2;
 
@@ -285,37 +532,91 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   separator: 'Separator',
   splitter: 'Splitter',
   sorter: 'Size sorter',
+  heater: 'Resistive heater',
+  meter: 'Flow meter',
+  tank: 'Tank',
+  receptacle: 'Receptacle',
   spectrometer: 'Mass spectrometer',
   reference: 'Cryostabilizer reference',
 };
 
 /**
- * The separator splits each species between its outlets by color: a molecule
- * with p primary atoms (R, G, B) and s secondary ones (C, M, Y) leaves
- * left : right in the ratio e^p : e^s. LEFT_SHARE[species] is its left fraction.
+ * How sharply the separator sorts, editable from the Chemistry panel: each molecule goes to outlet j in proportion
+ * to e^(−sharpness·(j − its own outlet)²) (see SEPARATOR_OUTLET). At 0 everything splits evenly five ways; at 3 a
+ * molecule goes 91% to its own outlet if it's one of the middle three, 95% if it's at an end, and the rest mostly to
+ * the next outlet over; and from SEPARATOR_PERFECT up, which is the default, every molecule goes out its own.
  */
-export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
+export const SEPARATOR = { sharpness: 10 };
+const DEFAULT_SEPARATOR = { ...SEPARATOR };
+
+export function restoreDefaultSeparator(): void {
+  Object.assign(SEPARATOR, DEFAULT_SEPARATOR);
+}
+
+/** The sharpness from which the separator sorts perfectly: the top of its slider. */
+export const SEPARATOR_PERFECT = 10;
+
+/** How many outlets the separator has, one per mix of primary and secondary atoms a molecule can have. */
+export const SEPARATOR_OUTLETS = 5;
+
+/**
+ * Each species' own outlet on the separator, left to right, by the share of its atoms that are primary (R, G, B):
+ * all of them (0), two in three (1), half (2), one in three (3), none (4).
+ */
+export const SEPARATOR_OUTLET: Uint8Array = Uint8Array.from(SPECIES, (sp) => {
   const p = sp.atoms.filter((a) => a && GROUP_PRIMARY.includes(a)).length;
-  return Math.exp(p) / (Math.exp(p) + Math.exp(sp.size - p));
+  if (p === sp.size) return 0;
+  if (p === 0) return 4;
+  if (2 * p === sp.size) return 2;
+  return 3 * p === 2 * sp.size ? 1 : 3;
 });
+
+let shareCache = { sharpness: NaN, shares: [] as number[][] };
+
+/** For each of its own outlets, the shares a molecule sends to each outlet, at the current SEPARATOR.sharpness. */
+export function separatorShares(): number[][] {
+  const k = SEPARATOR.sharpness;
+  if (shareCache.sharpness !== k) {
+    const shares = Array.from({ length: SEPARATOR_OUTLETS }, (_, own) => {
+      const w = Array.from({ length: SEPARATOR_OUTLETS }, (_, j) =>
+        k >= SEPARATOR_PERFECT ? +(j === own) : Math.exp(-k * (j - own) ** 2),
+      );
+      const total = w.reduce((a, b) => a + b, 0);
+      return w.map((x) => x / total);
+    });
+    shareCache = { sharpness: k, shares };
+  }
+  return shareCache.shares;
+}
 
 /**
  * Something with tanks on top, each draining through its own valve, and
  * spouts on the bottom.
  *
  * - A **dispenser** has one tank and one spout. A **pipette** is a narrow one, a tenth of a flask, filled
- *   through a little funnel on top, that empties in PIPETTE_EMPTY_S with its valve fully open.
+ *   through a little funnel on top, that lets out PIPETTE_FLOW full and fully open.
  * - A **heat exchanger** has two tanks, whose streams pass each other in
  *   counterflow on the way to their spouts, trading heat but never mixing.
- * - A **separator** has one tank and two spouts, and splits what drains
- *   between them by color (see LEFT_SHARE).
+ * - A **separator** has one tank and five spouts, and sorts what drains
+ *   among them by its mix of primary and secondary colors (see separate).
  * - A **splitter** has a small funnel that drains straight through (at
  *   FUNNEL_RATE) to two spouts. Its valve doesn't open or close: it sets the
  *   share that goes right, from 0 (all left) to 1 (all right).
  * - A **size sorter** has a funnel like the splitter's, with no valve, draining down a chute through two
  *   screens and off its end, each with a spout under it (see SORTER_SCREENS).
+ * - A **resistive heater** has a funnel draining (at HEATER.feed) into one end of a long tube, which carries
+ *   it to the other end in HEATER.transit and out a spout there, heating it all the way (see heatBy) with a
+ *   wire whose temperature its dial sets (see wireTemperature). Three taps along the tube, each a valve over
+ *   a spout, let fluid out sooner, less heated.
  * - A **cryostabilizer reference** is a sealed hundred flasks' worth of the target with a valve that lets out at most
  *   0.02 flask/s.
+ * - A **tank** is a dispenser holding a hundred flasks, drawn as big as a hundred flasks, with ten faint
+ *   graduations across it.
+ * - A **receptacle** is where cryostabilizer goes: a vessel of RECEPTACLE_CAP, which stays put, with a button. Pressing it (see
+ *   press) lids the vessel and thinks for a moment, beeping; then, if what's inside is more than GOAL_PURITY target,
+ *   it flushes it down its hose, counting toward the goal, and otherwise pours it out its one spout.
+ * - A **flow meter** has a funnel like the splitter's, with no valve, draining straight through to one spout, and
+ *   shows what flows out, averaged over about METER.tau (see rate and meterText).
  * - A **mass spectrometer** has a small sample cup and no spouts. Running it (see scan) reads the sample's
  *   spectrum onto a screen, then lids the cup and drains the sample away into the cabinet over the run.
  *
@@ -324,8 +625,10 @@ export const LEFT_SHARE: Float64Array = Float64Array.from(SPECIES, (sp) => {
  */
 export class Tool {
   readonly tanks: Vessel[];
+  /** A heater's tube, stretch by stretch from the funnel's end (see HEATER_CELLS); empty for any other tool. */
+  readonly tube: Vessel[];
   /**
-   * Per tank: 0 (closed) to 1 (MAX_FLOW). Closed by default, so a tool doesn't drip on everything it's carried
+   * Per valve (one per tank unless the shape places them): 0 (closed) to 1 (MAX_FLOW). Closed by default, so a tool doesn't drip on everything it's carried
    * over. A splitter's one valve is instead the share going right, half by default.
    */
   readonly valves: number[];
@@ -341,6 +644,26 @@ export class Tool {
   reading: number[] | null = null;
   /** Sim seconds since the spectrometer was last run (see SCAN_LIGHTS); Infinity if it isn't running. */
   scanAge = Infinity;
+  /** A meter's reading: what's flowed out of it, by volume per sim second, averaged over about METER.tau. */
+  rate = 0;
+  /**
+   * The player's note about the whole tool, written above it; empty for none. Only a tool with more than one tank
+   * has one: on a tool with one tank, its tank's label (Vessel.label) does the job.
+   */
+  note = '';
+  /** A receptacle's cycle, from pressing its button until it opens again (see press); null while it's open. */
+  cycle: { phase: 'think' | 'flush' | 'reject'; age: number } | null = null;
+  /** The beeps of a receptacle's thinking (see beepPattern), for its lamps and its sound. */
+  beeps: Beep[] = [];
+  /** A receptacle's last verdict, shown on its lamp until it's pressed again; null before it's first pressed. */
+  verdict: 'pass' | 'fail' | null = null;
+  /** The target a receptacle has flushed down its hose, by volume, not yet counted toward the goal (see the engine). */
+  flushed = 0;
+  /**
+   * Whether it's flipped left to right, if its shape is flippable: everything about it is mirrored (its local x
+   * negated) except its valves' levers and any writing, which read the same either way.
+   */
+  flipped = false;
 
   constructor(
     readonly kind: ToolKind,
@@ -352,7 +675,9 @@ export class Tool {
     valves: readonly number[] = [],
   ) {
     this.tanks = SHAPES[kind].tanks.map(() => new Vessel(SHAPES[kind].tankCap ?? TANK_CAP));
-    this.valves = this.tanks.map((_, k) => valves[k] ?? (kind === 'splitter' ? 0.5 : 0));
+    this.tube = Array.from({ length: kind === 'heater' ? HEATER_CELLS : 0 }, () => new Vessel(Infinity));
+    const nValves = SHAPES[kind].valves?.length ?? this.tanks.length;
+    this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' ? 0.5 : 0));
     this.out = this.shape.spouts.map(() => null);
     this.flow = this.shape.spouts.map(() => 0);
     this.drops = this.shape.spouts.map(() => new Vessel(Infinity));
@@ -375,10 +700,17 @@ export class Tool {
       }
       return (this.out = []);
     }
-    const funnel = this.kind === 'splitter' || this.kind === 'sorter';
+    if (this.kind === 'heater') return this.heat(h);
+    if (this.kind === 'receptacle') return this.receive(h);
     let packets = this.tanks.map((tank, k) => {
       const p = new Vessel(Infinity);
-      transfer(tank, p, funnel ? FUNNEL_RATE * h : this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW) * h);
+      // a valve, or a funnel without one, lets out in proportion to how high the fluid stands; the meter's funnel
+      // drains at a fixed rate, so what it reads is just what's arriving
+      const rate =
+        this.kind === 'meter' ? FUNNEL_RATE
+        : this.kind === 'splitter' || this.kind === 'sorter' ? FUNNEL_RATE * this.level(k)
+        : this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW) * this.level(k);
+      transfer(tank, p, rate * h);
       return p;
     });
     if (this.kind === 'exchanger') counterflow(packets[0], packets[1], EXCHANGE_RATE * h);
@@ -387,7 +719,44 @@ export class Tool {
     if (this.kind === 'sorter') packets = sieve(packets[0]);
     this.out = packets.map((p) => (p.N > 0 ? p : null));
     this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
+    if (this.kind === 'meter') this.rate += (volume(packets[0]) / h - this.rate) * (1 - Math.exp(-h / Math.max(1e-9, METER.tau)));
     return this.out;
+  }
+
+  /**
+   * A heater's step: each stretch of the tube passes h / (HEATER.transit / HEATER_CELLS) of itself on, the last
+   * out the end, and the funnel tops up the first; then each tap lets out what its valve allows from its
+   * stretch, and the wire heats what's left.
+   */
+  private heat(h: number): (Vessel | null)[] {
+    const { tube, valves } = this;
+    const packets = this.shape.spouts.map(() => new Vessel(Infinity));
+    const on = Math.min(1, (h * HEATER_CELLS) / Math.max(1e-9, HEATER.transit));
+    const last = tube.length - 1;
+    transfer(tube[last], packets[HEATER_TAPS.length], volume(tube[last]) * on);
+    for (let c = last - 1; c >= 0; c--) transfer(tube[c], tube[c + 1], volume(tube[c]) * on);
+    transfer(this.tanks[0], tube[0], HEATER.feed * this.level(0) * h);
+    HEATER_TAPS.forEach((c, j) => transfer(tube[c], packets[j], valves[j] * MAX_FLOW * h));
+    const wireT = wireTemperature(valves[this.shape.dial!]);
+    for (const v of tube) heatBy(v, wireT, h);
+    this.out = packets.map((p) => (p.N > 0 ? p : null));
+    this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
+    return this.out;
+  }
+
+  /**
+   * How high the fluid in tank k stands, as a share of the tank's full height, as it's drawn: in step with how full
+   * it is, except in a tank with a cup on top (see cupFillHeight), whose narrow tube fills first, or a sump below
+   * (see sumpFillHeight), which fills first and is measured from its tip.
+   */
+  level(k: number): number {
+    const v = this.tanks[k];
+    const share = Math.min(1, volume(v) / v.cap);
+    const { cup, sump, tanks, tankH = TANK_H } = this.shape;
+    const w = tanks[k].x1 - tanks[k].x0;
+    if (sump) return sumpFillHeight(share, w, tankH, sump) / (tankH + sump.h);
+    if (cup) return cupFillHeight(share, w, tankH, 2 * cup.w, cup.h) / (tankH + cup.h);
+    return share;
   }
 
   /** Whether a spectrometer run is under way, with hexagons still to light. */
@@ -395,9 +764,56 @@ export class Tool {
     return this.scanAge < SCAN_LIGHTS[SCAN_LIGHTS.length - 1];
   }
 
-  /** Whether the tanks are lidded, so nothing can be poured or fall in: always if sealed, and a spectrometer's while it runs. */
+  /**
+   * Whether the tanks are lidded, so nothing can be poured or fall in: always if sealed, a spectrometer's while it
+   * runs, and a receptacle's through its cycle.
+   */
   get lidded(): boolean {
-    return !!this.shape.sealed || (this.kind === 'spectrometer' && this.scanning);
+    return !!this.shape.sealed || (this.kind === 'spectrometer' && this.scanning) || !!this.cycle;
+  }
+
+  /**
+   * Press a receptacle's button: lid it and start it thinking (see receive), with a new pattern of beeps. Does
+   * nothing, returning false, while a cycle is under way.
+   */
+  press(): boolean {
+    if (this.kind !== 'receptacle' || this.cycle) return false;
+    this.cycle = { phase: 'think', age: 0 };
+    this.beeps = beepPattern();
+    this.verdict = null;
+    return true;
+  }
+
+  /**
+   * A receptacle's step. Open, it just holds what's poured in. Thinking, it waits out RECEPTACLE_TIMES.think, then
+   * judges what it holds: more than GOAL_PURITY target, and it flushes it down its hose (counting the target in
+   * flushed), else it pours it out its spout, each evenly over its time in RECEPTACLE_TIMES. Then it opens again.
+   */
+  private receive(h: number): (Vessel | null)[] {
+    const tank = this.tanks[0];
+    const c = this.cycle;
+    this.out = [null];
+    this.flow = [0];
+    if (!c) return this.out;
+    c.age += h;
+    if (c.phase === 'think') {
+      if (c.age >= RECEPTACLE_TIMES.think) {
+        this.verdict = sustenance(tank) > 0 ? 'pass' : 'fail';
+        this.cycle = { phase: this.verdict === 'pass' ? 'flush' : 'reject', age: 0 };
+      }
+      return this.out;
+    }
+    // evenly, so it's empty just as the time's up
+    const left = RECEPTACLE_TIMES[c.phase] - (c.age - h);
+    const p = new Vessel(Infinity);
+    transfer(tank, p, left <= h ? volume(tank) : (volume(tank) * h) / left);
+    if (c.phase === 'flush') this.flushed += p.n[TARGET] * roomFor(TARGET);
+    else if (p.N > 0) {
+      this.out = [p];
+      this.flow = [volume(p) / (MAX_FLOW * h)];
+    }
+    if (c.age >= RECEPTACLE_TIMES[c.phase]) this.cycle = null;
+    return this.out;
   }
 
   /**
@@ -429,21 +845,44 @@ export function spectrum(f: Fluid, cap: number): number[] {
   return out;
 }
 
-/** Pass a fluid over the size sorter's screens (see SORTER_SCREENS): what falls through each, then what's left. */
-export function sieve(f: Vessel): Vessel[] {
-  const out: Vessel[] = [];
-  let rest = f;
-  for (const screen of SORTER_SCREENS) {
-    const [through, over] = divide(rest, (s) => screen[SPECIES[s].size - 1]);
-    out.push(through);
-    rest = over;
-  }
-  return [...out, rest];
+/**
+ * Pass a fluid over the size sorter's screens (see sorterShares): what falls through the first, what falls through
+ * the second, and what goes off the end, in whole molecules, with heat in proportion.
+ */
+export function sieve(f: Fluid): Vessel[] {
+  const shares = sorterShares();
+  return split(f, 3, (s) => shares[SPECIES[s].size - 1]);
 }
 
-/** Split a fluid between the separator's left and right outlets by LEFT_SHARE, in whole molecules, heat in proportion. */
-export function separate(f: Fluid): [Vessel, Vessel] {
-  return divide(f, (s) => LEFT_SHARE[s]);
+/** Split a fluid among the separator's outlets, left to right (see separatorShares), in whole molecules, heat in proportion. */
+export function separate(f: Fluid): Vessel[] {
+  const shares = separatorShares();
+  return split(f, SEPARATOR_OUTLETS, (s) => shares[SEPARATOR_OUTLET[s]]);
+}
+
+/**
+ * Split a fluid `n` ways, sending `shares(s)[j]` of species s to the j-th, in whole molecules (the last takes
+ * whatever rounding leaves), with heat in proportion to atoms.
+ */
+export function split(f: Fluid, n: number, shares: (s: number) => readonly number[]): Vessel[] {
+  const out = Array.from({ length: n }, () => new Vessel(Infinity));
+  for (let s = 0; s < NS; s++) {
+    if (!f.n[s]) continue;
+    const sh = shares(s);
+    let left = f.n[s];
+    for (let j = 0; j < n; j++) {
+      const m = j === n - 1 ? left : Math.min(left, roundRandom(f.n[s] * sh[j]));
+      left -= m;
+      out[j].n[s] += m;
+      out[j].N += m * SPECIES[s].size;
+    }
+  }
+  let Q = f.Q;
+  for (let j = 0; j < n; j++) {
+    out[j].Q = j === n - 1 ? Q : f.N > 0 ? Math.min(Q, roundRandom((f.Q * out[j].N) / f.N)) : 0;
+    Q -= out[j].Q;
+  }
+  return out;
 }
 
 /** Split a fluid into left and right, sending `leftShare(s)` of species s left, in whole molecules, heat in proportion. */
@@ -526,6 +965,8 @@ export class Hose {
   streaming = false;
   /** The flow on the last step, in flasks per second. */
   flow = 0;
+  /** The player's note, written above its funnel; empty for none. */
+  note = '';
 
   constructor(
     /** The funnel's mouth and the outlet's tip, as fractions of the home area's width and height (see HOME_W). */

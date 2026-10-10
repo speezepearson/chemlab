@@ -1,5 +1,14 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { INCIDENT, OPENING, PLAYER, formatLine, type LogLine } from '../intro/log';
+import { GOAL_L, VOYAGE } from '../game/config';
+
+const num = (x: number, digits = 0) => x.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+/** The litres needed and present, right-aligned together. */
+const [NEEDED_L, PRESENT_L] = (() => {
+  const [a, b] = [`${num(GOAL_L, 3)} L`, `${num(VOYAGE.presentL, 3)} L`];
+  const w = Math.max(a.length, b.length) + 2;
+  return [a.padStart(w), b.padStart(w)];
+})();
 
 /** How long the opening lines sit alone before the incident starts printing, in ms. */
 const PAUSE_MS = 3000;
@@ -111,10 +120,11 @@ function Notice({ onOk }: { onOk(): void }) {
         Sec. 041 - Understaffing) to be proactively depreserved to assist in solving the following problem:
       </p>
       <pre>
-        {'Cryostabilizer required to complete journey: (32,210 passengers) x (0.1 mL/pass/day) x (4,456 days) =\n' +
-          '  14,352.776 L\n' +
+        {`Cryostabilizer required to complete journey: (${num(VOYAGE.passengers)} passengers) x ` +
+          `(${VOYAGE.mlPerPassengerDay} mL/pass/day) x (${num(VOYAGE.days)} days) =\n` +
+          `${NEEDED_L}\n` +
           'Cryostabilizer present:\n' +
-          '       2.811 L'}
+          PRESENT_L}
       </pre>
       <p>If this sounds intimidating, please don't worry! You will have guidance from the following highly experienced crew members:</p>
       <ul className="crew" />

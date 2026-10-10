@@ -43,6 +43,8 @@ export class Scale {
   readonly load: { f: Flask; dx: number }[] = [];
   /** Subtracted from the reading, in whole grams. */
   tare = 0;
+  /** The player's note, written above it; empty for none. */
+  note = '';
 
   constructor(
     /** Position of the platform's top center, as fractions of the home area's width and height (see HOME_W). */

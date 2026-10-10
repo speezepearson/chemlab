@@ -2,6 +2,7 @@ import { THERMO, type ChemParams } from '../chem/params';
 import { NS, SPECIES } from '../chem/species';
 import { roomFor, volume, type Vessel } from './flask';
 import type { ToolKind } from './tools';
+import type { SavedPaper } from './paper';
 
 /**
  * A saved bench: everything on it, plus the chemistry parameters. Positions
@@ -17,8 +18,12 @@ export interface SaveState {
   scales: SavedScale[];
   hoses: SavedHose[];
   /** Where each faucet joins its pipe, as fractions of the home area (see HOME_W); where they start if left out. */
-  faucets?: { x: number; y: number }[];
+  faucets?: { x: number; y: number; note?: string }[];
   chem?: { bonds: ChemParams['bonds']; swapA: number; heatCap: number };
+  /** The target the receptacle has taken so far, by volume, toward the goal; none if left out. */
+  delivered?: number;
+  /** The player's sticky notes, the one on top last; none if left out. */
+  papers?: SavedPaper[];
 }
 
 /** Contents by species name (names outlast reorderings of the species list), and whole quanta of heat. */
@@ -44,6 +49,12 @@ export interface SavedTool {
   tanks: SavedVessel[];
   /** Per spout, the drop hanging there, if any. */
   drops?: SavedVessel[];
+  /** A heater's tube, stretch by stretch (see Tool.tube). */
+  tube?: SavedVessel[];
+  /** Whether it's flipped left to right (see Tool.flipped). */
+  flipped?: boolean;
+  /** The player's note about it (see Tool.note), if any. */
+  note?: string;
   /** A spectrometer's last reading, if it's been run (see spectrum). */
   reading?: number[];
 }
@@ -54,6 +65,8 @@ export interface SavedScale {
   tare: number;
   /** Flasks standing on it, by index into `flasks`. */
   load: { f: number; dx: number }[];
+  /** The player's note about it, if any. */
+  note?: string;
 }
 
 export interface SavedHose {
@@ -62,6 +75,8 @@ export interface SavedHose {
   funnel: SavedVessel;
   /** The drop hanging at the outlet, if any. */
   drop?: SavedVessel;
+  /** The player's note about it, if any. */
+  note?: string;
 }
 
 const BY_NAME = new Map(SPECIES.map((s) => [s.name, s.i]));
@@ -154,5 +169,27 @@ export function clearStoredSave(): void {
     localStorage.removeItem(KEY);
   } catch {
     // nothing to clear
+  }
+}
+
+const GOD_KEY = 'slurry-lab.god';
+
+/**
+ * Whether god mode was on when the player last left it, kept beside the save (but not in it, so exporting a bench
+ * doesn't carry it): on if it's never been set, or storage is blocked.
+ */
+export function storedGod(): boolean {
+  try {
+    return localStorage.getItem(GOD_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+export function storeGod(on: boolean): void {
+  try {
+    localStorage.setItem(GOD_KEY, on ? '1' : '0');
+  } catch {
+    // storage blocked: god mode just starts on next time
   }
 }

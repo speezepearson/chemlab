@@ -16,6 +16,9 @@ export function fmt(v: number): string {
  *
  * With `typeable`, double-clicking turns it into a text box: Enter or
  * clicking away commits, Escape cancels. Values below `min` are rejected.
+ * The box starts with a whole number exactly, anything else to 6 figures.
+ *
+ * `format` shows the value; by default it's `fmt`.
  */
 export function DragNumber({
   value,
@@ -23,12 +26,14 @@ export function DragNumber({
   onDoubleClick,
   typeable = false,
   min = -Infinity,
+  format = fmt,
 }: {
   value: number;
   onChange(v: number): void;
   onDoubleClick?(): void;
   typeable?: boolean;
   min?: number;
+  format?(v: number): string;
 }) {
   const [live, setLive] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -47,7 +52,7 @@ export function DragNumber({
       <input
         className="num-input"
         autoFocus
-        defaultValue={String(+value.toPrecision(6))}
+        defaultValue={String(Number.isInteger(value) ? value : +value.toPrecision(6))}
         onFocus={(e) => e.currentTarget.select()}
         onKeyDown={onKeyDown}
         onBlur={(e) => commit(e.currentTarget.value)}
@@ -82,7 +87,7 @@ export function DragNumber({
       onPointerDown={onPointerDown}
       onDoubleClick={onDoubleClick ?? (typeable ? () => setEditing(true) : undefined)}
     >
-      {fmt(value)}
+      {format(value)}
     </span>
   );
 }

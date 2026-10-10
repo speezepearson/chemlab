@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { defaultChemParams } from './params';
+import { testChemParams } from './testChem';
 import { ReactionNetwork, atomCounts, heatAt, temperature, type Fluid } from './reactions';
 import { NS, SPECIES, TARGET, singleOf, speciesIndex } from './species';
 import { ATOMS, type Atom } from './atoms';
-import { equilibrium } from './equilibrium';
+import { equilibrate, equilibrium } from './equilibrium';
 
 /** Counts in these tests are in millions of molecules, so the whole-number dynamics are smooth. */
 const M = 1e6;
@@ -39,7 +39,7 @@ describe('species', () => {
 });
 
 describe('reactions', () => {
-  const net = new ReactionNetwork(defaultChemParams());
+  const net = new ReactionNetwork(testChemParams());
 
   it('builds the full network', () => {
     expect(net.count).toBe(1428);
@@ -59,10 +59,15 @@ describe('reactions', () => {
     expect(Number.isInteger(f.Q)).toBe(true);
   });
 
-  it('heats up from exothermic bonding', () => {
+  it('turns the energy that bonding releases into heat', () => {
     const f = fluid([single('R', 50), single('G', 50)]);
+    const energy = () => SPECIES.reduce((t, s) => t + f.n[s.i] * net.U[s.i], 0);
+    const [U0, Q0] = [energy(), f.Q];
     run(net, f, 30);
-    expect(temperature(f)).toBeGreaterThan(1.3);
+    expect(energy()).toBeLessThan(U0);
+    // whole quanta, rounded at random, so right to within a little
+    expect((f.Q - Q0) / (U0 - energy())).toBeCloseTo(1, 3);
+    expect(temperature(f)).toBeGreaterThan(1);
   });
 
   it('never forms or breaks a blue bond directly, even white-hot', () => {
@@ -92,8 +97,34 @@ describe('reactions', () => {
   });
 });
 
+describe('net rates', () => {
+  const net = new ReactionNetwork(testChemParams());
+
+  it('lists what is reacting, busiest first, each the way it is going on net', () => {
+    const f = fluid([single('R', 3), single('G', 2)]);
+    const rates = net.netRates(f);
+    const RG = speciesIndex(['R', 'G', null], 1);
+    expect(rates[0]).toMatchObject({ from: [singleOf('R'), singleOf('G')].sort((a, b) => a - b), to: [RG] });
+    for (let i = 0; i < rates.length; i++) {
+      expect(rates[i].rate).toBeGreaterThan(0);
+      if (i) expect(rates[i].rate).toBeLessThanOrEqual(rates[i - 1].rate);
+    }
+    // with the bond formed, the same reaction runs the other way when it's hot enough to break it
+    const hot = fluid([[RG, 2]], 200);
+    expect(net.netRates(hot)[0]).toMatchObject({ from: [RG], to: [singleOf('R'), singleOf('G')].sort((a, b) => a - b) });
+  });
+
+  it('nets every reaction against its reverse, so nothing is going on at equilibrium', () => {
+    const atoms = ATOMS.map((a) => ({ R: 2, G: 1, C: 1, Y: 3 } as Partial<Record<Atom, number>>)[a] ?? 0);
+    const N = 1e9;
+    const n = equilibrium(atoms.map((v) => (v / 7) * N), net.U, 1.5);
+    const f: Fluid = { n, N, Q: heatAt(1.5, N) };
+    for (const r of net.netRates(f)) expect(r.rate).toBeLessThan(N * 1e-6);
+  });
+});
+
 describe('equilibrium', () => {
-  const net = new ReactionNetwork(defaultChemParams());
+  const net = new ReactionNetwork(testChemParams());
   const atoms = (counts: Partial<Record<Atom, number>>) => ATOMS.map((a) => counts[a] ?? 0);
 
   it('conserves atoms', () => {
@@ -116,6 +147,18 @@ describe('equilibrium', () => {
     // formation rate ∝ n_R·n_G/N, breaking rate ∝ n_RG·e^(−E/T), with N = 2 atoms
     const E = net.params.bonds.RG.E;
     expect((n[R] * n[G]) / 2 / (n[RG] * Math.exp(-E))).toBeCloseTo(1, 9);
+  });
+
+  it('equilibrates a fluid in whole molecules, keeping every atom and its temperature', () => {
+    // blue bonds never form by the kinetics, but equilibrate goes all the way regardless
+    const f = fluid([single('R', 3), single('G', 2), single('B', 1), single('Y', 1)], 0.7);
+    const before = atomCounts(f);
+    equilibrate(f, net.U, 0.7);
+    expect(atomCounts(f)).toEqual(before);
+    expect(f.n.every(Number.isInteger)).toBe(true);
+    expect(temperature(f)).toBeCloseTo(0.7, 6);
+    const want = equilibrium(before, net.U, 0.7);
+    for (let s = 0; s < NS; s++) expect(Math.abs(f.n[s] - want[s])).toBeLessThan(Math.max(10, want[s] * 1e-6));
   });
 
   it('favors the most stable shape of a triple', () => {

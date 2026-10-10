@@ -7,6 +7,9 @@ same commit as any behavior change. This file holds what README doesn't: how to 
 
 - `npx tsc -b`: typecheck. It's strict, with unused locals and imports as errors, so run it before committing.
 - `npm test`: runs vitest on all `*.test.ts`. These are pure-logic tests; nothing touches the canvas.
+  - No test may depend on the default chemistry (`defaultChemParams`, `THERMO`) or on the default values of the panel's
+    tunables (`DRIP` aside: heater, cooling). They're all in flux. A test that needs reactions uses the fixed chemistry
+    in `src/chem/testChem.ts`, and one that touches a tunable reads its current value rather than a literal.
 - `npm run route`: the synthesis-route harness (`src/game/route.ts`). It prints a report; `--silent=false` is already
   in the script.
 - `npx vite --port 5199 --strictPort`: the dev server, for browser checks.
@@ -33,7 +36,7 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
 
 - `src/chem/`: the chemistry.
   - `species.ts` defines the 50 species.
-  - `params.ts` holds the bond parameters, and `randomize.ts` the bond randomizer.
+  - `params.ts` holds the bond parameters.
   - `reactions.ts` is Arrhenius kinetics on whole molecules.
   - `equilibrium.ts` is the exact full-equilibrium solver, for the presets' and the route's settled mixes. Faucets
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
@@ -41,9 +44,12 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
   - `engine.ts` owns the canvas, input, sim loop and all drawing.
   - `tools.ts` holds tool shapes and per-step logic, plus drips and the spectrometer reading.
   - `flask.ts` has `Vessel`, `transfer`, volume and colors.
+  - `cooling.ts` is Newtonian cooling to the room; the engine works out each vessel's exposure from how it's drawn.
+  - `paper.ts` is sticky notes: the sheets, their strokes and text. The engine's pencil mode draws on them, and while
+    it's on, `pointerdown` hands everything to `pencilDown` before any other hit test.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
-    `volumes.ts`); `rumble.ts` is the spectrometer, `ambience.ts` the ship, `water.ts` drips and streams.
+    `volumes.ts`); `rumble.ts` is the spectrometer, `beeper.ts` the receptacle, `ambience.ts` the ship, `water.ts` drips and streams.
     New sounds play into a channel's `bus()`, never straight to the destination, so the sliders reach them. A sound
     on the bench goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),
     so it fades and pans with where it is on screen.
@@ -73,14 +79,23 @@ The engine is canvas code with no unit tests, so verify drawing and interaction 
   - Tools, scales, hose ends and faucets store positions as fractions of the 1000 × 620 home area (`fromFrac` and
     `toFrac`), so presets and old saves keep working.
   - Canvas `shadowBlur` is in device pixels, so scale it by `zoom * dpr`.
+- **`drawTool` is also the hit test.** `hitTool` draws a tool into a few offscreen pixels around the pointer (see
+  `drawnAt`) and counts it as hit if anything lands there. So `drawTool` and its helpers must draw through `this.ctx`
+  (never a canvas captured elsewhere), never set an absolute transform, and change no state.
+- **Flipped tools** are drawn on a mirrored canvas, so drawing code works in unflipped local units, and the geometry
+  helpers (`onTool`, `tankRect`, `inToolRect`, via `lx`) mirror only outside drawing. Valves and writing must go
+  through `upright()` so they read the same either way.
 - **Adding a tool kind** touches all of these:
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - A `drawTool` branch in `engine.ts`.
   - `ICONS` and `ITEMS` in `Palette.tsx`, unless the tool is unique.
   - Tests and the README.
-  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `noValve`, `sealed`, `maxFlow`, `label`.
-- **Unique tools** (`UNIQUE_TOOLS`: the spectrometer and the cryostabilizer reference) aren't in the palette and can't
-  be put away. `uniqueTools()` keeps at most one of each and always adds a spectrometer.
+  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `flippable`, `fixed`, `sealed`, `maxFlow`, `label`.
+- **Unique tools** (`UNIQUE_TOOLS`: the spectrometer, the cryostabilizer reference, the flow meter and the receptacle)
+  aren't in the palette and can't be put away. `uniqueTools()` keeps at most one of each and always adds a
+  spectrometer, a meter and a receptacle. The receptacle is also `fixed`: it can't be carried at all.
+- **The goal** is what the receptacle flushes (`Tool.flushed`, gathered into the engine's `delivered`, which is
+  saved), not what's lying around in vessels.
 - **Saves** stay at format v1. New fields are optional and the loaders tolerate their absence. Species are stored by
   name.
 
