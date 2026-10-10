@@ -3,7 +3,7 @@ import { testChemParams } from './testChem';
 import { ReactionNetwork, atomCounts, heatAt, temperature, type Fluid } from './reactions';
 import { NS, SPECIES, TARGET, singleOf, speciesIndex } from './species';
 import { ATOMS, type Atom } from './atoms';
-import { equilibrium } from './equilibrium';
+import { equilibrate, equilibrium } from './equilibrium';
 
 /** Counts in these tests are in millions of molecules, so the whole-number dynamics are smooth. */
 const M = 1e6;
@@ -121,6 +121,18 @@ describe('equilibrium', () => {
     // formation rate ∝ n_R·n_G/N, breaking rate ∝ n_RG·e^(−E/T), with N = 2 atoms
     const E = net.params.bonds.RG.E;
     expect((n[R] * n[G]) / 2 / (n[RG] * Math.exp(-E))).toBeCloseTo(1, 9);
+  });
+
+  it('equilibrates a fluid in whole molecules, keeping every atom and its temperature', () => {
+    // blue bonds never form by the kinetics, but equilibrate goes all the way regardless
+    const f = fluid([single('R', 3), single('G', 2), single('B', 1), single('Y', 1)], 0.7);
+    const before = atomCounts(f);
+    equilibrate(f, net.U, 0.7);
+    expect(atomCounts(f)).toEqual(before);
+    expect(f.n.every(Number.isInteger)).toBe(true);
+    expect(temperature(f)).toBeCloseTo(0.7, 6);
+    const want = equilibrium(before, net.U, 0.7);
+    for (let s = 0; s < NS; s++) expect(Math.abs(f.n[s] - want[s])).toBeLessThan(Math.max(10, want[s] * 1e-6));
   });
 
   it('favors the most stable shape of a triple', () => {

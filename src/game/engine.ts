@@ -1,5 +1,6 @@
 import { temperature, type Fluid, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
+import { equilibrate } from '../chem/equilibrium';
 import { CAP, FILL_RATE, FLASK_L, GOAL_L, GOAL_VOLUME, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { FAUCETS, faucetOutput, faucetTarget, type Faucet } from './faucets';
 import { LOOK, coronaAlpha, coronaRadius, css, glowFalloff, haloAlpha, haloRadius, type RGB } from './appearance';
@@ -296,6 +297,17 @@ export class GameEngine {
     const tank = tool.tanks.length > 1 ? ` ${tool.shape.tanks[k].name}` : '';
     const label = tool.tanks[k].label ? ` (${tool.tanks[k].label})` : '';
     return { vessel: tool.tanks[k], title: `${TOOL_NAMES[tool.kind]} ${nth}${tank}${label}` };
+  }
+
+  /**
+   * God mode: bring a vessel (by id, as for vessel) to full chemical equilibrium at its temperature, at once (see
+   * equilibrate). If that leaves it more molecules than fit, the excess spills over its rim.
+   */
+  equilibrate(id: string): void {
+    const v = this.vessel(id)?.vessel;
+    if (!v) return;
+    equilibrate(v, this.chem.U, temperature(v));
+    this.overflow(v);
   }
 
   /** Restart from the current preset. */

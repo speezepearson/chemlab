@@ -122,7 +122,16 @@ export function FlaskEditor({ engine, id, onClose }: { engine: GameEngine; id: s
         </select>
         <button onClick={() => edit(() => { for (let s = 0; s < NS; s++) f.setMolecules(s, 0); })}>Empty</button>
       </div>
-      <p className="muted">Drag a number to scale it, or double-click to type. It keeps reacting while you edit.</p>
+      <div className="line">
+        <button
+          title="react to full equilibrium at this temperature, at once"
+          disabled={!f.N}
+          onClick={() => edit(() => engine.equilibrate(id))}
+        >
+          Equilibrate
+        </button>
+      </div>
+      <p className="muted">Drag a number to scale it, or double-click to type. It keeps reacting while you edit. Equilibrate runs every reaction to its end at once, even ones too slow ever to happen.</p>
     </div>
   );
 }
