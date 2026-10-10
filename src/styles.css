@@ -128,7 +128,7 @@ canvas{display:block;width:100%;height:100%;touch-action:none}
 #editor .muted{color:var(--muted)}
 #editor .line input{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:0 4px;flex:1;min-width:0}
 .label-edit{
-  position:absolute;transform:translate(-50%,-75%);width:120px;z-index:6;text-align:center;
+  position:absolute;transform:translate(-50%,-75%);width:170px;z-index:6;text-align:center;
   font:12px "Schibsted Grotesk",sans-serif;color:var(--ink);background:var(--panel);
   border:1px solid var(--accent);border-radius:4px;padding:2px 4px;box-shadow:0 4px 12px var(--shadow);
 }

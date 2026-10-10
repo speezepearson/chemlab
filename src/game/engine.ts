@@ -61,7 +61,7 @@ type Zone =
   | { kind: 'scale'; scale: Scale; dx: number; p: Point }
   | { kind: 'sink' };
 /** A faucet where it is: (fx, fy) is where it joins its pipe, as fractions of the home area (see HOME_W). */
-type FaucetLayout = Faucet & { fx: number; fy: number; output: Fluid };
+type FaucetLayout = Faucet & { fx: number; fy: number; output: Fluid; note: string };
 
 interface Layout {
   faucets: FaucetLayout[];
@@ -86,8 +86,8 @@ const FAUCET_REACH = 24;
 const FLASK_CATCH = 14;
 /** Where an overflowing flask spills, right of its mouth's center, in local units: just outside its lip. */
 const FLASK_LIP = 12;
-/** Where a flask's label sits, below its mouth, in local units: the text's baseline, on the bench under it. */
-const LABEL_Y = 86;
+/** How far above a flask's mouth, or a hose's funnel, its note's baseline sits, in local units. */
+const NOTE_GAP = 8;
 /** How close to a valve, in world units, the pointer can be before it stops turning the lever: the valve's core (see drawTool), not its lever. */
 const VALVE_DEADZONE = 6;
 /** How near a valve's center, in world units, the right button grabs it: the reach of its lever, or a dial's ticks. */
@@ -317,14 +317,19 @@ export class GameEngine {
         kind: t.kind, id: t.id, fx: t.fx, fy: t.fy, valves: [...t.valves], tanks: t.tanks.map(saveVessel), drops: t.drops.map(saveVessel),
         ...(t.tube.length ? { tube: t.tube.map(saveVessel) } : {}),
         ...(t.flipped ? { flipped: true } : {}),
+        ...(t.note ? { note: t.note } : {}),
         ...(t.reading ? { reading: [...t.reading] } : {}),
       })),
       scales: this.scales.map((sc) => ({
         fx: sc.fx, fy: sc.fy, tare: sc.tare,
         load: sc.load.map(({ f, dx }) => ({ f: this.flasks.indexOf(f), dx })).filter((l) => l.f >= 0),
+        ...(sc.note ? { note: sc.note } : {}),
       })),
-      hoses: this.hoses.map((h) => ({ inlet: { ...h.inlet }, outlet: { ...h.outlet }, funnel: saveVessel(h.funnel), drop: saveVessel(h.drop) })),
-      faucets: L.faucets.map((fa) => ({ x: fa.fx, y: fa.fy })),
+      hoses: this.hoses.map((h) => ({
+        inlet: { ...h.inlet }, outlet: { ...h.outlet }, funnel: saveVessel(h.funnel), drop: saveVessel(h.drop),
+        ...(h.note ? { note: h.note } : {}),
+      })),
+      faucets: L.faucets.map((fa) => ({ x: fa.fx, y: fa.fy, ...(fa.note ? { note: fa.note } : {}) })),
       delivered: this.delivered,
       chem: saveChem(this.chem.params),
     };
@@ -351,6 +356,7 @@ export class GameEngine {
         t.drops.forEach((v, k) => st.drops?.[k] && loadVessel(v, st.drops[k]));
         t.tube.forEach((v, k) => st.tube?.[k] && loadVessel(v, st.tube[k]));
         t.flipped = !!st.flipped && !!t.shape.flippable;
+        if (typeof st.note === 'string') t.note = st.note;
         if (Array.isArray(st.reading) && st.reading.length === 18) t.reading = st.reading.map((x) => Math.max(0, Number(x) || 0));
         return t;
       });
@@ -359,6 +365,7 @@ export class GameEngine {
     this.scales = s.scales.map((ss) => {
       const sc = new Scale(ss.fx, ss.fy);
       sc.tare = ss.tare ?? 0;
+      if (typeof ss.note === 'string') sc.note = ss.note;
       for (const { f, dx } of ss.load ?? []) if (this.flasks[f]) sc.put(this.flasks[f], dx);
       return sc;
     });
@@ -366,6 +373,7 @@ export class GameEngine {
       const h = new Hose({ ...sh.inlet }, { ...sh.outlet });
       if (sh.funnel) loadVessel(h.funnel, sh.funnel);
       if (sh.drop) loadVessel(h.drop, sh.drop);
+      if (typeof sh.note === 'string') h.note = sh.note;
       return h;
     });
     for (const t of this.tools) this.place(t, this.toolXY(t));
@@ -516,7 +524,7 @@ export class GameEngine {
   /** Lay out the world, once: the faucets (see placeFaucets), and the shelf along the bottom of the home area. */
   private layoutWorld(): void {
     const { L, S, H } = this;
-    L.faucets = FAUCETS.map((fa) => ({ ...fa, output: faucetOutput(fa, this.chem), fx: 0, fy: 0 }));
+    L.faucets = FAUCETS.map((fa) => ({ ...fa, output: faucetOutput(fa, this.chem), fx: 0, fy: 0, note: '' }));
     this.placeFaucets();
     L.floorY = H - SINK_H * S;
     L.homes = [];
@@ -528,7 +536,7 @@ export class GameEngine {
    * Put the faucets where they start, evenly along the top of the home area, or where a save had them. A save
    * with a different number of faucets is from before the faucets changed, so its places are ignored.
    */
-  private placeFaucets(saved: readonly Point[] = []): void {
+  private placeFaucets(saved: readonly (Point & { note?: string })[] = []): void {
     const n = this.L.faucets.length;
     if (saved.length !== n) saved = [];
     this.L.faucets.forEach((fa, i) => {
@@ -536,6 +544,7 @@ export class GameEngine {
       const ok = at && Number.isFinite(at.x) && Number.isFinite(at.y);
       fa.fx = ok ? at.x : (i + 0.5) / n;
       fa.fy = ok ? at.y : 30 / HOME_H;
+      fa.note = typeof at?.note === 'string' ? at.note : '';
     });
   }
 
@@ -587,17 +596,108 @@ export class GameEngine {
     this.cam = { x: this.cam.x, y: Math.min(this.H - this.viewH / this.zoom, this.cam.y) };
   }
 
-  /** Where a flask's or tank's label is drawn (see vessel for its id), on the canvas in CSS pixels. */
-  labelSpot(id: string): Point | null {
-    const fm = /^f(\d+)$/.exec(id);
-    if (fm) {
-      const f = this.flasks[+fm[1]];
-      return f ? this.toScreen({ x: f.home.x, y: f.home.y + LABEL_Y * this.S }) : null;
+  /**
+   * The note an id names, to read and change: a flask's label (`f3`, by index), a tank's (`t2.0`, by tool id and
+   * tank), a tool's own note (`t2`; only a tool with more than one tank has one), a scale's (`s1`), a hose's (`h0`)
+   * or a faucet's (`F5`), by index. Things are replaced on reset and load, so look this up each time.
+   */
+  note(id: string): { text: string; set(text: string): void } | null {
+    const label = (o: { label: string } | undefined) => o && { text: o.label, set: (s: string) => void (o.label = s) };
+    const note = (o: { note: string } | undefined) => o && { text: o.note, set: (s: string) => void (o.note = s) };
+    const tank = /^t(\d+)\.(\d+)$/.exec(id);
+    if (tank) return label(this.tools.find((t) => t.id === +tank[1])?.tanks[+tank[2]]) ?? null;
+    const m = /^([fFsht])(\d+)$/.exec(id);
+    if (!m) return null;
+    const i = +m[2];
+    const found =
+      m[1] === 'f' ? label(this.flasks[i])
+      : m[1] === 't' ? note(this.tools.find((t) => t.id === i && t.tanks.length > 1))
+      : m[1] === 's' ? note(this.scales[i])
+      : m[1] === 'h' ? note(this.hoses[i])
+      : note(this.L.faucets[i]);
+    return found ?? null;
+  }
+
+  /** Where a note (see note for its id) is written: just above what it's about, in world units. */
+  private noteAt(id: string): Point | null {
+    const { S } = this;
+    const tank = /^t(\d+)\.(\d+)$/.exec(id);
+    if (tank) {
+      const t = this.tools.find((u) => u.id === +tank[1]);
+      return t && t.tanks[+tank[2]] ? this.tankLabelAt(t, +tank[2]) : null;
     }
-    const tm = /^t(\d+)\.(\d+)$/.exec(id);
-    const tool = tm ? this.tools.find((t) => t.id === +tm[1]) : undefined;
-    const k = tm ? +tm[2] : -1;
-    return tool && tool.tanks[k] ? this.toScreen(this.tankLabelAt(tool, k)) : null;
+    const m = /^([fFsht])(\d+)$/.exec(id);
+    if (!m) return null;
+    const i = +m[2];
+    if (m[1] === 'f') {
+      const f = this.flasks[i];
+      if (!f) return null;
+      const p = this.drag?.flask === f ? f : f.home;
+      return { x: p.x, y: p.y - NOTE_GAP * S };
+    }
+    if (m[1] === 't') {
+      const t = this.tools.find((u) => u.id === i);
+      return t ? this.toolNoteAt(t) : null;
+    }
+    if (m[1] === 's') {
+      const sc = this.scales[i];
+      if (!sc) return null;
+      // just above its platform, or above any flasks standing on it, and their notes
+      const o = this.scaleXY(sc);
+      return { x: o.x, y: o.y - (sc.load.length ? 70 + NOTE_GAP + 13 : NOTE_GAP) * S };
+    }
+    if (m[1] === 'h') {
+      const h = this.hoses[i];
+      return h ? { x: this.hoseEnd(h, 'inlet').x, y: this.hoseEnd(h, 'inlet').y - NOTE_GAP * S } : null;
+    }
+    const fa = this.L.faucets[i];
+    return fa ? { x: this.faucetXY(fa).pipe.x, y: this.faucetXY(fa).pipe.y - 16 * S } : null;
+  }
+
+  /** Where a note (see note for its id) is written, on the canvas in CSS pixels, for its editor. */
+  labelSpot(id: string): Point | null {
+    const at = this.noteAt(id);
+    return at && this.toScreen(at);
+  }
+
+  /** Where a tool's own note is written: centered over it, above its tanks' labels. */
+  private toolNoteAt(t: Tool): Point {
+    const o = this.toolXY(t);
+    const b = t.shape.box;
+    const [x0, x1] = this.spanOn(t, b.x0, b.x1);
+    let y = o.y + (b.y0 - 4) * this.S;
+    t.tanks.forEach((v, k) => {
+      if (v.label) y = Math.min(y, this.tankLabelAt(t, k).y - 13 * this.S);
+    });
+    return { x: o.x + ((x0 + x1) / 2) * this.S, y };
+  }
+
+  /**
+   * The id of the note (see note) for what's under p, frontmost first: a hose by either end; a tool, by the tank
+   * under p, or the one tank it has, or else its own note; a flask; a scale; or a faucet.
+   */
+  private noteUnder(p: Point): string | null {
+    const end = this.hitHoseEnd(p);
+    if (end) return `h${this.hoses.indexOf(end.hose)}`;
+    const tank = this.tankAt(p);
+    if (tank) return `t${tank.tool.id}.${tank.k}`;
+    const t = this.hitTool(p);
+    if (t) return t.tanks.length === 1 ? `t${t.id}.0` : `t${t.id}`;
+    const f = this.hitFlask(p);
+    if (f) return `f${this.flasks.indexOf(f)}`;
+    const sc = this.hitScale(p);
+    if (sc) return `s${this.scales.indexOf(sc)}`;
+    const fa = this.hitFaucet(p);
+    return fa ? `F${this.L.faucets.indexOf(fa)}` : null;
+  }
+
+  /** A note, in the muted ink of labels, centered on x with its baseline at y. */
+  private drawNote(text: string, at: Point): void {
+    const { ctx } = this;
+    ctx.fillStyle = this.theme.muted;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(text, at.x, at.y);
   }
 
   /** Where a tank's label is written: just above its rim and any lid, or above the tool's own label if it has one. */
@@ -1063,22 +1163,13 @@ export class GameEngine {
     onWindow('contextmenu', (e) => {
       if (this.drag || this.toolDrag || this.scaleDrag || this.hoseDrag) e.preventDefault();
     });
+    // double-click anything that can be carried to write a note above it; in god mode a flask or tank opens the
+    // editor instead, which has a field for its label
     on('dblclick', (e) => {
-      const p = this.ptr(e);
-      if (!this.god) {
-        const hit = this.tankAt(p);
-        const f = hit ? null : this.hitFlask(p);
-        if (hit) this.cb.onLabel(`t${hit.tool.id}.${hit.k}`);
-        else if (f) this.cb.onLabel(`f${this.flasks.indexOf(f)}`);
-        return;
-      }
-      const hit = this.tankAt(p);
-      if (hit) {
-        this.cb.onEdit(`t${hit.tool.id}.${hit.k}`);
-        return;
-      }
-      const f = this.hitFlask(p);
-      if (f) this.cb.onEdit(`f${this.flasks.indexOf(f)}`);
+      const id = this.noteUnder(this.ptr(e));
+      if (!id) return;
+      if (this.god && /^(f\d+|t\d+\.\d+)$/.test(id)) this.cb.onEdit(id);
+      else this.cb.onLabel(id);
     });
   }
 
@@ -2574,6 +2665,7 @@ export class GameEngine {
     ctx.fillStyle = theme.bench;
     for (const y of new Set(L.homes.map((h) => h.y))) ctx.fillRect(left, y + 70 * S, right - left, 6 * S);
     for (const sc of this.scales) this.drawScale(sc);
+    this.scales.forEach((sc, i) => sc.note && this.drawNote(sc.note, this.noteAt(`s${i}`)!));
 
     // faucets, each on its own stub of pipe
     ctx.lineCap = 'round';
@@ -2599,18 +2691,14 @@ export class GameEngine {
       ctx.strokeStyle = theme.glass;
       ctx.lineWidth = 1.2;
       ctx.stroke();
+      if (fa.note) this.drawNote(fa.note, { x: pipe.x, y: pipe.y - 16 * S });
     }
 
     // flasks at rest
     for (const f of this.flasks) {
       if (drag?.flask === f) continue;
       this.drawFlask(f, f.home.x, f.home.y, 0);
-      // a label would cover a scale's display
-      if (f.label && !this.scales.some((sc) => sc.load.some((l) => l.f === f))) {
-        ctx.fillStyle = theme.muted;
-        ctx.textAlign = 'center';
-        ctx.fillText(f.label, f.home.x, f.home.y + LABEL_Y * S);
-      }
+      if (f.label) this.drawNote(f.label, { x: f.home.x, y: f.home.y - NOTE_GAP * S });
       if (this.hover === f && this.god) {
         ctx.strokeStyle = theme.accent;
         ctx.lineWidth = 1.5;
@@ -2626,9 +2714,15 @@ export class GameEngine {
       this.drawTool(t);
       ctx.restore();
     }
+    for (const t of this.tools) if (t.note) this.drawNote(t.note, this.toolNoteAt(t));
     for (const h of this.hoses) this.drawHose(h);
+    this.hoses.forEach((h, i) => h.note && this.drawNote(h.note, this.noteAt(`h${i}`)!));
     this.drawDrops();
-    if (drag) this.drawFlask(drag.flask, drag.flask.x, drag.flask.y, drag.flask.ang);
+    if (drag) {
+      const D = drag.flask;
+      this.drawFlask(D, D.x, D.y, D.ang);
+      if (D.label) this.drawNote(D.label, { x: D.x, y: D.y - NOTE_GAP * S });
+    }
     if (this.rightWouldDo()) this.drawRightHint();
 
     // glow goes on top of everything, so a very hot flask washes out its surroundings

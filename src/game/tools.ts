@@ -646,6 +646,11 @@ export class Tool {
   scanAge = Infinity;
   /** A meter's reading: what's flowed out of it, by volume per sim second, averaged over about METER.tau. */
   rate = 0;
+  /**
+   * The player's note about the whole tool, written above it; empty for none. Only a tool with more than one tank
+   * has one: on a tool with one tank, its tank's label (Vessel.label) does the job.
+   */
+  note = '';
   /** A receptacle's cycle, from pressing its button until it opens again (see press); null while it's open. */
   cycle: { phase: 'think' | 'flush' | 'reject'; age: number } | null = null;
   /** The beeps of a receptacle's thinking (see beepPattern), for its lamps and its sound. */
@@ -960,6 +965,8 @@ export class Hose {
   streaming = false;
   /** The flow on the last step, in flasks per second. */
   flow = 0;
+  /** The player's note, written above its funnel; empty for none. */
+  note = '';
 
   constructor(
     /** The funnel's mouth and the outlet's tip, as fractions of the home area's width and height (see HOME_W). */

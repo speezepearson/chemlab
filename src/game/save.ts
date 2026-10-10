@@ -17,7 +17,7 @@ export interface SaveState {
   scales: SavedScale[];
   hoses: SavedHose[];
   /** Where each faucet joins its pipe, as fractions of the home area (see HOME_W); where they start if left out. */
-  faucets?: { x: number; y: number }[];
+  faucets?: { x: number; y: number; note?: string }[];
   chem?: { bonds: ChemParams['bonds']; swapA: number; heatCap: number };
   /** The target the receptacle has taken so far, by volume, toward the goal; none if left out. */
   delivered?: number;
@@ -50,6 +50,8 @@ export interface SavedTool {
   tube?: SavedVessel[];
   /** Whether it's flipped left to right (see Tool.flipped). */
   flipped?: boolean;
+  /** The player's note about it (see Tool.note), if any. */
+  note?: string;
   /** A spectrometer's last reading, if it's been run (see spectrum). */
   reading?: number[];
 }
@@ -60,6 +62,8 @@ export interface SavedScale {
   tare: number;
   /** Flasks standing on it, by index into `flasks`. */
   load: { f: number; dx: number }[];
+  /** The player's note about it, if any. */
+  note?: string;
 }
 
 export interface SavedHose {
@@ -68,6 +72,8 @@ export interface SavedHose {
   funnel: SavedVessel;
   /** The drop hanging at the outlet, if any. */
   drop?: SavedVessel;
+  /** The player's note about it, if any. */
+  note?: string;
 }
 
 const BY_NAME = new Map(SPECIES.map((s) => [s.name, s.i]));
