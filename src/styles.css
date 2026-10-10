@@ -103,7 +103,8 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .palette .lcd{fill:#26302b;stroke:none}
 .palette .digits{stroke:#9fe0b8;stroke-width:1.5}
 @media (max-width:560px){
-  .palette{gap:3px;padding:4px}
+  .palette{gap:3px;padding:4px;flex-wrap:wrap;justify-content:center;width:calc(100% - 24px);box-sizing:border-box}
+  .stick{bottom:104px}
   .palette svg{width:24px;height:24px}
 }
 .crosshair{
@@ -143,6 +144,15 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
   max-width:min(520px,calc(100% - 32px));box-shadow:0 10px 30px var(--shadow);font-size:13px;
 }
 .paused b{display:block;font-size:16px;font-weight:600;margin-bottom:8px}
+.paused .card p{margin:0 0 8px;color:var(--muted)}
+.stick{
+  position:absolute;bottom:84px;width:112px;height:112px;border-radius:50%;z-index:3;touch-action:none;
+  background:rgba(20,26,24,.28);border:2px solid rgba(255,255,255,.35);
+  display:flex;align-items:center;justify-content:center;user-select:none;-webkit-user-select:none;
+}
+.stick.move{left:20px}
+.stick.look{right:20px}
+.stick i{width:44px;height:44px;border-radius:50%;background:rgba(238,240,235,.55);pointer-events:none}
 .paused dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0}
 .paused dt{font-weight:600;white-space:nowrap}
 .paused dd{margin:0;color:var(--muted)}

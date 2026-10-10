@@ -1,4 +1,63 @@
-import type { Hud as HudState } from '../game/engine';
+import { useRef, useState } from 'react';
+import { TOUCH, type GameEngine, type Hud as HudState } from '../game/engine';
+
+/** How far a stick's knob can go from its middle, in CSS pixels. */
+const STICK_R = 44;
+
+/**
+ * An on-screen stick, for a touch screen: a ring with a knob that follows the finger, as far as the ring's edge, and
+ * springs back to the middle when it lets go. It tells the engine how far it's pushed each way, from −1 to 1.
+ */
+function Stick({ engine, which }: { engine: GameEngine; which: 'move' | 'look' }) {
+  const [knob, setKnob] = useState({ x: 0, y: 0 });
+  const center = useRef<{ x: number; y: number } | null>(null);
+  const push = (e: React.PointerEvent<HTMLDivElement>) => {
+    const c = center.current;
+    if (!c) return;
+    let x = e.clientX - c.x;
+    let y = e.clientY - c.y;
+    const d = Math.hypot(x, y);
+    if (d > STICK_R) {
+      x *= STICK_R / d;
+      y *= STICK_R / d;
+    }
+    setKnob({ x, y });
+    engine.stick(which, x / STICK_R, y / STICK_R);
+  };
+  const release = () => {
+    center.current = null;
+    setKnob({ x: 0, y: 0 });
+    engine.stick(which, 0, 0);
+  };
+  return (
+    <div
+      className={`stick ${which}`}
+      aria-label={which === 'move' ? 'walk' : 'look'}
+      onPointerDown={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        center.current = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        push(e);
+      }}
+      onPointerMove={push}
+      onPointerUp={release}
+      onPointerCancel={release}
+    >
+      <i style={{ transform: `translate(${knob.x}px, ${knob.y}px)` }} />
+    </div>
+  );
+}
+
+/** On a touch screen, while playing: the stick that walks, bottom left, and the one that looks, bottom right. */
+export function Sticks({ engine, hud }: { engine: GameEngine; hud: HudState }) {
+  if (!TOUCH || !hud.locked) return null;
+  return (
+    <>
+      <Stick engine={engine} which="move" />
+      <Stick engine={engine} which="look" />
+    </>
+  );
+}
 
 /** A little mouse with one button lit: that button would do something. */
 function MouseHint({ side }: { side: 'left' | 'right' }) {
@@ -33,27 +92,31 @@ export function Paused({ onStart }: { onStart(): void }) {
   return (
     <div className="paused" onClick={onStart}>
       <div className="card">
-        <b>Click to look around</b>
-        <dl>
-          <dt>W A S D</dt>
-          <dd>walk, and the mouse looks · C crouches</dd>
-          <dt>E</dt>
-          <dd>pick up what you look at, or let go: an arm holds it where you leave it</dd>
-          <dt>Shift + mouse</dt>
-          <dd>turn what you hold · the wheel holds it nearer or further</dd>
-          <dt>Right button</dt>
-          <dd>tip a flask you hold to pour, or let a tool you hold flow · on a valve, point to turn it</dd>
-          <dt>Left button</dt>
-          <dd>press keys and buttons · double-click anything you can carry, or a faucet, to write a note</dd>
-          <dt>1 – 0, -</dt>
-          <dd>make equipment in your hands · Backspace puts away what you hold</dd>
-          <dt>F</dt>
-          <dd>flip the tool you hold or look at, left to right</dd>
-          <dt>P</dt>
-          <dd>pick up the pencil, to draw sticky notes on the back wall</dd>
-          <dt>Esc</dt>
-          <dd>let go of the mouse</dd>
-        </dl>
+        <b>{TOUCH ? 'Tap to start' : 'Click to look around'}</b>
+        {TOUCH && <p>The circle at the bottom left walks, and the one at the bottom right looks around.</p>}
+        {/* the keys and mouse buttons, unless this is a touch screen, where they'd only be noise */}
+        {!TOUCH && (
+          <dl>
+            <dt>W A S D</dt>
+            <dd>walk, and the mouse looks · C crouches</dd>
+            <dt>E</dt>
+            <dd>pick up what you look at, or let go: an arm holds it where you leave it</dd>
+            <dt>Shift + mouse</dt>
+            <dd>turn what you hold · the wheel holds it nearer or further</dd>
+            <dt>Right button</dt>
+            <dd>tip a flask you hold to pour, or let a tool you hold flow · on a valve, point to turn it</dd>
+            <dt>Left button</dt>
+            <dd>press keys and buttons · double-click anything you can carry, or a faucet, to write a note</dd>
+            <dt>1 – 0, -</dt>
+            <dd>make equipment in your hands · Backspace puts away what you hold</dd>
+            <dt>F</dt>
+            <dd>flip the tool you hold or look at, left to right</dd>
+            <dt>P</dt>
+            <dd>pick up the pencil, to draw sticky notes on the back wall</dd>
+            <dt>Esc</dt>
+            <dd>let go of the mouse</dd>
+          </dl>
+        )}
       </div>
     </div>
   );

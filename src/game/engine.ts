@@ -144,6 +144,11 @@ const HOLD_FAR = 520;
 /** Radians the view turns per pixel the mouse moves, and that something held turns with Shift. */
 const LOOK_SENS = 0.0022;
 const TURN_SENS = 0.008;
+/** How fast the look stick turns the view when pushed all the way, in radians per real second: across, and up or down. */
+const STICK_TURN = 2.4;
+const STICK_TILT = 1.6;
+/** Whether the screen is mainly touched, rather than pointed at with a mouse: then the on-screen sticks walk and look. */
+export const TOUCH = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 /** How long two clicks can be apart and count as a double-click, in ms. */
 const DOUBLE_MS = 380;
 /** Where the faucets are: along the right wall over its counter, this high, this far apart. */
@@ -172,6 +177,8 @@ export class GameEngine {
   /** Where the player stands, which way they look (yaw about the vertical, pitch up), and how far they crouch (0 to 1). */
   private player = { x: 480, z: 620, yaw: 0, pitch: -0.08, crouch: 0 };
   private keys = new Set<string>();
+  /** Where the on-screen sticks are pushed (see stick). */
+  private sticks = { move: { x: 0, y: 0 }, look: { x: 0, y: 0 } };
   private held: Held | null = null;
   /** Whether the right button is held: a held flask tips and pours, and a held tool or hose lets fluid out, only while it is. */
   private rightHeld = false;
@@ -709,7 +716,20 @@ export class GameEngine {
 
   /** Capture the mouse to look around (the browser lets go of it on Escape). */
   lock(): void {
+    if (TOUCH) {
+      // a touch screen has no mouse to capture: the sticks walk and look
+      this.locked = true;
+      return;
+    }
     if (document.pointerLockElement !== this.canvas) this.canvas.requestPointerLock?.()?.catch?.(() => {});
+  }
+
+  /**
+   * Push one of the on-screen sticks (on a touch screen) to (x, y), each from −1 to 1, x right and y down; (0, 0)
+   * lets go of it. The move stick walks as far as it's pushed (up is forward); the look stick turns the view.
+   */
+  stick(which: 'move' | 'look', x: number, y: number): void {
+    this.sticks[which] = { x, y };
   }
 
   private bindInput(): void {
@@ -1291,16 +1311,23 @@ export class GameEngine {
   private move(dt: number): void {
     const p = this.player;
     const k = this.keys;
-    const fwd = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
-    const side = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
+    const { move, look } = this.sticks;
+    const fwd = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - move.y;
+    const side = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0) + move.x;
+    // the look stick turns the view at a rate, gently near its middle so small turns can be aimed
+    if (look.x || look.y) {
+      p.yaw = wrapAngle(p.yaw - look.x * Math.abs(look.x) * STICK_TURN * dt);
+      p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch - look.y * Math.abs(look.y) * STICK_TILT * dt));
+    }
     const crouching = k.has('KeyC');
     p.crouch = Math.max(0, Math.min(1, p.crouch + (crouching ? 1 : -1) * dt * 5));
     const h = this.held;
     const obstacles = this.obstacles(h);
     let load = h ? this.heldBox(h) : null;
     if (fwd || side) {
+      // keys walk at full speed whichever way; the move stick as far as it's pushed
       const len = Math.hypot(fwd, side);
-      const sp = (WALK * dt) / len;
+      const sp = (WALK * dt * Math.min(1, len)) / len;
       const dx = (-Math.sin(p.yaw) * fwd + Math.cos(p.yaw) * side) * sp;
       const dz = (-Math.cos(p.yaw) * fwd - Math.sin(p.yaw) * side) * sp;
       const body = { x: p.x, z: p.z, r: PLAYER_R, y0: 0, y1: this.eyeHeight() + 20 };
