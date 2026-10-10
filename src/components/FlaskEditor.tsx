@@ -10,6 +10,8 @@ import { MAX_LABEL } from './LabelEditor';
 
 /** Molecules of a species added from the "add species" menu. */
 const ADDED = CAP / 30;
+/** A molecule count in full, every digit: 1,234,567. */
+const exact = (n: number) => n.toLocaleString('en');
 
 /**
  * God-mode editor for one vessel's temperature and composition: a flask or a
@@ -78,7 +80,13 @@ export function FlaskEditor({ engine, id, onClose }: { engine: GameEngine; id: s
                 {s.i === TARGET ? ' ✓' : ''}
               </td>
               <td>
-                <DragNumber typeable min={0} value={f.n[s.i]} onChange={(v) => edit(() => f.setMolecules(s.i, v))} />
+                <DragNumber
+                  typeable
+                  min={0}
+                  value={f.n[s.i]}
+                  format={exact}
+                  onChange={(v) => edit(() => f.setMolecules(s.i, v))}
+                />
               </td>
               <td>
                 <button aria-label={`remove ${s.name}`} onClick={() => edit(() => f.setMolecules(s.i, 0))}>
