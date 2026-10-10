@@ -8,8 +8,6 @@ import { fmtCount } from '../game/format';
 import { DragNumber } from './DragNumber';
 import { MAX_LABEL } from './LabelEditor';
 
-/** Smallest molecule count worth listing; reactions leave dust below this. */
-const SHOWN = CAP * 1e-5;
 /** Molecules of a species added from the "add species" menu. */
 const ADDED = CAP / 30;
 
@@ -30,8 +28,9 @@ export function FlaskEditor({ engine, id, onClose }: { engine: GameEngine; id: s
   if (!found) return null;
   const f = found.vessel;
 
-  const present = SPECIES.filter((s) => f.n[s.i] >= SHOWN);
-  const absent = SPECIES.filter((s) => f.n[s.i] < SHOWN);
+  // every species there is, down to a single molecule
+  const present = SPECIES.filter((s) => f.n[s.i] > 0);
+  const absent = SPECIES.filter((s) => f.n[s.i] <= 0);
   const edit = (apply: () => void) => {
     apply();
     rerender();
