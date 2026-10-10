@@ -2,6 +2,7 @@ import { THERMO, type ChemParams } from '../chem/params';
 import { NS, SPECIES } from '../chem/species';
 import { roomFor, volume, type Vessel } from './flask';
 import type { ToolKind } from './tools';
+import type { SavedPaper } from './paper';
 
 /**
  * A saved bench: everything on it, plus the chemistry parameters. Positions
@@ -21,6 +22,8 @@ export interface SaveState {
   chem?: { bonds: ChemParams['bonds']; swapA: number; heatCap: number };
   /** The target the receptacle has taken so far, by volume, toward the goal; none if left out. */
   delivered?: number;
+  /** The player's sticky notes, the one on top last; none if left out. */
+  papers?: SavedPaper[];
 }
 
 /** Contents by species name (names outlast reorderings of the species list), and whole quanta of heat. */

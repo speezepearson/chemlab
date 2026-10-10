@@ -106,7 +106,7 @@ const hotkey = (i: number) => '1234567890-'[i] ?? '';
  * Prototypes to drag onto the bench to make more of them. Dropping anything back here puts it away. Each has a
  * number key too, which puts a new one down under the pointer.
  */
-export function Palette({ engine }: { engine: GameEngine }) {
+export function Palette({ engine, pencil }: { engine: GameEngine; pencil: boolean }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || typingIn(e.target)) return;
@@ -139,6 +139,26 @@ export function Palette({ engine }: { engine: GameEngine }) {
           </span>
         </button>
       ))}
+      <button
+        className={`pencil${pencil ? ' on' : ''}`}
+        aria-label="Pencil"
+        aria-pressed={pencil}
+        aria-keyshortcuts="P"
+        title={
+          'Pencil (P): drag on bare bench for a sticky note, drag on one to draw, click one to type, right-drag to ' +
+          'erase. Drag a note by its top strip, resize it by its corner, × throws it away. P or Escape puts it down.'
+        }
+        onClick={() => engine.setPencil(!engine.pencilOn)}
+      >
+        <svg viewBox="0 0 40 40" aria-hidden="true">
+          <rect x="5" y="20" width="18" height="15" rx="1" style={{ fill: '#fbf0a2', stroke: 'var(--glass)' }} />
+          <path className="pipe" d="M17 30 L33 9" style={{ strokeWidth: 4 }} />
+          <path d="M15.2 32.4 L17 30 L19 31.5 Z" style={{ fill: 'var(--ink)', stroke: 'var(--ink)', strokeWidth: 1 }} />
+        </svg>
+        <span className="key" aria-hidden="true">
+          P
+        </span>
+      </button>
     </aside>
   );
 }
