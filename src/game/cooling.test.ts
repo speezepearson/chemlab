@@ -3,7 +3,7 @@ import { singleOf } from '../chem/species';
 import { temperature } from '../chem/reactions';
 import { CAP } from './config';
 import { COOLING, cool, exposure, restoreDefaultCooling, taper } from './cooling';
-import { FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
+import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
 import { Vessel } from './flask';
 import { cupFillHeight } from './tools';
 
@@ -53,7 +53,7 @@ describe('cooling', () => {
 
   it('cools a puddle fastest, then a pipette, then a flask, and a full dispenser slowest', () => {
     const area = areaBelow(FLASK_OUTLINE, 0);
-    const flaskH = 70 - fillLevel(0, 1);
+    const flaskH = FLASK_H + fillLevel(0, 1);
     const flask = exposure(flaskH, area / flaskH);
     const dispenser = exposure(84, 60);
     const h = cupFillHeight(1, 10, 84, 28, 14);

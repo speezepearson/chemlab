@@ -28,9 +28,6 @@ export const FLASK_OUTLINE: readonly Point[] = [
   { x: -9, y: 22 },
 ];
 
-/** FLASK_OUTLINE as SVG path data, for Path2D. */
-export const FLASK_PATH_DATA = `M${FLASK_OUTLINE.map((p) => `${p.x} ${p.y}`).join(' L')} Z`;
-
 /** Twice the signed area of a polygon (shoelace). */
 function area2(poly: readonly Point[]): number {
   let a = 0;
@@ -42,7 +39,7 @@ function area2(poly: readonly Point[]): number {
   return a;
 }
 
-/** Area of the part of a polygon below the line y = h (y grows downward). */
+/** Area of the part of a polygon below the line y = h (y grows downward): FLASK_OUTLINE's is the flask's outline's. */
 export function areaBelow(poly: readonly Point[], h: number): number {
   // clip to y >= h, one edge at a time (Sutherland–Hodgman against a single half-plane)
   const kept: Point[] = [];
@@ -57,30 +54,74 @@ export function areaBelow(poly: readonly Point[], h: number): number {
   return Math.abs(area2(kept)) / 2;
 }
 
-/** FLASK_OUTLINE turned by `ang` about the mouth, as drawFlask turns it. */
-export function tiltedOutline(ang: number): Point[] {
-  const c = Math.cos(ang);
-  const s = Math.sin(ang);
-  return FLASK_OUTLINE.map(({ x, y }) => ({ x: x * c - y * s, y: x * s + y * c }));
+/** The flask's inside radius `d` below its mouth (0 to 70), from FLASK_OUTLINE's right side; 0 outside it. */
+export function flaskRadius(d: number): number {
+  let r = 0;
+  const n = FLASK_OUTLINE.length;
+  for (let i = 0; i < n; i++) {
+    const p = FLASK_OUTLINE[i];
+    const q = FLASK_OUTLINE[(i + 1) % n];
+    if ((p.y <= d && q.y >= d) || (q.y <= d && p.y >= d)) {
+      const x = p.y === q.y ? Math.max(p.x, q.x) : p.x + ((d - p.y) * (q.x - p.x)) / (q.y - p.y);
+      r = Math.max(r, x);
+    }
+  }
+  return r;
 }
 
+/** The flask's depth, mouth to base. */
+export const FLASK_H = 70;
+
 /**
- * Where the fluid's surface is in a flask tilted by `ang` and filled to
- * fraction `frac` of its capacity: the height, in local units below the
- * mouth (and upright to the screen), that leaves `frac` of the flask's area
- * underneath. So the colored area always tracks the amount of fluid, whether
- * the level is in the wide base or the narrow neck, or the flask is tipped
- * to pour.
+ * The flask's inside, the solid FLASK_OUTLINE turns about its axis, as thin slabs: each is a point (x, y), with the
+ * mouth at the origin and y up, and the volume of the slab through it from front to back. Front to back doesn't
+ * matter to the level: the flask tips about its own z axis, which leaves z out of every height.
  */
-export function fillLevel(ang: number, frac: number): number {
-  const poly = tiltedOutline(ang);
-  let lo = Math.min(...poly.map((p) => p.y)); // the surface can't be higher than the top...
-  let hi = Math.max(...poly.map((p) => p.y)); // ...or lower than the bottom
-  const target = Math.max(0, Math.min(1, frac)) * areaBelow(poly, lo);
-  for (let i = 0; i < 40; i++) {
-    const mid = (lo + hi) / 2;
-    if (areaBelow(poly, mid) > target) lo = mid;
+const SLABS: readonly (readonly [number, number, number])[] = (() => {
+  const out: [number, number, number][] = [];
+  const STEP = 0.6;
+  for (let d = STEP / 2; d < FLASK_H; d += STEP) {
+    const r = flaskRadius(d);
+    for (let x = -r + STEP / 2; x < r; x += STEP) out.push([x, -d, 2 * Math.sqrt(r * r - x * x) * STEP * STEP]);
+  }
+  return out;
+})();
+
+let levelCache = { tilt: NaN, heights: new Float64Array(0), below: new Float64Array(0) };
+
+/**
+ * Where the fluid's surface is in a flask filled to fraction `frac` of its capacity and tipped by `tilt` about
+ * its mouth (its own right side going down, see Flask.tilt): the height above the mouth that leaves `frac` of the
+ * flask's volume underneath. So the fluid shown always tracks the amount in it, whether the level is in the
+ * wide base or the narrow neck, or the flask is tipped to pour.
+ */
+export function fillLevel(tilt: number, frac: number): number {
+  if (levelCache.tilt !== tilt) {
+    const c = Math.cos(tilt);
+    const s = Math.sin(tilt);
+    const slabs = SLABS.map(([x, y, w]) => [y * c - x * s, w] as const).sort((a, b) => a[0] - b[0]);
+    const heights = Float64Array.from(slabs, (sl) => sl[0]);
+    // the share of the volume below each slab's middle
+    const below = new Float64Array(slabs.length);
+    let total = 0;
+    for (const [, w] of slabs) total += w;
+    let acc = 0;
+    slabs.forEach(([, w], i) => {
+      below[i] = (acc + w / 2) / total;
+      acc += w;
+    });
+    levelCache = { tilt, heights, below };
+  }
+  const { heights: h, below } = levelCache;
+  const f = Math.max(0, Math.min(1, frac));
+  if (f <= below[0]) return h[0];
+  if (f >= below[below.length - 1]) return h[h.length - 1];
+  let lo = 0;
+  let hi = below.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (below[mid] <= f) lo = mid;
     else hi = mid;
   }
-  return (lo + hi) / 2;
+  return h[lo] + ((h[hi] - h[lo]) * (f - below[lo])) / (below[hi] - below[lo]);
 }

@@ -74,36 +74,25 @@ describe('faucets', () => {
 });
 
 describe('faucetTarget', () => {
-  const spout = { x: 100, y: 60 };
+  const spout = { x: 100, y: 60, z: 0 };
   const reach = 24;
-  const mouth = (v: Vessel, y: number): Mouth => ({ v, x0: 80, x1: 120, y });
+  const mouth = (v: Vessel, y: number): Mouth => ({ v, x: 100, y, z: 0, hx: 20, hz: 20 });
 
   it('fills something parked under it, in reach', () => {
     const tank = new Vessel(CAP);
-    expect(faucetTarget([mouth(tank, 70)], spout, reach, new Set(), false)?.v).toBe(tank);
+    expect(faucetTarget([mouth(tank, 50)], spout, reach)?.v).toBe(tank);
   });
 
   it('fills nothing out of reach, but keeps filling something full (which overflows)', () => {
     const tank = new Vessel(CAP);
-    expect(faucetTarget([mouth(tank, 90)], spout, reach, new Set(), false)).toBeNull();
+    expect(faucetTarget([mouth(tank, 30)], spout, reach)).toBeNull();
     tank.N = CAP;
-    expect(faucetTarget([mouth(tank, 70)], spout, reach, new Set(), false)?.v).toBe(tank);
+    expect(faucetTarget([mouth(tank, 50)], spout, reach)?.v).toBe(tank);
   });
 
-  it("passes by anything carried unless the right button is held, whether it's a flask, a tank or a funnel", () => {
-    for (const cap of [CAP, 4 * CAP, CAP / 4]) {
-      const carried = new Vessel(cap);
-      const mouths = [mouth(carried, 70)];
-      expect(faucetTarget(mouths, spout, reach, new Set([carried]), false)).toBeNull();
-      expect(faucetTarget(mouths, spout, reach, new Set([carried]), true)?.v).toBe(carried);
-    }
-  });
-
-  it('fills what is parked below something carried, if that is in reach', () => {
-    const carried = new Vessel(4 * CAP);
+  it('fills only the first thing under it', () => {
+    const top = new Vessel(4 * CAP);
     const below = new Vessel(CAP);
-    const mouths = [mouth(carried, 70), mouth(below, 80)];
-    expect(faucetTarget(mouths, spout, reach, new Set([carried]), false)?.v).toBe(below);
-    expect(faucetTarget(mouths, spout, reach, new Set([carried]), true)?.v).toBe(carried);
+    expect(faucetTarget([mouth(below, 40), mouth(top, 50)], spout, reach)?.v).toBe(top);
   });
 });

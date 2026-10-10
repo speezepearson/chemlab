@@ -150,7 +150,7 @@ export const PRESETS: readonly Preset[] = [
     name: 'Heat exchanger demo',
     description:
       'Hot red and room-temperature green pass each other in a counterflow heat exchanger, trading heat but not ' +
-      'mixing: the red comes out cool and the green hot. Slower flows trade more. Right-click a valve and point up to open it, right to close it.',
+      'mixing: the red comes out cool and the green hot. Slower flows trade more. Look at a valve and hold the right button: point up to open it, right to close it.',
     flasks: [],
     tools: [
       { kind: 'dispenser', at: [0.5625, 0.22], valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('R'), 4 * CAP)], T: 10 }] },

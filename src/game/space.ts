@@ -38,6 +38,8 @@ export const COUNTERS = [
 export function groundAt(x: number, z: number): number {
   return COUNTERS.some((c) => x >= c.x0 && x <= c.x1 && z >= c.z0 && z <= c.z1) ? LIFT : 0;
 }
+/** How far out from the back wall sticky notes are, so they lie on its face. */
+export const PAPER_Z = 0.6;
 /** How far out from the back wall things stand when nothing says otherwise: over the counter. */
 export const Z_HOME = 70;
 /** Where the old bench's sink was, in its own units, down from the top of its home area. */

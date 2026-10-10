@@ -1,6 +1,5 @@
-import { useEffect, type ReactNode } from 'react';
-import type { GameEngine } from '../game/engine';
-import { typingIn } from '../game/typing';
+import type { ReactNode } from 'react';
+import { HOTKEYS, ITEMS, type GameEngine } from '../game/engine';
 
 /** Small drawings of each item, echoing how the bench draws it, in a 40 × 40 box. */
 const ICONS: Record<string, ReactNode> = {
@@ -84,59 +83,30 @@ const ICONS: Record<string, ReactNode> = {
   ),
 };
 
-const ITEMS = [
-  ['flask', 'Flask'],
-  ['dispenser', 'Dispenser'],
-  ['pipette', 'Pipette'],
-  ['exchanger', 'Heat exchanger'],
-  ['separator', 'Separator'],
-  ['splitter', 'Splitter'],
-  ['sorter', 'Size sorter'],
-  ['heater', 'Resistive heater'],
-  ['scale', 'Scale'],
-  ['hose', 'Hose'],
-  ['tank', 'Tank'],
-] as const;
-
-/** The key that puts down each item, in ITEMS order: along the number row, 1 to 9, then 0 and -. */
-const hotkey = (i: number) => '1234567890-'[i] ?? '';
-
-
 /**
- * Prototypes to drag onto the bench to make more of them. Dropping anything back here puts it away. Each has a
- * number key too, which puts a new one down under the pointer.
+ * The equipment that can be made, along the bottom of the view: a key along the number row makes one in the player's
+ * hands, if there's room for it there. Clicking one does the same, when the mouse isn't captured. Last is the pencil,
+ * for sticky notes.
  */
 export function Palette({ engine, pencil }: { engine: GameEngine; pencil: boolean }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || typingIn(e.target)) return;
-      const i = ITEMS.findIndex((_, j) => hotkey(j) === e.key);
-      if (i >= 0 && engine.placeAt(ITEMS[i][0])) e.preventDefault();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [engine]);
-
   return (
-    <aside className="palette" aria-label="equipment" title="Drag out to add. Drop here to put away.">
-      {ITEMS.map(([kind, label], i) => (
+    <div className="palette" aria-label="equipment">
+      {ITEMS.map((kind, i) => (
         <button
           key={kind}
-          aria-label={label}
-          aria-keyshortcuts={hotkey(i)}
+          aria-label={kind}
+          aria-keyshortcuts={HOTKEYS[i]}
           // no name in the tooltip: working out what each tool does is part of the game
-          title={`Drag onto the bench for a new one, or back here to put one away. Press ${hotkey(i)} to put one under the pointer.`}
-          onPointerDown={(e) => {
-            e.preventDefault();
-            engine.spawn(kind, e.clientX, e.clientY);
+          title={`Press ${HOTKEYS[i]} to make one in your hands`}
+          onClick={() => {
+            engine.lock();
+            engine.spawn(kind);
           }}
         >
           <svg viewBox="0 0 40 40" aria-hidden="true">
             {ICONS[kind]}
           </svg>
-          <span className="key" aria-hidden="true">
-            {hotkey(i)}
-          </span>
+          <kbd>{HOTKEYS[i]}</kbd>
         </button>
       ))}
       <button
@@ -145,20 +115,22 @@ export function Palette({ engine, pencil }: { engine: GameEngine; pencil: boolea
         aria-pressed={pencil}
         aria-keyshortcuts="P"
         title={
-          'Pencil (P): drag on bare bench for a sticky note, drag on one to draw, click one to type, right-drag to ' +
-          'erase. Drag a note by its top strip, resize it by its corner, × throws it away. P or Escape puts it down.'
+          'Pencil (P): the mouse moves a pointer instead of your view. Drag on bare back wall for a sticky note, drag ' +
+          'on one to draw, click one to type, right-drag to erase. Drag a note by its top strip, resize it by its ' +
+          'corner, × throws it away. P puts it down.'
         }
-        onClick={() => engine.setPencil(!engine.pencilOn)}
+        onClick={() => {
+          engine.lock();
+          engine.setPencil(!engine.pencilOn);
+        }}
       >
         <svg viewBox="0 0 40 40" aria-hidden="true">
           <rect x="5" y="20" width="18" height="15" rx="1" style={{ fill: '#fbf0a2', stroke: 'var(--glass)' }} />
           <path className="pipe" d="M17 30 L33 9" style={{ strokeWidth: 4 }} />
           <path d="M15.2 32.4 L17 30 L19 31.5 Z" style={{ fill: 'var(--ink)', stroke: 'var(--ink)', strokeWidth: 1 }} />
         </svg>
-        <span className="key" aria-hidden="true">
-          P
-        </span>
+        <kbd>P</kbd>
       </button>
-    </aside>
+    </div>
   );
 }

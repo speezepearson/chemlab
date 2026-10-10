@@ -4,6 +4,7 @@ import { ReactionNetwork } from './chem/reactions';
 import { AppearancePanel } from './components/AppearancePanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
 import { FlaskEditor } from './components/FlaskEditor';
+import { Hud, Paused } from './components/Hud';
 import { LabelEditor } from './components/LabelEditor';
 import { PaperTextEditor } from './components/PaperTextEditor';
 import { SoundPanel } from './components/SoundPanel';
@@ -12,7 +13,7 @@ import { InfoPanel } from './components/InfoPanel';
 import { Palette } from './components/Palette';
 import { SpeedControl } from './components/SpeedControl';
 import { ambience } from './game/ambience';
-import { GameEngine, type Inspection, type PaperEdit } from './game/engine';
+import { GameEngine, type Hud as HudState, type Inspection, type PaperEdit } from './game/engine';
 import { DEFAULT_PRESET, PRESETS } from './game/presets';
 import { decodeSave, encodeSave, storeGod, storeSave, storedGod, storedSave, type SaveState } from './game/save';
 
@@ -43,6 +44,7 @@ export function App() {
   const [god, setGod] = useState(storedGod);
   const [won, setWon] = useState(false);
   const [inspection, setInspection] = useState<Inspection | null>(null);
+  const [hud, setHud] = useState<HudState | null>(null);
   const [saved] = useState(storedSave);
   const [preset, setPreset] = useState(() => presetOf(saved));
   const [chemVersion, setChemVersion] = useState(0);
@@ -80,10 +82,12 @@ export function App() {
       onLabel: setLabeling,
       onPencil: setPencil,
       onPaperText: (edit) => setPaperEdit((was) => edit && { edit, key: (was?.key ?? 0) + 1 }),
-      isDiscard: (x, y) => !!document.elementFromPoint(x, y)?.closest('.palette'),
+      onHud: setHud,
     }, presetRef.current);
     if (saved) e.restore(saved, presetRef.current);
     setEngine(e);
+    // for checks in a browser (see CLAUDE.md)
+    if (import.meta.env.DEV) (window as unknown as { lab?: GameEngine }).lab = e;
     const save = () => storeSave(e.snapshot());
     const timer = setInterval(save, AUTOSAVE_MS);
     window.addEventListener('pagehide', save);
@@ -198,10 +202,14 @@ export function App() {
         {preset.description && <p className="hint">{preset.description}</p>}
       </header>
       <div className="main">
-        {engine && <Palette engine={engine} pencil={pencil} />}
         <div id="stage" ref={stageRef}>
           <canvas ref={canvasRef} />
+          {hud && <Hud hud={hud} />}
           {inspection && <InfoPanel info={inspection} />}
+          {engine && <Palette engine={engine} pencil={pencil} />}
+          {engine && hud && !hud.locked && !intro && editing === null && labeling === null && !paperEdit && (
+            <Paused onStart={() => engine.lock()} />
+          )}
           {engine && editing !== null && <FlaskEditor engine={engine} id={editing} onClose={() => setEditing(null)} />}
           {engine && paperEdit && (
             <PaperTextEditor key={paperEdit.key} engine={engine} edit={paperEdit.edit} onClose={() => setPaperEdit(null)} />

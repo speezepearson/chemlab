@@ -5,6 +5,7 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP } from './config';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_OUTLINE, areaBelow } from './flaskShape';
+import { ORIGIN, type Pose, type Vec3 } from './space';
 
 /** Capacity of each tank on a tool, in atoms. */
 export const TANK_CAP = 4 * CAP;
@@ -667,11 +668,10 @@ export class Tool {
 
   constructor(
     readonly kind: ToolKind,
-    /** Stable across z-reordering; used to find a tank from the god-mode editor. */
+    /** Stable across saves; used to find a tank from the god-mode editor. */
     readonly id: number,
-    /** Position as fractions of the home area's width and height (see HOME_W), outside [0, 1] beyond it. */
-    public fx: number,
-    public fy: number,
+    /** Where the top center of its bounding box is in the room, and which way it faces (see space.ts). */
+    public pose: Pose = { ...ORIGIN },
     valves: readonly number[] = [],
   ) {
     this.tanks = SHAPES[kind].tanks.map(() => new Vessel(SHAPES[kind].tankCap ?? TANK_CAP));
@@ -928,20 +928,35 @@ export function counterflow(a: Fluid, b: Fluid, ua: number): void {
   b.Q += moved;
 }
 
-/** The open top of a vessel, in stage coordinates: anything falling onto [x0, x1] at height y goes in. */
+/**
+ * The open top of a vessel, in the room: anything falling onto it goes in. It's a rectangle `hx` by `hz` either
+ * side of its center (x, y, z), along the vessel's own axes, turned by `yaw` about the vertical (see toWorld).
+ */
 export interface Mouth {
   v: Vessel;
-  x0: number;
-  x1: number;
+  x: number;
   y: number;
+  z: number;
+  hx: number;
+  hz: number;
+  yaw?: number;
   /** Where whatever overflows the vessel spills over its lip, to fall onto whatever's below; the sink if left out. */
-  rim?: Point;
+  rim?: Vec3;
 }
 
-/** The first mouth that something falling from `p` lands in, or null if it falls to the floor. */
-export function mouthBelow(mouths: readonly Mouth[], p: Point): Mouth | null {
+/** Whether something falling straight down at (x, z) lands in a mouth (if it's below it). */
+export function overMouth(m: Mouth, x: number, z: number): boolean {
+  const c = Math.cos(m.yaw ?? 0);
+  const s = Math.sin(m.yaw ?? 0);
+  const dx = x - m.x;
+  const dz = z - m.z;
+  return Math.abs(dx * c - dz * s) <= m.hx && Math.abs(dx * s + dz * c) <= m.hz;
+}
+
+/** The first mouth that something falling from `p` lands in, or null if it falls to the sink. */
+export function mouthBelow(mouths: readonly Mouth[], p: Vec3): Mouth | null {
   let best: Mouth | null = null;
-  for (const m of mouths) if (m.y > p.y && p.x >= m.x0 && p.x <= m.x1 && (!best || m.y < best.y)) best = m;
+  for (const m of mouths) if (m.y < p.y && overMouth(m, p.x, p.z) && (!best || m.y > best.y)) best = m;
   return best;
 }
 
@@ -969,9 +984,9 @@ export class Hose {
   note = '';
 
   constructor(
-    /** The funnel's mouth and the outlet's tip, as fractions of the home area's width and height (see HOME_W). */
-    public inlet: Point,
-    public outlet: Point,
+    /** The funnel's mouth and the outlet's tip, in the room. */
+    public inlet: Vec3,
+    public outlet: Vec3,
   ) {}
 
   /** Run for `h` sim seconds. Returns what left the outlet, or null if nothing did. */

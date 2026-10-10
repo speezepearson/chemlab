@@ -5,9 +5,9 @@ import type { ToolKind } from './tools';
 import type { SavedPaper } from './paper';
 
 /**
- * A saved bench: everything on it, plus the chemistry parameters. Positions
- * are stored the way the engine keeps them across resizes, so a save loads
- * sensibly into a different window size.
+ * A saved lab: everything in it, plus the chemistry parameters. Across and up are stored as they were on the old
+ * flat bench, which is now the lab's back wall (see fromFrac), so saves from before the lab was 3D still load.
+ * How far out from the wall things are, and which way they face, are optional, since those saves lack them.
  */
 export interface SaveState {
   v: 1;
@@ -17,13 +17,18 @@ export interface SaveState {
   tools: SavedTool[];
   scales: SavedScale[];
   hoses: SavedHose[];
-  /** Where each faucet joins its pipe, as fractions of the home area (see HOME_W); where they start if left out. */
+  /**
+   * Each faucet's note, with where it was on the old flat bench. The lab's faucets are fixed to its right wall, so
+   * where is ignored; it's kept so saves still load on the old bench.
+   */
   faucets?: { x: number; y: number; note?: string }[];
   chem?: { bonds: ChemParams['bonds']; swapA: number; heatCap: number };
   /** The target the receptacle has taken so far, by volume, toward the goal; none if left out. */
   delivered?: number;
   /** The player's sticky notes, the one on top last; none if left out. */
   papers?: SavedPaper[];
+  /** Where the player stood and looked (see GameEngine); where they start if left out. */
+  player?: { x: number; z: number; yaw: number; pitch: number };
 }
 
 /** Contents by species name (names outlast reorderings of the species list), and whole quanta of heat. */
@@ -33,14 +38,20 @@ export interface SavedVessel {
   label?: string;
 }
 
-export interface SavedFlask extends SavedVessel {
-  /** Resting place: across as a fraction of the home area's width (see HOME_W), up from the floor in world units. */
+/** How far out from the back wall something is, in world units, and which way it faces (see Pose); optional. */
+export interface SavedDepth {
+  z?: number;
+  yaw?: number;
+}
+
+export interface SavedFlask extends SavedVessel, SavedDepth {
+  /** Where its mouth is: across as a fraction of the home area's width (see HOME_W), up from the counter in world units. */
   x: number;
   up: number;
   glass: number;
 }
 
-export interface SavedTool {
+export interface SavedTool extends SavedDepth {
   kind: ToolKind;
   id: number;
   fx: number;
@@ -59,7 +70,7 @@ export interface SavedTool {
   reading?: number[];
 }
 
-export interface SavedScale {
+export interface SavedScale extends SavedDepth {
   fx: number;
   fy: number;
   tare: number;
@@ -70,8 +81,9 @@ export interface SavedScale {
 }
 
 export interface SavedHose {
-  inlet: { x: number; y: number };
-  outlet: { x: number; y: number };
+  /** Each end as fractions of the home area (see HOME_W), and how far out from the back wall (optional). */
+  inlet: { x: number; y: number; z?: number };
+  outlet: { x: number; y: number; z?: number };
   funnel: SavedVessel;
   /** The drop hanging at the outlet, if any. */
   drop?: SavedVessel;

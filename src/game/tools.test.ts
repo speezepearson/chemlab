@@ -32,7 +32,7 @@ describe('pipette', () => {
   });
 
   it('holds a tenth of a flask, and lets out a fifth of that a second when full and fully open', () => {
-    const p = new Tool('pipette', 0, 0, 0, [1]);
+    const p = new Tool('pipette', 0, undefined, [1]);
     expect(p.tanks[0].cap).toBe(CAP / 10);
     expect(p.shape.cup).toBeDefined();
     p.tanks[0].setMolecules(R, CAP / 10);
@@ -41,7 +41,7 @@ describe('pipette', () => {
   });
 
   it('flows with the height of its fluid, measured up its narrow tube once the cup has drained', () => {
-    const p = new Tool('pipette', 0, 0, 0, [1]);
+    const p = new Tool('pipette', 0, undefined, [1]);
     p.tanks[0].setMolecules(R, CAP / 10);
     const full = p.shape.tankH ?? 84;
     const cupH = p.shape.cup!.h;
@@ -54,7 +54,7 @@ describe('pipette', () => {
   });
 
   it('flows in proportion to its valve, and not at all closed', () => {
-    const p = new Tool('pipette', 0, 0, 0, [0.5]);
+    const p = new Tool('pipette', 0, undefined, [0.5]);
     p.tanks[0].setMolecules(R, CAP / 10);
     expect(volume(p.step(1)[0]!) / (CAP / 10 / 5 / 2)).toBeCloseTo(1, 4);
     p.valves[0] = 0;
@@ -65,7 +65,7 @@ describe('pipette', () => {
 describe('resistive heater', () => {
   /** A heater fed a steady room-temperature stream of R for `t` sim seconds, catching what leaves each spout. */
   function run(valves: number[], t = 3 * HEATER.transit, feed = 0.25 * CAP) {
-    const ht = new Tool('heater', 0, 0, 0, valves);
+    const ht = new Tool('heater', 0, undefined, valves);
     const out = ht.shape.spouts.map(() => new Vessel(Infinity));
     const src = filled(new Vessel(Infinity), R, CAP, 1);
     let fed = 0;
@@ -79,7 +79,7 @@ describe('resistive heater', () => {
   const held = (ht: Tool) => [...ht.tanks, ...ht.tube].reduce((n, v) => n + v.N, 0);
 
   it('has three taps and a dial, all starting at 0', () => {
-    const ht = new Tool('heater', 0, 0, 0);
+    const ht = new Tool('heater', 0);
     expect(ht.valves).toEqual([0, 0, 0, 0]);
     expect(ht.shape.dial).toBe(3);
     expect(ht.shape.spouts.length).toBe(4);
@@ -87,7 +87,7 @@ describe('resistive heater', () => {
   });
 
   it('carries fluid the length of its tube in about HEATER.transit, and out the end', () => {
-    const ht = new Tool('heater', 0, 0, 0);
+    const ht = new Tool('heater', 0);
     ht.tanks[0].setMolecules(R, CAP / 100);
     // the first of it gets out a little early, as the stretches mix; most takes about the transit
     let t = 0;
@@ -140,14 +140,14 @@ describe('resistive heater', () => {
   });
 
   it('feeds its tube from its funnel in proportion to how high the fluid stands in it', () => {
-    const ht = new Tool('heater', 0, 0, 0);
+    const ht = new Tool('heater', 0);
     filled(ht.tanks[0], R, ht.tanks[0].cap / 4, 1);
     ht.step(0.01);
     expect(ht.tube.reduce((n, v) => n + v.N, 0) / (0.01 * HEATER.feed * 0.25)).toBeCloseTo(1, 4);
   });
 
   it('feeds its tube at most HEATER.feed', () => {
-    const ht = new Tool('heater', 0, 0, 0);
+    const ht = new Tool('heater', 0);
     filled(ht.tanks[0], R, ht.tanks[0].cap, 1);
     ht.step(0.01);
     expect(ht.tube.reduce((n, v) => n + v.N, 0) / (0.01 * HEATER.feed)).toBeCloseTo(1, 6);
@@ -171,7 +171,7 @@ describe('resistive heater', () => {
 
 describe('flow meter', () => {
   it('drains its funnel straight through at FUNNEL_RATE, with no valve', () => {
-    const m = new Tool('meter', 0, 0, 0);
+    const m = new Tool('meter', 0);
     expect(m.shape.noValve).toBe(true);
     filled(m.tanks[0], R, FUNNEL_CAP, 2);
     const out = m.step(0.02)[0]!;
@@ -180,7 +180,7 @@ describe('flow meter', () => {
   });
 
   it('reads what flows through it, averaged over about METER.tau', () => {
-    const m = new Tool('meter', 0, 0, 0);
+    const m = new Tool('meter', 0);
     const feed = 0.25 * CAP; // per sim second
     const src = filled(new Vessel(Infinity), R, CAP, 1);
     for (let t = 0; t < METER.tau; t += 0.02) {
@@ -212,14 +212,14 @@ describe('flow meter', () => {
 
 describe('tank', () => {
   it('holds a hundred flasks, and is drawn as big as a hundred flasks', () => {
-    const tk = new Tool('tank', 0, 0, 0);
+    const tk = new Tool('tank', 0);
     expect(tk.tanks[0].cap).toBe(100 * CAP);
     const { x0, x1 } = tk.shape.tanks[0];
     expect(((x1 - x0) * tk.shape.tankH!) / areaBelow(FLASK_OUTLINE, 0)).toBeCloseTo(100, 6);
   });
 
   it('pours through its valve like any tank, by how high its fluid stands', () => {
-    const tk = new Tool('tank', 0, 0, 0, [1]);
+    const tk = new Tool('tank', 0, undefined, [1]);
     filled(tk.tanks[0], R, 50 * CAP, 1);
     const level = tk.level(0);
     expect(tk.step(0.01)[0]!.N / (MAX_FLOW * level * 0.01)).toBeCloseTo(1, 5);
@@ -229,7 +229,7 @@ describe('tank', () => {
 describe('receptacle', () => {
   /** A receptacle holding `atoms` of the target and `impurity` atoms of R, pressed and run to the end of its cycle. */
   function run(atoms: number, impurity: number) {
-    const r = new Tool('receptacle', 0, 0, 0);
+    const r = new Tool('receptacle', 0);
     r.tanks[0].setMolecules(TARGET, atoms / 3);
     r.tanks[0].setMolecules(R, impurity);
     const before = r.tanks[0].N;
@@ -249,7 +249,7 @@ describe('receptacle', () => {
   }
 
   it('holds a little over twice the reference, and stays put', () => {
-    const r = new Tool('receptacle', 0, 0, 0);
+    const r = new Tool('receptacle', 0);
     expect(r.tanks[0].cap).toBe(RECEPTACLE_CAP);
     expect(RECEPTACLE_CAP / REFERENCE_CAP).toBeGreaterThan(2);
     expect(RECEPTACLE_CAP / REFERENCE_CAP).toBeLessThan(2.5);
@@ -297,7 +297,7 @@ describe('receptacle', () => {
   });
 
   it('refuses an empty vessel, and ignores its button mid-cycle', () => {
-    const r = new Tool('receptacle', 0, 0, 0);
+    const r = new Tool('receptacle', 0);
     expect(r.press()).toBe(true);
     expect(r.press()).toBe(false);
     for (let t = 0; t < RECEPTACLE_TIMES.think + 0.1; t += 0.02) r.step(0.02);
@@ -314,7 +314,7 @@ describe('receptacle', () => {
 
 describe('dispenser', () => {
   it('dispenses valve × MAX_FLOW × how high its fluid stands, per sim second', () => {
-    const d = new Tool('dispenser', 0, 0, 0, [0.5]);
+    const d = new Tool('dispenser', 0, undefined, [0.5]);
     filled(d.tanks[0], R, 2 * CAP, 3);
     // half full, it stands a little over half as high, measured from the tip of its sump
     const level = d.level(0);
@@ -329,7 +329,7 @@ describe('dispenser', () => {
   });
 
   it('starts closed, and dispenses nothing when closed or empty', () => {
-    const d = new Tool('dispenser', 0, 0, 0);
+    const d = new Tool('dispenser', 0);
     filled(d.tanks[0], R, CAP, 1);
     expect(d.step(0.1)).toEqual([null]);
     expect(d.tanks[0].N).toBe(CAP);
@@ -339,7 +339,7 @@ describe('dispenser', () => {
   });
 
   it('measures its fluid from the tip of its sump, so a thin layer across the floor still drains steadily', () => {
-    const d = new Tool('dispenser', 0, 0, 0, [1]);
+    const d = new Tool('dispenser', 0, undefined, [1]);
     const { sump, tankH = 84 } = d.shape;
     // a little more than the sump holds: a thin layer across the floor
     filled(d.tanks[0], R, 0.02 * TANK_CAP, 1);
@@ -352,7 +352,7 @@ describe('dispenser', () => {
   });
 
   it('empties a full tank fully open in well under a minute, not trickling on', () => {
-    const d = new Tool('dispenser', 0, 0, 0, [1]);
+    const d = new Tool('dispenser', 0, undefined, [1]);
     filled(d.tanks[0], R, TANK_CAP, 1);
     let t = 0;
     for (; d.tanks[0].N > 0 && t < 120; t += 0.02) d.step(0.02);
@@ -361,7 +361,7 @@ describe('dispenser', () => {
   });
 
   it('empties completely in the end, rather than leaving a trace behind', () => {
-    const d = new Tool('dispenser', 0, 0, 0, [1]);
+    const d = new Tool('dispenser', 0, undefined, [1]);
     filled(d.tanks[0], R, CAP, 1);
     let total = 0;
     for (let i = 0; i < 10000; i++) total += d.step(0.01)[0]?.N ?? 0;
@@ -376,14 +376,14 @@ describe('dispenser', () => {
 
 describe('splitter', () => {
   function run(valve: number | undefined) {
-    const sp = new Tool('splitter', 0, 0, 0, valve === undefined ? [] : [valve]);
+    const sp = new Tool('splitter', 0, undefined, valve === undefined ? [] : [valve]);
     filled(sp.tanks[0], R, FUNNEL_CAP, 4);
     const [l, r] = sp.step(0.05);
     return { sp, l, r };
   }
 
   it('drains its funnel at FUNNEL_RATE times how high the fluid stands, so half full at half the rate', () => {
-    const sp = new Tool('splitter', 0, 0, 0);
+    const sp = new Tool('splitter', 0);
     filled(sp.tanks[0], R, FUNNEL_CAP / 2, 1);
     expect(sp.level(0)).toBe(0.5);
     const [l, r] = sp.step(0.01);
@@ -415,13 +415,13 @@ describe('splitter', () => {
   });
 
   it('holds only a little', () => {
-    expect(new Tool('splitter', 0, 0, 0).tanks[0].cap).toBe(FUNNEL_CAP);
+    expect(new Tool('splitter', 0).tanks[0].cap).toBe(FUNNEL_CAP);
   });
 });
 
 describe('cryostabilizer reference', () => {
   it('holds a hundred flasks, and lets out at most 0.02 flask/s through its valve, when full', () => {
-    const ref = new Tool('reference', 0, 0, 0, [1]);
+    const ref = new Tool('reference', 0, undefined, [1]);
     expect(ref.tanks[0].cap).toBe(100 * CAP);
     expect(ref.shape.sealed).toBe(true);
     filled(ref.tanks[0], TARGET, 3 * REFERENCE_CAP, 1); // full: a hundred flasks of triangles
@@ -446,7 +446,7 @@ describe('size sorter', () => {
   };
   /** Each size's shares out the three spouts, sorting singles, pairs and triples at the current strength. */
   function sort() {
-    const so = new Tool('sorter', 0, 0, 0);
+    const so = new Tool('sorter', 0);
     const f = so.tanks[0];
     f.setMolecules(R, 6e7);
     f.setMolecules(RG, 3e7);
@@ -480,14 +480,14 @@ describe('size sorter', () => {
   });
 
   it('keeps the temperature of what it sorts', () => {
-    const so = new Tool('sorter', 0, 0, 0);
+    const so = new Tool('sorter', 0);
     filled(so.tanks[0], R, FUNNEL_CAP, 3);
     for (const v of so.step(0.02)) if (v) expect(temperature(v)).toBeCloseTo(3, 2);
   });
 
   it('drains its funnel at FUNNEL_RATE times how high the fluid stands, with no valve', () => {
     for (const share of [1, 0.25]) {
-      const so = new Tool('sorter', 0, 0, 0);
+      const so = new Tool('sorter', 0);
       filled(so.tanks[0], R, FUNNEL_CAP * share, 4);
       const out = so.step(0.01).reduce((t, v) => t + (v?.N ?? 0), 0);
       expect(out / (FUNNEL_RATE * share * 0.01)).toBeCloseTo(1, 5);
@@ -536,7 +536,7 @@ describe('mass spectrometer', () => {
   });
 
   it('reads its sample when run, lids it and drains it evenly over the run, ignoring the button until the end', () => {
-    const sp = new Tool('spectrometer', 0, 0, 0);
+    const sp = new Tool('spectrometer', 0);
     const cup = sp.tanks[0];
     expect(cup.cap).toBe(SAMPLE_CAP);
     expect(sp.step(0.1)).toEqual([]);
@@ -577,7 +577,7 @@ describe('mass spectrometer', () => {
 
 describe('heat exchanger', () => {
   function run(valves: number[], TA = 10, TB = 1) {
-    const x = new Tool('exchanger', 0, 0, 0, valves);
+    const x = new Tool('exchanger', 0, undefined, valves);
     // full, so each valve lets out its whole rate
     filled(x.tanks[0], R, TANK_CAP, TA);
     filled(x.tanks[1], G, TANK_CAP, TB);
@@ -634,19 +634,27 @@ describe('counterflow', () => {
 describe('mouthBelow', () => {
   const v = new Vessel(CAP);
   const mouths: Mouth[] = [
-    { v, x0: 0, x1: 10, y: 100 },
-    { v, x0: 0, x1: 10, y: 50 },
-    { v, x0: 20, x1: 30, y: 40 },
+    { v, x: 5, y: -100, z: 0, hx: 5, hz: 5 },
+    { v, x: 5, y: -50, z: 0, hx: 5, hz: 5 },
+    { v, x: 25, y: -40, z: 0, hx: 5, hz: 5 },
   ];
 
   it('finds the highest mouth below the point', () => {
-    expect(mouthBelow(mouths, { x: 5, y: 0 })).toBe(mouths[1]);
-    expect(mouthBelow(mouths, { x: 5, y: 60 })).toBe(mouths[0]);
+    expect(mouthBelow(mouths, { x: 5, y: 0, z: 0 })).toBe(mouths[1]);
+    expect(mouthBelow(mouths, { x: 5, y: -60, z: 0 })).toBe(mouths[0]);
   });
 
   it('ignores mouths above or to the side', () => {
-    expect(mouthBelow(mouths, { x: 5, y: 120 })).toBeNull();
-    expect(mouthBelow(mouths, { x: 15, y: 0 })).toBeNull();
+    expect(mouthBelow(mouths, { x: 5, y: -120, z: 0 })).toBeNull();
+    expect(mouthBelow(mouths, { x: 15, y: 0, z: 0 })).toBeNull();
+    expect(mouthBelow(mouths, { x: 5, y: 0, z: 8 })).toBeNull();
+  });
+
+  it('turns a mouth by its yaw', () => {
+    const long: Mouth = { v, x: 0, y: -10, z: 0, hx: 30, hz: 3 };
+    expect(mouthBelow([long], { x: 20, y: 0, z: 0 })).toBe(long);
+    expect(mouthBelow([{ ...long, yaw: Math.PI / 2 }], { x: 20, y: 0, z: 0 })).toBeNull();
+    expect(mouthBelow([{ ...long, yaw: Math.PI / 2 }], { x: 0, y: 0, z: 20 })).not.toBeNull();
   });
 });
 
@@ -729,7 +737,7 @@ describe('separator', () => {
   });
 
   it('drains its tank at the valve rate times its level, out of all five spouts', () => {
-    const x = new Tool('separator', 0, 0, 0, [0.5]);
+    const x = new Tool('separator', 0, undefined, [0.5]);
     filled(x.tanks[0], B, CAP, 3);
     x.tanks[0].setMolecules(Y, CAP);
     const level = x.level(0);
@@ -742,7 +750,7 @@ describe('separator', () => {
 
 describe('hose', () => {
   it('pumps what falls in its funnel out of its outlet, up to PUMP_RATE', () => {
-    const hose = new Hose({ x: 0, y: 0 }, { x: 1, y: 1 });
+    const hose = new Hose({ x: 0, y: 0, z: 0 }, { x: 1, y: -1, z: 0 });
     const src = filled(new Vessel(CAP), R, CAP, 2);
     hose.funnel.addFrom(src, HOSE_CAP * 2); // more than it holds: the rest overflows
     expect(hose.funnel.N / HOSE_CAP).toBeCloseTo(1, 6);
