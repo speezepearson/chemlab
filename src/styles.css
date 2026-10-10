@@ -105,6 +105,7 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 @media (max-width:560px){
   .palette{gap:3px;padding:4px;flex-wrap:wrap;justify-content:center;width:calc(100% - 24px);box-sizing:border-box}
   .stick{bottom:104px}
+  .touch-buttons{bottom:228px}
   .palette svg{width:24px;height:24px}
 }
 .crosshair{
@@ -153,6 +154,18 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .stick.move{left:20px}
 .stick.look{right:20px}
 .stick i{width:44px;height:44px;border-radius:50%;background:rgba(238,240,235,.55);pointer-events:none}
+.touch-buttons{
+  position:absolute;bottom:208px;display:flex;flex-direction:column;align-items:center;gap:10px;z-index:3;
+}
+.touch-buttons.left{left:48px}
+.touch-buttons.right{right:48px}
+button.touch{
+  width:58px;height:58px;border-radius:50%;padding:0;touch-action:none;user-select:none;-webkit-user-select:none;
+  background:rgba(238,240,235,.6);border:2px solid rgba(255,255,255,.5);color:#1b2320;font-size:12px;font-weight:600;
+}
+button.touch.small{width:46px;height:46px;font-size:10px}
+button.touch.pad{width:78px;height:58px;border-radius:14px}
+button.touch.dim{opacity:.45}
 .paused dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0}
 .paused dt{font-weight:600;white-space:nowrap}
 .paused dd{margin:0;color:var(--muted)}

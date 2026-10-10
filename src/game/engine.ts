@@ -69,6 +69,10 @@ export interface Hud {
   aim: { x: number; y: number } | null;
   /** Whether the pencil is in hand. */
   pencil: boolean;
+  /** Whether F would flip something: the tool held, or else the one looked at, if it can be flipped. */
+  flip: boolean;
+  /** What the right button does now, in a word, for the touch screen's button that stands in for it. */
+  hand: 'Pour' | 'Flow' | 'Turn' | 'Erase';
   /** A brief note, like there being no room for something. */
   note: string | null;
 }
@@ -179,6 +183,10 @@ export class GameEngine {
   private keys = new Set<string>();
   /** Where the on-screen sticks are pushed (see stick). */
   private sticks = { move: { x: 0, y: 0 }, look: { x: 0, y: 0 } };
+  /** Whether the touch screen's crouch button is held (see touchCrouch). */
+  private crouchHeld = false;
+  /** When the pencil last drew by touch, so the mouse events a browser makes up from a touch are ignored. */
+  private lastTouch = -Infinity;
   private held: Held | null = null;
   /** Whether the right button is held: a held flask tips and pours, and a held tool or hose lets fluid out, only while it is. */
   private rightHeld = false;
@@ -732,6 +740,59 @@ export class GameEngine {
     this.sticks[which] = { x, y };
   }
 
+  /* On a touch screen, the on-screen buttons stand in for the keys and the right button (see TouchControls). */
+
+  /** Where a pointer event happened on the canvas, in CSS pixels. */
+  private screenPt(e: PointerEvent): { x: number; y: number } {
+    const r = this.canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  /** E: pick up what the crosshair is on, or let go of what's held. */
+  touchGrab(): void {
+    if (this.locked) this.grabOrRelease();
+  }
+
+  /** F: flip the tool held or looked at. */
+  touchFlip(): void {
+    if (this.locked) this.flipTarget();
+  }
+
+  /** Backspace: put away what's held. */
+  touchPutAway(): void {
+    if (this.locked) this.putAway();
+  }
+
+  /** C, held or let go. */
+  touchCrouch(on: boolean): void {
+    this.crouchHeld = on;
+  }
+
+  /**
+   * The right button, pressed or let go: it pours, lets fluid out, or turns the valve looked at; with the pencil in
+   * hand, touches on the view erase while it's held.
+   */
+  hand(down: boolean): void {
+    if (!down) {
+      this.rightHeld = false;
+      this.turning = null;
+    } else if (this.pencil) this.rightHeld = true;
+    else if (this.locked) this.rightDown();
+  }
+
+  /** A finger dragged (dx, dy) pixels on the right button's stand-in: while a valve turns, it moves the aim. */
+  handDrag(dx: number, dy: number): void {
+    if (this.turning) this.look(dx, dy, false);
+  }
+
+  /** Shift and the mouse, and the wheel: a drag across turns what's held, and up holds it further, down nearer. */
+  turnHeld(dx: number, dy: number): void {
+    const h = this.held;
+    if (!h) return;
+    h.relYaw = wrapAngle(h.relYaw - dx * TURN_SENS);
+    h.dist = this.clampDist(h, h.dist * Math.exp(-dy * 0.004));
+  }
+
   private bindInput(): void {
     const c = this.canvas;
     const on = <K extends keyof WindowEventMap>(target: Window | HTMLElement, type: K, fn: (e: WindowEventMap[K]) => void) => {
@@ -749,7 +810,32 @@ export class GameEngine {
     };
     document.addEventListener('pointerlockchange', onLock);
     this.cleanups.push(() => document.removeEventListener('pointerlockchange', onLock));
+    // with the pencil in hand on a touch screen, the finger is the pencil's point, and erases while the right
+    // button's stand-in is held
+    on(c, 'pointerdown', (e) => {
+      if (e.pointerType !== 'touch' || !this.pencil || !this.locked) return;
+      this.lastTouch = performance.now();
+      this.cursor = this.screenPt(e);
+      const at = this.wallAt();
+      if (at) this.pencilDown(at, this.rightHeld ? 2 : 0);
+      c.setPointerCapture(e.pointerId);
+    });
+    on(c, 'pointermove', (e) => {
+      if (e.pointerType !== 'touch' || !this.paperDrag) return;
+      this.lastTouch = performance.now();
+      this.cursor = this.screenPt(e);
+      const at = this.wallAt();
+      if (at) this.pencilMove(at);
+    });
+    const touchUp = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch' || !this.paperDrag) return;
+      this.lastTouch = performance.now();
+      this.pencilUp(this.wallAt());
+    };
+    on(c, 'pointerup', touchUp);
+    on(c, 'pointercancel', touchUp);
     on(c, 'mousedown', (e) => {
+      if (this.pencil && performance.now() - this.lastTouch < 1000) return;
       if (!this.locked) {
         if (e.button === 0) this.lock();
         return;
@@ -764,6 +850,7 @@ export class GameEngine {
       if (e.button === 2) this.rightDown();
     });
     on(window, 'mouseup', (e) => {
+      if (this.pencil && performance.now() - this.lastTouch < 1000) return;
       if (this.paperDrag) {
         this.pencilUp(this.wallAt());
         return;
@@ -1319,7 +1406,7 @@ export class GameEngine {
       p.yaw = wrapAngle(p.yaw - look.x * Math.abs(look.x) * STICK_TURN * dt);
       p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch - look.y * Math.abs(look.y) * STICK_TILT * dt));
     }
-    const crouching = k.has('KeyC');
+    const crouching = k.has('KeyC') || this.crouchHeld;
     p.crouch = Math.max(0, Math.min(1, p.crouch + (crouching ? 1 : -1) * dt * 5));
     const h = this.held;
     const obstacles = this.obstacles(h);
@@ -1621,6 +1708,7 @@ export class GameEngine {
   private hud(now: number): void {
     if (this.flash && now > this.flash.until) this.flash = null;
     const p = this.target;
+    const h = this.held;
     const hud: Hud = {
       locked: this.locked,
       grab: !this.held && !!p && p.kind !== 'faucet' && !(p.kind === 'tool' && p.t.shape.fixed),
@@ -1631,6 +1719,8 @@ export class GameEngine {
       right: this.rightWouldDo(),
       aim: this.pencil ? { ...this.cursor } : this.turning ? { ...this.turning.aim } : null,
       pencil: this.pencil,
+      flip: !!(h?.kind === 'tool' ? h.t : !h && p?.kind === 'tool' ? p.t : null)?.shape.flippable,
+      hand: this.pencil ? 'Erase' : h?.kind === 'flask' ? 'Pour' : h ? 'Flow' : 'Turn',
       note: this.flash?.text ?? null,
     };
     const key = JSON.stringify(hud);

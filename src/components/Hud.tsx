@@ -48,13 +48,83 @@ function Stick({ engine, which }: { engine: GameEngine; which: 'move' | 'look' }
   );
 }
 
-/** On a touch screen, while playing: the stick that walks, bottom left, and the one that looks, bottom right. */
-export function Sticks({ engine, hud }: { engine: GameEngine; hud: HudState }) {
+/**
+ * A round button for a touch screen. `down` and `up` fire as a finger lands and lifts, and `drag` with how far it
+ * moved, in CSS pixels, while it's held; the finger stays the button's until it lifts, wherever it goes.
+ */
+function TouchButton({
+  label,
+  className = '',
+  lit = true,
+  down,
+  up,
+  drag,
+}: {
+  label: string;
+  className?: string;
+  lit?: boolean;
+  down?(): void;
+  up?(): void;
+  drag?(dx: number, dy: number): void;
+}) {
+  const last = useRef<{ x: number; y: number } | null>(null);
+  const lift = () => {
+    if (!last.current) return;
+    last.current = null;
+    up?.();
+  };
+  return (
+    <button
+      className={`touch ${className}${lit ? '' : ' dim'}`}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        last.current = { x: e.clientX, y: e.clientY };
+        down?.();
+      }}
+      onPointerMove={(e) => {
+        const l = last.current;
+        if (!l) return;
+        drag?.(e.clientX - l.x, e.clientY - l.y);
+        last.current = { x: e.clientX, y: e.clientY };
+      }}
+      onPointerUp={lift}
+      onPointerCancel={lift}
+    >
+      {label}
+    </button>
+  );
+}
+
+/**
+ * On a touch screen, while playing: the stick that walks, bottom left, and the one that looks, bottom right; and
+ * buttons standing in for the keys and the right button. Over the look stick, Grab (E) and the right button, which
+ * is named for what it'll do and, while a valve turns, aims its lever as the finger drags; and Flip (F) when there's
+ * something to flip. Over the move stick, Crouch (C), and while something's held, a pad to drag (across to turn it,
+ * up and down to hold it further or nearer) and Put away (Backspace).
+ */
+export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudState }) {
   if (!TOUCH || !hud.locked) return null;
   return (
     <>
       <Stick engine={engine} which="move" />
       <Stick engine={engine} which="look" />
+      <div className="touch-buttons right">
+        {hud.flip && <TouchButton label="Flip" className="small" down={() => engine.touchFlip()} />}
+        <TouchButton
+          label={hud.hand}
+          lit={hud.right || hud.pencil}
+          down={() => engine.hand(true)}
+          up={() => engine.hand(false)}
+          drag={(dx, dy) => engine.handDrag(dx, dy)}
+        />
+        <TouchButton label={hud.holding ? 'Drop' : 'Grab'} lit={hud.grab || hud.holding} down={() => engine.touchGrab()} />
+      </div>
+      <div className="touch-buttons left">
+        {hud.holding && <TouchButton label="Put away" className="small" down={() => engine.touchPutAway()} />}
+        {hud.holding && <TouchButton label="Turn" className="pad" drag={(dx, dy) => engine.turnHeld(dx, dy)} />}
+        <TouchButton label="Crouch" className="small" down={() => engine.touchCrouch(true)} up={() => engine.touchCrouch(false)} />
+      </div>
     </>
   );
 }
@@ -93,7 +163,12 @@ export function Paused({ onStart }: { onStart(): void }) {
     <div className="paused" onClick={onStart}>
       <div className="card">
         <b>{TOUCH ? 'Tap to start' : 'Click to look around'}</b>
-        {TOUCH && <p>The circle at the bottom left walks, and the one at the bottom right looks around.</p>}
+        {TOUCH && (
+          <p>
+            The circle at the bottom left walks, and the one at the bottom right looks around. Tap the view to press what
+            you look at, and double-tap to write a note. The buttons above the circles do the rest.
+          </p>
+        )}
         {/* the keys and mouse buttons, unless this is a touch screen, where they'd only be noise */}
         {!TOUCH && (
           <dl>
