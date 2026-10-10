@@ -12,6 +12,7 @@ import { SCALE_SHAPE, Scale, glassGrams } from './scale';
 import { CENTER, placement, type Placement } from './place';
 import { rumble, type Rumble } from './rumble';
 import { beeper, type Beeper } from './beeper';
+import { typingIn } from './typing';
 import { WaterSounds } from './water';
 import {
   HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, METER_BODY, METER_DIGITS, RECEPTACLE_BODY, RECEPTACLE_LAMPS,
@@ -1153,8 +1154,7 @@ export class GameEngine {
     onWindow('keydown', (e) => {
       if (e.key !== 'f' && e.key !== 'F') return;
       if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
-      const el = e.target;
-      if (el instanceof HTMLElement && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return;
+      if (typingIn(e.target)) return;
       const t = this.toolDrag?.tool ?? this.hoverTool;
       if (t && this.flip(t)) e.preventDefault();
     });

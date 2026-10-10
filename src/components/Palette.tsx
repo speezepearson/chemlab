@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react';
 import type { GameEngine } from '../game/engine';
+import { typingIn } from '../game/typing';
 
 /** Small drawings of each item, echoing how the bench draws it, in a 40 × 40 box. */
 const ICONS: Record<string, ReactNode> = {
@@ -100,9 +101,6 @@ const ITEMS = [
 /** The key that puts down each item, in ITEMS order: along the number row, 1 to 9, then 0 and -. */
 const hotkey = (i: number) => '1234567890-'[i] ?? '';
 
-/** Whether a key press is meant for a text field, not the bench. */
-const typing = (t: EventTarget | null) =>
-  t instanceof HTMLElement && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
 
 /**
  * Prototypes to drag onto the bench to make more of them. Dropping anything back here puts it away. Each has a
@@ -111,7 +109,7 @@ const typing = (t: EventTarget | null) =>
 export function Palette({ engine }: { engine: GameEngine }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || typing(e.target)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || typingIn(e.target)) return;
       const i = ITEMS.findIndex((_, j) => hotkey(j) === e.key);
       if (i >= 0 && engine.placeAt(ITEMS[i][0])) e.preventDefault();
     };
