@@ -13,7 +13,7 @@ import { SpeedControl } from './components/SpeedControl';
 import { ambience } from './game/ambience';
 import { GameEngine, type Inspection } from './game/engine';
 import { DEFAULT_PRESET, PRESETS } from './game/presets';
-import { decodeSave, encodeSave, storeSave, storedSave, type SaveState } from './game/save';
+import { decodeSave, encodeSave, storeGod, storeSave, storedGod, storedSave, type SaveState } from './game/save';
 
 const INTRO_KEY = 'slurry-lab.introSeen';
 const introSeen = () => {
@@ -39,7 +39,7 @@ export function App() {
   const [network] = useState(() => new ReactionNetwork(defaultChemParams()));
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [speed, setSpeed] = useState(1);
-  const [god, setGod] = useState(true);
+  const [god, setGod] = useState(storedGod);
   const [won, setWon] = useState(false);
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [saved] = useState(storedSave);
@@ -96,6 +96,7 @@ export function App() {
   useEffect(() => {
     if (engine) engine.god = god;
     if (!god) setEditing(null);
+    storeGod(god);
   }, [engine, god]);
 
   const reset = () => {
