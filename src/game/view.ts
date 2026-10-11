@@ -1778,14 +1778,15 @@ const MSG_PX = 1280;
 const MSG_PAD = 44;
 const OK_PX = { w: 170, h: 64 };
 
-/** Text wrapped to fit `w` pixels in the canvas's current font, by words; explicit newlines kept. */
+/** Text wrapped to fit `w` pixels in the canvas's current font, by words; explicit newlines and indents kept. */
 function wrapText(ctx: CanvasRenderingContext2D, text: string, w: number): string[] {
   const out: string[] = [];
   for (const para of text.split('\n')) {
-    let line = '';
-    for (const word of para.split(' ')) {
-      const next = line ? `${line} ${word}` : word;
-      if (line && ctx.measureText(next).width > w) {
+    const indent = /^ */.exec(para)![0];
+    let line = indent;
+    for (const word of para.slice(indent.length).split(' ')) {
+      const next = line.trim() ? `${line} ${word}` : line + word;
+      if (line.trim() && ctx.measureText(next).width > w) {
         out.push(line);
         line = word;
       } else line = next;
@@ -1796,8 +1797,8 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, w: number): strin
 }
 
 /**
- * The notice (see intro/notice.ts) as light projected on the inside of the pod's front: pale blue text on a faint glow, with room at
- * the bottom right for the OK button, which is its own mesh. Returns the canvas, laid out to fit.
+ * The notice (see intro/notice.ts) as light projected on the inside of the pod's front: pale blue text on a faint
+ * glow, with room at the bottom right for the OK button, which is its own mesh. Returns the canvas, laid out to fit.
  */
 function messageCanvas(): HTMLCanvasElement {
   const c = document.createElement('canvas');
@@ -1825,6 +1826,7 @@ function messageCanvas(): HTMLCanvasElement {
       b.kind === 'brand' ? [sans(600, 24), 24, '#8cc4ff', 14]
       : b.kind === 'h' ? [sans(600, 38), 38, '#f2f8ff', 8]
       : b.kind === 'pre' ? [mono(21), 21, '#cfe7ff', 12]
+      : b.kind === 'small' ? [sans(400, 19), 19, '#a9c6e6', 8]
       : [sans(400, 25), 25, '#dcecff', 8];
     ctx.font = font;
     const pad = b.kind === 'pre' ? 14 : 0;
