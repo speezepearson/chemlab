@@ -182,24 +182,26 @@ describe('flow meter', () => {
     expect(temperature(out)).toBeCloseTo(2, 6);
   });
 
-  it('reads what flows through it, averaged over about METER.tau', () => {
+  it('reads what flows through it, averaged over the last METER.window', () => {
     const m = new Tool('meter', 0);
     const feed = 0.25 * CAP; // per sim second
     const src = filled(new Vessel(Infinity), R, CAP, 1);
-    for (let t = 0; t < METER.tau; t += 0.02) {
-      m.tanks[0].addFrom(src, feed * 0.02);
-      m.step(0.02);
-    }
-    // a time constant in: about 1 − 1/e of the way there
-    expect(m.rate / feed).toBeCloseTo(1 - Math.exp(-1), 1);
-    for (let t = 0; t < 10 * METER.tau; t += 0.02) {
-      m.tanks[0].addFrom(src, feed * 0.02);
-      m.step(0.02);
-    }
-    expect(m.rate / feed).toBeCloseTo(1, 3);
-    // and back down when it stops
-    for (let t = 0; t < 10 * METER.tau; t += 0.02) m.step(0.02);
-    expect(m.rate / feed).toBeLessThan(1e-3);
+    const run = (secs: number, on: boolean) => {
+      for (let i = 0; i < Math.round(secs / 0.02); i++) {
+        if (on) m.tanks[0].addFrom(src, feed * 0.02);
+        m.step(0.02);
+      }
+    };
+    // the flow builds up in the funnel for the first few steps before it's draining at the feed rate, so leave a
+    // little slack: halfway through the window it reads about half
+    run(METER.window / 2, true);
+    expect(m.rate / feed).toBeCloseTo(0.5, 1);
+    run(2 * METER.window, true);
+    expect(m.rate / feed).toBeCloseTo(1, 2);
+    // and once the funnel's drained and the window's passed, nothing
+    run(METER.window, false);
+    run(METER.window, false);
+    expect(m.rate).toBe(0);
   });
 
   it(`shows millions per second in ${METER_DIGITS} digits, to as many decimals as fit`, () => {

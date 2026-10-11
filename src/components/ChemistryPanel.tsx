@@ -183,10 +183,10 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
             </tr>
             <tr className="group">
               <td colSpan={4}>
-                <b>Flow meter</b> <span>its reading closes 1 − e^(−t/τ) of the gap to a new flow in t seconds</span>
+                <b>Flow meter</b> <span>its reading is the average flow over the last so many seconds</span>
               </td>
             </tr>
-            <NumberRow label="averaging τ, s" min={0.001} value={METER.tau} onChange={(v) => edit(() => (METER.tau = v))} />
+            <NumberRow label="window, s" min={0.02} value={METER.window} onChange={(v) => edit(() => (METER.window = v))} />
           </tbody>
         </table>
         <p>
