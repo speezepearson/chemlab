@@ -11,7 +11,7 @@ import {
 } from './bodies';
 import { CAP, FILL_RATE, GOAL_VOLUME, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
-import { FAUCETS, faucetOutput, faucetTarget } from './faucets';
+import { FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
 import { Flask, Vessel, fluidColor, transfer, volume, volumeUnit, type Point } from './flask';
 import { boxesOverlap, moveBox, roomBoxes, walk, type Box } from './physics';
@@ -562,22 +562,24 @@ export class GameEngine {
       return h;
     });
     // what each funnel hangs under, now that there's everything to hang under
+    const fs = s.faucets ?? [];
     s.hoses.forEach((sh, i) => {
       const on = sh.on;
       if (!on) return;
+      const fa = Number.isInteger(on.faucet) ? faucetIndex(on.faucet!, fs.length) : null;
       const t = this.tools.find((u) => u.id === on.tool);
       const mount: HoseMount | null =
         t && Number.isInteger(on.spout) && on.spout! >= 0 && on.spout! < t.shape.spouts.length ? { tool: t, spout: on.spout! }
-        : Number.isInteger(on.faucet) && this.faucets[on.faucet!] ? { faucet: on.faucet! }
+        : fa !== null ? { faucet: fa }
         : Number.isInteger(on.hose) && this.hoses[on.hose!] && on.hose !== i ? { hose: this.hoses[on.hose!] }
         : null;
       this.hoses[i].on = mount;
     });
     this.hang();
-    const fs = s.faucets ?? [];
-    this.faucets.forEach((fa, i) => {
-      const note = fs.length === this.faucets.length ? fs[i]?.note : undefined;
-      fa.note = typeof note === 'string' ? note : '';
+    for (const fa of this.faucets) fa.note = '';
+    fs.forEach((f, i) => {
+      const j = faucetIndex(i, fs.length);
+      if (j !== null && typeof f?.note === 'string') this.faucets[j].note = f.note;
     });
     this.delivered = Number.isFinite(s.delivered) ? Math.max(0, s.delivered!) : 0;
     this.setAlarmsOff(!!s.alarmsOff);
