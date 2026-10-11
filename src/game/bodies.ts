@@ -42,8 +42,10 @@ export function spoutAt(t: Tool, j: number): Vec3 {
   return onTool(t, t.shape.spouts[j], t.shape.spoutY);
 }
 
-/** How far in front of the tool's middle its valves sit: on its front face. */
-export const valveZ = (t: Tool) => TOOL_DEPTH[t.kind].body / 2 + 3;
+/**
+ * How far in front of the tool's middle its valves sit: on its front face, or for a round tank, on the pipe under it.
+ */
+export const valveZ = (t: Tool) => (t.shape.round ? 8 : TOOL_DEPTH[t.kind].body / 2 + 3);
 
 /** A valve's center, in the tool's flat frame as it stands (so mirrored if it's flipped): as its shape places it, or under tank k. */
 export function valveLocal(t: Tool, k: number): { x: number; y: number } {

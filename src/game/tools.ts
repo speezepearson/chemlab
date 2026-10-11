@@ -74,6 +74,8 @@ export function levelIn(ps: readonly Piece[], share: number): number {
   return y;
 }
 
+/** How wide a sump narrows to at its tip, where its valve is, in local units (see ToolShape.sump). */
+export const SUMP_TIP = 4;
 /** How wide a funnel-shaped tank narrows to at the bottom of its stem, across and front to back. */
 export const FUNNEL_TIP = 6;
 
@@ -88,6 +90,11 @@ export function tankPieces(sh: ToolShape, k: number, d: number): Piece[] {
   }
   const w = sh.tanks[k].x1 - sh.tanks[k].x0;
   const h = sh.tankH ?? TANK_H;
+  if (sh.round) {
+    const s = sh.sump;
+    const tank = { h, w0: w, d0: w, w1: w, d1: w, round: true };
+    return s ? [{ h: s.h, w0: SUMP_TIP, d0: SUMP_TIP, w1: s.w, d1: s.w, round: true }, tank] : [tank];
+  }
   if (sh.funnel) return [{ h, w0: FUNNEL_TIP, d0: FUNNEL_TIP, w1: w, d1: d }];
   const box = { h, w0: w, d0: d, w1: w, d1: d };
   if (sh.cup) return [box, { h: sh.cup.h, w0: w, d0: d, w1: 2 * sh.cup.w, d1: 2 * sh.cup.w }];
@@ -100,14 +107,14 @@ const depths = new Map<ToolKind, number>();
 
 /**
  * How deep front to back a kind of tool's tanks are inside: deep enough to hold what they hold (see SPACE_PER_ATOM),
- * given how wide and tall they're drawn. A catcher's funnel is as deep as it's wide.
+ * given how wide and tall they're drawn. A catcher's funnel, or a round tank, is as deep as it's wide.
  */
 export function tankDepth(kind: ToolKind): number {
   let d = depths.get(kind);
   if (d !== undefined) return d;
   const sh = SHAPES[kind];
   const want = (sh.tankCap ?? TANK_CAP) * SPACE_PER_ATOM;
-  if (sh.catcher) d = sh.tanks[0].x1 - sh.tanks[0].x0;
+  if (sh.catcher || sh.round) d = sh.tanks[0].x1 - sh.tanks[0].x0;
   else {
     let [lo, hi] = [0.1, 5000];
     for (let i = 0; i < 60; i++) {
@@ -204,10 +211,14 @@ export function sorterShares(): number[][] {
 export const REFERENCE_CAP = 100 * CAP;
 /** How much the big tank holds, by volume: a hundred flasks. */
 export const BIG_TANK_CAP = 100 * CAP;
-/** The big tank's inside width, in local units: wide, so it isn't too tall. */
-export const BIG_TANK_W = 560;
-/** The big tank's inside height, in local units: enough to hold a hundred flasks about 40 deep. */
-export const BIG_TANK_H = Math.round((BIG_TANK_CAP * SPACE_PER_ATOM) / (BIG_TANK_W * 40));
+/** The big tank's inside: an upright cylinder this wide, over a round sump this wide and deep. */
+export const BIG_TANK_W = 200;
+const BIG_TANK_SUMP = { w: 30, h: 20 };
+/** The big tank's inside height, in local units: enough, with its sump, to hold a hundred flasks. */
+export const BIG_TANK_H =
+  (BIG_TANK_CAP * SPACE_PER_ATOM -
+    spaceOf([{ h: BIG_TANK_SUMP.h, w0: SUMP_TIP, d0: SUMP_TIP, w1: BIG_TANK_SUMP.w, d1: BIG_TANK_SUMP.w, round: true }])) /
+  ((Math.PI / 4) * BIG_TANK_W ** 2);
 /** The cryostabilizer reference's inside width and height, in local units: big enough to hold a hundred flasks. */
 const REF_W = 170;
 const REF_H = 220;
@@ -236,8 +247,6 @@ export function cupFillHeight(share: number, tubeW: number, tubeH: number, mouth
   return tubeH + Math.min(cupH, y);
 }
 
-/** How wide a sump narrows to at its tip, where its valve is, in local units (see ToolShape.sump). */
-export const SUMP_TIP = 4;
 
 /**
  * How high fluid filling `share` of a `w`-wide, `h`-deep tank with a sump under its floor (see ToolShape.sump) stands
@@ -433,6 +442,8 @@ export interface ToolShape {
    * anything with on its own.
    */
   catcher?: number;
+  /** Whether its tanks are upright cylinders, as wide front to back as across, rather than boxes; a sump too. */
+  round?: boolean;
   /** Whether it stands straight on a counter, like a cabinet, rather than being held up over it on a clamp stand. */
   bench?: boolean;
   /** Whether it stays where it is: it can't be picked up and carried. */
@@ -556,7 +567,8 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tanks: [{ name: 'tank', x0: -BIG_TANK_W / 2, x1: BIG_TANK_W / 2 }],
     tankH: BIG_TANK_H,
     tankCap: BIG_TANK_CAP,
-    sump: { w: 30, h: 20 },
+    round: true,
+    sump: BIG_TANK_SUMP,
     spouts: [0],
     valveY: BIG_TANK_H + 28,
     spoutY: BIG_TANK_H + 44,

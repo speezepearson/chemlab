@@ -705,6 +705,22 @@ class ToolView {
       } else if (sh.funnel) {
         glassFrom(art, frustum(cx, r.y0, r.y1, w, d, FUNNEL_TIP, FUNNEL_TIP, true));
         geoms = [frustum(cx, r.y0 + 0.5, r.y1 - 0.5, w - 1.5, d - 1.5, FUNNEL_TIP - 1, FUNNEL_TIP - 1, false)];
+      } else if (sh.round) {
+        // an upright glass cylinder with a thin metal rim, over a round sump
+        const rr = w / 2;
+        const mid = -(r.y0 + r.y1) / 2;
+        glassFrom(art, new THREE.CylinderGeometry(rr, rr, r.y1 - r.y0, 48, 1, true).translate(cx, mid, 0));
+        art.add(new THREE.Mesh(new THREE.CircleGeometry(rr, 48).rotateX(Math.PI / 2).translate(cx, -r.y1, 0), glassMat));
+        const rim = new THREE.Mesh(new THREE.TorusGeometry(rr + 0.6, 0.8, 6, 48).rotateX(Math.PI / 2).translate(cx, 0, 0), pipeMat);
+        art.add(rim);
+        geoms = [new THREE.CylinderGeometry(rr - 0.5, rr - 0.5, r.y1 - r.y0 - 0.5, 48).translate(cx, mid - 0.25, 0)];
+        const sump = sh.sump;
+        if (sump) {
+          const sm = -(r.y1 + sump.h / 2);
+          glassFrom(art, new THREE.CylinderGeometry(sump.w / 2, SUMP_TIP / 2, sump.h, 24, 1, true).translate(cx, sm, 0));
+          geoms.push(new THREE.CylinderGeometry(sump.w / 2 - 0.5, SUMP_TIP / 2 - 0.3, sump.h - 0.3, 24).translate(cx, sm, 0));
+        }
+        if (t.kind === 'tank') this.tankLines(r, bottom, d, pieces, rr);
       } else {
         openBox(art, r.x0, r.x1, r.y0, r.y1, d);
         // a thin metal rim
@@ -813,9 +829,16 @@ class ToolView {
   }
 
   /** Ten thin, faint lines across the big tank's front, one at each tenth of its capacity as its fluid is shown, the last at the brim. */
-  private tankLines(r: { x0: number; x1: number }, bottom: number, d: number, pieces: Piece[]): void {
+  private tankLines(r: { x0: number; x1: number }, bottom: number, d: number, pieces: Piece[], round?: number): void {
     for (let i = 1; i <= 10; i++) {
       const y = bottom - levelIn(pieces, i / 10);
+      if (round) {
+        // a ring round a round tank
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(round + 0.3, 0.3, 4, 64).rotateX(Math.PI / 2), faintMat);
+        ring.position.set((r.x0 + r.x1) / 2, -y, 0);
+        this.art.add(ring);
+        continue;
+      }
       block(this.art, faintMat, r.x0, r.x1, y - 0.3, y + 0.3, d / 2, d / 2 + 0.2).castShadow = false;
     }
   }
