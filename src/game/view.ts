@@ -108,6 +108,26 @@ const LOOK_RANK: Record<GuideLook | 'place' | 'bad', number> = { faint: 0, solid
 const STREAM_WIDTH = 4.5;
 /** Radius of a guide stream (see Frame.guides), about a slow stream's; and how wide the outline round its mouth is. */
 const GUIDE_R = 1.6;
+/** Marks only how near things are, for hiding guides behind glass (see View.renderGuides). */
+const depthOnly = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide });
+
+/** How long a guide's dashes are, and the gaps between them, in world units. */
+const GUIDE_DASH = { on: 9, off: 7 };
+/** The layer guides' streams are drawn on, apart from everything else (see View.render). */
+const GUIDE_LAYER = 3;
+
+/** Stripes for a guide's dashes, as an alpha map: on at the top of each repeat, off below. */
+const dashTexture = (() => {
+  const n = GUIDE_DASH.on + GUIDE_DASH.off;
+  const data = new Uint8Array(4 * n);
+  for (let i = 0; i < n; i++) data.fill(i >= GUIDE_DASH.off ? 255 : 0, 4 * i, 4 * i + 4);
+  const t = new THREE.DataTexture(data, 1, n);
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.NearestFilter;
+  t.wrapT = THREE.RepeatWrapping;
+  t.needsUpdate = true;
+  return t;
+})();
 const RIM_W = 1.6;
 /** Drawn radius of a DROP_R_ATOMS drop; it goes as the cube root of the drop's size. */
 const DROP_R = 3;
@@ -2337,6 +2357,42 @@ export class View {
     (this.beacon.lamp.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.3 + 1.2 * pulse;
 
     this.renderer.render(scene, this.camera);
+    this.renderGuides();
+  }
+
+  /**
+   * The guides' streams, over the frame just drawn, hidden behind anything in front of them, glass included. Glass
+   * and everything else see-through is drawn without marking how near it is, so first it's drawn again marking only
+   * that (no color, no shadows), and then the guides, which are on a layer of their own.
+   */
+  private renderGuides(): void {
+    if (!this.guides.some((m) => m.visible)) return;
+    const { renderer, scene, camera } = this;
+    const hidden: THREE.Object3D[] = [];
+    scene.traverse((o) => {
+      if (!o.visible || !(o instanceof THREE.Mesh || o instanceof THREE.Sprite || o instanceof THREE.Line || o instanceof THREE.Points)) return;
+      // opaque things marked their depth already; sprites (labels) and lines don't hide anything
+      const see = o instanceof THREE.Mesh && !Array.isArray(o.material) && o.material.transparent;
+      if (!see) {
+        o.visible = false;
+        hidden.push(o);
+      }
+    });
+    // a colored background would clear the frame on each draw, whatever autoClear says
+    const bg = scene.background;
+    scene.background = null;
+    renderer.autoClear = false;
+    renderer.shadowMap.autoUpdate = false;
+    scene.overrideMaterial = depthOnly;
+    renderer.render(scene, camera);
+    scene.overrideMaterial = null;
+    for (const o of hidden) o.visible = true;
+    camera.layers.set(GUIDE_LAYER);
+    renderer.render(scene, camera);
+    camera.layers.set(0);
+    renderer.shadowMap.autoUpdate = true;
+    renderer.autoClear = true;
+    scene.background = bg;
   }
 
   /** Every stand, its base on whatever's under it: a counter, or the floor under something held out over it. */
@@ -2355,8 +2411,10 @@ export class View {
 
   private updateGuides(fr: Frame): void {
     while (this.guides.length < fr.guides.length) {
-      const m = new THREE.Mesh(unitCylinder, new THREE.MeshBasicMaterial({ color: 0xb4bcb8, transparent: true, depthWrite: false }));
-      m.renderOrder = 5;
+      // each its own copy of the stripes, since each repeats them over its own length
+      const mat = new THREE.MeshBasicMaterial({ color: 0xb4bcb8, transparent: true, depthWrite: false, alphaMap: dashTexture.clone() });
+      const m = new THREE.Mesh(unitCylinder, mat);
+      m.layers.set(GUIDE_LAYER);
       this.scene.add(m);
       this.guides.push(m);
     }
@@ -2372,6 +2430,10 @@ export class View {
       const r = g.look === 'faint' ? GUIDE_R * 0.75 : GUIDE_R;
       m.position.set(g.from.x, g.from.y - len / 2, g.from.z);
       m.scale.set(r, len, r);
+      // dashes counted from the top, where it's from, so they stay put as its length changes
+      const reps = len / (GUIDE_DASH.on + GUIDE_DASH.off);
+      mat.alphaMap!.repeat.set(1, reps);
+      mat.alphaMap!.offset.set(0, Math.ceil(reps) - reps);
     });
     // each mouth a guide ends at, outlined once, in the look of the strongest guide into it
     const mouths = new Map<string, Frame['guides'][number]['mouth'] & { look: keyof typeof GUIDE_LOOKS }>();
