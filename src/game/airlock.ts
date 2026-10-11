@@ -9,7 +9,7 @@ import { ROOM } from './space';
  * - wall: how thick the wall with the doorway is, which the doors slide into.
  * - door: the doorway, across and high.
  */
-export const AIRLOCK = { x: 150, w: 220, d: 230, h: 820, wall: 30, door: { w: 160, h: 780 } };
+export const AIRLOCK = { x: 150, w: 320, d: 230, h: 1100, wall: 30, door: { w: 240, h: 1014 } };
 
 /** The cryopod: where it stands (its axis), its shell's radius, and how high its body and dome go. */
 export const POD = {
