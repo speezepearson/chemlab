@@ -1146,6 +1146,9 @@ export const PUMP_RATE = 2 * MAX_FLOW;
  * between them. Whatever falls into the funnel comes out of the outlet, up to
  * PUMP_RATE; anything arriving faster overflows the funnel to the sink.
  */
+/** What a hose's funnel can hang under: a tool's spout, a faucet (by its place in the lab's list), or another hose's nozzle. */
+export type HoseMount = { tool: Tool; spout: number } | { faucet: number } | { hose: Hose };
+
 export class Hose {
   readonly funnel = new Vessel(HOSE_CAP);
   /** What left the outlet on the last step, for drawing; null if nothing did. */
@@ -1160,6 +1163,11 @@ export class Hose {
   note = '';
   /** Which way each end faces, about the vertical (see Pose), with the stand holding it up behind it. */
   turn = { inlet: 0, outlet: 0 };
+  /**
+   * The outlet its funnel hangs just under, following it wherever it goes; null for a funnel on a stand of its own
+   * (only from before funnels had to hang under something).
+   */
+  on: HoseMount | null = null;
 
   constructor(
     /** The funnel's mouth and the outlet's tip, in the room. */

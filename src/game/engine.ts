@@ -19,11 +19,11 @@ import { rumble, type Rumble } from './rumble';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
 import {
-  COUNTERS, LIFT, PAPER_Z, ROOM, Z_HOME, counterUnder, fromFrac, groundAt, toFrac, toLocal, toWorld, wrapAngle, type Pose, type Vec3,
+  COUNTERS, LIFT, PAPER_Z, ROOM, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, wrapAngle, type Pose, type Vec3,
 } from './space';
 import {
   HEATER, HEATER_CELLS, HEATER_TUBE, Hose, MAX_FLOW, RECEPTACLE_TIMES, SCAN_LIGHTS, SHAPES, SUMP_TIP, TANK_H, TOOL_NAMES,
-  Tool, UNIQUE_TOOLS, aimAt, cupFillHeight, drip, mouthBelow, scanLevel, snapInto, sumpFillHeight, tankX, type Mouth, type ToolKind,
+  Tool, UNIQUE_TOOLS, aimAt, cupFillHeight, type HoseMount, drip, mouthBelow, scanLevel, snapInto, sumpFillHeight, tankX, type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
 import {
@@ -112,6 +112,8 @@ interface Aim {
 interface Rest {
   pose: Pose;
   scale?: { sc: Scale; dx: number };
+  /** For a hose's funnel, what it hangs under. */
+  mount?: HoseMount;
 }
 
 /** What the player is holding. A hose is held by one end, or (just made) both. */
@@ -153,6 +155,10 @@ const POUR_ANG = Math.PI * 0.61;
 const TIP_S = 0.3;
 /** How far across, in world units, an outlet can miss a mouth by and still show a faint guide to it (see guides). */
 const GUIDE_NEAR = 40;
+/** How far under the outlet it hangs from a hose's funnel's mouth is (see Hose.on). */
+const HOSE_HANG = 4;
+/** How near where it'd hang under an outlet a hose's funnel has to be held to be hung there. */
+const HANG_REACH = 80;
 /** How fast a falling drop speeds up, in world units per sim second squared: a 500-unit fall takes 0.7 s. */
 const GRAVITY = 2000;
 /** The player's eyes, standing and crouching; their body's radius; and how fast they walk, per real second. */
@@ -427,7 +433,9 @@ export class GameEngine {
       const t = this.tools[to.tool];
       const m = tankMouth(t, to.tank ?? 0);
       const out = onTool(t, tankX(t.shape.tanks[to.tank ?? 0]) + (to.dx ?? 0), -24);
-      return new Hose({ ...sp, y: sp.y - 16 }, { ...out, y: Math.max(out.y, m.y + 24) });
+      const h = new Hose({ ...sp, y: sp.y - HOSE_HANG }, { ...out, y: Math.max(out.y, m.y + 24) });
+      h.on = { tool: this.tools[from.tool], spout: from.spout };
+      return h;
     });
     this.restAll();
     this.afterLoad();
@@ -466,6 +474,7 @@ export class GameEngine {
       hoses: this.hoses.map((h) => ({
         inlet: { ...toFrac(h.inlet), z: h.inlet.z, yaw: h.turn.inlet }, outlet: { ...toFrac(h.outlet), z: h.outlet.z, yaw: h.turn.outlet },
         funnel: saveVessel(h.funnel), drop: saveVessel(h.drop),
+        ...(h.on ? { on: 'tool' in h.on ? { tool: h.on.tool.id, spout: h.on.spout } : 'faucet' in h.on ? { faucet: h.on.faucet } : { hose: this.hoses.indexOf(h.on.hose) } } : {}),
         ...(h.note ? { note: h.note } : {}),
       })),
       // where they started on the old flat bench, so the save still loads there, with their notes
@@ -526,6 +535,19 @@ export class GameEngine {
       h.turn = { inlet: num(sh.inlet.yaw, 0), outlet: num(sh.outlet.yaw, 0) };
       return h;
     });
+    // what each funnel hangs under, now that there's everything to hang under
+    s.hoses.forEach((sh, i) => {
+      const on = sh.on;
+      if (!on) return;
+      const t = this.tools.find((u) => u.id === on.tool);
+      const mount: HoseMount | null =
+        t && Number.isInteger(on.spout) && on.spout! >= 0 && on.spout! < t.shape.spouts.length ? { tool: t, spout: on.spout! }
+        : Number.isInteger(on.faucet) && this.faucets[on.faucet!] ? { faucet: on.faucet! }
+        : Number.isInteger(on.hose) && this.hoses[on.hose!] && on.hose !== i ? { hose: this.hoses[on.hose!] }
+        : null;
+      this.hoses[i].on = mount;
+    });
+    this.hang();
     const fs = s.faucets ?? [];
     this.faucets.forEach((fa, i) => {
       const note = fs.length === this.faucets.length ? fs[i]?.note : undefined;
@@ -760,8 +782,10 @@ export class GameEngine {
     for (const hose of this.hoses)
       for (const end of ['inlet', 'outlet'] as const)
         if (!(h?.kind === 'hose' && h.h === hose && (h.end === end || h.end === 'both'))) {
+          // a funnel hanging under what's held goes along with it
+          if (end === 'inlet' && h && this.ridesOn(hose, h)) continue;
           out.push(hoseEndBox(hose, end));
-          if (bases) out.push(standBase(hoseStand(hose[end], end, hose.turn[end])));
+          if (bases && !(end === 'inlet' && hose.on)) out.push(standBase(hoseStand(hose[end], end, hose.turn[end])));
         }
     if (bases) for (const t of this.tools) if (!(h?.kind === 'tool' && h.t === t)) for (const st of toolStands(t)) out.push(standBase(st));
     return out;
@@ -1027,7 +1051,10 @@ export class GameEngine {
       h = { kind: 'flask', f: p.f, relYaw: 0, dist: 0 };
     } else if (p.kind === 'tool') h = { kind: 'tool', t: p.t, relYaw: 0, dist: 0 };
     else if (p.kind === 'scale') h = { kind: 'scale', sc: p.sc, relYaw: 0, dist: 0 };
-    else h = { kind: 'hose', h: p.h, end: p.end, relYaw: 0, dist: 0 };
+    else {
+      h = { kind: 'hose', h: p.h, end: p.end, relYaw: 0, dist: 0 };
+      if (p.end === 'inlet') p.h.on = null;
+    }
     h.relYaw = h.kind === 'hose' || h.kind === 'flask' ? 0 : wrapAngle(this.heldPose(h).yaw - this.player.yaw);
     // it comes to the player's hands, as far as it can
     h.dist = this.clampDist(h, this.holdDist(h));
@@ -1055,9 +1082,15 @@ export class GameEngine {
       }
     }
     if (h.kind === 'hose') {
-      if (h.end !== 'outlet') h.h.turn.inlet = this.player.yaw;
-      if (h.end !== 'inlet') h.h.turn.outlet = this.player.yaw;
-      if (h.end === 'both') h.end = 'inlet';
+      if (h.end !== 'outlet') h.h.on = pl.rest.mount ?? null;
+      if (h.end === 'outlet') h.h.turn.outlet = this.player.yaw;
+      // a new hose's funnel is hung, and its nozzle stays in hand, to be set down next
+      if (h.end === 'both') {
+        const next: Held = { kind: 'hose', h: h.h, end: 'outlet', relYaw: 0, dist: 0 };
+        next.dist = this.clampDist(next, dist3(this.eye(), h.h.outlet));
+        this.held = next;
+        return;
+      }
     }
     this.held = null;
   }
@@ -1459,6 +1492,7 @@ export class GameEngine {
     this.view.look(this.eye(), this.player.yaw, this.player.pitch);
     // a hose held by one end can't pick up its other end
     if (!this.turning) this.target = this.view.pick(REACH, this.held?.kind === 'hose' ? this.held.h : this.heldObject());
+    this.hang();
     this.simulate(dt);
     this.render(dt);
     this.inspect(now);
@@ -1758,6 +1792,17 @@ export class GameEngine {
     const p = this.heldPose(h);
     const obstacles = this.obstacles(h);
     const solid = this.obstacles(h, false);
+    // a hose's funnel hangs only under an outlet: the nearest it can
+    if (h.kind === 'hose' && h.end !== 'outlet') {
+      let why = 'Hang its funnel under a spout or a faucet';
+      for (const m of this.mounts(h.h, p)) {
+        const o = this.outletOf(m)!;
+        const r = this.rest(h, { x: o.x, y: o.y - HOSE_HANG, z: o.z, yaw: 0 }, obstacles, solid);
+        if (typeof r !== 'string') return { rest: { ...r, mount: m }, snap: null };
+        why = r;
+      }
+      return { why };
+    }
     for (const sn of this.snaps(this.aims(h))) {
       const r = this.rest(h, { ...p, x: p.x + sn.d.x, z: p.z + sn.d.z }, obstacles, solid);
       if (typeof r !== 'string' && !r.scale) return { rest: r, snap: sn };
@@ -1786,6 +1831,8 @@ export class GameEngine {
     };
     const box = this.boxAt(h, p);
     const stands = this.standsAt(h, p);
+    // a hose's funnel hangs where it is (see placement); a new hose's nozzle stays in hand (see release)
+    if (h.kind === 'hose' && h.end !== 'outlet') return blocked(box) ? 'No room' : { pose: p };
     if (stands.length) {
       const tops = stands.map((st) => counterUnder(standBase(st, 0)));
       if (tops.some((t) => t === null)) return 'Its stand needs a counter under it';
@@ -1817,8 +1864,50 @@ export class GameEngine {
     if (h.kind !== 'hose') return [];
     // a hose end held faces the player, so its stand is behind it
     const yaw = this.player.yaw;
-    if (h.end === 'both') return [hoseStand(p, 'inlet', yaw), hoseStand(this.trailing(h, p), 'outlet', yaw)];
-    return [hoseStand(p, h.end, yaw)];
+    // its funnel hangs under an outlet instead (see placement), and a new hose's nozzle stays in hand (see release)
+    return h.end === 'outlet' ? [hoseStand(p, 'outlet', yaw)] : [];
+  }
+
+  /** Where the outlet a hose's funnel hangs under is: null if it's gone (a tool put away, say). */
+  private outletOf(m: HoseMount): Vec3 | null {
+    if ('tool' in m) return this.tools.includes(m.tool) ? spoutAt(m.tool, m.spout) : null;
+    if ('faucet' in m) return this.faucets[m.faucet]?.spout ?? null;
+    return this.hoses.includes(m.hose) ? m.hose.outlet : null;
+  }
+
+  /**
+   * Hang each hose's funnel just under the outlet it's on, wherever that's got to (unless the funnel's in hand). One
+   * whose outlet is gone comes off it, and stays where it was.
+   */
+  private hang(): void {
+    const h = this.held;
+    for (const hose of this.hoses) {
+      if (!hose.on || (h?.kind === 'hose' && h.h === hose && h.end !== 'outlet')) continue;
+      const o = this.outletOf(hose.on);
+      if (o) Object.assign(hose.inlet, { x: o.x, y: o.y - HOSE_HANG, z: o.z });
+      else hose.on = null;
+    }
+  }
+
+  /** Whether a hose's funnel hangs under what's held, so goes along with it. */
+  private ridesOn(hose: Hose, h: Held): boolean {
+    const on = hose.on;
+    if (!on) return false;
+    if ('tool' in on) return h.kind === 'tool' && h.t === on.tool;
+    return 'hose' in on && h.kind === 'hose' && h.h === on.hose && h.end !== 'inlet';
+  }
+
+  /** The outlets a hose's funnel held with its mouth at p could hang under: within HANG_REACH of where it'd hang, nearest first. */
+  private mounts(hose: Hose, p: Vec3): HoseMount[] {
+    const out: { m: HoseMount; d: number }[] = [];
+    const add = (m: HoseMount, o: Vec3) => {
+      const d = dist3(p, { ...o, y: o.y - HOSE_HANG });
+      if (d <= HANG_REACH) out.push({ m, d });
+    };
+    for (const t of this.tools) t.shape.spouts.forEach((_, j) => add({ tool: t, spout: j }, spoutAt(t, j)));
+    this.faucets.forEach((fa, i) => add({ faucet: i }, fa.spout));
+    for (const o of this.hoses) if (o !== hose) add({ hose: o }, o.outlet);
+    return out.sort((a, b) => a.d - b.d).map((x) => x.m);
   }
 
   /** Every stand in the lab, with what it holds up. */
@@ -1830,6 +1919,8 @@ export class GameEngine {
       for (const end of ['inlet', 'outlet'] as const) {
         // one held faces the player (see standsAt)
         const inHand = held?.kind === 'hose' && held.h === h && (held.end === end || held.end === 'both');
+        // a funnel hangs under an outlet, or will once let go; only one from before funnels had to has a stand
+        if (end === 'inlet' && (h.on || inHand)) continue;
         out.push({ s: hoseStand(h[end], end, inHand ? this.player.yaw : h.turn[end]), of: { kind: 'hose', h, end } });
       }
     return out;
@@ -1843,10 +1934,18 @@ export class GameEngine {
   private guides(pl: ReturnType<GameEngine['placement']> | null): Frame['guides'] {
     const h = this.held;
     if (!h) return [];
-    const aims = this.aims(h);
+    let aims = this.aims(h);
     const sn = pl && 'rest' in pl ? pl.snap : null;
     const at = this.heldPose(h);
-    return aims.map((a) => {
+    // a hose's funnel to be hung under an outlet: that outlet's guide is to where it'll hang
+    const mount = pl && 'rest' in pl && pl.rest.mount ? this.outletOf(pl.rest.mount) : null;
+    const hung: Frame['guides'][number][] = [];
+    if (mount && pl && 'rest' in pl) {
+      const r = pl.rest.pose;
+      aims = aims.filter((a) => a.from.x !== mount.x || a.from.y !== mount.y || a.from.z !== mount.z);
+      hung.push({ from: mount, toY: r.y, look: 'snap', mouth: { x: r.x, y: r.y, z: r.z, hx: FUNNEL_R, hz: FUNNEL_R, yaw: 0 } });
+    }
+    return aims.map((a): Frame['guides'][number] => {
       const { x, y, z, hx, hz, yaw = 0 } = a.m;
       // the snapped aim is matched up by where it's from and what it's into, since the snap was worked out from aims of its own
       const same = sn && sn.a.m.v === a.m.v && sn.a.from.x === a.from.x && sn.a.from.y === a.from.y && sn.a.from.z === a.from.z;
@@ -1857,7 +1956,7 @@ export class GameEngine {
       const d = { x: r.x - at.x, y: r.y - at.y, z: r.z - at.z };
       if (a.held === 'outlet') return { from: { x: a.from.x + d.x, y: a.from.y + d.y, z: a.from.z + d.z }, toY: y, look: 'snap', mouth: { x, y, z, hx, hz, yaw } };
       return { from: a.from, toY: y + d.y, look: 'snap', mouth: { x: x + d.x, y: y + d.y, z: z + d.z, hx, hz, yaw } };
-    });
+    }).concat(hung);
   }
 
   /**
@@ -1866,7 +1965,8 @@ export class GameEngine {
    */
   private footprints(pl: ReturnType<GameEngine['placement']> | null): Frame['footprints'] {
     const h = this.held;
-    if (!h || !pl) return [];
+    // a hose's funnel alone doesn't stand on anything: its guide shows where it'll hang
+    if (!h || !pl || (h.kind === 'hose' && h.end !== 'outlet')) return [];
     const ok = 'rest' in pl;
     const p = ok ? pl.rest.pose : this.heldPose(h);
     const stands = this.standsAt(h, p);

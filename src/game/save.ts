@@ -92,6 +92,8 @@ export interface SavedHose {
   drop?: SavedVessel;
   /** The player's note about it, if any. */
   note?: string;
+  /** What its funnel hangs under, if anything (see Hose.on): a tool by its id and a spout, a faucet, or a hose by its place. */
+  on?: { tool?: number; spout?: number; faucet?: number; hose?: number };
 }
 
 const BY_NAME = new Map(SPECIES.map((s) => [s.name, s.i]));
