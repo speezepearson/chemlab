@@ -11,7 +11,7 @@ import { ROOM } from './space';
  */
 export const AIRLOCK = { x: 150, w: 220, d: 230, h: 820, wall: 30, door: { w: 160, h: 780 } };
 
-/** The cryopod: where it stands (its axis), its glass's radius, and how high its body and dome go. */
+/** The cryopod: where it stands (its axis), its shell's radius, and how high its body and dome go. */
 export const POD = {
   x: AIRLOCK.x,
   z: ROOM.z1 + AIRLOCK.wall + AIRLOCK.d - 72,
@@ -20,14 +20,18 @@ export const POD = {
   top: 654,
 };
 
-/** Seconds the message on the glass takes to flicker out, the glass to slide up, and the doors to close. */
+/**
+ * Sim seconds the message in the pod takes to flicker out, its front to slide up, and the doors to close: they run on
+ * sim time, like everything else, so pausing stops them.
+ */
 export const WAKE_S = { flicker: 0.7, open: 1.6, close: 1.2 };
 
 /**
  * Where the player is in waking up, the first time (and on a replay of the intro):
- * - pod: in the cryopod, with the message on its glass; they can look around, but not move.
+ * - pod: in the cryopod, with the message projected on the inside of its front; they can look around, but not move,
+ *   and the lab waits.
  * - flicker: OK was pressed, and the message is flickering out.
- * - opening: the glass is sliding up.
+ * - opening: the pod's front is sliding up.
  * - out: they can walk, and the doors stand open until they're out in the lab.
  * - closed: the doors have closed behind them, for good. This is how every lab starts but the first.
  */

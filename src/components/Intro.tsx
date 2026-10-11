@@ -17,7 +17,7 @@ type Phase = 'start' | 'log' | 'logFading' | 'leaving';
 /**
  * The intro, over everything: a start button, then the ship's console log as the disaster unfolds, which fades, and
  * then the black behind it fades, onto the lab seen from inside the player's cryopod. `onLogEnd` is called as the log
- * fades, to put them there; the notice that wakes them is on the pod's glass (see GameEngine.enterPod).
+ * fades, to put them there; the notice that wakes them is projected inside the pod (see GameEngine.enterPod).
  * With `skipStart` (a replay) it opens on the log. With `resume` (a returning player) it's only the start button,
  * which fades straight into the game: browsers keep sound off until a click, so this is that click.
  */

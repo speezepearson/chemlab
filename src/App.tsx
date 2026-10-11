@@ -79,7 +79,7 @@ export function App() {
    * just the start button for a returning player, so there's a click to turn the sound on.
    */
   const [intro, setIntro] = useState<'first' | 'replay' | 'resume' | null>(() => (introSeen() ? 'resume' : 'first'));
-  // it's seen once OK is pressed on the cryopod's glass, after it's ended (see onAwake), so a reload before then
+  // it's seen once OK is pressed inside the cryopod, after it's ended (see onAwake), so a reload before then
   // plays it again
   const endIntro = useCallback(() => setIntro(null), []);
   /** Whether the intro is still before the end of its console log: the ship's ambience starts after it. */

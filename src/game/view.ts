@@ -28,7 +28,7 @@ export type Pick =
   | { kind: 'faucet'; i: number }
   /** The button under the beacon that silences the alarms. */
   | { kind: 'alarm' }
-  /** The OK on the message on the cryopod's glass. */
+  /** The OK on the message inside the cryopod. */
   | { kind: 'wake' };
 
 /** A faucet where it is: its spout, where its pipe meets the wall, and what it pours. */
@@ -1770,9 +1770,9 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
   return { beacon, lamp };
 }
 
-/** How far in front of the player's eyes, in the pod, the message on its glass is, and how wide. */
-const MESSAGE_AT = 56;
-const MESSAGE_W = 74;
+/** How far in front of the player's eyes, in the pod, the message projected on its front is, and how wide. */
+const MESSAGE_AT = 44;
+const MESSAGE_W = 58;
 /** The message's canvas: how wide, its margins, and how far its OK button is from its bottom right. */
 const MSG_PX = 1280;
 const MSG_PAD = 44;
@@ -1796,7 +1796,7 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, w: number): strin
 }
 
 /**
- * The notice (see intro/notice.ts) as light projected on the glass: pale blue text on a faint glow, with room at
+ * The notice (see intro/notice.ts) as light projected on the inside of the pod's front: pale blue text on a faint glow, with room at
  * the bottom right for the OK button, which is its own mesh. Returns the canvas, laid out to fit.
  */
 function messageCanvas(): HTMLCanvasElement {
@@ -1896,9 +1896,11 @@ function okTexture(hot: boolean): THREE.CanvasTexture {
 export interface AirlockLook {
   /** How far open the doors are, 0 to 1. */
   door: number;
-  /** How far up the pod's glass has slid, 0 (shut) to 1. */
-  glass: number;
-  /** Whether the message shows on the glass, with its OK button. */
+  /** How far up the pod's front has slid, 0 (shut) to 1. */
+  front: number;
+  /** How far the room's lights are shut out by the pod, 1 while it's shut: only its emergency lights show inside. */
+  dark: number;
+  /** Whether the message shows on the inside of its front, with its OK button. */
   message: boolean;
   /** Whether the crosshair is on the OK button. */
   okHot: boolean;
@@ -1906,12 +1908,12 @@ export interface AirlockLook {
 
 /**
  * The airlock (see airlock.ts): its chamber behind the front wall, the doorway's sides, the two doors that slide
- * apart into the wall, and the standing cryopod at the back, with the message on its glass in front of the face of
+ * apart into the wall, and the standing cryopod at the back, with the message projected inside its front, in front of the face of
  * whoever's in it. The doorway itself is a hole in the room's front wall (see buildRoom).
  */
 class AirlockView {
   private doors: THREE.Mesh[] = [];
-  private glass = new THREE.Group();
+  private front = new THREE.Group();
   private message: THREE.Mesh;
   private ok: THREE.Mesh;
   private okTex = [okTexture(false), okTexture(true)];
@@ -1938,26 +1940,31 @@ class AirlockView {
     const inside = new THREE.Mesh(new THREE.ShapeGeometry(shape), panel);
     inside.position.set(x, 0, z1 + wall);
     g.add(inside);
-    // the doorway's sides, through the wall's thickness
-    const jamb = rectPath(0, door.h / 2 - 3, door.w + 12, door.h + 6, new THREE.Shape());
-    jamb.holes.push(rectPath(0, door.h / 2, door.w, door.h));
-    const sides = new THREE.Mesh(new THREE.ExtrudeGeometry(jamb, { depth: wall, bevelEnabled: false }), darkMat);
-    sides.position.set(x, 0, z1);
-    g.add(sides);
+    // the doorway's sides and top, through the wall's thickness: planes only, with nothing lying in either wall's face
+    const jambMat = darkMat.clone();
+    jambMat.side = THREE.DoubleSide;
+    for (const side of [-1, 1]) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(wall, door.h).rotateY(Math.PI / 2), jambMat);
+      m.position.set(x + (side * door.w) / 2, door.h / 2, z1 + wall / 2);
+      g.add(m);
+    }
+    const lintel = new THREE.Mesh(new THREE.PlaneGeometry(door.w, wall).rotateX(Math.PI / 2), jambMat);
+    lintel.position.set(x, door.h, z1 + wall / 2);
+    g.add(lintel);
     // the doors, each half the doorway, sliding apart into the wall
     const doorMat = new THREE.MeshStandardMaterial({ color: 0x9aa5a0, roughness: 0.5, metalness: 0.2 });
     for (const side of [-1, 1]) {
       const m = new THREE.Mesh(new THREE.BoxGeometry(door.w / 2, door.h, 12), doorMat);
       m.position.set(x, door.h / 2, z1 + wall / 2);
       m.userData.side = side;
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(door.w / 2, 26, 12.4), new THREE.MeshStandardMaterial({ color: 0xc9a227, roughness: 0.6 }));
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(door.w / 2 - 2, 26, 14), new THREE.MeshStandardMaterial({ color: 0xc9a227, roughness: 0.6 }));
       stripe.position.y = -door.h / 2 + 120;
       m.add(stripe);
       this.doors.push(m);
       g.add(m);
     }
-    // the pod: a plinth, an opaque back, and a glass front that slides up into the ceiling
-    const shell = new THREE.MeshStandardMaterial({ color: 0xd6dcd9, roughness: 0.35, metalness: 0.2, side: THREE.DoubleSide });
+    // the pod: a plinth, and a metal shell whose front half slides up into the ceiling
+    const shell = new THREE.MeshStandardMaterial({ color: 0x8c9692, roughness: 0.45, metalness: 0.35, side: THREE.DoubleSide });
     const pod = new THREE.Group();
     pod.position.set(POD.x, 0, POD.z);
     const plinth = new THREE.Mesh(new THREE.CylinderGeometry(POD.r + 10, POD.r + 14, POD.base, 40), darkMat);
@@ -1976,12 +1983,26 @@ class AirlockView {
     const band = new THREE.Mesh(new THREE.TorusGeometry(POD.r + 3, 3, 8, 48).rotateX(Math.PI / 2), darkMat);
     band.position.y = POD.top;
     pod.add(band);
-    const glassMat = new THREE.MeshStandardMaterial({
-      color: 0xbfe0ff, roughness: 0.08, metalness: 0.1, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false,
-    });
-    for (const m of half(true, glassMat, POD.r)) this.glass.add(m);
-    pod.add(this.glass);
-    // the message on the glass, in front of the face, facing in
+    for (const m of half(true, shell, POD.r)) {
+      m.castShadow = true;
+      this.front.add(m);
+    }
+    pod.add(this.front);
+    // two dim emergency lights on the inside of the front, either side of the message, the only light while it's
+    // shut (see View.render); they go up with it
+    for (const side of [-1, 1]) {
+      const bulb = new THREE.Mesh(
+        new THREE.SphereGeometry(2.5, 12, 8),
+        new THREE.MeshStandardMaterial({ color: 0x5a3010, emissive: 0xff9a3c, emissiveIntensity: 0.8 }),
+      );
+      const at = new THREE.Vector3(side * 42, eye + 20, -Math.sqrt(POD.r * POD.r - 42 * 42) + 2);
+      bulb.position.copy(at);
+      this.front.add(bulb);
+      const light = new THREE.PointLight(0xff9a3c, 300, 260, 2);
+      light.position.copy(at).add(new THREE.Vector3(-side * 5, 0, 5));
+      this.front.add(light);
+    }
+    // the message, projected on the inside of the front, in front of the face, facing in
     const tex = new THREE.CanvasTexture(messageCanvas());
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
@@ -1990,7 +2011,7 @@ class AirlockView {
     const msgMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false });
     this.message = new THREE.Mesh(new THREE.PlaneGeometry(MESSAGE_W, mh), msgMat);
     // it hangs a little low, so the eyes start on its heading and look down to OK
-    const cy = eye + 34 - mh / 2;
+    const cy = eye + 27 - mh / 2;
     this.message.position.set(0, cy, -MESSAGE_AT);
     pod.add(this.message);
     const unit = MESSAGE_W / MSG_PX;
@@ -2007,12 +2028,12 @@ class AirlockView {
 
   update(a: AirlockLook): void {
     const l = this.last;
-    if (l && l.door === a.door && l.glass === a.glass && l.message === a.message && l.okHot === a.okHot) return;
+    if (l && l.door === a.door && l.front === a.front && l.dark === a.dark && l.message === a.message && l.okHot === a.okHot) return;
     this.last = { ...a };
     const { x, door } = AIRLOCK;
     for (const m of this.doors) m.position.x = x + m.userData.side * (door.w / 4 + a.door * (door.w / 2 + 6));
     // up past the ceiling, out of sight
-    this.glass.position.y = a.glass * (AIRLOCK.h + 40);
+    this.front.position.y = a.front * (AIRLOCK.h + 40);
     // off its layer it's neither drawn nor hit by the crosshair
     for (const m of [this.message, this.ok]) m.layers.set(a.message ? 0 : 1);
     (this.ok.material as THREE.MeshBasicMaterial).map = this.okTex[a.okHot ? 1 : 0];
@@ -2158,6 +2179,8 @@ export class View {
   private beacon: { beacon: THREE.PointLight; lamp: THREE.Mesh };
   private alarmButton: AlarmButton;
   private airlock: AirlockView;
+  /** The room's lights, and how bright each is, to be dimmed while the cryopod is shut (see AirlockLook.dark). */
+  private roomLights: { light: THREE.Light; base: number }[] = [];
   private raycaster = new THREE.Raycaster();
   private clock = 0;
   private stars = starField();
@@ -2165,7 +2188,7 @@ export class View {
   private port: THREE.Group | null = null;
   private portFrac = NaN;
 
-  /** `eye` is how high the player's eyes are standing, for the message on the cryopod's glass. */
+  /** `eye` is how high the player's eyes are standing, for the message inside the cryopod. */
   constructor(canvas: HTMLCanvasElement, faucets: readonly FaucetSpot[], eye: number) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.localClippingEnabled = true;
@@ -2174,7 +2197,8 @@ export class View {
     this.camera.rotation.order = 'YXZ';
     this.scene.background = new THREE.Color(0x010206);
     this.scene.add(this.stars);
-    this.scene.add(new THREE.HemisphereLight(0xe4eef0, 0x4a4440, 1.5));
+    const sky = new THREE.HemisphereLight(0xe4eef0, 0x4a4440, 1.5);
+    this.scene.add(sky);
     // the ceiling panels, as one light from overhead, so what hangs casts its shadow on the counter and floor
     const sun = new THREE.DirectionalLight(0xf4f8ff, 1.3);
     const [cx, cz] = [(ROOM.x0 + ROOM.x1) / 2, (ROOM.z0 + ROOM.z1) / 2];
@@ -2192,6 +2216,7 @@ export class View {
     sc.far = 4500;
     sun.shadow.bias = -0.0005;
     this.scene.add(sun, sun.target);
+    this.roomLights = [sky, sun].map((light) => ({ light, base: light.intensity }));
     this.beacon = buildRoom(this.scene);
     this.alarmButton = new AlarmButton(this.scene, this.pickables);
     this.airlock = new AirlockView(this.scene, this.pickables, eye);
@@ -2304,7 +2329,9 @@ export class View {
     this.airlock.update(fr.airlock);
     // the beacon turns slowly; real time, like the alarms it goes with
     const pulse = 0.5 + 0.5 * Math.sin(this.clock * 2.4);
-    this.beacon.beacon.intensity = 9000 * pulse * pulse;
+    const lit = 1 - fr.airlock.dark;
+    for (const { light, base } of this.roomLights) light.intensity = base * lit;
+    this.beacon.beacon.intensity = 9000 * pulse * pulse * lit;
     (this.beacon.lamp.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.3 + 1.2 * pulse;
 
     this.renderer.render(scene, this.camera);

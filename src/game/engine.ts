@@ -60,7 +60,7 @@ export interface Inspection {
 export interface Hud {
   /** Whether the mouse is captured for looking around; if not, the game shows how to start. */
   locked: boolean;
-  /** Whether the player is still shut in the cryopod, waking (see Wake), where the message on its glass says what to do. */
+  /** Whether the player is still shut in the cryopod, waking (see Wake), where the message inside it says what to do. */
   inPod: boolean;
   /** Whether E would pick up what the crosshair is on. */
   grab: boolean;
@@ -112,7 +112,7 @@ export interface EngineCallbacks {
   onPaperText(edit: PaperEdit | null): void;
   /** Whenever the heads-up display changes. */
   onHud(hud: Hud): void;
-  /** OK was pressed on the message on the cryopod's glass: the player is awake. */
+  /** OK was pressed on the message inside the cryopod: the player is awake. */
   onAwake(): void;
 }
 
@@ -268,9 +268,9 @@ export class GameEngine {
   private delivered = 0;
   /** Whether the alarms are silenced, by the button under the beacon (see hushAlarms). Saved, and kept through Reset. */
   private alarmsOff = false;
-  /** Where the player is in waking up in the airlock (see Wake), and when (performance.now) it got there. */
+  /** Where the player is in waking up in the airlock (see Wake), and how many sim seconds it's been there. */
   private wake: Wake = 'closed';
-  private wakeAt = -Infinity;
+  private wakeT = Infinity;
   /** Each receptacle's sounds, through its cycle (see Tool.press). */
   private beepers = new Map<Tool, Beeper>();
   /** The player's sticky notes, on the back wall, the one on top last (see paper.ts). They're notes, not lab, so Reset keeps them. */
@@ -953,7 +953,7 @@ export class GameEngine {
       if (this.pencil && performance.now() - this.lastTouch < 1000) return;
       if (!this.locked) {
         if (e.button !== 0) return;
-        // the mouse is free, so it can press OK on the glass where it points, as well as capturing the mouse
+        // the mouse is free, so it can press OK in the pod where it points, as well as capturing the mouse
         if (this.wake === 'pod') {
           const r = c.getBoundingClientRect();
           const at = this.view.pick(REACH, null, ((e.clientX - r.left) / r.width) * 2 - 1, 1 - ((e.clientY - r.top) / r.height) * 2);
@@ -995,7 +995,7 @@ export class GameEngine {
     });
     on(window, 'keydown', (e) => {
       if (typingIn(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
-      // Enter is OK on the message on the cryopod's glass, as it was on the notice it replaced
+      // Enter is OK on the message inside the cryopod, as it was on the notice it replaced
       if (e.code === 'Enter' && this.wake === 'pod') this.pressOk();
       if (!this.locked) return;
       this.keys.add(e.code);
@@ -1540,7 +1540,6 @@ export class GameEngine {
   private frame = (now: number): void => {
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
-    this.stepWake(now);
     this.move(dt);
     this.view.look(this.eye(), this.player.yaw, this.player.pitch);
     // a hose held by one end can't pick up its other end
@@ -1625,8 +1624,8 @@ export class GameEngine {
     this.inflow.clear();
     this.landed = [];
     this.pour = null;
-    // the lab waits while the player wakes, as it did through the rest of the intro
-    const simDt = inPod(this.wake) ? 0 : dt * this.speed;
+    // the lab waits for the player to press OK in the pod, as it did through the rest of the intro
+    const simDt = this.wake === 'pod' ? 0 : dt * this.speed;
     const mouths = (this.open = this.mouths());
     const h = this.held;
 
@@ -1679,6 +1678,7 @@ export class GameEngine {
       const stillTool = !this.rightHeld && h?.kind === 'tool' && h.t.shape.spouts.length ? h.t : null;
       const stillHose = !this.rightHeld && h?.kind === 'hose' ? h.h : null;
       for (let i = 0; i < sub; i++) {
+        this.stepWake(step);
         if (D && this.pour) {
           const out = new Vessel(Infinity);
           transfer(D, out, POUR_RATE * step);
@@ -2067,7 +2067,7 @@ export class GameEngine {
       flasks: this.flasks, tools: this.tools, scales: this.scales, hoses: this.hoses, faucets: this.faucets,
       streams, drops,
       tarePress: this.tarePress, hot: this.target, shake, dt, delivered: this.delivered, alarmsOff: this.alarmsOff,
-      airlock: this.airlockLook(performance.now()),
+      airlock: this.airlockLook(),
       papers: this.paperFrame(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(),
     });
@@ -2199,23 +2199,23 @@ export class GameEngine {
     this.rightHeld = false;
     Object.assign(this.player, { x: POD.x, z: POD.z, yaw: 0, pitch: -0.12, crouch: 0 });
     this.wake = 'pod';
-    this.wakeAt = performance.now();
+    this.wakeT = 0;
   }
 
-  /** OK, on the message on the glass: it flickers out, the glass slides up, and then the player can walk. */
+  /** OK, on the message inside the pod: it flickers out, the pod's front slides up, and then the player can walk. */
   private pressOk(): void {
     if (this.wake !== 'pod') return;
     this.wake = 'flicker';
-    this.wakeAt = performance.now();
+    this.wakeT = 0;
     this.cb.onAwake();
   }
 
-  /** On through waking up, as time passes (see Wake): the player's own, so real time, like walking. */
-  private stepWake(now: number): void {
-    const t = (now - this.wakeAt) / 1000;
+  /** On through waking up, over a sim substep of h seconds (see Wake), like everything else that happens. */
+  private stepWake(h: number): void {
+    const t = (this.wakeT += h);
     const next = (w: Wake) => {
       this.wake = w;
-      this.wakeAt = now;
+      this.wakeT = 0;
     };
     if (this.wake === 'flicker' && t >= WAKE_S.flicker) next('opening');
     else if (this.wake === 'opening' && t >= WAKE_S.open) next('out');
@@ -2223,14 +2223,16 @@ export class GameEngine {
   }
 
   /** How the airlock looks just now, for the view. */
-  private airlockLook(now: number): AirlockLook {
+  private airlockLook(): AirlockLook {
     const w = this.wake;
-    const t = (now - this.wakeAt) / 1000;
+    const t = this.wakeT;
     // the message flickers, on less and less of the time, until it's gone
     const flick = w === 'flicker' && Math.sin(t * 90) + Math.sin(t * 37) > 2.6 * (t / WAKE_S.flicker) - 0.6;
     return {
       door: w === 'closed' ? 1 - ease(t / WAKE_S.close) : 1,
-      glass: w === 'opening' ? ease(t / WAKE_S.open) : inPod(w) ? 0 : 1,
+      front: w === 'opening' ? ease(t / WAKE_S.open) : inPod(w) ? 0 : 1,
+      // the room's light floods in as the front slides up
+      dark: w === 'opening' ? 1 - ease(t / WAKE_S.open) : inPod(w) ? 1 : 0,
       message: w === 'pod' || flick,
       okHot: w === 'pod' && this.target?.kind === 'wake',
     };

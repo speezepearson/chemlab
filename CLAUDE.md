@@ -60,7 +60,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     wall. While the pencil is in hand, the mouse moves `cursor` rather than the view, and both buttons go to
     `pencilDown`, which works where the cursor's ray meets the wall (`wallAt`).
   - `airlock.ts` is the airlock and cryopod where the player wakes: their size, collisions, and the `Wake` states.
-    `src/intro/notice.ts` is the message on the pod's glass.
+    `src/intro/notice.ts` is the message projected inside the pod.
   - `sight.ts` is the View panel's settings: the field of view and the porthole's size.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
@@ -82,8 +82,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   chemistry, cooling, the spectrometer's run and sound, the receptacle's cycle, and the drip and stream sounds. All of it
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
-  notice; and the player themselves (walking, looking, carrying, tipping a flask, and waking in the airlock: the
-  message on the pod's glass flickering out, the glass opening and the doors closing), which is input, not the sim.
+  notice; and the player themselves (walking, looking, carrying, tipping a flask), which is input, not the sim. Waking
+  in the airlock (the pod's message flickering out, its front opening, the doors closing) is sim time too.
   - Anything drawn per outlet must use totals over the whole frame. A single substep's output can be empty, for
     example when a wide-open valve drains its tank in the first substep.
 - **Landing fluid goes through `fill()`.** Anything that lands in a vessel (streams, drops, faucets, pours) must use
