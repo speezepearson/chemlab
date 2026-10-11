@@ -20,18 +20,33 @@ export interface Pose extends Vec3 {
 export const ORIGIN: Pose = { x: 0, y: 0, z: 0, yaw: 0 };
 
 /** The room's walls, floor and ceiling. The back wall, at z = 0, is the old bench. */
-export const ROOM = { x0: -600, x1: 1600, z0: 0, z1: 1700, y1: 1300 };
-/** Height of the sink counter along the back wall: the old bench's sink. */
+export const ROOM = { x0: -700, x1: 2300, z0: 0, z1: 3000, y1: 1300 };
+/** Height of every counter: the sink counters along the walls, and the islands. */
 export const LIFT = 300;
-/** How far the counters come out from the walls. */
+/** How far the wall counters come out from the walls. */
 export const COUNTER_D = 130;
+/** The islands' size, across and front to back, and where their grid starts and how far apart they are. */
+const ISLAND = { w: 1000, d: 380, x0: -400, z0: 560, dx: 1300, dz: 780, cols: 2, rows: 3 };
+/** A counter: its x and z extents, and whether it's an island out in the room rather than a sink counter on a wall. */
+export interface Counter {
+  x0: number;
+  x1: number;
+  z0: number;
+  z1: number;
+  island?: boolean;
+}
 /**
- * The sink counters, LIFT high, as x and z extents: one along the back wall under the old bench, and one along the
- * right wall under the faucets.
+ * The counters, all LIFT high, as x and z extents: one along the back wall under the old bench, one along the right
+ * wall under the faucets, and a grid of islands out in the room, like an undergraduate lab's benches.
  */
-export const COUNTERS = [
+export const COUNTERS: readonly Counter[] = [
   { x0: ROOM.x0, x1: ROOM.x1 - COUNTER_D, z0: ROOM.z0, z1: ROOM.z0 + COUNTER_D },
   { x0: ROOM.x1 - COUNTER_D, x1: ROOM.x1, z0: ROOM.z0, z1: ROOM.z1 },
+  ...Array.from({ length: ISLAND.cols * ISLAND.rows }, (_, i) => {
+    const x0 = ISLAND.x0 + (i % ISLAND.cols) * ISLAND.dx;
+    const z0 = ISLAND.z0 + Math.floor(i / ISLAND.cols) * ISLAND.dz;
+    return { x0, x1: x0 + ISLAND.w, z0, z1: z0 + ISLAND.d, island: true };
+  }),
 ];
 
 /** How high the floor or counter is under (x, z): where whatever falls there goes down the sink. */

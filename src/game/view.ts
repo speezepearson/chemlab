@@ -1478,17 +1478,35 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
     r.position.set(cx, H - 3, z);
     scene.add(r);
   }
-  // the sink counters along the back wall and under the faucets: whatever falls past everything ends up there, or on the floor
+  // the sink counters along the back wall and under the faucets, and the islands out in the room: whatever falls past
+  // everything ends up on one of them, or on the floor
+  const steel = new THREE.MeshStandardMaterial({ color: 0x6f7975, metalness: 0.5, roughness: 0.4 });
+  const cabinet = new THREE.MeshStandardMaterial({ color: 0x8b948f, metalness: 0.2, roughness: 0.7 });
+  const epoxy = new THREE.MeshStandardMaterial({ color: 0x1d2322, metalness: 0.1, roughness: 0.35 });
   for (const c of COUNTERS) {
     const w = c.x1 - c.x0;
     const d = c.z1 - c.z0;
-    const counter = new THREE.Mesh(new THREE.BoxGeometry(w, LIFT, d), new THREE.MeshStandardMaterial({ color: 0x6f7975, metalness: 0.5, roughness: 0.4 }));
-    counter.position.set((c.x0 + c.x1) / 2, LIFT / 2, (c.z0 + c.z1) / 2);
+    const [x, z] = [(c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2];
+    if (c.island) {
+      // a cabinet, set in a little at the foot, under a dark top
+      const top = 24;
+      const body = new THREE.Mesh(new THREE.BoxGeometry(w - 24, LIFT - top, d - 24), cabinet);
+      body.position.set(x, (LIFT - top) / 2, z);
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(w, top, d), epoxy);
+      slab.position.set(x, LIFT - top / 2, z);
+      for (const m of [body, slab]) {
+        m.receiveShadow = m.castShadow = true;
+        scene.add(m);
+      }
+      continue;
+    }
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(w, LIFT, d), steel);
+    counter.position.set(x, LIFT / 2, z);
     counter.receiveShadow = counter.castShadow = true;
     scene.add(counter);
     const grate = new THREE.Mesh(new THREE.PlaneGeometry(w - 16, d - 16), new THREE.MeshStandardMaterial({ color: 0x1a1f1e, metalness: 0.6, roughness: 0.5 }));
     grate.rotation.x = -Math.PI / 2;
-    grate.position.set((c.x0 + c.x1) / 2, LIFT + 0.5, (c.z0 + c.z1) / 2);
+    grate.position.set(x, LIFT + 0.5, z);
     grate.receiveShadow = true;
     scene.add(grate);
   }
@@ -1511,7 +1529,7 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
     new THREE.PointsMaterial({ color: 0xffffff, size: 2, sizeAttenuation: false }),
   );
   port.add(stars);
-  port.position.set(ROOM.x0 + 1, 760, 900);
+  port.position.set(ROOM.x0 + 1, 760, (ROOM.z0 + ROOM.z1) / 2);
   port.rotation.y = Math.PI / 2;
   scene.add(port);
   // an emergency beacon over the door, turning slowly
@@ -1595,15 +1613,17 @@ export class View {
     this.scene.add(new THREE.HemisphereLight(0xe4eef0, 0x4a4440, 1.5));
     // the ceiling panels, as one light from overhead, so what hangs casts its shadow on the counter and floor
     const sun = new THREE.DirectionalLight(0xf4f8ff, 1.3);
-    sun.position.set(450, ROOM.y1 + 1500, 900);
-    sun.target.position.set(500, 0, 700);
+    const [cx, cz] = [(ROOM.x0 + ROOM.x1) / 2, (ROOM.z0 + ROOM.z1) / 2];
+    sun.position.set(cx - 50, ROOM.y1 + 1500, cz + 200);
+    sun.target.position.set(cx, 0, cz);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(4096, 4096);
     const sc = sun.shadow.camera;
-    sc.left = -1400;
-    sc.right = 1400;
-    sc.top = 1400;
-    sc.bottom = -1400;
+    const half = Math.max(ROOM.x1 - ROOM.x0, ROOM.z1 - ROOM.z0) / 2 + 100;
+    sc.left = -half;
+    sc.right = half;
+    sc.top = half;
+    sc.bottom = -half;
     sc.near = 500;
     sc.far = 4500;
     sun.shadow.bias = -0.0005;

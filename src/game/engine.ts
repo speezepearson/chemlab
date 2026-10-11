@@ -194,7 +194,7 @@ export class GameEngine {
   private hoses: Hose[] = [];
   private faucets: (FaucetSpot & { start: (typeof FAUCETS)[number] })[];
   /** Where the player stands, which way they look (yaw about the vertical, pitch up), and how far they crouch (0 to 1). */
-  private player = { x: 480, z: 620, yaw: 0, pitch: -0.08, crouch: 0 };
+  private player = { x: 480, z: 380, yaw: 0, pitch: -0.08, crouch: 0 };
   private keys = new Set<string>();
   /** Where the on-screen sticks are pushed (see stick). */
   private sticks = { move: { x: 0, y: 0 }, look: { x: 0, y: 0 } };
