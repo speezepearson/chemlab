@@ -164,6 +164,8 @@ const WALK = 560;
 const REACH = 460;
 /** The nearest and furthest something can be held, from the eyes to its middle, beyond its own size. */
 const HOLD_NEAR = 40;
+/** How much further off than other things a flask is held to start with (see holdDist). */
+const FLASK_HOLD = 1.7;
 const HOLD_FAR = 520;
 /** Radians the view turns per pixel the mouse moves, and that something held turns with Shift. */
 const LOOK_SENS = 0.0022;
@@ -674,10 +676,13 @@ export class GameEngine {
     return { x: 0, y: b.y - e.y, z: 0 };
   }
 
-  /** How far in front of the eyes something is held to start with: just clear of the player, with room to see it. */
+  /**
+   * How far in front of the eyes something is held to start with: just clear of the player, with room to see it; a
+   * flask, which is small, further off, so it isn't in the player's face.
+   */
   private holdDist(h: Held): number {
     const b = this.heldBox(h);
-    return Math.hypot(b.hx, b.hz) + 90;
+    return (Math.hypot(b.hx, b.hz) + 90) * (h.kind === 'flask' ? FLASK_HOLD : 1);
   }
 
   /** Where it's held from: its own pose, or for a hose, the end that's held (which doesn't turn). */
