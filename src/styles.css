@@ -127,26 +127,26 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .hints .mouse rect{fill:rgba(238,240,235,.85);stroke:#1b2320;stroke-width:1.2}
 .hints .mouse path{fill:none;stroke:#1b2320;stroke-width:1.2}
 .hints .mouse path.lit{fill:#2f6a56;stroke:none}
-.hints .mouse,.actions .mouse{width:12px;height:17px;opacity:.85}
-.actions{
+.hints .mouse,.doable .mouse{width:12px;height:17px;opacity:.85}
+.doable{
   position:absolute;left:12px;bottom:12px;z-index:2;pointer-events:none;display:flex;flex-direction:column;gap:3px;
   padding:7px 9px;border-radius:7px;background:rgba(12,17,15,.55);color:#dfe6e2;font-size:12px;line-height:1.2;
   max-width:min(340px,calc(50% - 150px));
 }
 /* where the window's too narrow for it beside the hotbar, it sits above it */
-@media (max-width:1240px){.actions{bottom:84px;max-width:340px}}
-.action{display:flex;align-items:center;gap:8px}
-.action.off{opacity:.45}
-.actions .keys{display:flex;align-items:center;gap:3px;flex:none;min-width:76px}
-.actions .plus{margin:0 2px;opacity:.7}
-.actions .twice{display:inline-flex;align-items:center;gap:1px}
-.actions kbd{
+@media (max-width:1240px){.doable{bottom:84px;max-width:340px}}
+.can{display:flex;align-items:center;gap:8px}
+.can.off{opacity:.45}
+.doable .keys{display:flex;align-items:center;gap:3px;flex:none;min-width:76px}
+.doable .plus{margin:0 2px;opacity:.7}
+.doable .twice{display:inline-flex;align-items:center;gap:1px}
+.doable kbd{
   font:600 11px "Schibsted Grotesk",sans-serif;color:#1b2320;background:rgba(238,240,235,.85);
   border-radius:4px;padding:1px 5px;
 }
-.actions .mouse rect{fill:rgba(238,240,235,.85);stroke:#1b2320;stroke-width:1.2}
-.actions .mouse path{fill:none;stroke:#1b2320;stroke-width:1.2}
-.actions .mouse path.lit{fill:#2f6a56;stroke:none}
+.doable .mouse rect{fill:rgba(238,240,235,.85);stroke:#1b2320;stroke-width:1.2}
+.doable .mouse path{fill:none;stroke:#1b2320;stroke-width:1.2}
+.doable .mouse path.lit{fill:#2f6a56;stroke:none}
 .aim{
   position:absolute;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;pointer-events:none;z-index:2;
   border:2px solid #fff;mix-blend-mode:difference;

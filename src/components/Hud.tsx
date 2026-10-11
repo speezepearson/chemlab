@@ -155,9 +155,9 @@ function Key({ k }: { k: string }) {
 /** In a corner, everything the player can do just now besides walking and looking, and how. */
 function Actions({ actions }: { actions: readonly Action[] }) {
   return (
-    <div className="actions">
+    <div className="doable">
       {actions.map((a, i) => (
-        <div key={i} className={a.off ? 'action off' : 'action'}>
+        <div key={i} className={a.off ? 'can off' : 'can'}>
           <span className="keys">
             {a.keys.map((k, j) => (
               <span key={j}>
