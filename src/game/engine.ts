@@ -723,7 +723,7 @@ export class GameEngine {
   /** Where the box of what's held would be with it at pose p. */
   private boxAt(h: Held, p: Pose): Box {
     const c = toWorld(p, this.anchor(h));
-    return { ...this.heldBox(h), ...c, yaw: p.yaw };
+    return { ...this.heldBox(h), ...c, yaw: h.kind === 'flask' ? 0 : p.yaw };
   }
 
   /** The pose what's held would have for its box to be at b. */
@@ -839,7 +839,8 @@ export class GameEngine {
   turnHeld(dx: number, dy: number): void {
     const h = this.held;
     if (!h) return;
-    h.relYaw = wrapAngle(h.relYaw - dx * TURN_SENS);
+    // a flask is round, so turning it does nothing (see faceFlask)
+    if (h.kind !== 'flask') h.relYaw = wrapAngle(h.relYaw - dx * TURN_SENS);
     h.dist = this.clampDist(h, h.dist * Math.exp(-dy * 0.004));
   }
 
@@ -973,7 +974,7 @@ export class GameEngine {
       return;
     }
     if (shift && this.held) {
-      this.held.relYaw = wrapAngle(this.held.relYaw - dx * TURN_SENS);
+      if (this.held.kind !== 'flask') this.held.relYaw = wrapAngle(this.held.relYaw - dx * TURN_SENS);
       return;
     }
     const p = this.player;
@@ -1016,7 +1017,7 @@ export class GameEngine {
     } else if (p.kind === 'tool') h = { kind: 'tool', t: p.t, relYaw: 0, dist: 0 };
     else if (p.kind === 'scale') h = { kind: 'scale', sc: p.sc, relYaw: 0, dist: 0 };
     else h = { kind: 'hose', h: p.h, end: p.end, relYaw: 0, dist: 0 };
-    h.relYaw = h.kind === 'hose' ? 0 : wrapAngle(this.heldPose(h).yaw - this.player.yaw);
+    h.relYaw = h.kind === 'hose' || h.kind === 'flask' ? 0 : wrapAngle(this.heldPose(h).yaw - this.player.yaw);
     // it comes to the player's hands, as far as it can
     h.dist = this.clampDist(h, this.holdDist(h));
     this.held = h;
@@ -1489,13 +1490,24 @@ export class GameEngine {
     if (!h || !load) return;
     // what's held goes toward where it'd be in front of the eyes, the short way round
     const want = this.boxAt(h, this.gripPose(h));
-    want.yaw = load.yaw + wrapAngle(want.yaw - load.yaw);
+    // a flask's box doesn't turn (see flaskBox): it's turned to face the player after it's moved, below
+    want.yaw = h.kind === 'flask' ? load.yaw : load.yaw + wrapAngle(want.yaw - load.yaw);
     this.placeHeld(h, this.poseForBox(h, moveBox(load, want, obstacles)));
     if (h.kind === 'flask') {
+      this.faceFlask(h.f);
       const goal = this.rightHeld ? POUR_ANG : 0;
       const step = (POUR_ANG * dt) / TIP_S;
       h.f.tilt = h.f.tilt < goal ? Math.min(goal, h.f.tilt + step) : Math.max(goal, h.f.tilt - step);
     }
+  }
+
+  /**
+   * Turn a held flask to face the player, so that it tips to pour (about its own front-to-back axis) about the
+   * level line from the player to it, toward the player's right. A flask is round, so this is all its turn is for.
+   */
+  private faceFlask(f: Flask): void {
+    const p = this.player;
+    f.pose = { ...f.pose, yaw: Math.atan2(p.x - f.pose.x, p.z - f.pose.z) };
   }
 
   /** The thing the player holds, as the view knows it (a hose end's point, for a hose held by one end). */

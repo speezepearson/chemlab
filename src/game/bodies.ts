@@ -123,8 +123,9 @@ export function flaskMouth(f: Flask): Mouth {
   return { v: f, x: p.x, y: p.y, z: p.z, hx: FLASK_CATCH, hz: FLASK_CATCH, yaw: p.yaw, rim: flaskLip(f) };
 }
 
+/** A flask's box. A flask is round, so its box doesn't turn with it. */
 export function flaskBox(f: Flask): Box {
-  return placeBox(f.pose, FLASK_CENTER, { x: FLASK_R, y: FLASK_H / 2, z: FLASK_R });
+  return placeBox({ ...f.pose, yaw: 0 }, FLASK_CENTER, { x: FLASK_R, y: FLASK_H / 2, z: FLASK_R });
 }
 
 /* ---------------- scales ---------------- */
