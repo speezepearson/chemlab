@@ -989,6 +989,22 @@ export function aimAt(mouths: readonly Mouth[], p: Vec3, near: number, reach = I
   return best && { m: best, hit: false };
 }
 
+/**
+ * The least sideways shift that brings (x, z) over the middle half of a mouth (half as wide and half as deep, about
+ * its center), for snapping something falling from there well into it: nothing if it's already there.
+ */
+export function snapInto(m: Mouth, x: number, z: number): { dx: number; dz: number } {
+  const c = Math.cos(m.yaw ?? 0);
+  const s = Math.sin(m.yaw ?? 0);
+  const dx = x - m.x;
+  const dz = z - m.z;
+  const u = dx * c - dz * s;
+  const w = dx * s + dz * c;
+  const du = Math.max(-m.hx / 2, Math.min(m.hx / 2, u)) - u;
+  const dw = Math.max(-m.hz / 2, Math.min(m.hz / 2, w)) - w;
+  return { dx: du * c + dw * s, dz: -du * s + dw * c };
+}
+
 /** How much a hose's funnel holds, in atoms: just a buffer, so a loop can't spin forever in one step. */
 export const HOSE_CAP = CAP / 4;
 /** How fast a hose's pump moves fluid from its inlet to its outlet, in atoms per sim second. */

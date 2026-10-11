@@ -46,10 +46,11 @@ export interface Frame {
   standing: ReadonlySet<Flask>;
   streams: readonly { from: Vec3; toY: number; fluid: Fluid; flow: number }[];
   /**
-   * Gray streams for lining things up: solid where fluid would land in a mouth, faint where it would just miss one;
-   * each with that mouth, whose rim is outlined to match.
+   * Streams for lining things up: solid gray where fluid would land in a mouth, faint gray where it would just miss
+   * one, green for what will snap together when what's held is let go; each with that mouth, whose rim is outlined to
+   * match.
    */
-  guides: readonly { from: Vec3; toY: number; solid: boolean; mouth: Vec3 & { hx: number; hz: number; yaw: number } }[];
+  guides: readonly { from: Vec3; toY: number; look: GuideLook; mouth: Vec3 & { hx: number; hz: number; yaw: number } }[];
   drops: readonly { at: Vec3; v: Vessel; hanging: boolean }[];
   /** The scale whose tare key is held down. */
   tarePress: Scale | null;
@@ -71,6 +72,16 @@ export interface Frame {
     draft: { x0: number; y0: number; x1: number; y1: number } | null;
   };
 }
+
+export type GuideLook = 'faint' | 'solid' | 'snap';
+/** How each look of guide is drawn: the color and opacity of its stream, and of its rim. */
+const GUIDE_LOOKS: Record<GuideLook, { color: number; stream: number; edge: number; rim: number }> = {
+  faint: { color: 0xb4bcb8, stream: 0.18, edge: 0xdfe6e2, rim: 0.4 },
+  solid: { color: 0xb4bcb8, stream: 0.6, edge: 0xdfe6e2, rim: 0.85 },
+  snap: { color: 0x7fd4ad, stream: 0.8, edge: 0x7fd4ad, rim: 0.95 },
+};
+/** Which look wins where guides of several looks end at the same mouth. */
+const LOOK_RANK: Record<GuideLook, number> = { faint: 0, solid: 1, snap: 2 };
 
 /** Width of a stream flowing one flask per second; it goes as the square root of the flow. */
 const STREAM_WIDTH = 4.5;
@@ -1728,19 +1739,22 @@ export class View {
       const g = fr.guides[i];
       m.visible = !!g;
       if (!g) return;
-      (m.material as THREE.MeshBasicMaterial).opacity = g.solid ? 0.6 : 0.18;
+      const look = GUIDE_LOOKS[g.look];
+      const mat = m.material as THREE.MeshBasicMaterial;
+      mat.color.setHex(look.color);
+      mat.opacity = look.stream;
       const len = Math.max(0.1, g.from.y - g.toY);
-      const r = g.solid ? GUIDE_R : GUIDE_R * 0.75;
+      const r = g.look === 'faint' ? GUIDE_R * 0.75 : GUIDE_R;
       m.position.set(g.from.x, g.from.y - len / 2, g.from.z);
       m.scale.set(r, len, r);
     });
-    // each mouth a guide ends at, outlined once, solid if any guide into it is
-    const mouths = new Map<string, Frame['guides'][number]['mouth'] & { solid: boolean }>();
+    // each mouth a guide ends at, outlined once, in the look of the strongest guide into it
+    const mouths = new Map<string, Frame['guides'][number]['mouth'] & { look: GuideLook }>();
     for (const g of fr.guides) {
       const m = g.mouth;
       const key = `${m.x},${m.y},${m.z}`;
       const was = mouths.get(key);
-      mouths.set(key, { ...m, solid: g.solid || !!was?.solid });
+      mouths.set(key, { ...m, look: was && LOOK_RANK[was.look] > LOOK_RANK[g.look] ? was.look : g.look });
     }
     const want = [...mouths.values()];
     while (this.rims.length < want.length) {
@@ -1757,7 +1771,8 @@ export class View {
       const m = want[i];
       g.visible = !!m;
       if (!m) return;
-      mat.opacity = m.solid ? 0.85 : 0.4;
+      mat.color.setHex(GUIDE_LOOKS[m.look].edge);
+      mat.opacity = GUIDE_LOOKS[m.look].rim;
       g.position.set(m.x, m.y + 0.6, m.z);
       g.rotation.y = m.yaw;
       // a square mouth is a round one (a flask's, a funnel's), so it gets a ring; a tank's gets a frame

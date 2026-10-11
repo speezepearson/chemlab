@@ -22,7 +22,7 @@ import {
 } from './space';
 import {
   HEATER, HEATER_CELLS, HEATER_TUBE, Hose, MAX_FLOW, RECEPTACLE_TIMES, SCAN_LIGHTS, SHAPES, SUMP_TIP, TANK_H, TOOL_NAMES,
-  Tool, UNIQUE_TOOLS, aimAt, cupFillHeight, drip, mouthBelow, scanLevel, sumpFillHeight, tankX, type Mouth, type ToolKind,
+  Tool, UNIQUE_TOOLS, aimAt, cupFillHeight, drip, mouthBelow, scanLevel, snapInto, sumpFillHeight, tankX, type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
 import {
@@ -95,6 +95,19 @@ export interface EngineCallbacks {
 }
 
 /** What the player is holding. A hose is held by one end, or (just made) both. */
+/**
+ * An outlet lined up with a mouth below it (see GameEngine.aims): whether fluid from it would land there (a hit) or
+ * just miss, and which of them is held: the outlet, a held flask's lip (as it would pour), or the mouth.
+ */
+interface Aim {
+  from: Vec3;
+  m: Mouth;
+  hit: boolean;
+  held: 'outlet' | 'lip' | 'mouth';
+  /** How far below the outlet fluid reaches: a faucet's FAUCET_REACH, or else forever. */
+  reach: number;
+}
+
 type Held = (
   | { kind: 'flask'; f: Flask }
   | { kind: 'tool'; t: Tool }
@@ -974,10 +987,18 @@ export class GameEngine {
     this.held = h;
   }
 
-  /** Let go of what's held: an arm comes down to hold it where it is, or a flask let go over a scale stands on it. */
+  /**
+   * Let go of what's held: an arm comes down to hold it where it is, snapped to line up with an outlet or mouth (see
+   * snap), or a flask let go over a scale stands on it.
+   */
   private release(): void {
     const h = this.held;
     if (!h) return;
+    const sn = this.snap(h, this.aims(h));
+    if (sn) {
+      const p = this.heldPose(h);
+      this.placeHeld(h, { x: p.x + sn.d.x, y: p.y + sn.d.y, z: p.z + sn.d.z, yaw: p.yaw });
+    }
     if (h.kind === 'flask') {
       h.f.tilt = 0;
       for (const sc of this.scales) {
@@ -1619,43 +1640,88 @@ export class GameEngine {
   }
 
   /**
-   * Guides for lining up what's held, as gray streams: from each outlet of what's held (a flask's lip, tipped as it
-   * would be to pour; a tool's spouts; a hose's nozzle) down to the mouth it would land in, solid, or to one it would
-   * just miss, faint; and the same from every other outlet (spouts, nozzles, faucets) that would land in, or just
-   * miss, something held. Shown only while something's held, since that's when things are being lined up.
+   * Each outlet that lines up with a mouth, for the guides and for snapping: from each outlet of what's held (a
+   * flask's lip, tipped as it would be to pour; a tool's spouts; a hose's nozzle) to the mouth it would land in, or
+   * would just miss; and the same from every other outlet (spouts, nozzles, faucets) to what's held.
+   */
+  private aims(h: Held): Aim[] {
+    const mouths = this.open;
+    // what's held, as outlets and as vessels that can be landed in
+    const mine = new Set<Vessel>();
+    const outlets: { at: Vec3; lip: boolean }[] = [];
+    if (h.kind === 'flask') {
+      mine.add(h.f);
+      outlets.push({ at: flaskLip(h.f, POUR_ANG), lip: true });
+    } else if (h.kind === 'tool') {
+      for (const v of h.t.tanks) mine.add(v);
+      h.t.shape.spouts.forEach((_, j) => outlets.push({ at: spoutAt(h.t, j), lip: false }));
+    } else if (h.kind === 'scale') for (const { f } of h.sc.load) mine.add(f);
+    else {
+      if (h.end !== 'outlet') mine.add(h.h.funnel);
+      if (h.end !== 'inlet') outlets.push({ at: h.h.outlet, lip: false });
+    }
+    const out: Aim[] = [];
+    const aim = (from: Vec3, reach: number, held: Aim['held']) => {
+      const a = aimAt(mouths, from, GUIDE_NEAR, reach);
+      if (!a || mine.has(a.m.v) !== (held === 'mouth')) return;
+      out.push({ from, m: a.m, hit: a.hit, held, reach });
+    };
+    for (const o of outlets) aim(o.at, Infinity, o.lip ? 'lip' : 'outlet');
+    if (mine.size) {
+      for (const t of this.tools) if (!(h.kind === 'tool' && h.t === t)) t.shape.spouts.forEach((_, j) => aim(spoutAt(t, j), Infinity, 'mouth'));
+      for (const hose of this.hoses) if (!(h.kind === 'hose' && h.h === hose)) aim(hose.outlet, Infinity, 'mouth');
+      for (const fa of this.faucets) aim(fa.spout, FAUCET_REACH, 'mouth');
+    }
+    return out;
+  }
+
+  /**
+   * Where what's held would snap to if let go now, to line up one of its aims (see aims): the one it takes the least
+   * shift to bring an outlet over the middle of its mouth, slid sideways, and up or down too to come within a faucet's
+   * reach, so long as that bumps into nothing. Not a flask's lip, which pours only while held, nor for a flask that
+   * will stand on a scale.
+   */
+  private snap(h: Held, aims: readonly Aim[]): { a: Aim; d: Vec3 } | null {
+    const onScale = (p: Vec3) => h.kind === 'flask' && this.scales.some((sc) => scaleSpot(sc, p) !== null);
+    const pose = this.heldPose(h);
+    if (onScale(pose)) return null;
+    const ways = aims
+      .filter((a) => a.held !== 'lip')
+      .map((a) => {
+        const s = snapInto(a.m, a.from.x, a.from.z);
+        const d = a.held === 'outlet' ? { x: s.dx, y: 0, z: s.dz } : { x: -s.dx, y: 0, z: -s.dz };
+        if (a.from.y - a.m.y > a.reach) d.y = a.from.y - a.reach / 2 - a.m.y;
+        return { a, d };
+      })
+      .sort((p, q) => Math.hypot(p.d.x, p.d.y, p.d.z) - Math.hypot(q.d.x, q.d.y, q.d.z));
+    if (!ways.length) return null;
+    const box = this.heldBox(h);
+    const obstacles = this.obstacles(h).filter((o) => !boxesOverlap(box, o));
+    return (
+      ways.find(({ d }) => {
+        const moved = { ...box, x: box.x + d.x, y: box.y + d.y, z: box.z + d.z };
+        return !obstacles.some((o) => boxesOverlap(moved, o)) && !onScale({ x: pose.x + d.x, y: pose.y + d.y, z: pose.z + d.z });
+      }) ?? null
+    );
+  }
+
+  /**
+   * Guides for lining up what's held (see aims), shown only while something's held, since that's when things are
+   * being lined up: solid where fluid would land in a mouth, faint where it would just miss; and the aim it would snap
+   * to if let go, as it would be after the snap.
    */
   private guides(): Frame['guides'] {
     const h = this.held;
     if (!h) return [];
-    const mouths = this.open;
-    // what's held, as outlets and as vessels that can be landed in
-    const mine = new Set<Vessel>();
-    const outlets: Vec3[] = [];
-    if (h.kind === 'flask') {
-      mine.add(h.f);
-      outlets.push(flaskLip(h.f, POUR_ANG));
-    } else if (h.kind === 'tool') {
-      for (const v of h.t.tanks) mine.add(v);
-      h.t.shape.spouts.forEach((_, j) => outlets.push(spoutAt(h.t, j)));
-    } else if (h.kind === 'scale') for (const { f } of h.sc.load) mine.add(f);
-    else {
-      if (h.end !== 'outlet') mine.add(h.h.funnel);
-      if (h.end !== 'inlet') outlets.push(h.h.outlet);
-    }
-    const out: Frame['guides'][number][] = [];
-    const guide = (from: Vec3, reach: number, onlyMine: boolean) => {
-      const a = aimAt(mouths, from, GUIDE_NEAR, reach);
-      if (!a || (onlyMine && !mine.has(a.m.v)) || (!onlyMine && mine.has(a.m.v))) return;
+    const aims = this.aims(h);
+    const sn = this.snap(h, aims);
+    return aims.map((a) => {
       const { x, y, z, hx, hz, yaw = 0 } = a.m;
-      out.push({ from, toY: y, solid: a.hit, mouth: { x, y, z, hx, hz, yaw } });
-    };
-    for (const o of outlets) guide(o, Infinity, false);
-    if (mine.size) {
-      for (const t of this.tools) if (!(h.kind === 'tool' && h.t === t)) t.shape.spouts.forEach((_, j) => guide(spoutAt(t, j), Infinity, true));
-      for (const hose of this.hoses) if (!(h.kind === 'hose' && h.h === hose)) guide(hose.outlet, Infinity, true);
-      for (const fa of this.faucets) guide(fa.spout, FAUCET_REACH, true);
-    }
-    return out;
+      if (sn?.a !== a) return { from: a.from, toY: y, look: a.hit ? 'solid' : 'faint', mouth: { x, y, z, hx, hz, yaw } };
+      const { d } = sn;
+      if (a.held === 'outlet') return { from: { x: a.from.x + d.x, y: a.from.y, z: a.from.z + d.z }, toY: y, look: 'snap', mouth: { x, y, z, hx, hz, yaw } };
+      return { from: a.from, toY: y + d.y, look: 'snap', mouth: { x: x + d.x, y: y + d.y, z: z + d.z, hx, hz, yaw } };
+    });
   }
 
   private render(dt: number): void {
