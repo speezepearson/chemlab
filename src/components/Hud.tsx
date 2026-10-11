@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { TOUCH, type GameEngine, type Hud as HudState } from '../game/engine';
+import { TOUCH, type Action, type GameEngine, type Hud as HudState } from '../game/engine';
 
 /** How far a stick's knob can go from its middle, in CSS pixels. */
 const STICK_R = 44;
@@ -140,7 +140,43 @@ function MouseHint({ side }: { side: 'left' | 'right' }) {
   );
 }
 
-/** The crosshair, with hints by it for what E and the mouse buttons would do; and the aim while a valve turns. */
+/** One key or button of an action (see Action): a key cap, or a little mouse with the button lit. */
+function Key({ k }: { k: string }) {
+  if (k === 'LMB' || k === 'RMB') return <MouseHint side={k === 'LMB' ? 'left' : 'right'} />;
+  if (k === 'LMB2')
+    return (
+      <span className="twice">
+        <MouseHint side="left" />×2
+      </span>
+    );
+  return <kbd>{k}</kbd>;
+}
+
+/** In a corner, everything the player can do just now besides walking and looking, and how. */
+function Actions({ actions }: { actions: readonly Action[] }) {
+  return (
+    <div className="actions">
+      {actions.map((a, i) => (
+        <div key={i} className={a.off ? 'action off' : 'action'}>
+          <span className="keys">
+            {a.keys.map((k, j) => (
+              <span key={j}>
+                {j > 0 && <span className="plus">+</span>}
+                <Key k={k} />
+              </span>
+            ))}
+          </span>
+          <span className="does">{a.does}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The crosshair, with hints by it for what E, F and the mouse buttons would do; the aim while a valve turns; and, on a
+ * screen with a mouse and keys, everything else that can be done just now, in a corner.
+ */
 export function Hud({ hud }: { hud: HudState }) {
   if (!hud.locked) return null;
   return (
@@ -148,11 +184,13 @@ export function Hud({ hud }: { hud: HudState }) {
       <div className={hud.aim ? 'crosshair dim' : 'crosshair'} />
       <div className="hints">
         {(hud.grab || hud.drop) && <kbd>E</kbd>}
+        {hud.flip && <kbd>F</kbd>}
         {hud.press && <MouseHint side="left" />}
         {hud.right && <MouseHint side="right" />}
       </div>
       {hud.aim && <div className="aim" style={{ left: hud.aim.x, top: hud.aim.y }} />}
       {hud.note && <div className="note">{hud.note}</div>}
+      {!TOUCH && <Actions actions={hud.actions} />}
     </>
   );
 }
@@ -169,13 +207,14 @@ export function Paused({ onStart }: { onStart(): void }) {
             you look at, and double-tap to write a note. The buttons above the circles do the rest.
           </p>
         )}
-        {/* the keys and mouse buttons, unless this is a touch screen, where they'd only be noise */}
+        {/* the keys and mouse buttons, unless this is a touch screen, where they'd only be noise; in play, the corner
+            lists what can be done just now */}
         {!TOUCH && (
           <dl>
             <dt>W A S D</dt>
             <dd>walk, and the mouse looks · C crouches</dd>
             <dt>E</dt>
-            <dd>pick up what you look at, or let go: an arm holds it where you leave it</dd>
+            <dd>pick up what you look at, or set it down: only squarely on a counter, or on a stand over one</dd>
             <dt>Shift + mouse</dt>
             <dd>turn what you hold · the wheel holds it nearer or further</dd>
             <dt>Right button</dt>

@@ -78,6 +78,19 @@ export interface Hud {
   hand: 'Pour' | 'Flow' | 'Turn' | 'Erase';
   /** A brief note, like there being no room for something. */
   note: string | null;
+  /** Everything the player can do just now besides walking and looking, with how (see Action), for a reminder. */
+  actions: Action[];
+}
+
+/**
+ * Something the player can do just now: the keys or buttons that do it, pressed together, and what it does, in a few
+ * words. Keys are named as on the keyboard; 'LMB' and 'RMB' are the mouse's left and right buttons, 'LMB2' a
+ * double-click, 'Wheel' its wheel and '←→' moving it across. `off` if it can't be done here, though it could elsewhere.
+ */
+export interface Action {
+  keys: string[];
+  does: string;
+  off?: boolean;
 }
 
 export interface EngineCallbacks {
@@ -2052,6 +2065,53 @@ export class GameEngine {
   }
 
   /** Whether the right button would do something now (see Hud.right). */
+  /** Everything the player can do just now besides walking and looking (see Hud.actions). */
+  private actions(): Action[] {
+    const out: Action[] = [];
+    const add = (keys: string[], does: string, off = false) => out.push(off ? { keys, does, off } : { keys, does });
+    // turning a valve takes the mouse over until the button's let go
+    if (this.turning) {
+      add(['Mouse'], 'point the lever');
+      add(['RMB'], 'let go when it’s set');
+      return out;
+    }
+    const p = this.target;
+    const h = this.held;
+    if (this.pencil) {
+      add(['LMB'], 'drag to draw, or on bare wall to mark out a sheet');
+      add(['LMB'], 'click a sheet to type on it');
+      add(['RMB'], 'drag to erase');
+      add(['P'], 'put the pencil down');
+    }
+    if (h) {
+      const ok = !!this.placed && 'rest' in this.placed;
+      const how = h.kind === 'hose' && h.end === 'both' ? 'hang its funnel' : h.kind === 'hose' && h.end === 'inlet' ? 'hang it' : 'set it down';
+      add(['E'], ok ? how : `${how}: not here`, !ok);
+      if (!this.pencil && this.rightWouldDo()) add(['RMB'], h.kind === 'flask' ? 'hold to pour' : 'hold to let it flow');
+      if (h.kind !== 'flask') add(['Shift', '←→'], 'turn it');
+      add(['Wheel'], 'hold it nearer or further');
+      if (h.kind === 'tool' && h.t.shape.flippable) add(['F'], 'flip it');
+      if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it away');
+    } else {
+      if (p && p.kind !== 'faucet' && !(p.kind === 'tool' && p.t.shape.fixed)) add(['E'], 'pick it up');
+      if (!this.pencil && this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
+      if (p?.kind === 'tool' && p.t.shape.flippable) add(['F'], 'flip it');
+      add(['1–0, −'], 'make equipment in your hands');
+    }
+    if (!this.pencil) {
+      const press =
+        (p?.kind === 'tool' && p.part === 'button' && !(p.t.kind === 'receptacle' ? p.t.cycle : p.t.scanning)) ||
+        (p?.kind === 'scale' && p.part === 'tare');
+      if (press) add(['LMB'], 'press it');
+      const id = this.targetNote();
+      if (id) add(['LMB2'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
+      add(['P'], 'pick up the pencil');
+    }
+    add(['C'], 'crouch');
+    add(['Esc'], 'let go of the mouse');
+    return out;
+  }
+
   private rightWouldDo(): boolean {
     if (this.rightHeld) return false;
     const h = this.held;
@@ -2085,6 +2145,7 @@ export class GameEngine {
       flip: !!(h?.kind === 'tool' ? h.t : !h && p?.kind === 'tool' ? p.t : null)?.shape.flippable,
       hand: this.pencil ? 'Erase' : h?.kind === 'flask' ? 'Pour' : h ? 'Flow' : 'Turn',
       note: this.flash?.text ?? null,
+      actions: this.actions(),
     };
     const key = JSON.stringify(hud);
     if (key === this.lastHud) return;
