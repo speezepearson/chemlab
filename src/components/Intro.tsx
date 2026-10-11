@@ -36,13 +36,16 @@ export function Intro({
   const [shown, setShown] = useState(0);
   const consoleRef = useRef<HTMLDivElement>(null);
 
+  /** When the log started printing (performance.now), moved back by a skip to its end. */
+  const t0 = useRef(0);
+
   // print the incident line by line, by its timestamps, then fade the log out
   useEffect(() => {
     if (phase !== 'log') return;
-    const t0 = performance.now();
+    t0.current = performance.now();
     let raf = 0;
     const tick = () => {
-      const t = performance.now() - t0;
+      const t = performance.now() - t0.current;
       let n = 0;
       while (n < AT.length && AT[n] <= t) n++;
       setShown(n);
@@ -56,6 +59,24 @@ export function Intro({
   useEffect(() => {
     if (phase === 'logFading') onLogEnd();
   }, [phase, onLogEnd]);
+
+  // Enter skips to the end of the log, every line printed, lingering as ever; again, it fades at once. While the log
+  // is up or fading, Enter is the intro's alone, so it can't press OK in the pod before the pod is in view.
+  useEffect(() => {
+    if (phase === 'start') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter') return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      if (phase !== 'log' || e.repeat) return;
+      const now = performance.now();
+      if (now - t0.current < AT[AT.length - 1]) t0.current = now - AT[AT.length - 1];
+      else setPhase('logFading');
+    };
+    // capturing, so it's heard before the lab's own listener on the window
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
+  }, [phase]);
 
   useEffect(() => {
     if (phase !== 'logFading' && phase !== 'leaving') return;
