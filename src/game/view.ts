@@ -9,6 +9,7 @@ import { Vessel, fluidAlpha, fluidRGB, glowColor, volume, type Flask } from './f
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { COUNTERS, LIFT, PAPER_Z, ROOM, groundAt, toWorld, type Vec3 } from './space';
+import { PORT_WALL, SIGHT, porthole, type Porthole } from './sight';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
   HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, RECEPTACLE_BODY, RECEPTACLE_LAMPS,
@@ -1476,8 +1477,8 @@ function panelTexture(): THREE.Texture {
   return t;
 }
 
-/** The porthole through the left wall: how high its middle is, its radius, and how thick the hull is around it. */
-const PORT = { y: 760, r: 150, depth: 40 };
+/** How thick the hull is round the porthole (see porthole for its size and shape). */
+const PORT_DEPTH = 40;
 
 /**
  * The stars, all round the ship, far enough off that they don't move as the player walks: seen only through the
@@ -1589,6 +1590,85 @@ function milkyWay(rnd: () => number): THREE.Group {
 /** How far off the stars are drawn: inside the camera's reach, outside the room's. */
 const STAR_R = 6000;
 
+/**
+ * A wall w long and as tall as the room, standing on its middle, facing +z; with a hole in it if `hole` is given, in
+ * the wall's own units from its middle.
+ */
+function wallMesh(w: number, hole?: THREE.Path): THREE.Mesh {
+  const H = ROOM.y1;
+  const tex = panelTexture();
+  let geom: THREE.BufferGeometry;
+  if (hole) {
+    const shape = new THREE.Shape().moveTo(-w / 2, -H / 2).lineTo(w / 2, -H / 2).lineTo(w / 2, H / 2).lineTo(-w / 2, H / 2).lineTo(-w / 2, -H / 2);
+    shape.holes.push(hole);
+    geom = new THREE.ShapeGeometry(shape, 24);
+    // its texture coordinates are in world units, from its bottom left, as a plane's are in fractions
+    tex.repeat.set(1 / 220, 1 / 440);
+    tex.offset.set(w / 2 / 220, H / 2 / 440);
+  } else {
+    geom = new THREE.PlaneGeometry(w, H);
+    tex.repeat.set(w / 220, H / 440);
+  }
+  const m = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, metalness: 0.1 }));
+  m.receiveShadow = true;
+  return m;
+}
+
+/** A rounded rectangle w by h, with corners of radius c, centered on (x, y), drawn into `path`. */
+function roundRect<P extends THREE.Path>(path: P, x: number, y: number, w: number, h: number, c: number): P {
+  const [hw, hh] = [w / 2, h / 2];
+  const r = Math.max(0, Math.min(c, hw, hh));
+  path.moveTo(x + hw, y - hh + r);
+  path.lineTo(x + hw, y + hh - r);
+  path.absarc(x + hw - r, y + hh - r, r, 0, Math.PI / 2, false);
+  path.lineTo(x - hw + r, y + hh);
+  path.absarc(x - hw + r, y + hh - r, r, Math.PI / 2, Math.PI, false);
+  path.lineTo(x - hw, y - hh + r);
+  path.absarc(x - hw + r, y - hh + r, r, Math.PI, (3 * Math.PI) / 2, false);
+  path.lineTo(x + hw - r, y - hh);
+  path.absarc(x + hw - r, y - hh + r, r, (3 * Math.PI) / 2, Math.PI * 2, false);
+  return path;
+}
+
+/** The porthole's outline grown by d all round, centered on (0, y). */
+function portOutline<P extends THREE.Path>(path: P, p: Porthole, y: number, d: number): P {
+  return roundRect(path, 0, y, p.w + 2 * d, p.h + 2 * d, p.c + d);
+}
+
+/**
+ * The left wall, with a porthole through it onto the stars (see starField) taking up `frac` of it (see porthole): a
+ * frame round it, and the hull's thickness behind.
+ */
+function buildPort(frac: number): THREE.Group {
+  const H = ROOM.y1;
+  const p = porthole(frac);
+  const g = new THREE.Group();
+  // turned to face in, the wall's own x runs toward −z
+  g.position.set(ROOM.x0, 0, (ROOM.z0 + ROOM.z1) / 2);
+  g.rotation.y = Math.PI / 2;
+  const w = wallMesh(PORT_WALL.w, portOutline(new THREE.Path(), p, p.cy - H / 2, 0));
+  w.position.y = H / 2;
+  g.add(w);
+  const band = (d0: number, d1: number, depth: number, z: number, mat: THREE.Material, bevel: boolean) => {
+    const shape = portOutline(new THREE.Shape(), p, p.cy, d1);
+    shape.holes.push(portOutline(new THREE.Path(), p, p.cy, d0));
+    const geom = new THREE.ExtrudeGeometry(shape, {
+      depth,
+      bevelEnabled: bevel,
+      bevelThickness: 4,
+      bevelSize: 4,
+      bevelSegments: 2,
+      curveSegments: 24,
+    });
+    const m = new THREE.Mesh(geom, mat);
+    m.position.z = z;
+    g.add(m);
+  };
+  band(-6, 10, 6, -3, darkMat, true);
+  band(0, 4, PORT_DEPTH, -PORT_DEPTH - 1, new THREE.MeshStandardMaterial({ color: 0x2a302e, metalness: 0.5, roughness: 0.6 }), false);
+  return g;
+}
+
 function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.Mesh } {
   const W = ROOM.x1 - ROOM.x0;
   const Dp = ROOM.z1 - ROOM.z0;
@@ -1606,31 +1686,15 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
   ceil.rotation.x = Math.PI / 2;
   ceil.position.set(cx, H, cz);
   scene.add(ceil);
-  // a wall, with a round hole in it at (hx, hy) from its middle if `hole` is given
-  const wall = (w: number, x: number, z: number, ry: number, hole?: { x: number; y: number; r: number }) => {
-    const tex = panelTexture();
-    let geom: THREE.BufferGeometry;
-    if (hole) {
-      const shape = new THREE.Shape().moveTo(-w / 2, -H / 2).lineTo(w / 2, -H / 2).lineTo(w / 2, H / 2).lineTo(-w / 2, H / 2).lineTo(-w / 2, -H / 2);
-      shape.holes.push(new THREE.Path().absarc(hole.x, hole.y, hole.r, 0, Math.PI * 2, true));
-      geom = new THREE.ShapeGeometry(shape, 24);
-      // its texture coordinates are in world units, from its bottom left, as a plane's are in fractions
-      tex.repeat.set(1 / 220, 1 / 440);
-      tex.offset.set(w / 2 / 220, H / 2 / 440);
-    } else {
-      geom = new THREE.PlaneGeometry(w, H);
-      tex.repeat.set(w / 220, H / 440);
-    }
-    const m = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, metalness: 0.1 }));
+  const wall = (w: number, x: number, z: number, ry: number) => {
+    const m = wallMesh(w);
     m.position.set(x, H / 2, z);
     m.rotation.y = ry;
-    m.receiveShadow = true;
     scene.add(m);
   };
   wall(W, cx, ROOM.z0, 0);
   wall(W, cx, ROOM.z1, Math.PI);
-  // the left wall has the porthole through it (see below); turned to face in, its own x runs toward −z
-  wall(Dp, ROOM.x0, cz, Math.PI / 2, { x: 0, y: PORT.y - H / 2, r: PORT.r });
+  // the left wall, with the porthole through it, is built apart (see buildPort), so it can change size
   wall(Dp, ROOM.x1, cz, -Math.PI / 2);
   // ceiling light panels
   for (let x = ROOM.x0 + 300; x < ROOM.x1; x += 500)
@@ -1672,18 +1736,6 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
     grate.receiveShadow = true;
     scene.add(grate);
   }
-  // a porthole through the left wall, onto the stars (see starField): a ring round it, and the hull's thickness
-  const port = new THREE.Group();
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(PORT.r + 2, 12, 12, 48), darkMat);
-  port.add(ring);
-  const tunnel = new THREE.Mesh(
-    new THREE.CylinderGeometry(PORT.r, PORT.r, PORT.depth, 48, 1, true).rotateX(Math.PI / 2).translate(0, 0, -PORT.depth / 2),
-    new THREE.MeshStandardMaterial({ color: 0x2a302e, metalness: 0.5, roughness: 0.6, side: THREE.BackSide }),
-  );
-  port.add(tunnel);
-  port.position.set(ROOM.x0, PORT.y, cz);
-  port.rotation.y = Math.PI / 2;
-  scene.add(port);
   // an emergency beacon over the door, turning slowly
   const lamp = new THREE.Mesh(new THREE.SphereGeometry(14, 16, 10), new THREE.MeshStandardMaterial({ color: 0x5a1010, emissive: 0xff2010, emissiveIntensity: 0.6 }));
   lamp.position.set(cx, H - 120, ROOM.z1 - 16);
@@ -1755,6 +1807,9 @@ export class View {
   private raycaster = new THREE.Raycaster();
   private clock = 0;
   private stars = starField();
+  /** The left wall and its porthole, built for the size in `portFrac` (see buildPort). */
+  private port: THREE.Group | null = null;
+  private portFrac = NaN;
 
   constructor(canvas: HTMLCanvasElement, faucets: readonly FaucetSpot[]) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -1822,9 +1877,32 @@ export class View {
     this.camera.updateMatrixWorld();
   }
 
+  /** Follow the View panel (see SIGHT): the field of view, and the porthole's size. */
+  private followSight(): void {
+    if (this.camera.fov !== SIGHT.fov) {
+      this.camera.fov = SIGHT.fov;
+      this.camera.updateProjectionMatrix();
+    }
+    if (this.portFrac === SIGHT.port) return;
+    if (this.port) {
+      this.scene.remove(this.port);
+      disposeGeometry(this.port);
+      // its own materials (the wall's, with its texture, and the hull's), not the shared frame's
+      this.port.traverse((c) => {
+        if (!(c instanceof THREE.Mesh) || c.material === darkMat) return;
+        c.material.map?.dispose();
+        c.material.dispose();
+      });
+    }
+    this.portFrac = SIGHT.port;
+    this.port = buildPort(SIGHT.port);
+    this.scene.add(this.port);
+  }
+
   render(fr: Frame): void {
     this.clock += fr.dt;
     const { scene, pickables } = this;
+    this.followSight();
     this.look(fr.eye, fr.yaw, fr.pitch);
 
     this.sync(this.flasks, fr.flasks, (f) => new FlaskView(f, scene, pickables));
