@@ -1646,7 +1646,8 @@ export class GameEngine {
     const guide = (from: Vec3, reach: number, onlyMine: boolean) => {
       const a = aimAt(mouths, from, GUIDE_NEAR, reach);
       if (!a || (onlyMine && !mine.has(a.m.v)) || (!onlyMine && mine.has(a.m.v))) return;
-      out.push({ from, toY: a.m.y, solid: a.hit });
+      const { x, y, z, hx, hz, yaw = 0 } = a.m;
+      out.push({ from, toY: y, solid: a.hit, mouth: { x, y, z, hx, hz, yaw } });
     };
     for (const o of outlets) guide(o, Infinity, false);
     if (mine.size) {

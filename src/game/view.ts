@@ -45,8 +45,11 @@ export interface Frame {
   held: object | null;
   standing: ReadonlySet<Flask>;
   streams: readonly { from: Vec3; toY: number; fluid: Fluid; flow: number }[];
-  /** Gray streams for lining things up: solid where fluid would land in a mouth, faint where it would just miss one. */
-  guides: readonly { from: Vec3; toY: number; solid: boolean }[];
+  /**
+   * Gray streams for lining things up: solid where fluid would land in a mouth, faint where it would just miss one;
+   * each with that mouth, whose rim is outlined to match.
+   */
+  guides: readonly { from: Vec3; toY: number; solid: boolean; mouth: Vec3 & { hx: number; hz: number; yaw: number } }[];
   drops: readonly { at: Vec3; v: Vessel; hanging: boolean }[];
   /** The scale whose tare key is held down. */
   tarePress: Scale | null;
@@ -71,8 +74,9 @@ export interface Frame {
 
 /** Width of a stream flowing one flask per second; it goes as the square root of the flow. */
 const STREAM_WIDTH = 4.5;
-/** Radius of a guide stream (see Frame.guides), about a slow stream's. */
+/** Radius of a guide stream (see Frame.guides), about a slow stream's; and how wide the outline round its mouth is. */
 const GUIDE_R = 1.6;
+const RIM_W = 1.6;
 /** Drawn radius of a DROP_R_ATOMS drop; it goes as the cube root of the drop's size. */
 const DROP_R = 3;
 const DROP_R_ATOMS = 1.5e6;
@@ -214,6 +218,9 @@ function disposeGeometry(o: THREE.Object3D): void {
 
 const unitCylinder = new THREE.CylinderGeometry(1, 1, 1, 12, 1);
 const unitSphere = new THREE.SphereGeometry(1, 12, 8);
+const unitBox = new THREE.BoxGeometry(1, 1, 1);
+/** A flat ring of radius 1, lying level, RIM_W thick at radius 14 (about a flask's mouth). */
+const unitRing = new THREE.TorusGeometry(1, 0.06, 6, 40).rotateX(Math.PI / 2);
 
 /** A rod of radius r from a to b (in the parent's frame). */
 function rod(parent: THREE.Object3D, mat: THREE.Material, a: THREE.Vector3, b: THREE.Vector3, r: number): THREE.Mesh {
@@ -1561,6 +1568,7 @@ export class View {
   private faucetNotes: Label[] = [];
   private streams: THREE.Mesh[] = [];
   private guides: THREE.Mesh[] = [];
+  private rims: { g: THREE.Group; mat: THREE.MeshBasicMaterial; sides: THREE.Mesh[]; ring: THREE.Mesh }[] = [];
   private drops: THREE.Mesh[] = [];
   private beacon: { beacon: THREE.PointLight; lamp: THREE.Mesh };
   private raycaster = new THREE.Raycaster();
@@ -1725,6 +1733,49 @@ export class View {
       const r = g.solid ? GUIDE_R : GUIDE_R * 0.75;
       m.position.set(g.from.x, g.from.y - len / 2, g.from.z);
       m.scale.set(r, len, r);
+    });
+    // each mouth a guide ends at, outlined once, solid if any guide into it is
+    const mouths = new Map<string, Frame['guides'][number]['mouth'] & { solid: boolean }>();
+    for (const g of fr.guides) {
+      const m = g.mouth;
+      const key = `${m.x},${m.y},${m.z}`;
+      const was = mouths.get(key);
+      mouths.set(key, { ...m, solid: g.solid || !!was?.solid });
+    }
+    const want = [...mouths.values()];
+    while (this.rims.length < want.length) {
+      const mat = new THREE.MeshBasicMaterial({ color: 0xdfe6e2, transparent: true, depthWrite: false });
+      const sides = [0, 1, 2, 3].map(() => new THREE.Mesh(unitBox, mat));
+      const ring = new THREE.Mesh(unitRing, mat);
+      const g = new THREE.Group();
+      g.add(...sides, ring);
+      for (const sd of [...sides, ring]) sd.renderOrder = 5;
+      this.scene.add(g);
+      this.rims.push({ g, mat, sides, ring });
+    }
+    this.rims.forEach(({ g, mat, sides, ring }, i) => {
+      const m = want[i];
+      g.visible = !!m;
+      if (!m) return;
+      mat.opacity = m.solid ? 0.85 : 0.4;
+      g.position.set(m.x, m.y + 0.6, m.z);
+      g.rotation.y = m.yaw;
+      // a square mouth is a round one (a flask's, a funnel's), so it gets a ring; a tank's gets a frame
+      const round = m.hx === m.hz;
+      ring.visible = round;
+      for (const sd of sides) sd.visible = !round;
+      ring.scale.setScalar(m.hx + RIM_W / 2);
+      // a frame RIM_W wide just outside the mouth's edges
+      const w = RIM_W;
+      const [ax, az] = [m.hx + w / 2, m.hz + w / 2];
+      sides[0].position.set(0, 0, az);
+      sides[1].position.set(0, 0, -az);
+      sides[0].scale.set(2 * ax + w, 0.8, w);
+      sides[1].scale.set(2 * ax + w, 0.8, w);
+      sides[2].position.set(ax, 0, 0);
+      sides[3].position.set(-ax, 0, 0);
+      sides[2].scale.set(w, 0.8, 2 * az - w);
+      sides[3].scale.set(w, 0.8, 2 * az - w);
     });
   }
 
