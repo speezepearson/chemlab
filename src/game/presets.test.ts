@@ -44,7 +44,7 @@ describe('presets', () => {
 
   it('starts the default game with the cryostabilizer reference holding the target, and no supply flask', () => {
     const spec = DEFAULT_PRESET.tools!.find((t) => t.kind === 'reference')!;
-    const ref = new Tool('reference', 0, ...spec.at);
+    const ref = new Tool('reference', 0);
     applyFill(ref.tanks[0], spec.tanks![0]);
     // full: a hundred flasks of triangles
     expect(ref.tanks[0].n[TARGET]).toBe(REFERENCE_CAP);
@@ -53,7 +53,7 @@ describe('presets', () => {
   });
 
   it('applyFill replaces whatever was in the flask', () => {
-    const f = new Flask({ x: 0, y: 0 }, CAP);
+    const f = new Flask(CAP);
     applyFill(f, { contents: [{ species: TARGET, molecules: 1000 }], T: 1, label: 'x' });
     f.setTemperature(7);
     applyFill(f, null);

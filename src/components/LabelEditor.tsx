@@ -1,16 +1,16 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import type { GameEngine } from '../game/engine';
 
-/** The longest label a flask or tank takes: about as wide as a flask's slot on the shelf. */
-export const MAX_LABEL = 20;
+/** The longest note anything takes: about as wide as a flask's slot on the shelf. */
+export const MAX_LABEL = 24;
 
 /**
- * A text field over a flask's or a tool tank's label, for naming what's in it: Enter or clicking away keeps it, Escape leaves it
- * as it was, and an empty one clears the label.
+ * A text field where a note goes (see GameEngine.note for its id), above a flask, tank, tool, scale, hose or faucet:
+ * Enter or clicking away keeps it, Escape leaves it as it was, and an empty one clears it.
  */
 export function LabelEditor({ engine, id, onClose }: { engine: GameEngine; id: string; onClose(): void }) {
-  const found = engine.vessel(id);
-  const [text, setText] = useState(found?.vessel.label ?? '');
+  const found = engine.note(id);
+  const [text, setText] = useState(found?.text ?? '');
   const done = useRef(false);
   // follow the flask if the view moves
   const [, rerender] = useReducer((x: number) => x + 1, 0);
@@ -22,7 +22,7 @@ export function LabelEditor({ engine, id, onClose }: { engine: GameEngine; id: s
   const finish = (keep: boolean) => {
     if (done.current || !found) return;
     done.current = true;
-    if (keep) found.vessel.label = text.trim();
+    if (keep) found.set(text.trim());
     onClose();
   };
   // clicking anywhere else keeps it; the canvas doesn't take focus, so the field wouldn't blur on its own
@@ -47,8 +47,8 @@ export function LabelEditor({ engine, id, onClose }: { engine: GameEngine; id: s
       autoFocus
       value={text}
       maxLength={MAX_LABEL}
-      placeholder="label"
-      aria-label="label"
+      placeholder="note"
+      aria-label="note"
       onChange={(e) => setText(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === 'Enter') finish(true);

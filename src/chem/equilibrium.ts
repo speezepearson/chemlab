@@ -1,7 +1,7 @@
 import { ATOMS, type Atom } from './atoms';
 import { THERMO } from './params';
-import type { Fluid } from './reactions';
-import { NS, SPECIES } from './species';
+import { atomCounts, heatAt, roundRandom, type Fluid } from './reactions';
+import { NS, SPECIES, singleOf } from './species';
 
 /**
  * One atom's worth of a fluid made of atoms in these shares, at full chemical equilibrium at T: every reaction
@@ -11,6 +11,39 @@ export function equilibriumFluid(atoms: Partial<Record<Atom, number>>, U: Float6
   const shares = ATOMS.map((a) => atoms[a] ?? 0);
   const total = shares.reduce((t, v) => t + v, 0);
   return { n: equilibrium(shares.map((v) => v / total), U, T), N: 1, Q: T * THERMO.heatCap };
+}
+
+/**
+ * Bring a fluid to full chemical equilibrium at T, in place: every reaction run to its end, including ones the
+ * kinetics never get to (see equilibrium), and its heat set to hold it at T. Counts are rounded to whole molecules,
+ * and any atom the rounding lost is added back as a single, and any it gained taken out of the species holding most
+ * of that atom, so every atom is kept exactly.
+ */
+export function equilibrate(f: Fluid, U: Float64Array, T: number): void {
+  if (f.N <= 0) return;
+  const atoms = atomCounts(f);
+  // the solver divides by T, and the kinetics treat anything colder as this anyway
+  const n = equilibrium(atoms, U, Math.max(T, 0.05));
+  for (let s = 0; s < NS; s++) f.n[s] = roundRandom(n[s]);
+  const now = atomCounts(f);
+  ATOMS.forEach((a, i) => {
+    let d = atoms[i] - now[i];
+    if (d > 0) f.n[singleOf(a)] += d;
+    // too many: take them out of whatever holds the most, freeing the rest of each molecule taken (which keeps
+    // every other atom's count as it was)
+    while (d < 0) {
+      let most = -1;
+      for (let s = 0; s < NS; s++)
+        if (f.n[s] > 0 && SPECIES[s].atomIdx.includes(i) && (most < 0 || f.n[s] > f.n[most])) most = s;
+      const take = Math.min(-d, f.n[most]);
+      f.n[most] -= take;
+      for (const o of SPECIES[most].atomIdx) if (o !== i) f.n[singleOf(ATOMS[o])] += take;
+      d += take;
+    }
+  });
+  f.N = 0;
+  for (let s = 0; s < NS; s++) f.N += f.n[s] * SPECIES[s].size;
+  f.Q = heatAt(T, f.N);
 }
 
 /**

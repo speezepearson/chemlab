@@ -38,6 +38,13 @@ export function roundRandom(x: number): number {
   return lo + (Math.random() < x - lo ? 1 : 0);
 }
 
+/** A reaction as it's going on net (see ReactionNetwork.netRates): species indices, and events per sim second. */
+export interface NetReaction {
+  from: number[];
+  to: number[];
+  rate: number;
+}
+
 interface Reaction {
   ra: number;
   rb: number; // -1 if unimolecular
@@ -176,6 +183,42 @@ export class ReactionNetwork {
       this.bar[i] = r.bar;
       this.dU[i] = r.dU;
     });
+  }
+
+  /**
+   * What's reacting in f right now: each reaction netted against its reverse, at its expected events per sim second
+   * in whichever direction is ahead, busiest first. Reactions that cancel exactly, or can't happen, are left out.
+   */
+  netRates(f: Fluid): NetReaction[] {
+    const N = f.N;
+    if (N <= 0) return [];
+    const { n } = f;
+    const { ra, rb, p1, p2, k, bar, count } = this;
+    const invT = 1 / Math.max(temperature(f), 0.05);
+    const side = (x: number, y: number) => (y < 0 ? [x] : x <= y ? [x, y] : [y, x]);
+    const byKey = new Map<string, NetReaction>();
+    for (let i = 0; i < count; i++) {
+      const a = n[ra[i]];
+      const b = rb[i];
+      if (a <= 0 || (b >= 0 && n[b] <= 0) || !k[i]) continue;
+      const rate = (b >= 0 ? (a * n[b]) / N : a) * k[i] * Math.exp(-bar[i] * invT);
+      const from = side(ra[i], b);
+      const to = side(p1[i], p2[i]);
+      const back = byKey.get(`${to}>${from}`);
+      if (back) back.rate -= rate;
+      else {
+        const key = `${from}>${to}`;
+        const fwd = byKey.get(key);
+        if (fwd) fwd.rate += rate;
+        else byKey.set(key, { from, to, rate });
+      }
+    }
+    const out: NetReaction[] = [];
+    for (const r of byKey.values()) {
+      if (r.rate > 0) out.push(r);
+      else if (r.rate < 0) out.push({ from: r.to, to: r.from, rate: -r.rate });
+    }
+    return out.sort((x, y) => y.rate - x.rate);
   }
 
   /**

@@ -1,5 +1,6 @@
 import { CAP } from './config';
 import type { Flask } from './flask';
+import { ORIGIN, type Pose } from './space';
 
 /** Fluid weighs 1 µg per atom, so a billion atoms (a full flask) weighs 1 kg. */
 export const GRAMS_PER_ATOM = 1000 / CAP;
@@ -27,9 +28,11 @@ export function flaskGrams(f: Flask): number {
   return f.glass + f.N * GRAMS_PER_ATOM;
 }
 
-/** Scale geometry in local units, origin at the top center of the platform. */
+/** Scale geometry in local units, origin at the top center of the platform, y down as on the old flat bench. */
 export const SCALE_SHAPE = {
   platform: { x0: -92, x1: 92 },
+  /** How far the platform and body reach out front and back. */
+  depth: 36,
   body: { x0: -84, x1: 84, y1: 40 },
   display: { x0: -62, x1: 22, y0: 12, y1: 32 },
   tare: { x0: 32, x1: 70, y0: 14, y1: 30 },
@@ -43,11 +46,12 @@ export class Scale {
   readonly load: { f: Flask; dx: number }[] = [];
   /** Subtracted from the reading, in whole grams. */
   tare = 0;
+  /** The player's note, written above it; empty for none. */
+  note = '';
 
   constructor(
-    /** Position of the platform's top center, as fractions of the home area's width and height (see HOME_W). */
-    public fx: number,
-    public fy: number,
+    /** Where the platform's top center is in the room, and which way the scale faces (see space.ts). */
+    public pose: Pose = { ...ORIGIN },
   ) {}
 
   /** The true weight of everything on the platform, in grams. */
