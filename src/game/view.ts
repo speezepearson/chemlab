@@ -131,6 +131,8 @@ const keyMats = {
 };
 const hidden = new THREE.MeshBasicMaterial({ visible: false });
 const faintMat = new THREE.MeshBasicMaterial({ color: 0xd6ecf2, transparent: true, opacity: 0.3, depthWrite: false });
+/** A catcher's funnel (see ToolShape.catcher): metal, seen from inside as well as out. */
+const catcherMat = new THREE.MeshStandardMaterial({ color: 0x7c8883, metalness: 0.55, roughness: 0.4, side: THREE.DoubleSide });
 const rodMat = new THREE.MeshStandardMaterial({ color: 0xb4bcb9, metalness: 0.75, roughness: 0.3 });
 
 /** Points in a flat frame (x right, y down), placed at depth z, as a vector in an object's own frame (y up). */
@@ -692,7 +694,7 @@ class ToolView {
       if (sh.catcher) {
         // an opaque funnel, holding nothing, over the little glass cell that holds it all
         const c = sh.catcher;
-        const funnel = new THREE.Mesh(frustum(cx, r.y0, r.y1, w, d, FUNNEL_TIP, FUNNEL_TIP, true), pipeMat);
+        const funnel = new THREE.Mesh(frustum(cx, r.y0, r.y1, w, d, FUNNEL_TIP, FUNNEL_TIP, true), catcherMat);
         funnel.castShadow = true;
         art.add(funnel);
         glassFrom(art, new THREE.BoxGeometry(c + 1, c, c + 1).translate(cx, -(r.y1 + c / 2), 0));
