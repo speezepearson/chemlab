@@ -27,6 +27,8 @@ export interface SaveState {
   delivered?: number;
   /** Whether the alarms are silenced (see GameEngine); not if left out. */
   alarmsOff?: boolean;
+  /** Whether the porthole's blinds are shut (see GameEngine); not if left out. */
+  blindsShut?: boolean;
   /** The player's sticky notes, the one on top last; none if left out. */
   papers?: SavedPaper[];
   /** Where the player stood and looked (see GameEngine); where they start if left out. */

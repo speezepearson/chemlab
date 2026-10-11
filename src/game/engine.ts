@@ -268,6 +268,8 @@ export class GameEngine {
   private delivered = 0;
   /** Whether the alarms are silenced, by the button under the beacon (see hushAlarms). Saved, and kept through Reset. */
   private alarmsOff = false;
+  /** Whether the porthole's blinds are shut, by the button beside it. Saved, and kept through Reset. */
+  private blindsShut = false;
   /** Where the player is in waking up in the airlock (see Wake), and how many sim seconds it's been there. */
   private wake: Wake = 'closed';
   /** How far the ship has turned, in radians (see SPIN), for the stars. */
@@ -508,6 +510,7 @@ export class GameEngine {
       faucets: this.faucets.map((fa, i, all) => ({ x: (i + 0.5) / all.length, y: 30 / HOME_H, ...(fa.note ? { note: fa.note } : {}) })),
       delivered: this.delivered,
       ...(this.alarmsOff ? { alarmsOff: true } : {}),
+      ...(this.blindsShut ? { blindsShut: true } : {}),
       ...(this.papers.length ? { papers: this.papers.map(savePaper) } : {}),
       player: { x: this.player.x, z: this.player.z, yaw: this.player.yaw, pitch: this.player.pitch },
       chem: saveChem(this.chem.params),
@@ -585,6 +588,7 @@ export class GameEngine {
     });
     this.delivered = Number.isFinite(s.delivered) ? Math.max(0, s.delivered!) : 0;
     this.setAlarmsOff(!!s.alarmsOff);
+    this.blindsShut = !!s.blindsShut;
     this.papers = (Array.isArray(s.papers) ? s.papers : []).map(loadPaper).filter((p): p is Paper => !!p);
     this.paperDrag = null;
     this.cb.onPaperText(null);
@@ -1085,7 +1089,7 @@ export class GameEngine {
     const p = this.target;
     if (!p) return;
     let h: Held;
-    if (p.kind === 'faucet' || p.kind === 'alarm' || p.kind === 'wake') return;
+    if (p.kind === 'faucet' || p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake') return;
     if (p.kind === 'tool' && p.t.shape.fixed) {
       this.say('That stays where it is');
       return;
@@ -1167,6 +1171,10 @@ export class GameEngine {
       this.setAlarmsOff(!this.alarmsOff);
       return;
     }
+    if (p?.kind === 'blinds') {
+      this.blindsShut = !this.blindsShut;
+      return;
+    }
     if (p?.kind === 'scale' && p.part === 'tare') {
       p.sc.zero();
       this.tarePress = p.sc;
@@ -1201,7 +1209,7 @@ export class GameEngine {
     }
     if (p.kind === 'scale') return `s${this.scales.indexOf(p.sc)}`;
     if (p.kind === 'hose') return `h${this.hoses.indexOf(p.h)}`;
-    if (p.kind === 'alarm' || p.kind === 'wake') return null;
+    if (p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake') return null;
     return `F${p.i}`;
   }
 
@@ -2071,7 +2079,7 @@ export class GameEngine {
       eye: this.eye(), yaw: this.player.yaw, pitch: this.player.pitch,
       flasks: this.flasks, tools: this.tools, scales: this.scales, hoses: this.hoses, faucets: this.faucets,
       streams, drops,
-      tarePress: this.tarePress, hot: this.target, shake, dt, delivered: this.delivered, alarmsOff: this.alarmsOff, spin: this.spin,
+      tarePress: this.tarePress, hot: this.target, shake, dt, delivered: this.delivered, alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
       airlock: this.airlockLook(),
       papers: this.paperFrame(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(),
@@ -2156,6 +2164,7 @@ export class GameEngine {
     }
     if (!this.pencil) {
       if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
+      else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
       else if (this.pressable()) add(['LMB'], 'press it');
       const id = this.targetNote();
       if (id) add(['LMB2'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
@@ -2179,13 +2188,14 @@ export class GameEngine {
       (p?.kind === 'tool' && p.part === 'button' && !(p.t.kind === 'receptacle' ? p.t.cycle : p.t.scanning)) ||
       (p?.kind === 'scale' && p.part === 'tare') ||
       p?.kind === 'alarm' ||
+      p?.kind === 'blinds' ||
       p?.kind === 'wake'
     );
   }
 
   /** Whether E would pick up `p`: anything but what's fixed in place. */
   private grabbable(p: Pick): boolean {
-    return p.kind !== 'faucet' && p.kind !== 'alarm' && p.kind !== 'wake' && !(p.kind === 'tool' && p.t.shape.fixed);
+    return p.kind !== 'faucet' && p.kind !== 'alarm' && p.kind !== 'blinds' && p.kind !== 'wake' && !(p.kind === 'tool' && p.t.shape.fixed);
   }
 
   /* ---------------- waking in the airlock ---------------- */

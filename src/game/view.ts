@@ -28,6 +28,8 @@ export type Pick =
   | { kind: 'faucet'; i: number }
   /** The button under the beacon that silences the alarms. */
   | { kind: 'alarm' }
+  /** The button by the porthole that shuts its blinds, or opens them. */
+  | { kind: 'blinds' }
   /** The OK on the message inside the cryopod. */
   | { kind: 'wake' };
 
@@ -77,6 +79,8 @@ export interface Frame {
   delivered: number;
   /** Whether the alarms are silenced, which the button under the beacon shows. */
   alarmsOff: boolean;
+  /** Whether the porthole's blinds are shut, leaving it solid black. */
+  blindsShut: boolean;
   airlock: AirlockLook;
   /** How far the ship has turned, in radians, which turns the stars about the room's front-to-back axis. */
   spin: number;
@@ -2143,6 +2147,69 @@ class AlarmButton {
   }
 }
 
+/** The blinds button's face: a dark plate with BLINDS under where the button goes, small and muted. */
+function blindsPlateTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 120;
+  c.height = 160;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#3b4240';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.fillStyle = '#9aa4a0';
+  ctx.font = '500 17px "Schibsted Grotesk", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('BLINDS', c.width / 2, c.height - 26);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/**
+ * The porthole's blinds: a plain little button on the wall beside it, at chest height, which stays pushed in while
+ * they're shut; and the blinds themselves, solid black across the porthole, just behind its frame.
+ */
+class BlindsButton {
+  private button: THREE.Mesh;
+  private blind: THREE.Mesh;
+  private shut: boolean | null = null;
+
+  constructor(scene: THREE.Scene, pickables: Map<THREE.Object3D, Pick>) {
+    const p = porthole(PORT_FRAC);
+    // in the porthole's frame (see buildPort): x along the wall toward −z, y up, z out into the room
+    const g = new THREE.Group();
+    g.position.set(ROOM.x0, 0, (ROOM.z0 + ROOM.z1) / 2);
+    g.rotation.y = Math.PI / 2;
+    this.blind = new THREE.Mesh(new THREE.ShapeGeometry(portOutline(new THREE.Shape(), p, p.cy, 2), 24), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+    this.blind.position.z = -1.5;
+    g.add(this.blind);
+    // to the right of the porthole as you face it
+    const at = new THREE.Group();
+    at.position.set(p.w / 2 + 90, ALARM_Y, 0);
+    const face = new THREE.MeshStandardMaterial({ map: blindsPlateTexture(), roughness: 0.7, metalness: 0.2 });
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(42, 56, 4).translate(0, 0, 2), [darkMat, darkMat, darkMat, darkMat, face, darkMat]);
+    this.button = new THREE.Mesh(
+      new THREE.CylinderGeometry(8, 8.5, 6, 24).rotateX(Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: 0x8a948f, roughness: 0.5, metalness: 0.3 }),
+    );
+    this.button.position.y = 6;
+    for (const m of [plate, this.button]) {
+      m.castShadow = m.receiveShadow = true;
+      at.add(m);
+      pickables.set(m, { kind: 'blinds' });
+    }
+    g.add(at);
+    scene.add(g);
+  }
+
+  update(shut: boolean): void {
+    if (shut === this.shut) return;
+    this.shut = shut;
+    this.blind.visible = shut;
+    this.button.position.z = shut ? 5 : 7;
+  }
+}
+
 /** The faucets: a manifold along a wall, and each faucet a pipe out over the counter, a knob of its color, and a spout. */
 function buildFaucets(
   scene: THREE.Scene,
@@ -2203,6 +2270,7 @@ export class View {
   private drops: THREE.Mesh[] = [];
   private beacon: { beacon: THREE.PointLight; lamp: THREE.Mesh };
   private alarmButton: AlarmButton;
+  private blindsButton: BlindsButton;
   private airlock: AirlockView;
   /** The room's lights, and how bright each is, to be dimmed while the cryopod is shut (see AirlockLook.dark). */
   private roomLights: { light: THREE.Light; base: number }[] = [];
@@ -2242,6 +2310,7 @@ export class View {
     this.beacon = buildRoom(this.scene);
     this.scene.add(buildPort(PORT_FRAC));
     this.alarmButton = new AlarmButton(this.scene, this.pickables);
+    this.blindsButton = new BlindsButton(this.scene, this.pickables);
     this.airlock = new AirlockView(this.scene, this.pickables, eye);
     this.draft = new THREE.LineLoop(
       new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(12), 3)),
@@ -2327,6 +2396,7 @@ export class View {
     this.updateGuides(fr);
 
     this.alarmButton.update(fr.alarmsOff);
+    this.blindsButton.update(fr.blindsShut);
     this.airlock.update(fr.airlock);
     // the beacon turns slowly; real time, like the alarms it goes with
     const pulse = 0.5 + 0.5 * Math.sin(this.clock * 2.4);
