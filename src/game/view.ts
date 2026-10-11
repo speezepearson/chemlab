@@ -45,6 +45,8 @@ export interface Frame {
   held: object | null;
   standing: ReadonlySet<Flask>;
   streams: readonly { from: Vec3; toY: number; fluid: Fluid; flow: number }[];
+  /** Gray streams for lining things up: solid where fluid would land in a mouth, faint where it would just miss one. */
+  guides: readonly { from: Vec3; toY: number; solid: boolean }[];
   drops: readonly { at: Vec3; v: Vessel; hanging: boolean }[];
   /** The scale whose tare key is held down. */
   tarePress: Scale | null;
@@ -69,6 +71,8 @@ export interface Frame {
 
 /** Width of a stream flowing one flask per second; it goes as the square root of the flow. */
 const STREAM_WIDTH = 4.5;
+/** Radius of a guide stream (see Frame.guides), about a slow stream's. */
+const GUIDE_R = 1.6;
 /** Drawn radius of a DROP_R_ATOMS drop; it goes as the cube root of the drop's size. */
 const DROP_R = 3;
 const DROP_R_ATOMS = 1.5e6;
@@ -1556,6 +1560,7 @@ export class View {
   private faucetMats: THREE.MeshStandardMaterial[] = [];
   private faucetNotes: Label[] = [];
   private streams: THREE.Mesh[] = [];
+  private guides: THREE.Mesh[] = [];
   private drops: THREE.Mesh[] = [];
   private beacon: { beacon: THREE.PointLight; lamp: THREE.Mesh };
   private raycaster = new THREE.Raycaster();
@@ -1663,6 +1668,7 @@ export class View {
 
     this.updateArms(fr);
     this.updateStreams(fr);
+    this.updateGuides(fr);
 
     // the beacon turns slowly; real time, like the alarms it goes with
     const pulse = 0.5 + 0.5 * Math.sin(this.clock * 2.4);
@@ -1701,6 +1707,25 @@ export class View {
   /** Arms are already holding everything at the start, rather than all snapping down at once. */
   settleArms(): void {
     for (const arm of this.arms.values()) arm.ext = 1;
+  }
+
+  private updateGuides(fr: Frame): void {
+    while (this.guides.length < fr.guides.length) {
+      const m = new THREE.Mesh(unitCylinder, new THREE.MeshBasicMaterial({ color: 0xb4bcb8, transparent: true, depthWrite: false }));
+      m.renderOrder = 5;
+      this.scene.add(m);
+      this.guides.push(m);
+    }
+    this.guides.forEach((m, i) => {
+      const g = fr.guides[i];
+      m.visible = !!g;
+      if (!g) return;
+      (m.material as THREE.MeshBasicMaterial).opacity = g.solid ? 0.6 : 0.18;
+      const len = Math.max(0.1, g.from.y - g.toY);
+      const r = g.solid ? GUIDE_R : GUIDE_R * 0.75;
+      m.position.set(g.from.x, g.from.y - len / 2, g.from.z);
+      m.scale.set(r, len, r);
+    });
   }
 
   private updateStreams(fr: Frame): void {

@@ -6,7 +6,7 @@ import { Vessel, roomFor, volume } from './flask';
 import { FLASK_OUTLINE, areaBelow } from './flaskShape';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PIPETTE_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
-  RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, SEPARATOR, SEPARATOR_PERFECT, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, drip, dropRate, mouthBelow, scanLevel, separate, spectrum, type Mouth,
+  RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, SEPARATOR, SEPARATOR_PERFECT, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, aimAt, counterflow, cupFillHeight, drip, dropRate, mouthBelow, mouthGap, scanLevel, separate, spectrum, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -628,6 +628,29 @@ describe('counterflow', () => {
     const b = { n: new Float64Array(1), N: 0, Q: 0 };
     counterflow(a, b, 1000);
     expect(temperature(a)).toBe(1);
+  });
+});
+
+describe('aimAt', () => {
+  const v = new Vessel(CAP);
+  const low: Mouth = { v, x: 0, y: -100, z: 0, hx: 10, hz: 10 };
+  const high: Mouth = { v, x: 0, y: -20, z: 0, hx: 10, hz: 10 };
+
+  it("hits the first mouth something falling would land in", () => {
+    expect(aimAt([low, high], { x: 5, y: 0, z: 0 }, 30)).toEqual({ m: high, hit: true });
+  });
+
+  it('measures a near miss across, and finds the mouth missed by least', () => {
+    expect(mouthGap(low, 13, 14)).toBeCloseTo(5);
+    const beside: Mouth = { ...low, x: 40 };
+    expect(aimAt([low, beside], { x: 18, y: 0, z: 0 }, 30)).toEqual({ m: low, hit: false });
+    expect(aimAt([low, beside], { x: 24, y: 0, z: 0 }, 30)).toEqual({ m: beside, hit: false });
+    expect(aimAt([low], { x: 50, y: 0, z: 0 }, 30)).toBeNull();
+  });
+
+  it('turns a hit too far below into a near miss, as from a faucet', () => {
+    expect(aimAt([low], { x: 0, y: 0, z: 0 }, 30, 24)).toEqual({ m: low, hit: false });
+    expect(aimAt([low], { x: 0, y: -80, z: 0 }, 30, 24)).toEqual({ m: low, hit: true });
   });
 });
 

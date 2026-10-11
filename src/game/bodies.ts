@@ -112,9 +112,9 @@ export const FLASK_R = 28;
 /** The middle of a flask, below its mouth: where it's held from. */
 export const FLASK_CENTER: Vec3 = { x: 0, y: -FLASK_H / 2, z: 0 };
 
-/** A flask's lip on its right, where it pours from, tipped by its tilt about its mouth (see Flask.tilt). */
-export function flaskLip(f: Flask): Vec3 {
-  return toWorld(f.pose, { x: FLASK_LIP * Math.cos(f.tilt), y: -FLASK_LIP * Math.sin(f.tilt), z: 0 });
+/** A flask's lip on its right, where it pours from, tipped by its tilt (or `tilt`) about its mouth (see Flask.tilt). */
+export function flaskLip(f: Flask, tilt = f.tilt): Vec3 {
+  return toWorld(f.pose, { x: FLASK_LIP * Math.cos(tilt), y: -FLASK_LIP * Math.sin(tilt), z: 0 });
 }
 
 /** A flask's mouth, in the room, unless it's tipped (when it pours instead). */

@@ -22,7 +22,7 @@ import {
 } from './space';
 import {
   HEATER, HEATER_CELLS, HEATER_TUBE, Hose, MAX_FLOW, RECEPTACLE_TIMES, SCAN_LIGHTS, SHAPES, SUMP_TIP, TANK_H, TOOL_NAMES,
-  Tool, UNIQUE_TOOLS, cupFillHeight, drip, mouthBelow, scanLevel, sumpFillHeight, tankX, type Mouth, type ToolKind,
+  Tool, UNIQUE_TOOLS, aimAt, cupFillHeight, drip, mouthBelow, scanLevel, sumpFillHeight, tankX, type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
 import {
@@ -131,6 +131,8 @@ const HOTKEY_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'
 const POUR_ANG = Math.PI * 0.61;
 /** How long a flask takes to tip to pour, or stand back up, in real seconds. */
 const TIP_S = 0.3;
+/** How far across, in world units, an outlet can miss a mouth by and still show a faint guide to it (see guides). */
+const GUIDE_NEAR = 40;
 /** How far below a faucet something can be and still get filled. */
 const FAUCET_REACH = 24;
 /** How fast a falling drop speeds up, in world units per sim second squared: a 500-unit fall takes 0.7 s. */
@@ -1616,6 +1618,45 @@ export class GameEngine {
     }
   }
 
+  /**
+   * Guides for lining up what's held, as gray streams: from each outlet of what's held (a flask's lip, tipped as it
+   * would be to pour; a tool's spouts; a hose's nozzle) down to the mouth it would land in, solid, or to one it would
+   * just miss, faint; and the same from every other outlet (spouts, nozzles, faucets) that would land in, or just
+   * miss, something held. Shown only while something's held, since that's when things are being lined up.
+   */
+  private guides(): Frame['guides'] {
+    const h = this.held;
+    if (!h) return [];
+    const mouths = this.open;
+    // what's held, as outlets and as vessels that can be landed in
+    const mine = new Set<Vessel>();
+    const outlets: Vec3[] = [];
+    if (h.kind === 'flask') {
+      mine.add(h.f);
+      outlets.push(flaskLip(h.f, POUR_ANG));
+    } else if (h.kind === 'tool') {
+      for (const v of h.t.tanks) mine.add(v);
+      h.t.shape.spouts.forEach((_, j) => outlets.push(spoutAt(h.t, j)));
+    } else if (h.kind === 'scale') for (const { f } of h.sc.load) mine.add(f);
+    else {
+      if (h.end !== 'outlet') mine.add(h.h.funnel);
+      if (h.end !== 'inlet') outlets.push(h.h.outlet);
+    }
+    const out: Frame['guides'][number][] = [];
+    const guide = (from: Vec3, reach: number, onlyMine: boolean) => {
+      const a = aimAt(mouths, from, GUIDE_NEAR, reach);
+      if (!a || (onlyMine && !mine.has(a.m.v)) || (!onlyMine && mine.has(a.m.v))) return;
+      out.push({ from, toY: a.m.y, solid: a.hit });
+    };
+    for (const o of outlets) guide(o, Infinity, false);
+    if (mine.size) {
+      for (const t of this.tools) if (!(h.kind === 'tool' && h.t === t)) t.shape.spouts.forEach((_, j) => guide(spoutAt(t, j), Infinity, true));
+      for (const hose of this.hoses) if (!(h.kind === 'hose' && h.h === hose)) guide(hose.outlet, Infinity, true);
+      for (const fa of this.faucets) guide(fa.spout, FAUCET_REACH, true);
+    }
+    return out;
+  }
+
   private render(dt: number): void {
     const mouths = this.open;
     const streams: Frame['streams'][number][] = [];
@@ -1644,7 +1685,7 @@ export class GameEngine {
       eye: this.eye(), yaw: this.player.yaw, pitch: this.player.pitch,
       flasks: this.flasks, tools: this.tools, scales: this.scales, hoses: this.hoses, faucets: this.faucets,
       held: this.heldObject(), standing: this.standing(), streams, drops,
-      tarePress: this.tarePress, hot: this.target, shake, dt, delivered: this.delivered, papers: this.paperFrame(),
+      tarePress: this.tarePress, hot: this.target, shake, dt, delivered: this.delivered, papers: this.paperFrame(), guides: this.guides(),
     });
     if (this.firstFrame) {
       // everything starts held, rather than every arm snapping down at once
