@@ -179,7 +179,8 @@ const GRAVITY = 2000;
 const EYE = 620;
 const CROUCH_EYE = 330;
 const PLAYER_R = 45;
-const WALK = 560;
+/** Walking speed, in world units per real second. */
+const WALK = 840;
 /** How far away something can be and still be picked up or pressed. */
 const REACH = 460;
 /** The nearest and furthest something can be held, from the eyes to its middle, beyond its own size. */
