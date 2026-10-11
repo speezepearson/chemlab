@@ -100,3 +100,33 @@ describe('walk', () => {
     expect(p.z).toBeGreaterThanOrEqual(-90);
   });
 });
+
+describe('round boxes and parts', () => {
+  const cyl = (x: number, z: number, r = 10): Box => ({ ...box(x, z, r, r), round: true });
+
+  it('lets cylinders come as close as their radii, at any angle, where boxes would meet at their corners', () => {
+    const d = 21 / Math.SQRT2;
+    expect(boxesOverlap(cyl(0, 0), cyl(d, d))).toBe(false);
+    expect(boxesOverlap(box(0, 0), box(d, d))).toBe(true);
+    expect(boxesOverlap(cyl(0, 0), cyl(19, 0))).toBe(true);
+  });
+
+  it('tells a cylinder from the box beside it', () => {
+    // a cylinder by a box's corner, clear of it, though their bounding squares overlap
+    expect(boxesOverlap(cyl(18, 18), box(0, 0))).toBe(false);
+    expect(boxesOverlap(cyl(18, 0), box(0, 0))).toBe(true);
+    expect(cylinderHitsBox({ x: 12, z: 12, r: 10, y0: -5, y1: 5 }, cyl(0, 0))).toBe(true);
+    expect(cylinderHitsBox({ x: 15, z: 15, r: 10, y0: -5, y1: 5 }, cyl(0, 0))).toBe(false);
+  });
+
+  it('is solid only in its parts, which turn with it', () => {
+    // a wide box solid only in a thin part across its top
+    const t: Box = { ...box(0, 0, 50, 10, 0, 0, 20), parts: [{ x: 0, y: 15, z: 0, hx: 50, hy: 5, hz: 10 }] };
+    expect(boxesOverlap(t, box(30, 0, 5, 5, 0, -10, 5))).toBe(false);
+    expect(boxesOverlap(t, box(30, 0, 5, 5, 0, 15, 5))).toBe(true);
+    // turned a quarter, its part runs front to back
+    const turned = { ...t, parts: [{ x: 30, y: 0, z: 0, hx: 5, hy: 20, hz: 5 }], yaw: Math.PI / 2 };
+    expect(boxesOverlap(turned, box(0, -30, 3, 3))).toBe(true);
+    expect(boxesOverlap(turned, box(30, 0, 3, 3))).toBe(false);
+  });
+});

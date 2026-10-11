@@ -1827,7 +1827,8 @@ export class GameEngine {
     const span = (to: Box, from: Box): Box => {
       const y0 = Math.min(to.y - to.hy, from.y - from.hy);
       const y1 = Math.max(to.y + to.hy, from.y + from.hy);
-      return { ...to, y: (y0 + y1) / 2, hy: (y1 - y0) / 2 };
+      // the whole of it, not just its parts, since its parts don't stretch
+      return { ...to, y: (y0 + y1) / 2, hy: (y1 - y0) / 2, parts: undefined };
     };
     const box = this.boxAt(h, p);
     const stands = this.standsAt(h, p);

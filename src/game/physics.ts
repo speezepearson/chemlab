@@ -2,16 +2,53 @@ import { toWorld, type Pose, type Vec3 } from './space';
 
 /**
  * Collisions in the lab. Nothing falls (whatever the player lets go of is set down on a counter, or on a stand), and
- * nothing turns except about the vertical, so every body is a box turned by some yaw, and the player is an
- * upright cylinder. The only things that move are the player and what they're carrying, so the physics is all
+ * nothing turns except about the vertical, so every body is a box turned by some yaw, or an upright cylinder, or
+ * made of several such parts, and the player is an upright cylinder. The only things that move are the player and what they're carrying, so the physics is all
  * about stopping those short of whatever they'd run into, and letting them slide along it.
  */
 
-/** A box turned by `yaw` about the vertical: its center, and its half-size along its own axes. */
+/**
+ * A box turned by `yaw` about the vertical: its center, and its half-size along its own axes. Or, if `round`, an
+ * upright cylinder `hx` (which is `hz`) in radius. If it has `parts`, it's solid only in them, and it bounds them all.
+ */
 export interface Box extends Pose {
   hx: number;
   hy: number;
   hz: number;
+  round?: boolean;
+  parts?: readonly Part[];
+}
+
+/** One solid part of a box (see Box.parts): a box, or a cylinder if round, its middle offset from the box's, in the box's own frame. */
+export interface Part {
+  x: number;
+  y: number;
+  z: number;
+  hx: number;
+  hy: number;
+  hz: number;
+  round?: boolean;
+}
+
+/** The solid parts of a box, in the room: itself, if it's solid all through. */
+export function solids(b: Box): Box[] {
+  if (!b.parts) return [b];
+  const c = Math.cos(b.yaw);
+  const s = Math.sin(b.yaw);
+  return b.parts.map((p) => ({
+    x: b.x + p.x * c + p.z * s, y: b.y + p.y, z: b.z - p.x * s + p.z * c, yaw: b.yaw, hx: p.hx, hy: p.hy, hz: p.hz, round: p.round,
+  }));
+}
+
+/** How far a point (x, z) on the floor is from a box's footprint, across: 0 inside it. */
+function footprintGap(b: Box, x: number, z: number): number {
+  const cs = Math.cos(b.yaw);
+  const sn = Math.sin(b.yaw);
+  const dx = x - b.x;
+  const dz = z - b.z;
+  const lx = dx * cs - dz * sn;
+  const lz = dx * sn + dz * cs;
+  return Math.hypot(lx - Math.max(-b.hx, Math.min(b.hx, lx)), lz - Math.max(-b.hz, Math.min(b.hz, lz)));
 }
 
 /** A body's box, given in its own frame (center and half-size), placed at a pose. */
@@ -28,9 +65,20 @@ function footprint(b: Box): { ax: [number, number]; az: [number, number] } {
   return { ax: [c, -s], az: [s, c] };
 }
 
-/** Whether two boxes overlap by more than `slop` (so boxes merely touching don't count). */
+/** Whether two boxes overlap by more than `slop` (so boxes merely touching don't count): in their solid parts, if they have any. */
 export function boxesOverlap(a: Box, b: Box, slop = 0.01): boolean {
+  if (!a.parts && !b.parts) return solidsOverlap(a, b, slop);
+  if (!solidsOverlap({ ...a, parts: undefined }, { ...b, parts: undefined }, slop)) return false;
+  const bs = solids(b);
+  return solids(a).some((p) => bs.some((q) => solidsOverlap(p, q, slop)));
+}
+
+/** Whether two solid boxes or cylinders (with no parts) overlap by more than `slop`. */
+function solidsOverlap(a: Box, b: Box, slop: number): boolean {
   if (Math.abs(a.y - b.y) >= a.hy + b.hy - slop) return false;
+  if (a.round && b.round) return Math.hypot(a.x - b.x, a.z - b.z) < a.hx + b.hx - slop;
+  if (a.round) return footprintGap(b, a.x, a.z) < a.hx - slop;
+  if (b.round) return footprintGap(a, b.x, b.z) < b.hx - slop;
   const fa = footprint(a);
   const fb = footprint(b);
   const dx = b.x - a.x;
@@ -53,19 +101,13 @@ export interface Cylinder {
   y1: number;
 }
 
-/** Whether a cylinder and a box overlap by more than `slop`. */
+/** Whether a cylinder and a box overlap by more than `slop`: in its solid parts, if it has any. */
 export function cylinderHitsBox(c: Cylinder, b: Box, slop = 0.01): boolean {
-  if (c.y1 <= b.y - b.hy + slop || c.y0 >= b.y + b.hy - slop) return false;
-  const cs = Math.cos(b.yaw);
-  const sn = Math.sin(b.yaw);
-  const dx = c.x - b.x;
-  const dz = c.z - b.z;
-  // the cylinder's axis in the box's own frame, then the nearest point of the box's footprint to it
-  const lx = dx * cs - dz * sn;
-  const lz = dx * sn + dz * cs;
-  const nx = Math.max(-b.hx, Math.min(b.hx, lx));
-  const nz = Math.max(-b.hz, Math.min(b.hz, lz));
-  return Math.hypot(lx - nx, lz - nz) < c.r - slop;
+  return solids(b).some((p) => {
+    if (c.y1 <= p.y - p.hy + slop || c.y0 >= p.y + p.hy - slop) return false;
+    if (p.round) return Math.hypot(c.x - p.x, c.z - p.z) < c.r + p.hx - slop;
+    return footprintGap(p, c.x, c.z) < c.r - slop;
+  });
 }
 
 const free = (b: Box, obstacles: readonly Box[]) => !obstacles.some((o) => boxesOverlap(b, o));

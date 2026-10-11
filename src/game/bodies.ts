@@ -1,10 +1,10 @@
 import type { Flask } from './flask';
 import { FLASK_H } from './flaskShape';
-import { placeBox, type Box } from './physics';
+import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { groundAt, toWorld, type Pose, type Vec3 } from './space';
 import {
-  HOSE_CAP, SHAPES, SPACE_PER_ATOM, TANK_H, tankDepth, tankX, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
+  HELIX, HOSE_CAP, SHAPES, SPACE_PER_ATOM, TANK_H, tankDepth, tankX, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
 } from './tools';
 
 /**
@@ -77,10 +77,48 @@ export function tankMouth(t: Tool, k: number): Mouth {
   return { v: t.tanks[k], ...c, hx: (o.x1 - o.x0) / 2, hz: o.hz, yaw: t.pose.yaw, rim };
 }
 
-/** A tool's bounding box in the room, for collisions. */
+/** The tools whose bodies are a cabinet as wide as they are, under their tanks, rather than pipes and valves. */
+const CABINETS: readonly ToolKind[] = ['spectrometer', 'meter', 'receptacle'];
+
+/**
+ * A tool's solid parts, in its flat frame (x right, y down from its top center) as it would stand unflipped, each
+ * reaching `hz` either side of its middle front to back: its tanks (round, for a round tank), and under them its
+ * cabinet, or else the pipes, valves and spouts there, across only as far as they reach.
+ */
+export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: number; hz: number; round?: boolean }[] {
+  const sh = t.shape;
+  const b = sh.box;
+  const D = TOOL_DEPTH[t.kind];
+  const bottom = (sh.tankH ?? TANK_H) + (sh.sump?.h ?? 0);
+  const x0s = sh.tanks.map((k) => (sh.cup ? tankX(k) - sh.cup.w : k.x0));
+  const x1s = sh.tanks.map((k) => (sh.cup ? tankX(k) + sh.cup.w : k.x1));
+  const tanks = {
+    x0: Math.min(...x0s) - 2, x1: Math.max(...x1s) + 2, y0: (sh.cup ? -sh.cup.h : 0) - 6, y1: bottom,
+    hz: Math.max(D.tank / 2 + 2, sh.cup ? sh.cup.w + 1 : 0), round: sh.round,
+  };
+  if (sh.round) tanks.hz = (tanks.x1 - tanks.x0) / 2;
+  if (bottom >= b.y1) return [tanks];
+  if (CABINETS.includes(t.kind)) return [tanks, { x0: b.x0, x1: b.x1, y0: bottom, y1: b.y1, hz: D.body / 2 }];
+  const valves = sh.noValve ? [] : (sh.valves ?? sh.tanks.map((k) => ({ x: tankX(k), y: sh.valveY })));
+  const xs = [...sh.spouts, ...valves.map((v) => v.x), ...sh.tanks.map(tankX)];
+  if (t.kind === 'exchanger') xs.push(HELIX.x0, HELIX.x1);
+  const below = {
+    x0: Math.max(b.x0, Math.min(...xs) - 12), x1: Math.min(b.x1, Math.max(...xs) + 12),
+    y0: Math.min(bottom, ...valves.map((v) => v.y - 10)), y1: b.y1, hz: D.body / 2,
+  };
+  return [tanks, below];
+}
+
+/** A tool's box in the room, for collisions: its bounding box, solid only in its parts (see toolParts). */
 export function toolBox(t: Tool): Box {
   const b = t.shape.box;
-  return placeBox(t.pose, toolCenter(t), { x: (b.x1 - b.x0) / 2, y: (b.y1 - b.y0) / 2, z: TOOL_DEPTH[t.kind].body / 2 });
+  const c = { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 };
+  const parts: Part[] = toolParts(t).map((p) => ({
+    x: lx(t, (p.x0 + p.x1) / 2 - c.x), y: -((p.y0 + p.y1) / 2 - c.y), z: 0,
+    hx: (p.x1 - p.x0) / 2, hy: (p.y1 - p.y0) / 2, hz: p.hz, round: p.round,
+  }));
+  const hz = Math.max(TOOL_DEPTH[t.kind].body / 2, ...parts.map((p) => p.hz));
+  return { ...placeBox(t.pose, toolCenter(t), { x: (b.x1 - b.x0) / 2, y: (b.y1 - b.y0) / 2, z: hz }), parts };
 }
 
 /** The middle of a tool's bounding box, in its own frame (y up), as it stands: where it's held from. */
@@ -126,9 +164,20 @@ export function flaskMouth(f: Flask): Mouth {
   return { v: f, x: p.x, y: p.y, z: p.z, hx: FLASK_CATCH, hz: FLASK_CATCH, yaw: p.yaw, rim: flaskLip(f) };
 }
 
-/** A flask's box. A flask is round, so its box doesn't turn with it. */
+/**
+ * A flask's solid parts, as slices of its outline down from its mouth, each a cylinder as wide as its widest part
+ * (glass included): its neck, two bands of its sloping shoulders, and its base.
+ */
+const FLASK_PARTS: readonly Part[] = [
+  [0, 22, 12],
+  [22, 36, 15.5],
+  [36, 50, 21],
+  [50, FLASK_H, FLASK_R],
+].map(([a, b, r]) => ({ x: 0, y: FLASK_H / 2 - (a + b) / 2, z: 0, hx: r, hy: (b - a) / 2, hz: r, round: true }));
+
+/** A flask's box: an upright cylinder, solid in the slices of its outline (see FLASK_PARTS). It doesn't turn. */
 export function flaskBox(f: Flask): Box {
-  return placeBox({ ...f.pose, yaw: 0 }, FLASK_CENTER, { x: FLASK_R, y: FLASK_H / 2, z: FLASK_R });
+  return { ...placeBox({ ...f.pose, yaw: 0 }, FLASK_CENTER, { x: FLASK_R, y: FLASK_H / 2, z: FLASK_R }), round: true, parts: FLASK_PARTS };
 }
 
 /* ---------------- scales ---------------- */
@@ -198,9 +247,11 @@ export function hoseMouth(h: Hose): Mouth {
 export function hoseEndBox(h: Hose, end: 'inlet' | 'outlet'): Box {
   const e = h[end];
   const pose = { ...e, yaw: 0 };
-  return end === 'inlet'
-    ? placeBox(pose, { x: 0, y: -FUNNEL_H / 2, z: 0 }, { x: FUNNEL_R, y: FUNNEL_H / 2, z: FUNNEL_R })
-    : placeBox(pose, { x: 0, y: NOZZLE_H / 2, z: 0 }, { x: 5, y: NOZZLE_H / 2, z: 5 });
+  const box =
+    end === 'inlet'
+      ? placeBox(pose, { x: 0, y: -FUNNEL_H / 2, z: 0 }, { x: FUNNEL_R, y: FUNNEL_H / 2, z: FUNNEL_R })
+      : placeBox(pose, { x: 0, y: NOZZLE_H / 2, z: 0 }, { x: 5, y: NOZZLE_H / 2, z: 5 });
+  return { ...box, round: true };
 }
 
 /* ---------------- stands ---------------- */

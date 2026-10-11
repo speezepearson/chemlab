@@ -209,3 +209,35 @@ describe('stands', () => {
     expect(hoseStand(e, 'outlet', Math.PI).x).toBeCloseTo(10);
   });
 });
+
+describe('collision shapes', () => {
+  it('let flasks stand as close as their round bases, at any angle', () => {
+    const a = new Flask(CAP);
+    const b = new Flask(CAP);
+    a.pose = at(0, 500, 0);
+    const d = (2 * FLASK_R + 1) / Math.SQRT2;
+    b.pose = at(d, 500, d);
+    expect(boxesOverlap(flaskBox(a), flaskBox(b))).toBe(false);
+    b.pose = at(2 * FLASK_R - 2, 500, 0);
+    expect(boxesOverlap(flaskBox(a), flaskBox(b))).toBe(true);
+  });
+
+  it("let a flask's wide base come down beside another's narrow neck", () => {
+    const a = new Flask(CAP);
+    const b = new Flask(CAP);
+    a.pose = at(0, 500, 0);
+    // b's base, 28 across from its middle, level with a's neck, 12 across from its middle
+    b.pose = at(42, 500 + FLASK_H - 10, 0);
+    expect(boxesOverlap(flaskBox(a), flaskBox(b))).toBe(false);
+  });
+
+  it("are solid in a tool's tank and pipes, not the empty space beside its pipes", () => {
+    const t = new Tool('separator', 0, at(0, 600, 0));
+    const f = new Flask(CAP);
+    // beside the tank, above the manifold: empty space within its bounding box
+    f.pose = at(70, 600 - 10, 0);
+    expect(boxesOverlap(toolBox(t), flaskBox(f))).toBe(false);
+    f.pose = at(0, 600 - 40, 0);
+    expect(boxesOverlap(toolBox(t), flaskBox(f))).toBe(true);
+  });
+});
