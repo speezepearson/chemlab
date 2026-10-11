@@ -78,6 +78,8 @@ export interface Frame {
   /** Whether the alarms are silenced, which the button under the beacon shows. */
   alarmsOff: boolean;
   airlock: AirlockLook;
+  /** How far the ship has turned, in radians, which turns the stars about the room's front-to-back axis. */
+  spin: number;
   /**
    * The sticky notes on the back wall: each sheet with its top left corner, on the old flat bench (x across, y down);
    * whether the pencil's in hand (so each shows its handles); and a sheet being marked out, if one is.
@@ -2284,6 +2286,7 @@ export class View {
     this.clock += fr.dt;
     const { scene, pickables } = this;
     this.look(fr.eye, fr.yaw, fr.pitch);
+    this.stars.rotation.z = fr.spin;
 
     this.sync(this.flasks, fr.flasks, (f) => new FlaskView(f, scene, pickables));
     this.sync(this.tools, fr.tools, (t) => new ToolView(t, scene, pickables));

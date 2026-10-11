@@ -21,7 +21,7 @@ import { rumble, type Rumble } from './rumble';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
 import {
-  COUNTERS, LIFT, PAPER_Z, ROOM, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, wrapAngle, type Pose, type Vec3,
+  COUNTERS, LIFT, PAPER_Z, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, wrapAngle, type Pose, type Vec3,
 } from './space';
 import {
   HEATER, HEATER_CELLS, HEATER_TUBE, Hose, MAX_FLOW, RECEPTACLE_TIMES, SCAN_LIGHTS, SHAPES, SUMP_TIP, TANK_H, TOOL_NAMES,
@@ -270,6 +270,8 @@ export class GameEngine {
   private alarmsOff = false;
   /** Where the player is in waking up in the airlock (see Wake), and how many sim seconds it's been there. */
   private wake: Wake = 'closed';
+  /** How far the ship has turned, in radians (see SPIN), for the stars. */
+  private spin = 0;
   private wakeT = Infinity;
   /** Each receptacle's sounds, through its cycle (see Tool.press). */
   private beepers = new Map<Tool, Beeper>();
@@ -1628,6 +1630,7 @@ export class GameEngine {
     this.pour = null;
     // the lab waits for the player to press OK in the pod, as it did through the rest of the intro
     const simDt = this.wake === 'pod' ? 0 : dt * this.speed;
+    this.spin = (this.spin + SPIN * simDt) % (2 * Math.PI);
     const mouths = (this.open = this.mouths());
     const h = this.held;
 
@@ -2068,7 +2071,7 @@ export class GameEngine {
       eye: this.eye(), yaw: this.player.yaw, pitch: this.player.pitch,
       flasks: this.flasks, tools: this.tools, scales: this.scales, hoses: this.hoses, faucets: this.faucets,
       streams, drops,
-      tarePress: this.tarePress, hot: this.target, shake, dt, delivered: this.delivered, alarmsOff: this.alarmsOff,
+      tarePress: this.tarePress, hot: this.target, shake, dt, delivered: this.delivered, alarmsOff: this.alarmsOff, spin: this.spin,
       airlock: this.airlockLook(),
       papers: this.paperFrame(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(),
