@@ -81,13 +81,9 @@ export const FUNNEL_TIP = 6;
 
 /**
  * Tank k of a shape's inside, `d` deep front to back, as it's drawn, bottom up: a sump under its floor, then the
- * tank; a funnel narrowing to its stem; a tube with a little funnel on top; or a catcher's cell.
+ * tank; a funnel narrowing to its stem; a tube with a little funnel on top; or an upright cylinder.
  */
 export function tankPieces(sh: ToolShape, k: number, d: number): Piece[] {
-  if (sh.catcher) {
-    const c = sh.catcher;
-    return [{ h: c, w0: c, d0: c, w1: c, d1: c }];
-  }
   const w = sh.tanks[k].x1 - sh.tanks[k].x0;
   const h = sh.tankH ?? TANK_H;
   if (sh.round) {
@@ -107,14 +103,14 @@ const depths = new Map<ToolKind, number>();
 
 /**
  * How deep front to back a kind of tool's tanks are inside: deep enough to hold what they hold (see SPACE_PER_ATOM),
- * given how wide and tall they're drawn. A catcher's funnel, or a round tank, is as deep as it's wide.
+ * given how wide and tall they're drawn. A round tank is as deep as it's wide.
  */
 export function tankDepth(kind: ToolKind): number {
   let d = depths.get(kind);
   if (d !== undefined) return d;
   const sh = SHAPES[kind];
   const want = (sh.tankCap ?? TANK_CAP) * SPACE_PER_ATOM;
-  if (sh.catcher || sh.round) d = sh.tanks[0].x1 - sh.tanks[0].x0;
+  if (sh.round) d = sh.tanks[0].x1 - sh.tanks[0].x0;
   else {
     let [lo, hi] = [0.1, 5000];
     for (let i = 0; i < 60; i++) {
@@ -296,8 +292,8 @@ export function beepPattern(rand = Math.random): Beep[] {
   return out;
 }
 
-/** How much a spectrometer's sample cup holds, by volume: a thousandth of a flask, 1M. */
-export const SAMPLE_CAP = CAP / 1000;
+/** How much a spectrometer's sample cup holds, by volume: a hundredth of a flask, 10M, about seven drops. */
+export const SAMPLE_CAP = CAP / 100;
 /** Sim seconds into a spectrometer run at which each of its three hexagons lights up; the run ends with the last. */
 export const SCAN_LIGHTS = [1, 3, 7] as const;
 /**
@@ -436,12 +432,6 @@ export interface ToolShape {
    * one that's its own mirror image, in what it does if not in every detail, can't.
    */
   flippable?: boolean;
-  /**
-   * Whether its tank is a cell `catcher` wide, deep and tall, under an opaque funnel the width of the tank's outline
-   * that holds nothing, just catching what falls in it and passing it straight down: for a vessel too small to catch
-   * anything with on its own.
-   */
-  catcher?: number;
   /** Whether its tanks are upright cylinders, as wide front to back as across, rather than boxes; a sump too. */
   round?: boolean;
   /** Whether it stands straight on a counter, like a cabinet, rather than being held up over it on a clamp stand. */
@@ -602,10 +592,10 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   },
   spectrometer: {
     // a sample cup on a cabinet with a screen and a run button (see SPECTROMETER)
-    tanks: [{ name: 'sample', x0: -12, x1: 12 }],
-    tankH: 20,
+    tanks: [{ name: 'sample', x0: -7, x1: 7 }],
+    tankH: 8,
     tankCap: SAMPLE_CAP,
-    catcher: Math.cbrt(SAMPLE_CAP * SPACE_PER_ATOM),
+    funnel: true,
     noValve: true,
     bench: true,
     spouts: [],

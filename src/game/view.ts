@@ -131,8 +131,6 @@ const keyMats = {
 };
 const hidden = new THREE.MeshBasicMaterial({ visible: false });
 const faintMat = new THREE.MeshBasicMaterial({ color: 0xd6ecf2, transparent: true, opacity: 0.3, depthWrite: false });
-/** A catcher's funnel (see ToolShape.catcher): metal, seen from inside as well as out. */
-const catcherMat = new THREE.MeshStandardMaterial({ color: 0x7c8883, metalness: 0.55, roughness: 0.4, side: THREE.DoubleSide });
 const rodMat = new THREE.MeshStandardMaterial({ color: 0xb4bcb9, metalness: 0.75, roughness: 0.3 });
 
 /** Points in a flat frame (x right, y down), placed at depth z, as a vector in an object's own frame (y up). */
@@ -673,7 +671,7 @@ class ToolView {
       pipes(art, [[tankX(sh.tanks[0]), TH], [tankX(sh.tanks[0]), y - r + 1]]);
       for (const x of sh.spouts.slice(0, -1)) pipes(art, [[x, y + r - 1], [x, sh.spoutY - 4]]);
       pipes(art, [[x1 + r - 1, y], [end - 4, y], [end, y + 4], [end, sh.spoutY - 4]]);
-    } else if (t.kind === 'spectrometer') pipes(art, [[0, TH + (sh.catcher ?? 0)], [0, SPECTROMETER.body.y0]]);
+    } else if (t.kind === 'spectrometer') pipes(art, [[0, TH], [0, SPECTROMETER.body.y0]]);
     else if (t.kind === 'receptacle') pipes(art, [[sh.spouts[0], TH], [sh.spouts[0], sh.spoutY - 4]]);
     else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);
     for (const x of sh.spouts) block(art, pipeMat, x - 4, x + 4, sh.spoutY - 6, sh.spoutY, -4, 4);
@@ -689,17 +687,9 @@ class ToolView {
       const share = (v: Vessel) => Math.min(1, volume(v) / v.cap);
       // the fluid settles into the tank as it's drawn (see tankPieces), from its bottom up
       const pieces = tankPieces(sh, k, d);
-      const bottom = r.y1 + (sh.catcher ?? (sh.cup || sh.funnel ? 0 : (sh.sump?.h ?? 0)));
+      const bottom = r.y1 + (sh.cup || sh.funnel ? 0 : (sh.sump?.h ?? 0));
       const level = (v: Vessel) => onTool(t, 0, bottom - levelIn(pieces, share(v))).y;
-      if (sh.catcher) {
-        // an opaque funnel, holding nothing, over the little glass cell that holds it all
-        const c = sh.catcher;
-        const funnel = new THREE.Mesh(frustum(cx, r.y0, r.y1, w, d, FUNNEL_TIP, FUNNEL_TIP, true), catcherMat);
-        funnel.castShadow = true;
-        art.add(funnel);
-        glassFrom(art, new THREE.BoxGeometry(c + 1, c, c + 1).translate(cx, -(r.y1 + c / 2), 0));
-        geoms = [new THREE.BoxGeometry(c, c - 0.2, c).translate(cx, -(r.y1 + c / 2), 0)];
-      } else if (sh.cup) {
+      if (sh.cup) {
         openBox(art, r.x0, r.x1, r.y0, r.y1, d);
         glassFrom(art, frustum(cx, o.y, r.y0, 2 * sh.cup.w, 2 * sh.cup.w, w, d, true));
         geoms = [
