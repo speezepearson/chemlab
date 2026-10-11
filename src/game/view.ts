@@ -1442,6 +1442,39 @@ function panelTexture(): THREE.Texture {
   return t;
 }
 
+/** The porthole through the left wall: how high its middle is, its radius, and how thick the hull is around it. */
+const PORT = { y: 760, r: 150, depth: 40 };
+
+/**
+ * The stars, all round the ship, far enough off that they don't move as the player walks: seen only through the
+ * porthole. Kept centered on the eye (see View.render), like a sky.
+ */
+function starField(): THREE.Points {
+  const pos: number[] = [];
+  const col: number[] = [];
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 4000; i++) {
+    // evenly over the sphere
+    const y = 2 * rnd() - 1;
+    const a = rnd() * Math.PI * 2;
+    const r = Math.sqrt(1 - y * y) * STAR_R;
+    pos.push(r * Math.cos(a), y * STAR_R, r * Math.sin(a));
+    // mostly faint, a few bright, some a little blue or warm
+    const b = 0.35 + 0.65 * rnd() ** 4;
+    const tint = rnd();
+    col.push(b * (tint < 0.15 ? 0.8 : 1), b * 0.95, b * (tint > 0.85 ? 0.75 : 1));
+  }
+  return new THREE.Points(
+    new THREE.BufferGeometry()
+      .setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+      .setAttribute('color', new THREE.Float32BufferAttribute(col, 3)),
+    new THREE.PointsMaterial({ size: 2, sizeAttenuation: false, vertexColors: true }),
+  );
+}
+/** How far off the stars are drawn: inside the camera's reach, outside the room's. */
+const STAR_R = 6000;
+
 function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.Mesh } {
   const W = ROOM.x1 - ROOM.x0;
   const Dp = ROOM.z1 - ROOM.z0;
@@ -1459,10 +1492,22 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
   ceil.rotation.x = Math.PI / 2;
   ceil.position.set(cx, H, cz);
   scene.add(ceil);
-  const wall = (w: number, x: number, z: number, ry: number) => {
+  // a wall, with a round hole in it at (hx, hy) from its middle if `hole` is given
+  const wall = (w: number, x: number, z: number, ry: number, hole?: { x: number; y: number; r: number }) => {
     const tex = panelTexture();
-    tex.repeat.set(w / 220, H / 440);
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, H), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, metalness: 0.1 }));
+    let geom: THREE.BufferGeometry;
+    if (hole) {
+      const shape = new THREE.Shape().moveTo(-w / 2, -H / 2).lineTo(w / 2, -H / 2).lineTo(w / 2, H / 2).lineTo(-w / 2, H / 2).lineTo(-w / 2, -H / 2);
+      shape.holes.push(new THREE.Path().absarc(hole.x, hole.y, hole.r, 0, Math.PI * 2, true));
+      geom = new THREE.ShapeGeometry(shape, 24);
+      // its texture coordinates are in world units, from its bottom left, as a plane's are in fractions
+      tex.repeat.set(1 / 220, 1 / 440);
+      tex.offset.set(w / 2 / 220, H / 2 / 440);
+    } else {
+      geom = new THREE.PlaneGeometry(w, H);
+      tex.repeat.set(w / 220, H / 440);
+    }
+    const m = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, metalness: 0.1 }));
     m.position.set(x, H / 2, z);
     m.rotation.y = ry;
     m.receiveShadow = true;
@@ -1470,7 +1515,8 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
   };
   wall(W, cx, ROOM.z0, 0);
   wall(W, cx, ROOM.z1, Math.PI);
-  wall(Dp, ROOM.x0, cz, Math.PI / 2);
+  // the left wall has the porthole through it (see below); turned to face in, its own x runs toward −z
+  wall(Dp, ROOM.x0, cz, Math.PI / 2, { x: 0, y: PORT.y - H / 2, r: PORT.r });
   wall(Dp, ROOM.x1, cz, -Math.PI / 2);
   // ceiling light panels
   for (let x = ROOM.x0 + 300; x < ROOM.x1; x += 500)
@@ -1512,26 +1558,16 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
     grate.receiveShadow = true;
     scene.add(grate);
   }
-  // a porthole on the left wall, onto the stars
+  // a porthole through the left wall, onto the stars (see starField): a ring round it, and the hull's thickness
   const port = new THREE.Group();
-  const glassDisc = new THREE.Mesh(new THREE.CircleGeometry(150, 48), new THREE.MeshBasicMaterial({ color: 0x02040a }));
-  port.add(glassDisc);
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(152, 12, 12, 48), darkMat);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(PORT.r + 2, 12, 12, 48), darkMat);
   port.add(ring);
-  const starPos: number[] = [];
-  let seed = 7;
-  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < 160; i++) {
-    const r = 145 * Math.sqrt(rnd());
-    const a = rnd() * Math.PI * 2;
-    starPos.push(r * Math.cos(a), r * Math.sin(a), 0.5);
-  }
-  const stars = new THREE.Points(
-    new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3)),
-    new THREE.PointsMaterial({ color: 0xffffff, size: 2, sizeAttenuation: false }),
+  const tunnel = new THREE.Mesh(
+    new THREE.CylinderGeometry(PORT.r, PORT.r, PORT.depth, 48, 1, true).rotateX(Math.PI / 2).translate(0, 0, -PORT.depth / 2),
+    new THREE.MeshStandardMaterial({ color: 0x2a302e, metalness: 0.5, roughness: 0.6, side: THREE.BackSide }),
   );
-  port.add(stars);
-  port.position.set(ROOM.x0 + 1, 760, (ROOM.z0 + ROOM.z1) / 2);
+  port.add(tunnel);
+  port.position.set(ROOM.x0, PORT.y, cz);
   port.rotation.y = Math.PI / 2;
   scene.add(port);
   // an emergency beacon over the door, turning slowly
@@ -1604,6 +1640,7 @@ export class View {
   private beacon: { beacon: THREE.PointLight; lamp: THREE.Mesh };
   private raycaster = new THREE.Raycaster();
   private clock = 0;
+  private stars = starField();
 
   constructor(canvas: HTMLCanvasElement, faucets: readonly FaucetSpot[]) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -1611,7 +1648,8 @@ export class View {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.camera.rotation.order = 'YXZ';
-    this.scene.background = new THREE.Color(0x101414);
+    this.scene.background = new THREE.Color(0x010206);
+    this.scene.add(this.stars);
     this.scene.add(new THREE.HemisphereLight(0xe4eef0, 0x4a4440, 1.5));
     // the ceiling panels, as one light from overhead, so what hangs casts its shadow on the counter and floor
     const sun = new THREE.DirectionalLight(0xf4f8ff, 1.3);
@@ -1664,6 +1702,8 @@ export class View {
   /** Put the camera at the player's eyes, looking their way. */
   look(eye: Vec3, yaw: number, pitch: number): void {
     this.camera.position.set(eye.x, eye.y, eye.z);
+    // the stars are too far off to move as the player does
+    this.stars.position.copy(this.camera.position);
     this.camera.rotation.set(pitch, yaw, 0);
     this.camera.updateMatrixWorld();
   }
