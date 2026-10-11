@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { temperature, type Fluid } from '../chem/reactions';
 import { LOOK, coronaAlpha, coronaRadius, glowFalloff, haloAlpha, haloRadius } from './appearance';
 import {
-  FUNNEL_H, FUNNEL_R, NOZZLE_H, STAND_BASE, TOOL_DEPTH, lx, onTool, openingOf, tankRect, valveLocal, valveZ, type Stand,
+  FUNNEL_H, FUNNEL_R, NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, lx, onTool, openingOf, tankRect, valveLocal, valveZ, type Stand,
 } from './bodies';
 import { CAP, FLASK_L, GOAL_L, TRACE } from './config';
 import { Vessel, fluidAlpha, fluidRGB, glowColor, volume, type Flask } from './flask';
@@ -1381,13 +1381,13 @@ class StandView {
     scene.add(this.group);
   }
 
-  /** Stand it with its base on a surface `y` high, reaching up to its clamp. */
+  /** Stand it with its base on a surface `y` high: its rod always STAND_ROD tall, and its clamp wherever it holds. */
   update(s: Stand, y: number): void {
     const h = STAND_BASE.h;
     this.group.position.set(s.x, 0, s.z);
     this.group.rotation.y = s.yaw;
     this.base.position.y = y + h / 2;
-    const top = Math.max(y + h + 1, s.clampY + 10);
+    const top = y + STAND_ROD;
     this.rod.position.y = (y + h + top) / 2;
     this.rod.scale.set(2.4, top - y - h, 2.4);
     this.boss.position.y = s.clampY;

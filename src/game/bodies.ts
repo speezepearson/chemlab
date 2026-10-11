@@ -211,8 +211,10 @@ export interface Stand {
 
 /** A stand's base plate: how far it reaches either side of its rod, across and front to back, and how thick it is. */
 export const STAND_BASE = { hx: 30, hz: 16, h: 6 };
-/** How high a stand's clamp can be above its base: as long as its rod is. */
-export const STAND_MAX = 800;
+/** How high a stand's rod reaches above the counter, whatever it holds: its clamp slides up and down it. */
+export const STAND_ROD = 570;
+/** How high a stand's clamp can be above the counter: just short of the top of its rod. */
+export const STAND_MAX = STAND_ROD - 10;
 /** A tool wider than this is held by two stands, one near each end, rather than one in the middle. */
 const TWO_STANDS = 300;
 /**
