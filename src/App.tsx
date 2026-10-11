@@ -8,7 +8,6 @@ import { Hud, StartHint, TouchControls } from './components/Hud';
 import { LabelEditor } from './components/LabelEditor';
 import { PaperTextEditor } from './components/PaperTextEditor';
 import { SoundPanel } from './components/SoundPanel';
-import { ViewPanel } from './components/ViewPanel';
 import { Intro } from './components/Intro';
 import { InfoPanel } from './components/InfoPanel';
 import { Palette } from './components/Palette';
@@ -226,7 +225,6 @@ export function App() {
           {god && <ChemistryPanel key={chemVersion} network={network} />}
           {god && <AppearancePanel />}
           <SoundPanel god={god} />
-          <ViewPanel />
           <button
             className="replay"
             onClick={() => {

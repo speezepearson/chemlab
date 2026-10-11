@@ -9,7 +9,7 @@ import { Vessel, fluidAlpha, fluidRGB, glowColor, volume, type Flask } from './f
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { COUNTERS, LIFT, PAPER_Z, ROOM, groundAt, toWorld, type Vec3 } from './space';
-import { PORT_WALL, SIGHT, porthole, type Porthole } from './sight';
+import { PORT_FRAC, PORT_WALL, porthole, type Porthole } from './porthole';
 import { AIRLOCK, POD } from './airlock';
 import { notice } from '../intro/notice';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
@@ -1738,7 +1738,7 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
   front.position.set(cx, H / 2, ROOM.z1);
   front.rotation.y = Math.PI;
   scene.add(front);
-  // the left wall, with the porthole through it, is built apart (see buildPort), so it can change size
+  // the left wall, with the porthole through it, is built apart (see buildPort)
   wall(Dp, ROOM.x1, cz, -Math.PI / 2);
   // ceiling light panels
   for (let x = ROOM.x0 + 300; x < ROOM.x1; x += 500)
@@ -2180,7 +2180,8 @@ function buildFaucets(
 
 /** Draws the lab with Three.js, from the player's eyes, and says what's under the crosshair. */
 export class View {
-  readonly camera = new THREE.PerspectiveCamera(72, 1, 2, 8000);
+  /** The field of view is 90°, top to bottom. */
+  readonly camera = new THREE.PerspectiveCamera(90, 1, 2, 8000);
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private pickables = new Map<THREE.Object3D, Pick>();
@@ -2206,9 +2207,6 @@ export class View {
   private raycaster = new THREE.Raycaster();
   private clock = 0;
   private stars = starField();
-  /** The left wall and its porthole, built for the size in `portFrac` (see buildPort). */
-  private port: THREE.Group | null = null;
-  private portFrac = NaN;
 
   /** `eye` is how high the player's eyes are standing, for the message inside the cryopod. */
   constructor(canvas: HTMLCanvasElement, faucets: readonly FaucetSpot[], eye: number) {
@@ -2240,6 +2238,7 @@ export class View {
     this.scene.add(sun, sun.target);
     this.roomLights = [sky, sun].map((light) => ({ light, base: light.intensity }));
     this.beacon = buildRoom(this.scene);
+    this.scene.add(buildPort(PORT_FRAC));
     this.alarmButton = new AlarmButton(this.scene, this.pickables);
     this.airlock = new AirlockView(this.scene, this.pickables, eye);
     this.draft = new THREE.LineLoop(
@@ -2281,32 +2280,9 @@ export class View {
     this.camera.updateMatrixWorld();
   }
 
-  /** Follow the View panel (see SIGHT): the field of view, and the porthole's size. */
-  private followSight(): void {
-    if (this.camera.fov !== SIGHT.fov) {
-      this.camera.fov = SIGHT.fov;
-      this.camera.updateProjectionMatrix();
-    }
-    if (this.portFrac === SIGHT.port) return;
-    if (this.port) {
-      this.scene.remove(this.port);
-      disposeGeometry(this.port);
-      // its own materials (the wall's, with its texture, and the hull's), not the shared frame's
-      this.port.traverse((c) => {
-        if (!(c instanceof THREE.Mesh) || c.material === darkMat) return;
-        c.material.map?.dispose();
-        c.material.dispose();
-      });
-    }
-    this.portFrac = SIGHT.port;
-    this.port = buildPort(SIGHT.port);
-    this.scene.add(this.port);
-  }
-
   render(fr: Frame): void {
     this.clock += fr.dt;
     const { scene, pickables } = this;
-    this.followSight();
     this.look(fr.eye, fr.yaw, fr.pitch);
 
     this.sync(this.flasks, fr.flasks, (f) => new FlaskView(f, scene, pickables));

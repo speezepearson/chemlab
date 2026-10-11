@@ -61,7 +61,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     `pencilDown`, which works where the cursor's ray meets the wall (`wallAt`).
   - `airlock.ts` is the airlock and cryopod where the player wakes: their size, collisions, and the `Wake` states.
     `src/intro/notice.ts` is the message projected inside the pod.
-  - `sight.ts` is the View panel's settings: the field of view and the porthole's size.
+  - `porthole.ts` is the porthole's shape, for how much of the wall it takes up.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
     `volumes.ts`); `rumble.ts` is the spectrometer, `beeper.ts` the receptacle, `ambience.ts` the ship, `water.ts` drips and streams.

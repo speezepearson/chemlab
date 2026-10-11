@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SIGHT, FOV_RANGE, PORT_MAX, PORT_WALL, parseSight, porthole, roundedArea } from './sight';
+import { PORT_MAX, PORT_WALL, porthole, roundedArea } from './porthole';
 
 const frac = (p: ReturnType<typeof porthole>) => roundedArea(p.w, p.h, p.c) / (PORT_WALL.w * PORT_WALL.h);
 
@@ -30,15 +30,5 @@ describe('porthole', () => {
 
   it("can't be asked for more than it can be", () => {
     expect(frac(porthole(1))).toBeCloseTo(PORT_MAX, 9);
-  });
-});
-
-describe('view settings', () => {
-  it('reads what was stored, and defaults whatever is missing or out of range', () => {
-    const fov = (FOV_RANGE.min + FOV_RANGE.max) / 2;
-    expect(parseSight(JSON.stringify({ fov, port: PORT_MAX / 2 }))).toEqual({ fov, port: PORT_MAX / 2 });
-    expect(parseSight(JSON.stringify({ fov: FOV_RANGE.max + 1, port: 'big' }))).toEqual(DEFAULT_SIGHT);
-    expect(parseSight('not json')).toEqual(DEFAULT_SIGHT);
-    expect(parseSight(null)).toEqual(DEFAULT_SIGHT);
   });
 });

@@ -1,15 +1,5 @@
 import { ROOM } from './space';
 
-/**
- * The player's view settings, from the View panel: the camera's field of view, top to bottom, in degrees, and how
- * much of the left wall the porthole onto the stars takes up, as a fraction of its area (see porthole). Kept in
- * local storage, not in saves: they're preferences.
- */
-export interface Sight {
-  fov: number;
-  port: number;
-}
-
 /** The left wall, which the porthole is in: how long it is (front to back) and how tall. */
 export const PORT_WALL = { w: ROOM.z1 - ROOM.z0, h: ROOM.y1 };
 /** How close the porthole comes to the wall's edges, and its corners' tightest radius once it's as big as it gets. */
@@ -17,11 +7,6 @@ const PORT_MARGIN = 60;
 const PORT_CORNER = 40;
 /** Where the porthole's middle is, as high as it can be while it fits. */
 const PORT_Y = 760;
-/** How big the porthole starts: a circle of this radius. */
-const PORT_R = 150;
-
-/** The field of view's range, in degrees. */
-export const FOV_RANGE = { min: 40, max: 110 };
 
 /**
  * The porthole: a rounded rectangle, w across and h tall, with corners of radius c, its middle cy above the floor
@@ -73,45 +58,5 @@ export function porthole(frac: number): Porthole {
   return { ...p, cy };
 }
 
-export const DEFAULT_SIGHT: Readonly<Sight> = {
-  fov: 72,
-  port: (Math.PI * PORT_R * PORT_R) / (PORT_WALL.w * PORT_WALL.h),
-};
-
-/** The settings in use: the View panel edits them, and the view follows. */
-export const SIGHT: Sight = storedSight();
-
-/** Settings from stored JSON, tolerating junk: anything missing or out of range gets its default. */
-export function parseSight(json: string | null): Sight {
-  const out = { ...DEFAULT_SIGHT };
-  let raw: unknown;
-  try {
-    raw = json ? JSON.parse(json) : null;
-  } catch {
-    return out;
-  }
-  if (raw && typeof raw === 'object') {
-    const { fov, port } = raw as Record<string, unknown>;
-    if (typeof fov === 'number' && fov >= FOV_RANGE.min && fov <= FOV_RANGE.max) out.fov = fov;
-    if (typeof port === 'number' && port >= 0 && port <= PORT_MAX) out.port = port;
-  }
-  return out;
-}
-
-const KEY = 'slurry-lab.sight';
-
-function storedSight(): Sight {
-  try {
-    return parseSight(localStorage.getItem(KEY));
-  } catch {
-    return { ...DEFAULT_SIGHT };
-  }
-}
-
-export function storeSight(): void {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(SIGHT));
-  } catch {
-    // storage blocked: the settings just reset next time
-  }
-}
+/** How much of the left wall the porthole takes up, by area (see porthole). */
+export const PORT_FRAC = 0.25;
