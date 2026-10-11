@@ -1491,30 +1491,39 @@ const PORT = { y: 760, r: 150, depth: 40 };
 
 /**
  * The stars, all round the ship, far enough off that they don't move as the player walks: seen only through the
- * porthole. Kept centered on the eye (see View.render), like a sky.
+ * porthole. Kept centered on the eye (see View.render), like a sky. Most are tiny and dim, fewer middling, and a few
+ * bright, each a little warm or cool, never strongly colored.
  */
-function starField(): THREE.Points {
-  const pos: number[] = [];
-  const col: number[] = [];
+function starField(): THREE.Group {
   let seed = 7;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < 4000; i++) {
-    // evenly over the sphere
-    const y = 2 * rnd() - 1;
-    const a = rnd() * Math.PI * 2;
-    const r = Math.sqrt(1 - y * y) * STAR_R;
-    pos.push(r * Math.cos(a), y * STAR_R, r * Math.sin(a));
-    // mostly faint, a few bright, some a little blue or warm
-    const b = 0.35 + 0.65 * rnd() ** 4;
-    const tint = rnd();
-    col.push(b * (tint < 0.15 ? 0.8 : 1), b * 0.95, b * (tint > 0.85 ? 0.75 : 1));
-  }
-  return new THREE.Points(
-    new THREE.BufferGeometry()
-      .setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
-      .setAttribute('color', new THREE.Float32BufferAttribute(col, 3)),
-    new THREE.PointsMaterial({ size: 2, sizeAttenuation: false, vertexColors: true }),
-  );
+  // tints a star can lean toward: blue-white, white, yellow-white, orange-white
+  const tints = [[0.8, 0.88, 1], [1, 1, 1], [1, 0.95, 0.82], [1, 0.86, 0.72]];
+  const layer = (count: number, size: number, dim: number, bright: number) => {
+    const pos: number[] = [];
+    const col: number[] = [];
+    for (let i = 0; i < count; i++) {
+      // evenly over the sphere
+      const y = 2 * rnd() - 1;
+      const a = rnd() * Math.PI * 2;
+      const r = Math.sqrt(1 - y * y) * STAR_R;
+      pos.push(r * Math.cos(a), y * STAR_R, r * Math.sin(a));
+      // dimmer far more often than brighter
+      const b = dim + (bright - dim) * rnd() ** 2.5;
+      const t = tints[Math.floor(rnd() * tints.length)];
+      const k = rnd() * 0.7;
+      col.push(...t.map((c) => b * (1 - k + k * c)));
+    }
+    return new THREE.Points(
+      new THREE.BufferGeometry()
+        .setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+        .setAttribute('color', new THREE.Float32BufferAttribute(col, 3)),
+      new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: true }),
+    );
+  };
+  const sky = new THREE.Group();
+  sky.add(layer(16000, 1, 0.12, 0.45), layer(3500, 1.4, 0.3, 0.75), layer(350, 2, 0.55, 1));
+  return sky;
 }
 /** How far off the stars are drawn: inside the camera's reach, outside the room's. */
 const STAR_R = 6000;
