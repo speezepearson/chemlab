@@ -175,8 +175,11 @@ export function walk(
   return { player: p, load: l };
 }
 
-/** The room's walls, floor and ceiling as boxes, thick enough that nothing passes through them in one step. */
-export function roomBoxes(r: { x0: number; x1: number; z0: number; z1: number; y1: number }): Box[] {
+/**
+ * The room's walls, floor and ceiling as boxes, thick enough that nothing passes through them in one step; without
+ * the front wall if `front` is false (the airlock's doorway is in it: see airlock.airlockBoxes).
+ */
+export function roomBoxes(r: { x0: number; x1: number; z0: number; z1: number; y1: number }, front = true): Box[] {
   const T = 200;
   const cx = (r.x0 + r.x1) / 2;
   const cz = (r.z0 + r.z1) / 2;
@@ -190,6 +193,6 @@ export function roomBoxes(r: { x0: number; x1: number; z0: number; z1: number; y
     box(r.x0 - T / 2, r.y1 / 2, cz, T / 2, h, d),
     box(r.x1 + T / 2, r.y1 / 2, cz, T / 2, h, d),
     box(cx, r.y1 / 2, r.z0 - T / 2, w, h, T / 2),
-    box(cx, r.y1 / 2, r.z1 + T / 2, w, h, T / 2),
+    ...(front ? [box(cx, r.y1 / 2, r.z1 + T / 2, w, h, T / 2)] : []),
   ];
 }

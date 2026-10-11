@@ -59,6 +59,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `paper.ts` is sticky notes: the sheets, their strokes and text, in old-bench coordinates. They hang on the back
     wall. While the pencil is in hand, the mouse moves `cursor` rather than the view, and both buttons go to
     `pencilDown`, which works where the cursor's ray meets the wall (`wallAt`).
+  - `airlock.ts` is the airlock and cryopod where the player wakes: their size, collisions, and the `Wake` states.
+    `src/intro/notice.ts` is the message on the pod's glass.
+  - `sight.ts` is the View panel's settings: the field of view and the porthole's size.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
     `volumes.ts`); `rumble.ts` is the spectrometer, `beeper.ts` the receptacle, `ambience.ts` the ship, `water.ts` drips and streams.
@@ -79,7 +82,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   chemistry, cooling, the spectrometer's run and sound, the receptacle's cycle, and the drip and stream sounds. All of it
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
-  notice; and the player themselves (walking, looking, carrying, tipping a flask), which is input, not the sim.
+  notice; and the player themselves (walking, looking, carrying, tipping a flask, and waking in the airlock: the
+  message on the pod's glass flickering out, the glass opening and the doors closing), which is input, not the sim.
   - Anything drawn per outlet must use totals over the whole frame. A single substep's output can be empty, for
     example when a wide-open valve drains its tank in the first substep.
 - **Landing fluid goes through `fill()`.** Anything that lands in a vessel (streams, drops, faucets, pours) must use

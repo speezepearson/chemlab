@@ -79,13 +79,18 @@ export function App() {
    * just the start button for a returning player, so there's a click to turn the sound on.
    */
   const [intro, setIntro] = useState<'first' | 'replay' | 'resume' | null>(() => (introSeen() ? 'resume' : 'first'));
-  const endIntro = useCallback(() => {
-    markIntroSeen();
-    setIntro(null);
-  }, []);
+  // it's seen once OK is pressed on the cryopod's glass, after it's ended (see onAwake), so a reload before then
+  // plays it again
+  const endIntro = useCallback(() => setIntro(null), []);
   /** Whether the intro is still before the end of its console log: the ship's ambience starts after it. */
   const [preLog, setPreLog] = useState(intro === 'first');
-  const endLog = useCallback(() => setPreLog(false), []);
+  const engineRef = useRef<GameEngine | null>(null);
+  engineRef.current = engine;
+  // as the log fades, the player is put in the cryopod, to be seen as the black behind it fades
+  const endLog = useCallback(() => {
+    setPreLog(false);
+    engineRef.current?.enterPod();
+  }, []);
   useEffect(() => ambience(!preLog), [preLog]);
   /** Whether the corner list of what can be done is showing: `/` shows or hides it, at any time. */
   const [help, setHelp] = useState(storedHelp);
@@ -114,6 +119,7 @@ export function App() {
       onPencil: setPencil,
       onPaperText: (edit) => setPaperEdit((was) => edit && { edit, key: (was?.key ?? 0) + 1 }),
       onHud: setHud,
+      onAwake: markIntroSeen,
     }, presetRef.current);
     if (saved) e.restore(saved, presetRef.current);
     setEngine(e);
@@ -240,7 +246,7 @@ export function App() {
           {engine && hud && <TouchControls engine={engine} hud={hud} />}
           {inspection && <InfoPanel info={inspection} />}
           {engine && <Palette engine={engine} pencil={pencil} />}
-          {hud && !hud.locked && !intro && editing === null && labeling === null && !paperEdit && (
+          {hud && !hud.locked && !hud.inPod && !intro && editing === null && labeling === null && !paperEdit && (
             <StartHint />
           )}
           {engine && editing !== null && <FlaskEditor engine={engine} id={editing} onClose={() => setEditing(null)} />}
