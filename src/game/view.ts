@@ -23,7 +23,9 @@ export type Pick =
   | { kind: 'tool'; t: Tool; part: 'body' | 'tank' | 'valve' | 'button'; k: number }
   | { kind: 'scale'; sc: Scale; part: 'body' | 'tare' }
   | { kind: 'hose'; h: Hose; end: 'inlet' | 'outlet' }
-  | { kind: 'faucet'; i: number };
+  | { kind: 'faucet'; i: number }
+  /** The button under the beacon that silences the alarms. */
+  | { kind: 'alarm' };
 
 /** A faucet where it is: its spout, where its pipe meets the wall, and what it pours. */
 export interface FaucetSpot {
@@ -69,6 +71,8 @@ export interface Frame {
   dt: number;
   /** The target the receptacle has taken so far, by volume, for its screen. */
   delivered: number;
+  /** Whether the alarms are silenced, which the button under the beacon shows. */
+  alarmsOff: boolean;
   /**
    * The sticky notes on the back wall: each sheet with its top left corner, on the old flat bench (x across, y down);
    * whether the pencil's in hand (so each shows its handles); and a sheet being marked out, if one is.
@@ -1746,6 +1750,85 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
   return { beacon, lamp };
 }
 
+/** How high the middle of the alarms' silence button's plate is: about chest height. */
+const ALARM_Y = 480;
+
+/** The face of the silence button's plate: hazard stripes round the edge, and what it's for. */
+function alarmPlateTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 220;
+  c.height = 300;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#d9b42a';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.fillStyle = '#1b1d1c';
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, c.width, c.height);
+  ctx.rect(16, 16, c.width - 32, c.height - 32);
+  ctx.clip('evenodd');
+  for (let x = -c.height; x < c.width; x += 28) {
+    ctx.beginPath();
+    ctx.moveTo(x, c.height);
+    ctx.lineTo(x + 14, c.height);
+    ctx.lineTo(x + 14 + c.height, 0);
+    ctx.lineTo(x + c.height, 0);
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.fillStyle = '#3a403e';
+  ctx.fillRect(16, 16, c.width - 32, c.height - 32);
+  ctx.fillStyle = '#e7ebe6';
+  ctx.font = '600 30px "Schibsted Grotesk", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('ALARM', c.width / 2, 52);
+  ctx.fillText('SILENCE', c.width / 2, c.height - 48);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/**
+ * The alarms' silence button, on the wall under the beacon at chest height: a plate with a big red button, which
+ * stays pushed in while the alarms are silenced, and a lamp over it that glows amber while they are.
+ */
+class AlarmButton {
+  private button: THREE.Mesh;
+  private lamp: THREE.MeshStandardMaterial;
+  private off: boolean | null = null;
+
+  constructor(scene: THREE.Scene, pickables: Map<THREE.Object3D, Pick>) {
+    const g = new THREE.Group();
+    // on the front wall, facing into the room
+    g.position.set((ROOM.x0 + ROOM.x1) / 2, ALARM_Y, ROOM.z1);
+    g.rotation.y = Math.PI;
+    const face = new THREE.MeshStandardMaterial({ map: alarmPlateTexture(), roughness: 0.6, metalness: 0.2 });
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(110, 150, 8).translate(0, 0, 4), [darkMat, darkMat, darkMat, darkMat, face, darkMat]);
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(27, 29, 6, 32).rotateX(Math.PI / 2).translate(0, 0, 11), darkMat);
+    this.button = new THREE.Mesh(
+      new THREE.CylinderGeometry(21, 22, 14, 32).rotateX(Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: 0xb3221a, roughness: 0.35, metalness: 0.05 }),
+    );
+    this.lamp = new THREE.MeshStandardMaterial({ color: 0x6b5520, emissive: 0xffa21a, emissiveIntensity: 0 });
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(6, 16, 10), this.lamp);
+    lamp.position.set(0, 34, 9);
+    for (const m of [plate, collar, this.button, lamp]) {
+      m.castShadow = m.receiveShadow = true;
+      g.add(m);
+      pickables.set(m, { kind: 'alarm' });
+    }
+    scene.add(g);
+  }
+
+  update(off: boolean): void {
+    if (off === this.off) return;
+    this.off = off;
+    this.button.position.z = off ? 12 : 18;
+    this.lamp.emissiveIntensity = off ? 1.6 : 0;
+  }
+}
+
 /** The faucets: a manifold along a wall, and each faucet a pipe out over the counter, a knob of its color, and a spout. */
 function buildFaucets(
   scene: THREE.Scene,
@@ -1804,6 +1887,7 @@ export class View {
   private rims: { g: THREE.Group; mat: THREE.MeshBasicMaterial; sides: THREE.Mesh[]; ring: THREE.Mesh }[] = [];
   private drops: THREE.Mesh[] = [];
   private beacon: { beacon: THREE.PointLight; lamp: THREE.Mesh };
+  private alarmButton: AlarmButton;
   private raycaster = new THREE.Raycaster();
   private clock = 0;
   private stars = starField();
@@ -1838,6 +1922,7 @@ export class View {
     sun.shadow.bias = -0.0005;
     this.scene.add(sun, sun.target);
     this.beacon = buildRoom(this.scene);
+    this.alarmButton = new AlarmButton(this.scene, this.pickables);
     this.draft = new THREE.LineLoop(
       new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(12), 3)),
       new THREE.LineDashedMaterial({ color: 0x8ccbb0, dashSize: 4, gapSize: 3 }),
@@ -1943,6 +2028,7 @@ export class View {
     this.updateStreams(fr);
     this.updateGuides(fr);
 
+    this.alarmButton.update(fr.alarmsOff);
     // the beacon turns slowly; real time, like the alarms it goes with
     const pulse = 0.5 + 0.5 * Math.sin(this.clock * 2.4);
     this.beacon.beacon.intensity = 9000 * pulse * pulse;

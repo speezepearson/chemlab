@@ -25,6 +25,8 @@ export interface SaveState {
   chem?: { bonds: ChemParams['bonds']; swapA: number; heatCap: number };
   /** The target the receptacle has taken so far, by volume, toward the goal; none if left out. */
   delivered?: number;
+  /** Whether the alarms are silenced (see GameEngine); not if left out. */
+  alarmsOff?: boolean;
   /** The player's sticky notes, the one on top last; none if left out. */
   papers?: SavedPaper[];
   /** Where the player stood and looked (see GameEngine); where they start if left out. */

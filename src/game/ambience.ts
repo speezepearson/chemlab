@@ -17,6 +17,24 @@ export function ambience(on: boolean): void {
 
 /** Where each part fades in and out (none without audio), built the first time the ambience is wanted. */
 let faders: GainNode[] | undefined;
+/** Where the klaxon and the fire alarm are silenced (see hushAlarms), and whether they are. */
+let hushes: GainNode[] = [];
+let hushed = false;
+
+/**
+ * Silence the klaxon and the fire alarm, or let them sound again: the lab's silence button (see GameEngine). They
+ * cut out in about a tenth of a second, and come back as quickly. Real time, like the rest of the ambience.
+ */
+export function hushAlarms(on: boolean): void {
+  hushed = on;
+  // before the ambience is built there's nothing to hush yet (and no reason to start the audio): it's built hushed
+  if (!hushes.length) return;
+  const ac = audio()!;
+  for (const g of hushes) {
+    g.gain.cancelScheduledValues(ac.currentTime);
+    g.gain.setTargetAtTime(on ? 0 : 1, ac.currentTime, 0.03);
+  }
+}
 
 function build(): GainNode[] {
   if (faders) return faders;
@@ -25,7 +43,14 @@ function build(): GainNode[] {
   const klaxon = bus('klaxon');
   const alarm = bus('alarm');
   if (!ac || !hum || !klaxon || !alarm) return (faders = []);
-  faders = [hum, klaxon, alarm].map((dest) => {
+  // the klaxon and the fire alarm each pass through a hush on the way
+  hushes = [klaxon, alarm].map((dest) => {
+    const g = ac.createGain();
+    g.gain.value = hushed ? 0 : 1;
+    g.connect(dest);
+    return g;
+  });
+  faders = [hum, ...hushes].map((dest) => {
     const f = ac.createGain();
     f.gain.value = 0;
     f.connect(dest);

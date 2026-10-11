@@ -1,6 +1,7 @@
 import { equilibrate } from '../chem/equilibrium';
 import { temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
+import { hushAlarms } from './ambience';
 import { beeper, type Beeper } from './beeper';
 import {
   FLASK_CENTER, FUNNEL_H, FUNNEL_R, FUNNEL_STEM_R, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, flip, hoseEndBox, hoseMouth, hoseStand, onBench, onScale,
@@ -259,6 +260,8 @@ export class GameEngine {
   private won = false;
   /** The target the receptacle has taken, all told, by volume: what counts toward the goal. */
   private delivered = 0;
+  /** Whether the alarms are silenced, by the button under the beacon (see hushAlarms). Saved, and kept through Reset. */
+  private alarmsOff = false;
   /** Each receptacle's sounds, through its cycle (see Tool.press). */
   private beepers = new Map<Tool, Beeper>();
   /** The player's sticky notes, on the back wall, the one on top last (see paper.ts). They're notes, not lab, so Reset keeps them. */
@@ -493,6 +496,7 @@ export class GameEngine {
       // where they started on the old flat bench, so the save still loads there, with their notes
       faucets: this.faucets.map((fa, i, all) => ({ x: (i + 0.5) / all.length, y: 30 / HOME_H, ...(fa.note ? { note: fa.note } : {}) })),
       delivered: this.delivered,
+      ...(this.alarmsOff ? { alarmsOff: true } : {}),
       ...(this.papers.length ? { papers: this.papers.map(savePaper) } : {}),
       player: { x: this.player.x, z: this.player.z, yaw: this.player.yaw, pitch: this.player.pitch },
       chem: saveChem(this.chem.params),
@@ -567,6 +571,7 @@ export class GameEngine {
       fa.note = typeof note === 'string' ? note : '';
     });
     this.delivered = Number.isFinite(s.delivered) ? Math.max(0, s.delivered!) : 0;
+    this.setAlarmsOff(!!s.alarmsOff);
     this.papers = (Array.isArray(s.papers) ? s.papers : []).map(loadPaper).filter((p): p is Paper => !!p);
     this.paperDrag = null;
     this.cb.onPaperText(null);
@@ -1054,7 +1059,7 @@ export class GameEngine {
     const p = this.target;
     if (!p) return;
     let h: Held;
-    if (p.kind === 'faucet') return;
+    if (p.kind === 'faucet' || p.kind === 'alarm') return;
     if (p.kind === 'tool' && p.t.shape.fixed) {
       this.say('That stays where it is');
       return;
@@ -1126,6 +1131,10 @@ export class GameEngine {
       } else if (t.scan()) this.rumbles.set(t, rumble(this.hear(this.machineAt(t))));
       return;
     }
+    if (p?.kind === 'alarm') {
+      this.setAlarmsOff(!this.alarmsOff);
+      return;
+    }
     if (p?.kind === 'scale' && p.part === 'tare') {
       p.sc.zero();
       this.tarePress = p.sc;
@@ -1160,6 +1169,7 @@ export class GameEngine {
     }
     if (p.kind === 'scale') return `s${this.scales.indexOf(p.sc)}`;
     if (p.kind === 'hose') return `h${this.hoses.indexOf(p.h)}`;
+    if (p.kind === 'alarm') return null;
     return `F${p.i}`;
   }
 
@@ -2023,7 +2033,8 @@ export class GameEngine {
       eye: this.eye(), yaw: this.player.yaw, pitch: this.player.pitch,
       flasks: this.flasks, tools: this.tools, scales: this.scales, hoses: this.hoses, faucets: this.faucets,
       streams, drops,
-      tarePress: this.tarePress, hot: this.target, shake, dt, delivered: this.delivered, papers: this.paperFrame(),
+      tarePress: this.tarePress, hot: this.target, shake, dt, delivered: this.delivered, alarmsOff: this.alarmsOff,
+      papers: this.paperFrame(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(),
     });
   }
@@ -2093,16 +2104,14 @@ export class GameEngine {
       if (h.kind === 'tool' && h.t.shape.flippable) add(['F'], 'flip it');
       if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it away');
     } else {
-      if (p && p.kind !== 'faucet' && !(p.kind === 'tool' && p.t.shape.fixed)) add(['E'], 'pick it up');
+      if (p && p.kind !== 'faucet' && p.kind !== 'alarm' && !(p.kind === 'tool' && p.t.shape.fixed)) add(['E'], 'pick it up');
       if (!this.pencil && this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
       if (p?.kind === 'tool' && p.t.shape.flippable) add(['F'], 'flip it');
       add(['1–0, −'], 'make equipment in your hands');
     }
     if (!this.pencil) {
-      const press =
-        (p?.kind === 'tool' && p.part === 'button' && !(p.t.kind === 'receptacle' ? p.t.cycle : p.t.scanning)) ||
-        (p?.kind === 'scale' && p.part === 'tare');
-      if (press) add(['LMB'], 'press it');
+      if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
+      else if (this.pressable()) add(['LMB'], 'press it');
       const id = this.targetNote();
       if (id) add(['LMB2'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
       add(['P'], 'pick up the pencil');
@@ -2110,6 +2119,21 @@ export class GameEngine {
     add(['C'], 'crouch');
     add(['Esc'], 'let go of the mouse');
     return out;
+  }
+
+  private setAlarmsOff(off: boolean): void {
+    this.alarmsOff = off;
+    hushAlarms(off);
+  }
+
+  /** Whether the left button would press the key or button the crosshair is on. */
+  private pressable(): boolean {
+    const p = this.target;
+    return (
+      (p?.kind === 'tool' && p.part === 'button' && !(p.t.kind === 'receptacle' ? p.t.cycle : p.t.scanning)) ||
+      (p?.kind === 'scale' && p.part === 'tare') ||
+      p?.kind === 'alarm'
+    );
   }
 
   private rightWouldDo(): boolean {
@@ -2133,12 +2157,10 @@ export class GameEngine {
     const h = this.held;
     const hud: Hud = {
       locked: this.locked,
-      grab: !this.held && !!p && p.kind !== 'faucet' && !(p.kind === 'tool' && p.t.shape.fixed),
+      grab: !this.held && !!p && p.kind !== 'faucet' && p.kind !== 'alarm' && !(p.kind === 'tool' && p.t.shape.fixed),
       holding: !!this.held,
       drop: !!this.placed && 'rest' in this.placed,
-      press:
-        (p?.kind === 'tool' && p.part === 'button' && !(p.t.kind === 'receptacle' ? p.t.cycle : p.t.scanning)) ||
-        (p?.kind === 'scale' && p.part === 'tare'),
+      press: this.pressable(),
       right: this.rightWouldDo(),
       aim: this.pencil ? { ...this.cursor } : this.turning ? { ...this.turning.aim } : null,
       pencil: this.pencil,
