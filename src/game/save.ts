@@ -81,9 +81,12 @@ export interface SavedScale extends SavedDepth {
 }
 
 export interface SavedHose {
-  /** Each end as fractions of the home area (see HOME_W), and how far out from the back wall (optional). */
-  inlet: { x: number; y: number; z?: number };
-  outlet: { x: number; y: number; z?: number };
+  /**
+   * Each end as fractions of the home area (see HOME_W), and how far out from the back wall and which way it faces
+   * (see Hose.turn), each optional.
+   */
+  inlet: { x: number; y: number; z?: number; yaw?: number };
+  outlet: { x: number; y: number; z?: number; yaw?: number };
   funnel: SavedVessel;
   /** The drop hanging at the outlet, if any. */
   drop?: SavedVessel;

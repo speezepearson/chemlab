@@ -3,8 +3,9 @@ import { temperature, type Fluid, type NetReaction, type ReactionNetwork } from 
 import { NS, SPECIES } from '../chem/species';
 import { beeper, type Beeper } from './beeper';
 import {
-  FLASK_CENTER, aimValve, flaskBox, flaskLip, flaskMouth, flip, hoseEndBox, hoseMouth, onScale, onTool, openingOf,
-  scaleBox, scaleCenter, scaleSpot, spoutAt, tankMouth, toolBox, toolCenter, valveNear, valveZ,
+  FLASK_CENTER, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, flip, hoseEndBox, hoseMouth, hoseStand, onBench, onScale,
+  onTool, openingOf, scaleBox, scaleCenter, scaleSpot, spoutAt, standBase, tankMouth, toolBox, toolCenter, toolStands, valveNear,
+  valveZ, type Stand,
 } from './bodies';
 import { CAP, FILL_RATE, GOAL_VOLUME, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
@@ -18,7 +19,7 @@ import { rumble, type Rumble } from './rumble';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
 import {
-  COUNTERS, LIFT, PAPER_Z, ROOM, Z_HOME, fromFrac, groundAt, toFrac, toLocal, toWorld, wrapAngle, type Pose, type Vec3,
+  COUNTERS, LIFT, PAPER_Z, ROOM, Z_HOME, counterUnder, fromFrac, groundAt, toFrac, toLocal, toWorld, wrapAngle, type Pose, type Vec3,
 } from './space';
 import {
   HEATER, HEATER_CELLS, HEATER_TUBE, Hose, MAX_FLOW, RECEPTACLE_TIMES, SCAN_LIGHTS, SHAPES, SUMP_TIP, TANK_H, TOOL_NAMES,
@@ -59,8 +60,10 @@ export interface Hud {
   locked: boolean;
   /** Whether E would pick up what the crosshair is on. */
   grab: boolean;
-  /** Whether something is being held (E lets go). */
+  /** Whether something is being held. */
   holding: boolean;
+  /** Whether E would set down what's held: whether there's somewhere for it to rest (see placement). */
+  drop: boolean;
   /** Whether the left button would press the key or button the crosshair is on. */
   press: boolean;
   /** Whether the right button would do something: turn the valve looked at, or let fluid out of what's held. */
@@ -94,7 +97,6 @@ export interface EngineCallbacks {
   onHud(hud: Hud): void;
 }
 
-/** What the player is holding. A hose is held by one end, or (just made) both. */
 /**
  * An outlet lined up with a mouth below it (see GameEngine.aims): whether fluid from it would land there (a hit) or
  * just miss, and which of them is held: the outlet, a held flask's lip (as it would pour), or the mouth.
@@ -104,10 +106,15 @@ interface Aim {
   m: Mouth;
   hit: boolean;
   held: 'outlet' | 'lip' | 'mouth';
-  /** How far below the outlet fluid reaches: a faucet's FAUCET_REACH, or else forever. */
-  reach: number;
 }
 
+/** Where something let go of comes to rest (see GameEngine.rest): its pose, and for a flask, the scale it stands on. */
+interface Rest {
+  pose: Pose;
+  scale?: { sc: Scale; dx: number };
+}
+
+/** What the player is holding. A hose is held by one end, or (just made) both. */
 type Held = (
   | { kind: 'flask'; f: Flask }
   | { kind: 'tool'; t: Tool }
@@ -146,8 +153,6 @@ const POUR_ANG = Math.PI * 0.61;
 const TIP_S = 0.3;
 /** How far across, in world units, an outlet can miss a mouth by and still show a faint guide to it (see guides). */
 const GUIDE_NEAR = 40;
-/** How far below a faucet something can be and still get filled. */
-const FAUCET_REACH = 24;
 /** How fast a falling drop speeds up, in world units per sim second squared: a 500-unit fall takes 0.7 s. */
 const GRAVITY = 2000;
 /** The player's eyes, standing and crouching; their body's radius; and how fast they walk, per real second. */
@@ -220,6 +225,8 @@ export class GameEngine {
   private faucetFlows: { fa: FaucetSpot; m: Mouth }[] = [];
   /** Where the held flask poured this frame, if it did: its lip, and what it poured into (null: the sink). */
   private pour: { from: Vec3; into: Mouth | null } | null = null;
+  /** Where what's held would come to rest if let go, as of the last frame drawn (see placement). */
+  private placed: ReturnType<GameEngine['placement']> | null = null;
   /** What the crosshair is on. */
   private target: (Pick & { point: Vec3; distance: number }) | null = null;
   /** A brief note on the display, like there being no room for something (see say). */
@@ -260,7 +267,6 @@ export class GameEngine {
   private inflow = new Map<Vessel, number>();
   /** Where each drop that landed in a vessel this frame landed, for its sound. */
   private landed: Vec3[] = [];
-  private firstFrame = true;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -397,7 +403,7 @@ export class GameEngine {
     this.preset = preset;
     this.flasks = Array.from({ length: N_FLASKS }, (_, i) => {
       const f = new Flask(CAP);
-      f.pose = { x: (HOME_W * (i + 0.5)) / N_FLASKS, y: LIFT + 92, z: Z_HOME, yaw: 0 };
+      f.pose = { x: (HOME_W * (i + 0.5)) / N_FLASKS, y: LIFT + FLASK_H, z: Z_HOME, yaw: 0 };
       f.glass = glassGrams(i);
       applyFill(f, preset.flasks[i] ?? null);
       return f;
@@ -418,7 +424,7 @@ export class GameEngine {
       const out = onTool(t, tankX(t.shape.tanks[to.tank ?? 0]) + (to.dx ?? 0), -24);
       return new Hose({ ...sp, y: sp.y - 16 }, { ...out, y: Math.max(out.y, m.y + 24) });
     });
-    this.settle();
+    this.restAll();
     this.afterLoad();
   }
 
@@ -428,7 +434,6 @@ export class GameEngine {
     this.beepers.clear();
     this.falling = [];
     this.held = this.turning = this.tarePress = null;
-    this.firstFrame = true;
   }
 
   /** Everything in the lab, plus the chemistry parameters, for saving. */
@@ -454,7 +459,7 @@ export class GameEngine {
         ...(sc.note ? { note: sc.note } : {}),
       })),
       hoses: this.hoses.map((h) => ({
-        inlet: { ...toFrac(h.inlet), z: h.inlet.z }, outlet: { ...toFrac(h.outlet), z: h.outlet.z },
+        inlet: { ...toFrac(h.inlet), z: h.inlet.z, yaw: h.turn.inlet }, outlet: { ...toFrac(h.outlet), z: h.outlet.z, yaw: h.turn.outlet },
         funnel: saveVessel(h.funnel), drop: saveVessel(h.drop),
         ...(h.note ? { note: h.note } : {}),
       })),
@@ -513,6 +518,7 @@ export class GameEngine {
       if (sh.funnel) loadVessel(h.funnel, sh.funnel);
       if (sh.drop) loadVessel(h.drop, sh.drop);
       if (typeof sh.note === 'string') h.note = sh.note;
+      h.turn = { inlet: num(sh.inlet.yaw, 0), outlet: num(sh.outlet.yaw, 0) };
       return h;
     });
     const fs = s.faucets ?? [];
@@ -529,7 +535,7 @@ export class GameEngine {
       const p = this.inRoom({ x: pl.x, y: 0, z: pl.z, yaw: pl.yaw });
       Object.assign(this.player, { x: p.x, z: p.z, yaw: pl.yaw, pitch: pl.pitch });
     }
-    this.settle();
+    this.restAll();
     this.afterLoad();
   }
 
@@ -560,6 +566,24 @@ export class GameEngine {
     add('spectrometer', SPECTROMETER_AT);
     add('meter', METER_AT);
     add('receptacle', RECEPTACLE_AT);
+  }
+
+  /**
+   * Set everything that stands on the bench (flasks, scales, and tools like the spectrometer) down on the counter
+   * under it, if there is one, and stand each flask on a scale where the scale now is. Presets and older saves leave
+   * things in the air, where arms from the ceiling used to hold them.
+   */
+  private restAll(): void {
+    const riders = this.standing();
+    const down = (b: Box, move: (dy: number) => void) => {
+      const top = counterUnder(b);
+      const dy = top === null ? 0 : b.y - b.hy - top;
+      if (dy > 0) move(dy);
+    };
+    for (const f of this.flasks) if (!riders.has(f)) down(flaskBox(f), (dy) => (f.pose = { ...f.pose, y: f.pose.y - dy }));
+    for (const sc of this.scales) down(scaleBox(sc), (dy) => (sc.pose = { ...sc.pose, y: sc.pose.y - dy }));
+    for (const t of this.tools) if (onBench(t)) down(toolBox(t), (dy) => (t.pose = { ...t.pose, y: t.pose.y - dy }));
+    this.settle();
   }
 
   /** Stand each flask on a scale where the scale now is. */
@@ -668,11 +692,15 @@ export class GameEngine {
     } else {
       const at = { x: p.x, y: p.y, z: p.z };
       if (h.end === 'both') {
-        // the outlet trails off to the funnel's right, as the player sees it
         Object.assign(h.h.inlet, at);
-        Object.assign(h.h.outlet, toWorld({ ...at, yaw: this.player.yaw + h.relYaw }, { x: 70, y: -30, z: 0 }));
+        Object.assign(h.h.outlet, this.trailing(h, p));
       } else Object.assign(h.h[h.end], at);
     }
+  }
+
+  /** Where a hose held by both ends, by its funnel at p, has its outlet: trailing off to the funnel's right, as the player sees it. */
+  private trailing(h: Held, p: Vec3): Vec3 {
+    return toWorld({ ...p, yaw: this.player.yaw + h.relYaw }, { x: 70, y: -30, z: 0 });
   }
 
   /** Where what's held would be, in front of the eyes. */
@@ -704,8 +732,11 @@ export class GameEngine {
     return { x: b.x - off.x, y: b.y - off.y, z: b.z - off.z, yaw: wrapAngle(b.yaw) };
   }
 
-  /** The walls, counters, and everything in the room but what's held (and what rides on it). */
-  private obstacles(h: Held | null): Box[] {
+  /**
+   * The walls, counters, and everything in the room but what's held (and what rides on it), including the bases of
+   * the stands holding up everything else (unless `bases` is false).
+   */
+  private obstacles(h: Held | null, bases = true): Box[] {
     const room = roomBoxes(ROOM);
     const counters = COUNTERS.map((c) => ({
       x: (c.x0 + c.x1) / 2, y: LIFT / 2, z: (c.z0 + c.z1) / 2, yaw: 0, hx: (c.x1 - c.x0) / 2, hy: LIFT / 2, hz: (c.z1 - c.z0) / 2,
@@ -717,7 +748,11 @@ export class GameEngine {
     for (const sc of this.scales) if (!(h?.kind === 'scale' && h.sc === sc)) out.push(scaleBox(sc));
     for (const hose of this.hoses)
       for (const end of ['inlet', 'outlet'] as const)
-        if (!(h?.kind === 'hose' && h.h === hose && (h.end === end || h.end === 'both'))) out.push(hoseEndBox(hose, end));
+        if (!(h?.kind === 'hose' && h.h === hose && (h.end === end || h.end === 'both'))) {
+          out.push(hoseEndBox(hose, end));
+          if (bases) out.push(standBase(hoseStand(hose[end], end, hose.turn[end])));
+        }
+    if (bases) for (const t of this.tools) if (!(h?.kind === 'tool' && h.t === t)) for (const st of toolStands(t)) out.push(standBase(st));
     return out;
   }
 
@@ -988,28 +1023,30 @@ export class GameEngine {
   }
 
   /**
-   * Let go of what's held: an arm comes down to hold it where it is, snapped to line up with an outlet or mouth (see
-   * snap), or a flask let go over a scale stands on it.
+   * Let go of what's held, if it can be set down (see placement): it comes to rest there, snapped into line with an
+   * outlet or mouth if it can be. If it can't, a note says why, and it stays in hand.
    */
   private release(): void {
     const h = this.held;
     if (!h) return;
-    const sn = this.snap(h, this.aims(h));
-    if (sn) {
-      const p = this.heldPose(h);
-      this.placeHeld(h, { x: p.x + sn.d.x, y: p.y + sn.d.y, z: p.z + sn.d.z, yaw: p.yaw });
+    const pl = this.placement(h);
+    if (!('rest' in pl)) {
+      this.say(pl.why);
+      return;
     }
+    this.placeHeld(h, pl.rest.pose);
     if (h.kind === 'flask') {
       h.f.tilt = 0;
-      for (const sc of this.scales) {
-        const dx = scaleSpot(sc, h.f.pose);
-        if (dx === null) continue;
-        sc.put(h.f, dx);
+      if (pl.rest.scale) {
+        pl.rest.scale.sc.put(h.f, pl.rest.scale.dx);
         this.settle();
-        break;
       }
     }
-    if (h.kind === 'hose' && h.end === 'both') h.end = 'inlet';
+    if (h.kind === 'hose') {
+      if (h.end !== 'outlet') h.h.turn.inlet = this.player.yaw;
+      if (h.end !== 'inlet') h.h.turn.outlet = this.player.yaw;
+      if (h.end === 'both') h.end = 'inlet';
+    }
     this.held = null;
   }
 
@@ -1491,7 +1528,7 @@ export class GameEngine {
     this.faucetFlows = [];
     for (const fa of this.faucets) {
       fa.output = faucetOutput(fa.start, this.chem); // cheap, and follows edits to the chemistry
-      const m = faucetTarget(mouths, fa.spout, FAUCET_REACH);
+      const m = faucetTarget(mouths, fa.spout);
       if (m && simDt > 0) this.faucetFlows.push({ fa, m });
     }
 
@@ -1661,67 +1698,163 @@ export class GameEngine {
       if (h.end !== 'inlet') outlets.push({ at: h.h.outlet, lip: false });
     }
     const out: Aim[] = [];
-    const aim = (from: Vec3, reach: number, held: Aim['held']) => {
-      const a = aimAt(mouths, from, GUIDE_NEAR, reach);
+    const aim = (from: Vec3, held: Aim['held']) => {
+      const a = aimAt(mouths, from, GUIDE_NEAR);
       if (!a || mine.has(a.m.v) !== (held === 'mouth')) return;
-      out.push({ from, m: a.m, hit: a.hit, held, reach });
+      out.push({ from, m: a.m, hit: a.hit, held });
     };
-    for (const o of outlets) aim(o.at, Infinity, o.lip ? 'lip' : 'outlet');
+    for (const o of outlets) aim(o.at, o.lip ? 'lip' : 'outlet');
     if (mine.size) {
-      for (const t of this.tools) if (!(h.kind === 'tool' && h.t === t)) t.shape.spouts.forEach((_, j) => aim(spoutAt(t, j), Infinity, 'mouth'));
-      for (const hose of this.hoses) if (!(h.kind === 'hose' && h.h === hose)) aim(hose.outlet, Infinity, 'mouth');
-      for (const fa of this.faucets) aim(fa.spout, FAUCET_REACH, 'mouth');
+      for (const t of this.tools) if (!(h.kind === 'tool' && h.t === t)) t.shape.spouts.forEach((_, j) => aim(spoutAt(t, j), 'mouth'));
+      for (const hose of this.hoses) if (!(h.kind === 'hose' && h.h === hose)) aim(hose.outlet, 'mouth');
+      for (const fa of this.faucets) aim(fa.spout, 'mouth');
     }
     return out;
   }
 
   /**
-   * Where what's held would snap to if let go now, to line up one of its aims (see aims): the one it takes the least
-   * shift to bring an outlet over the middle of its mouth, slid sideways, and up or down too to come within a faucet's
-   * reach, so long as that bumps into nothing. Not a flask's lip, which pours only while held, nor for a flask that
-   * will stand on a scale.
+   * The ways what's held could snap into line with one of its aims (see aims), least shift first: sliding sideways
+   * just far enough to bring the outlet over the middle of its mouth. Not a flask's lip, which pours only while held.
    */
-  private snap(h: Held, aims: readonly Aim[]): { a: Aim; d: Vec3 } | null {
-    const onScale = (p: Vec3) => h.kind === 'flask' && this.scales.some((sc) => scaleSpot(sc, p) !== null);
-    const pose = this.heldPose(h);
-    if (onScale(pose)) return null;
-    const ways = aims
+  private snaps(aims: readonly Aim[]): { a: Aim; d: Vec3 }[] {
+    return aims
       .filter((a) => a.held !== 'lip')
       .map((a) => {
         const s = snapInto(a.m, a.from.x, a.from.z);
-        const d = a.held === 'outlet' ? { x: s.dx, y: 0, z: s.dz } : { x: -s.dx, y: 0, z: -s.dz };
-        if (a.from.y - a.m.y > a.reach) d.y = a.from.y - a.reach / 2 - a.m.y;
-        return { a, d };
+        return { a, d: a.held === 'outlet' ? { x: s.dx, y: 0, z: s.dz } : { x: -s.dx, y: 0, z: -s.dz } };
       })
-      .sort((p, q) => Math.hypot(p.d.x, p.d.y, p.d.z) - Math.hypot(q.d.x, q.d.y, q.d.z));
-    if (!ways.length) return null;
-    const box = this.heldBox(h);
-    const obstacles = this.obstacles(h).filter((o) => !boxesOverlap(box, o));
-    return (
-      ways.find(({ d }) => {
-        const moved = { ...box, x: box.x + d.x, y: box.y + d.y, z: box.z + d.z };
-        return !obstacles.some((o) => boxesOverlap(moved, o)) && !onScale({ x: pose.x + d.x, y: pose.y + d.y, z: pose.z + d.z });
-      }) ?? null
-    );
+      .sort((p, q) => Math.hypot(p.d.x, p.d.z) - Math.hypot(q.d.x, q.d.z));
+  }
+
+  /**
+   * Where what's held would come to rest if let go now, and how it got there: snapped into line with one of its aims,
+   * the least shift that leaves somewhere it can rest (see rest); or else, if none does, right where it is. A flask
+   * that would stand on a scale isn't snapped. If it can't rest where it is either, why not.
+   */
+  private placement(h: Held): { rest: Rest; snap: { a: Aim; d: Vec3 } | null } | { why: string } {
+    const p = this.heldPose(h);
+    const obstacles = this.obstacles(h);
+    const solid = this.obstacles(h, false);
+    for (const sn of this.snaps(this.aims(h))) {
+      const r = this.rest(h, { ...p, x: p.x + sn.d.x, z: p.z + sn.d.z }, obstacles, solid);
+      if (typeof r !== 'string' && !r.scale) return { rest: r, snap: sn };
+    }
+    const r = this.rest(h, p, obstacles, solid);
+    return typeof r === 'string' ? { why: r } : { rest: r, snap: null };
+  }
+
+  /**
+   * Where what's held, at pose p, would come to rest if let go, or why it can't. Only squarely on a counter: a flask,
+   * a scale or a tool that stands on the bench goes straight down until it stands on the counter under it, which its
+   * whole footprint must be over (or a flask over a scale, onto its platform); a tool or hose end on a stand stays at
+   * the height it's held, no higher than its stand reaches, while its stand's base goes down onto the counter, which
+   * its whole footprint and its stand's whole base must be over. Either way, it mustn't bump into anything on the way down, nor its stand's base sit
+   * on anything but the counter. (Stands don't bump into each other: their rods can stand side by side.)
+   */
+  private rest(h: Held, p: Pose, obstacles: readonly Box[], solid: readonly Box[]): Rest | string {
+    const now = this.heldBox(h);
+    // what's in the way of a box, besides whatever what's held is already stuck in
+    const blocked = (b: Box) => obstacles.some((o) => boxesOverlap(b, o) && !boxesOverlap(now, o));
+    // box `to`, stretched up to the height of box `from`: what it passes through, going straight down
+    const span = (to: Box, from: Box): Box => {
+      const y0 = Math.min(to.y - to.hy, from.y - from.hy);
+      const y1 = Math.max(to.y + to.hy, from.y + from.hy);
+      return { ...to, y: (y0 + y1) / 2, hy: (y1 - y0) / 2 };
+    };
+    const box = this.boxAt(h, p);
+    const stands = this.standsAt(h, p);
+    if (stands.length) {
+      const tops = stands.map((st) => counterUnder(standBase(st, 0)));
+      if (tops.some((t) => t === null) || counterUnder(box) === null) return 'Set it down over a counter';
+      const drop = Math.max(0, ...stands.map((st, i) => st.clampY - tops[i]! - STAND_MAX));
+      const to = { ...box, y: box.y - drop };
+      if (blocked(span(to, box))) return 'No room';
+      if (stands.some((st, i) => solid.some((o) => boxesOverlap(standBase(st, tops[i]!), o)))) return 'No room for its stand';
+      return { pose: { ...p, y: p.y - drop } };
+    }
+    if (h.kind === 'flask')
+      for (const sc of this.scales) {
+        const dx = scaleSpot(sc, p, Infinity);
+        if (dx === null) continue;
+        const pose = onScale(sc, dx);
+        const to = this.boxAt(h, pose);
+        return blocked(span(to, { ...to, y: box.y })) ? 'No room' : { pose, scale: { sc, dx } };
+      }
+    const top = counterUnder(box);
+    if (top === null) return 'Set it down on a counter';
+    const dy = box.y - box.hy - top;
+    const to = { ...box, y: box.y - dy };
+    if (blocked(span(to, box))) return 'No room';
+    return { pose: { ...p, y: p.y - dy } };
+  }
+
+  /** The stands that would hold up what's held, at pose p: none for what stands on the bench. */
+  private standsAt(h: Held, p: Pose): Stand[] {
+    if (h.kind === 'tool') return toolStands(h.t, p);
+    if (h.kind !== 'hose') return [];
+    // a hose end held faces the player, so its stand is behind it
+    const yaw = this.player.yaw;
+    if (h.end === 'both') return [hoseStand(p, 'inlet', yaw), hoseStand(this.trailing(h, p), 'outlet', yaw)];
+    return [hoseStand(p, h.end, yaw)];
+  }
+
+  /** Every stand in the lab, with what it holds up. */
+  private stands(): { s: Stand; of: Pick }[] {
+    const out: { s: Stand; of: Pick }[] = [];
+    for (const t of this.tools) for (const s of toolStands(t)) out.push({ s, of: { kind: 'tool', t, part: 'body', k: 0 } });
+    const held = this.held;
+    for (const h of this.hoses)
+      for (const end of ['inlet', 'outlet'] as const) {
+        // one held faces the player (see standsAt)
+        const inHand = held?.kind === 'hose' && held.h === h && (held.end === end || held.end === 'both');
+        out.push({ s: hoseStand(h[end], end, inHand ? this.player.yaw : h.turn[end]), of: { kind: 'hose', h, end } });
+      }
+    return out;
   }
 
   /**
    * Guides for lining up what's held (see aims), shown only while something's held, since that's when things are
    * being lined up: solid where fluid would land in a mouth, faint where it would just miss; and the aim it would snap
-   * to if let go, as it would be after the snap.
+   * to if let go, as it would be once let go.
    */
-  private guides(): Frame['guides'] {
+  private guides(pl: ReturnType<GameEngine['placement']> | null): Frame['guides'] {
     const h = this.held;
     if (!h) return [];
     const aims = this.aims(h);
-    const sn = this.snap(h, aims);
+    const sn = pl && 'rest' in pl ? pl.snap : null;
+    const at = this.heldPose(h);
     return aims.map((a) => {
       const { x, y, z, hx, hz, yaw = 0 } = a.m;
-      if (sn?.a !== a) return { from: a.from, toY: y, look: a.hit ? 'solid' : 'faint', mouth: { x, y, z, hx, hz, yaw } };
-      const { d } = sn;
-      if (a.held === 'outlet') return { from: { x: a.from.x + d.x, y: a.from.y, z: a.from.z + d.z }, toY: y, look: 'snap', mouth: { x, y, z, hx, hz, yaw } };
+      // the snapped aim is matched up by where it's from and what it's into, since the snap was worked out from aims of its own
+      const same = sn && sn.a.m.v === a.m.v && sn.a.from.x === a.from.x && sn.a.from.y === a.from.y && sn.a.from.z === a.from.z;
+      if (!same || !pl || !('rest' in pl))
+        return { from: a.from, toY: y, look: a.hit ? 'solid' : 'faint', mouth: { x, y, z, hx, hz, yaw } };
+      // where it'll be, all told, once let go: snapped, and come to rest
+      const r = pl.rest.pose;
+      const d = { x: r.x - at.x, y: r.y - at.y, z: r.z - at.z };
+      if (a.held === 'outlet') return { from: { x: a.from.x + d.x, y: a.from.y + d.y, z: a.from.z + d.z }, toY: y, look: 'snap', mouth: { x, y, z, hx, hz, yaw } };
       return { from: a.from, toY: y + d.y, look: 'snap', mouth: { x: x + d.x, y: y + d.y, z: z + d.z, hx, hz, yaw } };
     });
+  }
+
+  /**
+   * Where what's held would come to rest, outlined on the counter: its footprint, or its stands' bases. Outlined in
+   * red, under where it is, if it can't be set down there.
+   */
+  private footprints(pl: ReturnType<GameEngine['placement']> | null): Frame['footprints'] {
+    const h = this.held;
+    if (!h || !pl) return [];
+    const ok = 'rest' in pl;
+    const p = ok ? pl.rest.pose : this.heldPose(h);
+    const stands = this.standsAt(h, p);
+    if (stands.length)
+      return stands.map((st) => {
+        const b = standBase(st, ok ? (counterUnder(standBase(st, 0)) ?? groundAt(st.x, st.z)) : groundAt(st.x, st.z));
+        return { x: b.x, y: b.y - b.hy, z: b.z, hx: b.hx, hz: b.hz, yaw: b.yaw, ok };
+      });
+    const b = this.boxAt(h, p);
+    const y = ok ? b.y - b.hy : groundAt(b.x, b.z);
+    return [{ x: b.x, y, z: b.z, hx: b.hx, hz: b.hz, yaw: b.yaw, ok }];
   }
 
   private render(dt: number): void {
@@ -1748,17 +1881,14 @@ export class GameEngine {
     for (const d of this.falling) drops.push({ at: d, v: d.v, hanging: false });
     const shake = new Map<Tool, number>();
     if (this.speed > 0) for (const t of this.tools) if (t.scanning) shake.set(t, scanLevel(t.scanAge) * 2.5);
+    const pl = (this.placed = h ? this.placement(h) : null);
     this.view.render({
       eye: this.eye(), yaw: this.player.yaw, pitch: this.player.pitch,
       flasks: this.flasks, tools: this.tools, scales: this.scales, hoses: this.hoses, faucets: this.faucets,
-      held: this.heldObject(), standing: this.standing(), streams, drops,
-      tarePress: this.tarePress, hot: this.target, shake, dt, delivered: this.delivered, papers: this.paperFrame(), guides: this.guides(),
+      streams, drops,
+      tarePress: this.tarePress, hot: this.target, shake, dt, delivered: this.delivered, papers: this.paperFrame(),
+      guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(),
     });
-    if (this.firstFrame) {
-      // everything starts held, rather than every arm snapping down at once
-      this.view.settleArms();
-      this.firstFrame = false;
-    }
   }
 
   /** The vessel the info panel is showing: what's held, if it's a flask, or else the flask or tank looked at. */
@@ -1821,6 +1951,7 @@ export class GameEngine {
       locked: this.locked,
       grab: !this.held && !!p && p.kind !== 'faucet' && !(p.kind === 'tool' && p.t.shape.fixed),
       holding: !!this.held,
+      drop: !!this.placed && 'rest' in this.placed,
       press:
         (p?.kind === 'tool' && p.part === 'button' && !(p.t.kind === 'receptacle' ? p.t.cycle : p.t.scanning)) ||
         (p?.kind === 'scale' && p.part === 'tare'),

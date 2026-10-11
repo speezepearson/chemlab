@@ -1,7 +1,7 @@
 import { toWorld, type Pose, type Vec3 } from './space';
 
 /**
- * Collisions in the lab. Nothing falls (whatever the player lets go of, an arm from the ceiling holds), and
+ * Collisions in the lab. Nothing falls (whatever the player lets go of is set down on a counter, or on a stand), and
  * nothing turns except about the vertical, so every body is a box turned by some yaw, and the player is an
  * upright cylinder. The only things that move are the player and what they're carrying, so the physics is all
  * about stopping those short of whatever they'd run into, and letting them slide along it.

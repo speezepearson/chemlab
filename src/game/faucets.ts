@@ -67,10 +67,9 @@ export function faucetOutput(fa: Faucet, net: ReactionNetwork): Fluid {
 }
 
 /**
- * What a faucet whose spout is at `spout` fills: the first open top below it, if that's within `reach`. A
- * full one keeps filling, and overflows. That includes something the player is holding there.
+ * What a faucet whose spout is at `spout` fills: the first open top below it, however far down, as a spout's stream
+ * would. A full one keeps filling, and overflows. That includes something the player is holding there.
  */
-export function faucetTarget(mouths: readonly Mouth[], spout: Vec3, reach: number): Mouth | null {
-  const m = mouthBelow(mouths, spout);
-  return m && spout.y - m.y <= reach ? m : null;
+export function faucetTarget(mouths: readonly Mouth[], spout: Vec3): Mouth | null {
+  return mouthBelow(mouths, spout);
 }

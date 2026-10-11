@@ -18,7 +18,7 @@ export interface FlaskFill {
  * Where the one and only mass spectrometer starts, as fractions of the home area (see HOME_W), unless a preset
  * places it itself: there's always exactly one.
  */
-export const SPECTROMETER_AT: [number, number] = [0.88, 0.3];
+export const SPECTROMETER_AT: [number, number] = [1.12, 0.3];
 
 /**
  * Where the one and only receptacle stands, the same way: there's always exactly one of it too. Its hose runs down
@@ -143,7 +143,7 @@ export const PRESETS: readonly Preset[] = [
       { kind: 'dispenser', at: [0.47, 0.3] },
       { kind: 'exchanger', at: [0.62, 0.3] },
     ],
-    scales: [[0.7, 0.62]],
+    scales: [[1.36, 0.62]],
   },
   {
     id: 'exchanger',

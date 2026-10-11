@@ -318,6 +318,8 @@ export interface ToolShape {
    * one that's its own mirror image, in what it does if not in every detail, can't.
    */
   flippable?: boolean;
+  /** Whether it stands straight on a counter, like a cabinet, rather than being held up over it on a clamp stand. */
+  bench?: boolean;
   /** Whether it stays where it is: it can't be picked up and carried. */
   fixed?: boolean;
   /** Whether the tanks are sealed on top, so nothing can be poured or fall into them. */
@@ -478,6 +480,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tankCap: SAMPLE_CAP,
     funnel: true,
     noValve: true,
+    bench: true,
     spouts: [],
     valveY: 20,
     spoutY: 20,
@@ -1027,6 +1030,8 @@ export class Hose {
   flow = 0;
   /** The player's note, written above its funnel; empty for none. */
   note = '';
+  /** Which way each end faces, about the vertical (see Pose), with the stand holding it up behind it. */
+  turn = { inlet: 0, outlet: 0 };
 
   constructor(
     /** The funnel's mouth and the outlet's tip, in the room. */

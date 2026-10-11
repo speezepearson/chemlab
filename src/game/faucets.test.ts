@@ -74,25 +74,25 @@ describe('faucets', () => {
 });
 
 describe('faucetTarget', () => {
-  const spout = { x: 100, y: 60, z: 0 };
-  const reach = 24;
+  const spout = { x: 100, y: 600, z: 0 };
   const mouth = (v: Vessel, y: number): Mouth => ({ v, x: 100, y, z: 0, hx: 20, hz: 20 });
 
-  it('fills something parked under it, in reach', () => {
+  it('fills something standing under it, however far down', () => {
     const tank = new Vessel(CAP);
-    expect(faucetTarget([mouth(tank, 50)], spout, reach)?.v).toBe(tank);
+    expect(faucetTarget([mouth(tank, 590)], spout)?.v).toBe(tank);
+    expect(faucetTarget([mouth(tank, 300)], spout)?.v).toBe(tank);
   });
 
-  it('fills nothing out of reach, but keeps filling something full (which overflows)', () => {
+  it('keeps filling something full (which overflows), but nothing beside it', () => {
     const tank = new Vessel(CAP);
-    expect(faucetTarget([mouth(tank, 30)], spout, reach)).toBeNull();
     tank.N = CAP;
-    expect(faucetTarget([mouth(tank, 50)], spout, reach)?.v).toBe(tank);
+    expect(faucetTarget([mouth(tank, 500)], spout)?.v).toBe(tank);
+    expect(faucetTarget([{ ...mouth(tank, 500), x: 200 }], spout)).toBeNull();
   });
 
   it('fills only the first thing under it', () => {
     const top = new Vessel(4 * CAP);
     const below = new Vessel(CAP);
-    expect(faucetTarget([mouth(below, 40), mouth(top, 50)], spout, reach)?.v).toBe(top);
+    expect(faucetTarget([mouth(below, 400), mouth(top, 500)], spout)?.v).toBe(top);
   });
 });

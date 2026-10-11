@@ -53,10 +53,23 @@ export const COUNTERS: readonly Counter[] = [
 export function groundAt(x: number, z: number): number {
   return COUNTERS.some((c) => x >= c.x0 && x <= c.x1 && z >= c.z0 && z <= c.z1) ? LIFT : 0;
 }
+/**
+ * The top of the counter a footprint (a rectangle `hx` by `hz` either side of (x, z), turned by `yaw` like a box) lies
+ * wholly on, or null if it doesn't lie wholly on one: things are set down only squarely on a counter.
+ */
+export function counterUnder(f: { x: number; z: number; hx: number; hz: number; yaw: number }): number | null {
+  const c = Math.cos(f.yaw);
+  const s = Math.sin(f.yaw);
+  const corners = [-1, 1].flatMap((sx) =>
+    [-1, 1].map((sz) => ({ x: f.x + sx * f.hx * c + sz * f.hz * s, z: f.z - sx * f.hx * s + sz * f.hz * c })),
+  );
+  const on = COUNTERS.find((k) => corners.every((p) => p.x >= k.x0 && p.x <= k.x1 && p.z >= k.z0 && p.z <= k.z1));
+  return on ? LIFT : null;
+}
 /** How far out from the back wall sticky notes are, so they lie on its face. */
 export const PAPER_Z = 0.6;
 /** How far out from the back wall things stand when nothing says otherwise: over the counter. */
-export const Z_HOME = 70;
+export const Z_HOME = 76;
 /** Where the old bench's sink was, in its own units, down from the top of its home area. */
 const SINK_2D = HOME_H - 16;
 

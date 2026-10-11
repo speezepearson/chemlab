@@ -79,8 +79,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   chemistry, cooling, the spectrometer's run and sound, the receptacle's cycle, and the drip and stream sounds. All of it
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
-  notice; and the player themselves (walking, looking, carrying, tipping a flask) and the arms, which are input, not
-  the sim.
+  notice; and the player themselves (walking, looking, carrying, tipping a flask), which is input, not the sim.
   - Anything drawn per outlet must use totals over the whole frame. A single substep's output can be empty, for
     example when a wide-open valve drains its tank in the first substep.
 - **Landing fluid goes through `fill()`.** Anything that lands in a vessel (streams, drops, faucets, pours) must use
@@ -95,8 +94,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     center, a flask's mouth, a scale's platform), with z toward their front: use `onTool` and friends in `bodies.ts`.
   - Presets and saves store across and up as fractions of the old 1000 × 620 home area (`fromFrac` and `toFrac` in
     `space.ts`), which is now the back wall, plus optional `z` and `yaw`, so old saves keep working.
-  - Everything turns only about the vertical, except a flask tipped to pour, and nothing falls: an arm holds whatever
-    the player lets go of. Keep it that way, or `physics.ts` won't do.
+  - Everything turns only about the vertical, except a flask tipped to pour, and nothing falls: whatever the player
+    lets go of is set down squarely on a counter, or held over one by its clamp stands (`toolStands`, `hoseStand`), or
+    stays in hand (see `GameEngine.placement`). Keep it that way, or `physics.ts` won't do.
 - **What's drawn is what's hit.** Every mesh a `ToolView` builds is registered as part of the tool for the crosshair's
   raycast, so empty space around it isn't. Register a mesh yourself only to make it a specific part (a tank, valve
   or button); sprites (labels) aren't hit.
@@ -110,7 +110,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `ITEMS` and `HOTKEYS` in `engine.ts` (the hotbar's order and keys) and `ICONS` in `Palette.tsx`, unless the tool is
     unique. The number row is all taken.
   - Tests and the README.
-  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `flippable`, `fixed`, `sealed`, `maxFlow`, `label`.
+  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `flippable`, `fixed`, `sealed`, `maxFlow`, `label`, `bench`.
 - **Unique tools** (`UNIQUE_TOOLS`: the spectrometer, the cryostabilizer reference, the flow meter and the receptacle)
   aren't on the hotbar and can't be put away. `uniqueTools()` keeps at most one of each and always adds a
   spectrometer, a meter and a receptacle. The receptacle is also `fixed`: it can't be carried at all.

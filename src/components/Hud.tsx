@@ -118,7 +118,7 @@ export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudSta
           up={() => engine.hand(false)}
           drag={(dx, dy) => engine.handDrag(dx, dy)}
         />
-        <TouchButton label={hud.holding ? 'Drop' : 'Grab'} lit={hud.grab || hud.holding} down={() => engine.touchGrab()} />
+        <TouchButton label={hud.holding ? 'Drop' : 'Grab'} lit={hud.grab || hud.drop} down={() => engine.touchGrab()} />
       </div>
       <div className="touch-buttons left">
         {hud.holding && <TouchButton label="Put away" className="small" down={() => engine.touchPutAway()} />}
@@ -147,7 +147,7 @@ export function Hud({ hud }: { hud: HudState }) {
     <>
       <div className={hud.aim ? 'crosshair dim' : 'crosshair'} />
       <div className="hints">
-        {(hud.grab || hud.holding) && <kbd>E</kbd>}
+        {(hud.grab || hud.drop) && <kbd>E</kbd>}
         {hud.press && <MouseHint side="left" />}
         {hud.right && <MouseHint side="right" />}
       </div>

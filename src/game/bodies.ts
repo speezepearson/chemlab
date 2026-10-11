@@ -2,7 +2,7 @@ import type { Flask } from './flask';
 import { FLASK_H } from './flaskShape';
 import { placeBox, type Box } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
-import { toWorld, type Pose, type Vec3 } from './space';
+import { groundAt, toWorld, type Pose, type Vec3 } from './space';
 import { TANK_H, tankX, type Hose, type Mouth, type Tool, type ToolKind } from './tools';
 
 /**
@@ -158,9 +158,9 @@ export function scaleCenter(sc: Scale): Vec3 {
 
 /**
  * Where a flask let go of with its mouth at `p` would stand on a scale: `dx` along the platform, if it's over the
- * platform and not far above it (nor below it). Null if it isn't.
+ * platform, above it but no more than `reach` above it. Null if it isn't.
  */
-export function scaleSpot(sc: Scale, p: Vec3): number | null {
+export function scaleSpot(sc: Scale, p: Vec3, reach = 60): number | null {
   const { platform: pl, depth } = SCALE_SHAPE;
   const c = Math.cos(sc.pose.yaw);
   const s = Math.sin(sc.pose.yaw);
@@ -169,7 +169,7 @@ export function scaleSpot(sc: Scale, p: Vec3): number | null {
   const lx = dx * c - dz * s;
   const lz = dx * s + dz * c;
   const above = p.y - FLASK_H - sc.pose.y;
-  if (lx < pl.x0 || lx > pl.x1 || Math.abs(lz) > depth || above < -10 || above > 60) return null;
+  if (lx < pl.x0 || lx > pl.x1 || Math.abs(lz) > depth || above < -10 || above > reach) return null;
   return Math.max(pl.x0 + SCALE_INSET, Math.min(pl.x1 - SCALE_INSET, lx));
 }
 
@@ -192,6 +192,68 @@ export function hoseEndBox(h: Hose, end: 'inlet' | 'outlet'): Box {
   return end === 'inlet'
     ? placeBox(pose, { x: 0, y: -FUNNEL_H / 2, z: 0 }, { x: FUNNEL_R, y: FUNNEL_H / 2, z: FUNNEL_R })
     : placeBox(pose, { x: 0, y: NOZZLE_H / 2, z: 0 }, { x: 5, y: NOZZLE_H / 2, z: 5 });
+}
+
+/* ---------------- stands ---------------- */
+
+/**
+ * A clamp stand, holding up a tool or a hose end: a base plate on whatever's below, a rod straight up from it, and a
+ * clamp at the rod's top reaching out to what it holds. Its rod stands at (x, z), behind what it holds as that faces,
+ * the clamp is `clampY` high, and its arm reaches what it holds at `to`.
+ */
+export interface Stand {
+  x: number;
+  z: number;
+  clampY: number;
+  to: Vec3;
+  yaw: number;
+}
+
+/** A stand's base plate: how far it reaches either side of its rod, across and front to back, and how thick it is. */
+export const STAND_BASE = { hx: 30, hz: 16, h: 6 };
+/** How high a stand's clamp can be above its base: as long as its rod is. */
+export const STAND_MAX = 800;
+/** A tool wider than this is held by two stands, one near each end, rather than one in the middle. */
+const TWO_STANDS = 300;
+/**
+ * How far behind the middle of what it holds a stand's rod is: far enough that its base clears a flask standing
+ * under what it holds (or under the tool's spouts, which are along its middle), by this much.
+ */
+const STAND_CLEAR = 6;
+const rodBack = (body: number) => Math.max(body / 2, FLASK_R) + STAND_CLEAR + STAND_BASE.hz;
+
+/** Whether a tool stands straight on a counter, rather than being held up on a stand. */
+export const onBench = (t: Tool) => !!t.shape.bench;
+
+/** The stands holding up a tool, unless it stands on the bench: clamped near its top, behind it. */
+export function toolStands(t: Tool, pose = t.pose): Stand[] {
+  if (onBench(t)) return [];
+  const at = (x: number, y: number, z: number) => toWorld(pose, { x: lx(t, x), y: -y, z });
+  const b = t.shape.box;
+  const body = TOOL_DEPTH[t.kind].body;
+  const xs = b.x1 - b.x0 > TWO_STANDS ? [b.x0 + 60, b.x1 - 60] : [(b.x0 + b.x1) / 2];
+  const y = Math.max(b.y0, 0) + 12;
+  return xs.map((x) => {
+    const rod = at(x, y, -rodBack(body));
+    return { x: rod.x, z: rod.z, clampY: rod.y, to: at(x, y, -body / 2), yaw: pose.yaw };
+  });
+}
+
+/**
+ * The stand holding up one end of a hose, at `e`, facing `yaw`: behind it, clamped round its funnel or nozzle.
+ */
+export function hoseStand(e: Vec3, end: 'inlet' | 'outlet', yaw: number): Stand {
+  const y = end === 'inlet' ? e.y - FUNNEL_H / 2 : e.y + NOZZLE_H / 2;
+  const r = end === 'inlet' ? FUNNEL_R : 5;
+  const pose = { ...e, yaw };
+  const rod = toWorld(pose, { x: 0, y: 0, z: -rodBack(2 * r) });
+  return { x: rod.x, z: rod.z, clampY: y, to: { ...toWorld(pose, { x: 0, y: 0, z: -r }), y }, yaw };
+}
+
+/** A stand's base plate, standing at height `y` (the counter's top, or the floor's under it if left out). */
+export function standBase(s: Stand, y = groundAt(s.x, s.z)): Box {
+  const { hx, hz, h } = STAND_BASE;
+  return { x: s.x, y: y + h / 2, z: s.z, yaw: s.yaw, hx, hy: h / 2, hz };
 }
 
 /* ---------------- valves ---------------- */

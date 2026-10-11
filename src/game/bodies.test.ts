@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
-  aimValve, flaskLip, flaskMouth, flip, onScale, scaleSpot, spoutAt, tankMouth, toolBox, valveLocal, valveNear,
+  FLASK_R, STAND_BASE, aimValve, flaskBox, flaskLip, flaskMouth, flip, hoseStand, onScale, scaleSpot, spoutAt, standBase,
+  tankMouth, toolBox, toolStands, valveLocal, valveNear,
 } from './bodies';
 import { CAP } from './config';
 import { Flask } from './flask';
 import { FLASK_H } from './flaskShape';
 import { boxesOverlap } from './physics';
 import { Scale } from './scale';
-import { fromFrac, toFrac } from './space';
+import { COUNTERS, LIFT, counterUnder, fromFrac, toFrac } from './space';
 import { Tool, mouthBelow } from './tools';
 
 const at = (x: number, y: number, z: number, yaw = 0) => ({ x, y, z, yaw });
@@ -161,5 +162,50 @@ describe('scaleSpot', () => {
     expect(scaleSpot(sc, { x: 30, y: 400 + FLASK_H - 40, z: 0 })).toBeNull();
     expect(scaleSpot(sc, { x: 30, y: 400 + FLASK_H, z: 80 })).toBeNull();
     expect(scaleSpot(sc, { x: 130, y: 400 + FLASK_H, z: 0 })).toBeNull();
+  });
+});
+
+describe('counterUnder', () => {
+  const island = COUNTERS.find((c) => c.island)!;
+  const mid = { x: (island.x0 + island.x1) / 2, z: (island.z0 + island.z1) / 2 };
+  it('finds the counter a footprint lies wholly on, at any yaw', () => {
+    expect(counterUnder({ ...mid, hx: 40, hz: 20, yaw: 0 })).toBe(LIFT);
+    expect(counterUnder({ ...mid, hx: 40, hz: 20, yaw: 1 })).toBe(LIFT);
+  });
+
+  it("finds none for one hanging off an edge, or out in an aisle", () => {
+    expect(counterUnder({ x: mid.x, z: island.z0 + 10, hx: 40, hz: 20, yaw: 0 })).toBeNull();
+    expect(counterUnder({ x: mid.x, z: island.z0 - 100, hx: 10, hz: 10, yaw: 0 })).toBeNull();
+  });
+});
+
+describe('stands', () => {
+  it('hold a tool up from behind, their bases clear of a flask standing under its spout', () => {
+    const t = new Tool('dispenser', 0, at(100, 600, 200));
+    const [st, more] = toolStands(t);
+    expect(more).toBeUndefined();
+    expect(st.z).toBeLessThan(200);
+    expect(st.clampY).toBeLessThan(600);
+    const f = new Flask(CAP);
+    const sp = spoutAt(t, 0);
+    f.pose = at(sp.x, LIFT + 70, sp.z);
+    expect(boxesOverlap(standBase(st, LIFT), flaskBox(f))).toBe(false);
+    expect(st.z + STAND_BASE.hz).toBeLessThan(sp.z - FLASK_R);
+  });
+
+  it('turn with the tool, two to a wide tool, and none for one that stands on the bench', () => {
+    const t = new Tool('dispenser', 0, at(0, 600, 0, Math.PI / 2));
+    // turned a quarter, its back is toward −x
+    expect(toolStands(t)[0].x).toBeLessThan(0);
+    expect(toolStands(t)[0].z).toBeCloseTo(0);
+    expect(toolStands(new Tool('separator', 0, at(0, 600, 0)))).toHaveLength(2);
+    expect(toolStands(new Tool('spectrometer', 0, at(0, 600, 0)))).toHaveLength(0);
+  });
+
+  it("hold a hose end from behind it, as it faces", () => {
+    const e = { x: 10, y: 500, z: 300 };
+    expect(hoseStand(e, 'inlet', 0).z).toBeLessThan(300);
+    expect(hoseStand(e, 'outlet', Math.PI).z).toBeGreaterThan(300);
+    expect(hoseStand(e, 'outlet', Math.PI).x).toBeCloseTo(10);
   });
 });

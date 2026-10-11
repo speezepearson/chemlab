@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { temperature, type Fluid } from '../chem/reactions';
 import { LOOK, coronaAlpha, coronaRadius, glowFalloff, haloAlpha, haloRadius } from './appearance';
-import { FUNNEL_H, FUNNEL_R, NOZZLE_H, TOOL_DEPTH, lx, onTool, openingOf, tankRect, valveLocal, valveZ } from './bodies';
+import {
+  FUNNEL_H, FUNNEL_R, NOZZLE_H, STAND_BASE, TOOL_DEPTH, lx, onTool, openingOf, tankRect, valveLocal, valveZ, type Stand,
+} from './bodies';
 import { CAP, FLASK_L, GOAL_L, TRACE } from './config';
 import { Vessel, fluidAlpha, fluidRGB, glowColor, volume, type Flask } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
@@ -41,9 +43,6 @@ export interface Frame {
   scales: readonly Scale[];
   hoses: readonly Hose[];
   faucets: readonly FaucetSpot[];
-  /** What the player is holding, which no arm holds; and flasks standing on scales, which no arm holds either. */
-  held: object | null;
-  standing: ReadonlySet<Flask>;
   streams: readonly { from: Vec3; toY: number; fluid: Fluid; flow: number }[];
   /**
    * Streams for lining things up: solid gray where fluid would land in a mouth, faint gray where it would just miss
@@ -51,6 +50,13 @@ export interface Frame {
    * match.
    */
   guides: readonly { from: Vec3; toY: number; look: GuideLook; mouth: Vec3 & { hx: number; hz: number; yaw: number } }[];
+  /**
+   * Where what's held would come to rest if let go, outlined where it'd stand (its footprint, or its stands' bases):
+   * pale if it can be set down there, red if it can't.
+   */
+  footprints: readonly (Vec3 & { hx: number; hz: number; yaw: number; ok: boolean })[];
+  /** Every clamp stand, each with what it holds up, to grab that by it. */
+  stands: readonly { s: Stand; of: Pick }[];
   drops: readonly { at: Vec3; v: Vessel; hanging: boolean }[];
   /** The scale whose tare key is held down. */
   tarePress: Scale | null;
@@ -58,7 +64,7 @@ export interface Frame {
   hot: Pick | null;
   /** How far each running spectrometer shakes, in world units. */
   shake: ReadonlyMap<Tool, number>;
-  /** Real seconds since the last frame, for the arms. */
+  /** Real seconds since the last frame, for the beacon. */
   dt: number;
   /** The target the receptacle has taken so far, by volume, for its screen. */
   delivered: number;
@@ -74,14 +80,19 @@ export interface Frame {
 }
 
 export type GuideLook = 'faint' | 'solid' | 'snap';
-/** How each look of guide is drawn: the color and opacity of its stream, and of its rim. */
-const GUIDE_LOOKS: Record<GuideLook, { color: number; stream: number; edge: number; rim: number }> = {
+/**
+ * How each look of guide is drawn: the color and opacity of its stream, and of its rim; and the same for the outline
+ * of where what's held will stand, `place`, or can't, `bad` (see Frame.footprints), which have no stream.
+ */
+const GUIDE_LOOKS: Record<GuideLook | 'place' | 'bad', { color: number; stream: number; edge: number; rim: number }> = {
   faint: { color: 0xb4bcb8, stream: 0.18, edge: 0xdfe6e2, rim: 0.4 },
   solid: { color: 0xb4bcb8, stream: 0.6, edge: 0xdfe6e2, rim: 0.85 },
   snap: { color: 0x7fd4ad, stream: 0.8, edge: 0x7fd4ad, rim: 0.95 },
+  place: { color: 0, stream: 0, edge: 0xe8eeea, rim: 0.75 },
+  bad: { color: 0, stream: 0, edge: 0xe0604c, rim: 0.85 },
 };
 /** Which look wins where guides of several looks end at the same mouth. */
-const LOOK_RANK: Record<GuideLook, number> = { faint: 0, solid: 1, snap: 2 };
+const LOOK_RANK: Record<GuideLook | 'place' | 'bad', number> = { faint: 0, solid: 1, snap: 2, place: 3, bad: 3 };
 
 /** Width of a stream flowing one flask per second; it goes as the square root of the flow. */
 const STREAM_WIDTH = 4.5;
@@ -93,8 +104,6 @@ const DROP_R = 3;
 const DROP_R_ATOMS = 1.5e6;
 /** A CRT's phosphor green. */
 const PHOSPHOR = '64, 255, 110';
-/** How long an arm takes to reach down to what it holds, or back up, in real seconds. */
-const ARM_S = 0.28;
 /** The separator's splitter, below its valve, in local units (y down). */
 const SEP_BODY = { x0: -150, x1: 150, y0: 100, y1: 112 };
 /** Height of each line of a label, in world units. */
@@ -119,7 +128,7 @@ const keyMats = {
 };
 const hidden = new THREE.MeshBasicMaterial({ visible: false });
 const faintMat = new THREE.MeshBasicMaterial({ color: 0xd6ecf2, transparent: true, opacity: 0.3, depthWrite: false });
-const armMat = new THREE.MeshStandardMaterial({ color: 0xd2a63a, metalness: 0.5, roughness: 0.35 });
+const rodMat = new THREE.MeshStandardMaterial({ color: 0xb4bcb9, metalness: 0.75, roughness: 0.3 });
 
 /** Points in a flat frame (x right, y down), placed at depth z, as a vector in an object's own frame (y up). */
 const v3 = (x: number, y: number, z = 0) => new THREE.Vector3(x, -y, z);
@@ -1347,48 +1356,46 @@ class PaperView {
   }
 }
 
-/* ---------------- arms ---------------- */
+/* ---------------- stands ---------------- */
 
-/**
- * An arm from the ceiling holding something the player let go of: a carriage on the ceiling and a rod that snaps
- * down to a clamp on the thing, or back up when the player takes it.
- */
-class Arm {
+/** A clamp stand (see Stand): a base plate, a steel rod up from it, and a clamp out to what it holds. */
+class StandView {
   readonly group = new THREE.Group();
+  readonly parts: THREE.Mesh[];
+  private base: THREE.Mesh;
   private rod: THREE.Mesh;
-  private clamp: THREE.Mesh;
-  ext = 0;
-  at = new THREE.Vector3();
-  holding = true;
+  private boss: THREE.Mesh;
+  private arm: THREE.Mesh;
+  private jaw: THREE.Mesh;
 
   constructor(scene: THREE.Object3D) {
-    const carriage = new THREE.Mesh(new THREE.BoxGeometry(26, 10, 26), darkMat);
-    carriage.position.y = ROOM.y1 - 5;
-    this.rod = new THREE.Mesh(unitCylinder, armMat);
-    this.clamp = new THREE.Mesh(new THREE.BoxGeometry(9, 7, 9), darkMat);
-    this.rod.castShadow = this.clamp.castShadow = true;
-    this.group.add(carriage, this.rod, this.clamp);
+    const { hx, hz, h } = STAND_BASE;
+    this.base = new THREE.Mesh(new THREE.BoxGeometry(2 * hx, h, 2 * hz), darkMat);
+    this.rod = new THREE.Mesh(unitCylinder, rodMat);
+    this.boss = new THREE.Mesh(new THREE.BoxGeometry(9, 12, 9), darkMat);
+    this.arm = new THREE.Mesh(unitBox, rodMat);
+    this.jaw = new THREE.Mesh(new THREE.BoxGeometry(12, 9, 4), darkMat);
+    this.parts = [this.base, this.rod, this.boss, this.arm, this.jaw];
+    for (const m of this.parts) m.castShadow = m.receiveShadow = true;
+    this.group.add(...this.parts);
     scene.add(this.group);
   }
 
-  /** Step the arm toward holding `at`, or (with null) back up out of the way. Returns false once it's all the way up. */
-  update(at: THREE.Vector3 | null, dt: number): boolean {
-    this.holding = !!at;
-    if (at) this.at.copy(at);
-    this.ext = Math.max(0, Math.min(1, this.ext + ((at ? 1 : -1) * dt) / ARM_S));
-    // fast at first, settling in at the end
-    const e = 1 - (1 - this.ext) ** 3;
-    const top = ROOM.y1 - 10;
-    const bottom = top - (top - this.at.y) * e;
-    this.group.position.set(this.at.x, 0, this.at.z);
-    this.rod.position.y = (top + bottom) / 2 + 2;
-    this.rod.scale.set(2.2, Math.max(0.1, top - bottom), 2.2);
-    this.clamp.position.y = bottom;
-    return this.ext > 0 || !!at;
-  }
-
-  dispose(): void {
-    this.group.removeFromParent();
+  /** Stand it with its base on a surface `y` high, reaching up to its clamp. */
+  update(s: Stand, y: number): void {
+    const h = STAND_BASE.h;
+    this.group.position.set(s.x, 0, s.z);
+    this.group.rotation.y = s.yaw;
+    this.base.position.y = y + h / 2;
+    const top = Math.max(y + h + 1, s.clampY + 10);
+    this.rod.position.y = (y + h + top) / 2;
+    this.rod.scale.set(2.4, top - y - h, 2.4);
+    this.boss.position.y = s.clampY;
+    // the clamp's arm reaches forward, along what it holds' own z, to it
+    const len = Math.max(1, Math.hypot(s.to.x - s.x, s.to.z - s.z));
+    this.arm.position.set(0, s.clampY, len / 2);
+    this.arm.scale.set(2.6, 2.6, len);
+    this.jaw.position.set(0, s.clampY, len);
   }
 }
 
@@ -1465,7 +1472,7 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
   wall(W, cx, ROOM.z1, Math.PI);
   wall(Dp, ROOM.x0, cz, Math.PI / 2);
   wall(Dp, ROOM.x1, cz, -Math.PI / 2);
-  // ceiling light panels, and the gantry rails the arms run on
+  // ceiling light panels
   for (let x = ROOM.x0 + 300; x < ROOM.x1; x += 500)
     for (let z = 350; z < ROOM.z1; z += 600) {
       const p = new THREE.Mesh(new THREE.PlaneGeometry(220, 90), new THREE.MeshBasicMaterial({ color: 0xe8f0ea }));
@@ -1473,11 +1480,6 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
       p.position.set(x, H - 1, z);
       scene.add(p);
     }
-  for (let z = 60; z < ROOM.z1; z += 160) {
-    const r = new THREE.Mesh(new THREE.BoxGeometry(W, 6, 8), darkMat);
-    r.position.set(cx, H - 3, z);
-    scene.add(r);
-  }
   // the sink counters along the back wall and under the faucets, and the islands out in the room: whatever falls past
   // everything ends up on one of them, or on the floor
   const steel = new THREE.MeshStandardMaterial({ color: 0x6f7975, metalness: 0.5, roughness: 0.4 });
@@ -1592,7 +1594,7 @@ export class View {
   private papers = new Map<Paper, PaperView>();
   /** A sticky note being marked out with the pencil. */
   private draft: THREE.LineLoop;
-  private arms = new Map<object, Arm>();
+  private stands: StandView[] = [];
   private faucetMats: THREE.MeshStandardMaterial[] = [];
   private faucetNotes: Label[] = [];
   private streams: THREE.Mesh[] = [];
@@ -1705,7 +1707,7 @@ export class View {
       this.draft.geometry.computeBoundingSphere();
     }
 
-    this.updateArms(fr);
+    this.updateStands(fr);
     this.updateStreams(fr);
     this.updateGuides(fr);
 
@@ -1717,35 +1719,18 @@ export class View {
     this.renderer.render(scene, this.camera);
   }
 
-  /** An arm holds everything the player let go of, except flasks standing on scales. */
-  private updateArms(fr: Frame): void {
-    const want = new Map<object, THREE.Vector3>();
-    const at = (p: Vec3) => new THREE.Vector3(p.x, p.y, p.z);
-    for (const f of fr.flasks)
-      if (f !== fr.held && !fr.standing.has(f)) want.set(f, at(toWorld(f.pose, { x: 0, y: -6, z: -14 })));
-    for (const t of fr.tools)
-      if (t !== fr.held) want.set(t, at(onTool(t, 0, t.shape.box.y0, -TOOL_DEPTH[t.kind].body / 2 - 6)));
-    for (const sc of fr.scales)
-      if (sc !== fr.held) want.set(sc, at(toWorld(sc.pose, { x: 0, y: -8, z: -SCALE_SHAPE.depth - 6 })));
-    for (const h of fr.hoses) {
-      if (h.inlet !== fr.held && h !== fr.held) want.set(h.inlet, at({ ...h.inlet, z: h.inlet.z - FUNNEL_R - 4 }));
-      if (h.outlet !== fr.held && h !== fr.held) want.set(h.outlet, at({ ...h.outlet, y: h.outlet.y + NOZZLE_H }));
-    }
-    for (const [k, p] of want) {
-      let arm = this.arms.get(k);
-      if (!arm) this.arms.set(k, (arm = new Arm(this.scene)));
-      arm.update(p, fr.dt);
-    }
-    for (const [k, arm] of this.arms)
-      if (!want.has(k) && !arm.update(null, fr.dt)) {
-        arm.dispose();
-        this.arms.delete(k);
+  /** Every stand, its base on whatever's under it: a counter, or the floor under something held out over it. */
+  private updateStands(fr: Frame): void {
+    while (this.stands.length < fr.stands.length) this.stands.push(new StandView(this.scene));
+    this.stands.forEach((v, i) => {
+      const st = fr.stands[i];
+      v.group.visible = !!st;
+      for (const m of v.parts) {
+        if (st) this.pickables.set(m, st.of);
+        else this.pickables.delete(m);
       }
-  }
-
-  /** Arms are already holding everything at the start, rather than all snapping down at once. */
-  settleArms(): void {
-    for (const arm of this.arms.values()) arm.ext = 1;
+      if (st) v.update(st.s, groundAt(st.s.x, st.s.z));
+    });
   }
 
   private updateGuides(fr: Frame): void {
@@ -1769,7 +1754,8 @@ export class View {
       m.scale.set(r, len, r);
     });
     // each mouth a guide ends at, outlined once, in the look of the strongest guide into it
-    const mouths = new Map<string, Frame['guides'][number]['mouth'] & { look: GuideLook }>();
+    const mouths = new Map<string, Frame['guides'][number]['mouth'] & { look: keyof typeof GUIDE_LOOKS }>();
+    for (const f of fr.footprints) mouths.set(`f${f.x},${f.y},${f.z}`, { ...f, look: f.ok ? 'place' : 'bad' });
     for (const g of fr.guides) {
       const m = g.mouth;
       const key = `${m.x},${m.y},${m.z}`;
