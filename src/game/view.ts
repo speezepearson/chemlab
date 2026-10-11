@@ -1513,7 +1513,78 @@ function starField(): THREE.Group {
   };
   const sky = new THREE.Group();
   sky.add(layer(16000, 1, 0.12, 0.45), layer(3500, 1.4, 0.3, 0.75), layer(350, 2, 0.55, 1));
+  sky.add(milkyWay(rnd));
   return sky;
+}
+
+/** How wide the Milky Way is, as the spread of its stars about its middle, in radians. */
+const BAND_SPREAD = 0.13;
+
+/**
+ * The Milky Way: a band of countless faint stars, clumped along its length, over a soft glow with a darker lane of
+ * dust down its middle, round the sky a little off level.
+ */
+function milkyWay(rnd: () => number): THREE.Group {
+  // how bright the band is at a longitude: uneven, from a few waves of random phase
+  const waves = [1, 2, 3, 5, 8].map((k) => ({ k, p: rnd() * Math.PI * 2, a: 1 / k }));
+  const clump = (lon: number) => 0.5 + 0.5 * Math.sin(waves.reduce((t, w) => t + w.a * Math.sin(w.k * lon + w.p), 0) * 1.6);
+  const band = new THREE.Group();
+  // its stars, thickest along its middle
+  const pos: number[] = [];
+  const col: number[] = [];
+  while (pos.length < 30000 * 3) {
+    const lon = rnd() * Math.PI * 2;
+    if (rnd() > 0.25 + 0.75 * clump(lon)) continue;
+    const lat = BAND_SPREAD * Math.sqrt(-2 * Math.log(1 - rnd())) * Math.cos(2 * Math.PI * rnd());
+    const r = Math.cos(lat) * STAR_R;
+    pos.push(r * Math.cos(lon), Math.sin(lat) * STAR_R, r * Math.sin(lon));
+    const b = 0.07 + 0.25 * rnd() ** 2;
+    col.push(b, b * 0.97, b * (0.9 + 0.15 * rnd()));
+  }
+  band.add(
+    new THREE.Points(
+      new THREE.BufferGeometry()
+        .setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+        .setAttribute('color', new THREE.Float32BufferAttribute(col, 3)),
+      new THREE.PointsMaterial({ size: 1, sizeAttenuation: false, vertexColors: true }),
+    ),
+  );
+  // its glow, painted round a sphere just inside the stars: longitude across, latitude down
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 256;
+  const ctx = c.getContext('2d')!;
+  const img = ctx.createImageData(c.width, c.height);
+  for (let y = 0; y < c.height; y++) {
+    // the canvas covers latitudes from −4 to 4 spreads
+    const lat = ((y + 0.5) / c.height - 0.5) * 8 * BAND_SPREAD;
+    for (let x = 0; x < c.width; x++) {
+      const lon = ((x + 0.5) / c.width) * Math.PI * 2;
+      const glow = Math.exp(-((lat / (1.3 * BAND_SPREAD)) ** 2)) * (0.35 + 0.65 * clump(lon));
+      // the dust lane wanders a little off the middle
+      const lane = 1 - 0.55 * Math.exp(-(((lat - 0.03 * Math.sin(3 * lon + 1)) / (0.25 * BAND_SPREAD)) ** 2)) * clump(lon + 1);
+      const v = glow * lane;
+      const i = (y * c.width + x) * 4;
+      img.data[i] = 255 * v * 0.92;
+      img.data[i + 1] = 255 * v * 0.9;
+      img.data[i + 2] = 255 * v;
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const cover = 8 * BAND_SPREAD;
+  const glow = new THREE.Mesh(
+    // just the strip of sphere the canvas covers, either side of the band's middle
+    new THREE.SphereGeometry(STAR_R * 1.01, 96, 16, 0, Math.PI * 2, Math.PI / 2 - cover / 2, cover),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide }),
+  );
+  glow.renderOrder = -1;
+  band.add(glow);
+  // a little off level, rising toward the left wall, so it crosses the porthole as seen from the floor
+  band.rotation.set(0.06, 0, -0.2);
+  return band;
 }
 /** How far off the stars are drawn: inside the camera's reach, outside the room's. */
 const STAR_R = 6000;
