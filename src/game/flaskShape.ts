@@ -72,6 +72,14 @@ export function flaskRadius(d: number): number {
 /** The flask's depth, mouth to base. */
 export const FLASK_H = 70;
 
+/** The flask's inside, in world units cubed: the solid FLASK_OUTLINE turns about its axis. */
+export const FLASK_VOLUME = (() => {
+  let v = 0;
+  const step = 0.01;
+  for (let d = step / 2; d < FLASK_H; d += step) v += Math.PI * flaskRadius(d) ** 2 * step;
+  return v;
+})();
+
 /**
  * The flask's inside, the solid FLASK_OUTLINE turns about its axis, as thin slabs: each is a point (x, y), with the
  * mouth at the origin and y up, and the volume of the slab through it from front to back. Front to back doesn't

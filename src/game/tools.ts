@@ -4,7 +4,7 @@ import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions'
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP } from './config';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
-import { FLASK_OUTLINE, areaBelow } from './flaskShape';
+import { FLASK_VOLUME } from './flaskShape';
 import { ORIGIN, type Pose, type Vec3 } from './space';
 
 /** Capacity of each tank on a tool, in atoms. */
@@ -17,6 +17,109 @@ export const TANK_CAP = 4 * CAP;
 export const MAX_FLOW = CAP;
 /** Height of every tank, in local units. */
 export const TANK_H = 84;
+
+/**
+ * How much room fluid takes up as it's drawn, in world units cubed per atom a vessel holds: a flask's inside over
+ * what it holds. Every vessel is drawn big enough inside to hold just what it holds at this, so how much fluid each
+ * looks to have agrees with how much it has, from one vessel to the next.
+ */
+export const SPACE_PER_ATOM = FLASK_VOLUME / CAP;
+
+/**
+ * Part of a vessel's inside, as a stack of these, bottom up: `h` tall, a rectangle `w0` by `d0` (across, and front to
+ * back) at its bottom widening or narrowing evenly to `w1` by `d1` at its top; or, if `round`, circles that wide.
+ */
+export interface Piece {
+  h: number;
+  w0: number;
+  d0: number;
+  w1: number;
+  d1: number;
+  round?: boolean;
+}
+
+/** The room inside the bottom `t` of a piece, in world units cubed. */
+function pieceSpace(p: Piece, t = p.h): number {
+  const a = (p.w1 - p.w0) / p.h;
+  const b = (p.d1 - p.d0) / p.h;
+  const s = p.w0 * p.d0 * t + ((p.w0 * b + p.d0 * a) * t * t) / 2 + (a * b * t * t * t) / 3;
+  return p.round ? (s * Math.PI) / 4 : s;
+}
+
+/** The room inside a stack of pieces, in world units cubed. */
+export const spaceOf = (ps: readonly Piece[]) => ps.reduce((t, p) => t + pieceSpace(p), 0);
+/** How tall a stack of pieces is. */
+export const heightOf = (ps: readonly Piece[]) => ps.reduce((t, p) => t + p.h, 0);
+
+/** How high above its bottom fluid filling `share` of a stack of pieces stands, as it settles into them. */
+export function levelIn(ps: readonly Piece[], share: number): number {
+  let left = Math.max(0, Math.min(1, share)) * spaceOf(ps);
+  let y = 0;
+  for (const p of ps) {
+    const s = pieceSpace(p);
+    if (left >= s) {
+      left -= s;
+      y += p.h;
+      continue;
+    }
+    let lo = 0;
+    let hi = p.h;
+    for (let i = 0; i < 40; i++) {
+      const mid = (lo + hi) / 2;
+      if (pieceSpace(p, mid) < left) lo = mid;
+      else hi = mid;
+    }
+    return y + (lo + hi) / 2;
+  }
+  return y;
+}
+
+/** How wide a funnel-shaped tank narrows to at the bottom of its stem, across and front to back. */
+export const FUNNEL_TIP = 6;
+
+/**
+ * Tank k of a shape's inside, `d` deep front to back, as it's drawn, bottom up: a sump under its floor, then the
+ * tank; a funnel narrowing to its stem; a tube with a little funnel on top; or a catcher's cell.
+ */
+export function tankPieces(sh: ToolShape, k: number, d: number): Piece[] {
+  if (sh.catcher) {
+    const c = sh.catcher;
+    return [{ h: c, w0: c, d0: c, w1: c, d1: c }];
+  }
+  const w = sh.tanks[k].x1 - sh.tanks[k].x0;
+  const h = sh.tankH ?? TANK_H;
+  if (sh.funnel) return [{ h, w0: FUNNEL_TIP, d0: FUNNEL_TIP, w1: w, d1: d }];
+  const box = { h, w0: w, d0: d, w1: w, d1: d };
+  if (sh.cup) return [box, { h: sh.cup.h, w0: w, d0: d, w1: 2 * sh.cup.w, d1: 2 * sh.cup.w }];
+  const sump = sh.sump;
+  if (sump) return [{ h: sump.h, w0: SUMP_TIP, d0: SUMP_TIP, w1: sump.w, d1: Math.min(d, sump.w) }, box];
+  return [box];
+}
+
+const depths = new Map<ToolKind, number>();
+
+/**
+ * How deep front to back a kind of tool's tanks are inside: deep enough to hold what they hold (see SPACE_PER_ATOM),
+ * given how wide and tall they're drawn. A catcher's funnel is as deep as it's wide.
+ */
+export function tankDepth(kind: ToolKind): number {
+  let d = depths.get(kind);
+  if (d !== undefined) return d;
+  const sh = SHAPES[kind];
+  const want = (sh.tankCap ?? TANK_CAP) * SPACE_PER_ATOM;
+  if (sh.catcher) d = sh.tanks[0].x1 - sh.tanks[0].x0;
+  else {
+    let [lo, hi] = [0.1, 5000];
+    for (let i = 0; i < 60; i++) {
+      const mid = (lo + hi) / 2;
+      if (spaceOf(tankPieces(sh, 0, mid)) < want) lo = mid;
+      else hi = mid;
+    }
+    d = (lo + hi) / 2;
+  }
+  depths.set(kind, d);
+  return d;
+}
 /**
  * How much heat a heat exchanger can move, as a heat-capacity flow in atoms
  * per sim second (heat capacity is per atom). The ratio of this to the
@@ -103,8 +206,14 @@ export const REFERENCE_CAP = 100 * CAP;
 export const BIG_TANK_CAP = 100 * CAP;
 /** The big tank's inside width, in local units: wide, so it isn't too tall. */
 export const BIG_TANK_W = 560;
-/** The big tank's inside height, in local units: enough that it's drawn as big as a hundred flasks are. */
-export const BIG_TANK_H = (100 * areaBelow(FLASK_OUTLINE, 0)) / BIG_TANK_W;
+/** The big tank's inside height, in local units: enough to hold a hundred flasks about 40 deep. */
+export const BIG_TANK_H = Math.round((BIG_TANK_CAP * SPACE_PER_ATOM) / (BIG_TANK_W * 40));
+/** The cryostabilizer reference's inside width and height, in local units: big enough to hold a hundred flasks. */
+const REF_W = 170;
+const REF_H = 220;
+/** The receptacle's vessel's inside width and height, in local units: big enough to hold 210 flasks. */
+const REC_W = 240;
+const REC_H = 240;
 
 /** How much a pipette holds, by volume: a tenth of a flask. */
 export const PIPETTE_CAP = CAP / 10;
@@ -318,6 +427,12 @@ export interface ToolShape {
    * one that's its own mirror image, in what it does if not in every detail, can't.
    */
   flippable?: boolean;
+  /**
+   * Whether its tank is a cell `catcher` wide, deep and tall, under an opaque funnel the width of the tank's outline
+   * that holds nothing, just catching what falls in it and passing it straight down: for a vessel too small to catch
+   * anything with on its own.
+   */
+  catcher?: number;
   /** Whether it stands straight on a counter, like a cabinet, rather than being held up over it on a clamp stand. */
   bench?: boolean;
   /** Whether it stays where it is: it can't be picked up and carried. */
@@ -349,7 +464,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     // a narrow dispenser, filled through a little funnel on top
     tanks: [{ name: 'tube', x0: -5, x1: 5 }],
     tankCap: PIPETTE_CAP,
-    cup: { w: 14, h: 14 },
+    cup: { w: 10, h: 8 },
     maxFlow: PIPETTE_FLOW,
     spouts: [0],
     valveY: 98,
@@ -424,17 +539,17 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   },
   reference: {
     // a hundred flasks' worth, sealed, draining a trickle through its valve
-    tanks: [{ name: 'reference', x0: -20, x1: 20 }],
-    tankH: 70,
+    tanks: [{ name: 'reference', x0: -REF_W / 2, x1: REF_W / 2 }],
+    tankH: REF_H,
     tankCap: REFERENCE_CAP,
     sump: { w: 12, h: 7 },
     sealed: true,
     maxFlow: 0.02 * MAX_FLOW,
     label: ['cryostabilizer', 'reference'],
     spouts: [0],
-    valveY: 84,
-    spoutY: 100,
-    box: { x0: -40, x1: 40, y0: -26, y1: 102 },
+    valveY: REF_H + 14,
+    spoutY: REF_H + 30,
+    box: { x0: -REF_W / 2 - 4, x1: REF_W / 2 + 4, y0: -26, y1: REF_H + 32 },
   },
   tank: {
     // a hundred flasks' worth, drawn as big as a hundred flasks, with ten faint graduations across it
@@ -450,16 +565,16 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   receptacle: {
     // a big vessel on a cabinet of lamps with a button (see RECEPTACLE_BODY), a hose running from the cabinet's
     // foot straight down off the bench, and a reject valve beside it over the one spout
-    tanks: [{ name: 'receptacle', x0: -46, x1: 46 }],
-    tankH: 80,
+    tanks: [{ name: 'receptacle', x0: -REC_W / 2, x1: REC_W / 2 }],
+    tankH: REC_H,
     tankCap: RECEPTACLE_CAP,
     noValve: true,
     fixed: true,
     label: ['cryostabilizer', 'receptacle'],
     spouts: [34],
-    valveY: 158,
-    spoutY: 172,
-    box: { x0: -58, x1: 58, y0: -26, y1: 174 },
+    valveY: REC_H + 78,
+    spoutY: REC_H + 92,
+    box: { x0: -REC_W / 2 - 4, x1: REC_W / 2 + 4, y0: -26, y1: REC_H + 94 },
   },
   meter: {
     // a funnel draining straight through a cabinet with a display (see METER_BODY) and out a spout
@@ -478,7 +593,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tanks: [{ name: 'sample', x0: -12, x1: 12 }],
     tankH: 20,
     tankCap: SAMPLE_CAP,
-    funnel: true,
+    catcher: Math.cbrt(SAMPLE_CAP * SPACE_PER_ATOM),
     noValve: true,
     bench: true,
     spouts: [],
@@ -507,11 +622,11 @@ export const SPECTROMETER = {
  * and a screen showing how much it's taken of what's needed; and where its hose leaves the cabinet's foot.
  */
 export const RECEPTACLE_BODY = {
-  x0: -54, x1: 54, y0: 84, y1: 146,
-  screen: { x0: -48, x1: 48, y0: 125, y1: 141 },
-  lamps: { x0: -44, dx: 11, y: 96, r: 3.2 },
-  verdict: { x: 34, y: 96, r: 5 },
-  button: { x0: -44, x1: 4, y0: 106, y1: 119 },
+  x0: -REC_W / 2, x1: REC_W / 2, y0: REC_H + 4, y1: REC_H + 66,
+  screen: { x0: -48, x1: 48, y0: REC_H + 45, y1: REC_H + 61 },
+  lamps: { x0: -44, dx: 11, y: REC_H + 16, r: 3.2 },
+  verdict: { x: 34, y: REC_H + 16, r: 5 },
+  button: { x0: -44, x1: 4, y0: REC_H + 26, y1: REC_H + 39 },
   hoseX: -16,
 };
 
@@ -748,9 +863,10 @@ export class Tool {
   }
 
   /**
-   * How high the fluid in tank k stands, as a share of the tank's full height, as it's drawn: in step with how full
-   * it is, except in a tank with a cup on top (see cupFillHeight), whose narrow tube fills first, or a sump below
-   * (see sumpFillHeight), which fills first and is measured from its tip.
+   * How high the fluid in tank k stands, as a share of the tank's full height, for how fast it drains: in step with
+   * how full it is, except in a tank with a cup on top (see cupFillHeight), whose narrow tube fills first, or a sump
+   * below (see sumpFillHeight), which fills first and is measured from its tip. This goes by the tank's flat outline,
+   * as the game has always drained, not by how it's drawn in the room (see tankPieces), so flows stay as they were.
    */
   level(k: number): number {
     const v = this.tanks[k];

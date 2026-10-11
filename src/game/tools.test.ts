@@ -3,10 +3,10 @@ import { SPECIES, TARGET, singleOf, speciesIndex } from '../chem/species';
 import { CAP, GOAL_PURITY, GOAL_VOLUME } from './config';
 import { heatAt, temperature } from '../chem/reactions';
 import { Vessel, roomFor, volume } from './flask';
-import { FLASK_OUTLINE, areaBelow } from './flaskShape';
+import { FLASK_VOLUME } from './flaskShape';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PIPETTE_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
-  RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, SEPARATOR, SEPARATOR_PERFECT, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, aimAt, counterflow, snapInto, cupFillHeight, drip, dropRate, mouthBelow, mouthGap, scanLevel, separate, spectrum, type Mouth,
+  RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, SEPARATOR, SEPARATOR_PERFECT, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, aimAt, counterflow, snapInto, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, mouthGap, scanLevel, separate, spectrum, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -44,10 +44,13 @@ describe('pipette', () => {
     const p = new Tool('pipette', 0, undefined, [1]);
     p.tanks[0].setMolecules(R, CAP / 10);
     const full = p.shape.tankH ?? 84;
-    const cupH = p.shape.cup!.h;
-    // the cup holds the top quarter of it, but only the top fraction cupH / (full + cupH) of its height
-    p.tanks[0].setMolecules(R, (0.75 * CAP) / 10);
-    expect(p.level(0)).toBeCloseTo(full / (full + cupH), 1);
+    const { w, h: cupH } = p.shape.cup!;
+    const tubeW = p.shape.tanks[0].x1 - p.shape.tanks[0].x0;
+    // filled just to the top of its tube, it's the tube's share of the outline's area full, and the cup's empty
+    const tube = tubeW * full;
+    const share = tube / (tube + ((tubeW + 2 * w) / 2) * cupH);
+    p.tanks[0].setMolecules(R, (share * CAP) / 10);
+    expect(p.level(0)).toBeCloseTo(full / (full + cupH), 4);
     const level = p.level(0);
     // a few hundred thousand whole molecules, so right to within parts per million
     expect(volume(p.step(0.02)[0]!) / (0.02 * level * PIPETTE_FLOW)).toBeCloseTo(1, 5);
@@ -214,8 +217,7 @@ describe('tank', () => {
   it('holds a hundred flasks, and is drawn as big as a hundred flasks', () => {
     const tk = new Tool('tank', 0);
     expect(tk.tanks[0].cap).toBe(100 * CAP);
-    const { x0, x1 } = tk.shape.tanks[0];
-    expect(((x1 - x0) * tk.shape.tankH!) / areaBelow(FLASK_OUTLINE, 0)).toBeCloseTo(100, 6);
+    expect(spaceOf(tankPieces(tk.shape, 0, tankDepth('tank'))) / FLASK_VOLUME).toBeCloseTo(100, 6);
   });
 
   it('pours through its valve like any tank, by how high its fluid stands', () => {
@@ -864,5 +866,26 @@ describe('dripping', () => {
       // no long tail of drops that hang on and on
       expect(biggest).toBeLessThan(2.6e6);
     }
+  });
+});
+
+describe('how big vessels are drawn', () => {
+  it('is just big enough inside to hold what each holds, as a flask is', () => {
+    for (const kind of Object.keys(SHAPES) as ToolKind[]) {
+      const t = new Tool(kind, 0);
+      t.tanks.forEach((v, k) => {
+        expect(spaceOf(tankPieces(t.shape, k, tankDepth(kind))) / FLASK_VOLUME).toBeCloseTo(v.cap / CAP, 6);
+      });
+    }
+  });
+
+  it('fills a stack of pieces from the bottom up, narrow parts quickly', () => {
+    const box = { h: 10, w0: 4, d0: 5, w1: 4, d1: 5 };
+    expect(levelIn([box], 0.5)).toBeCloseTo(5);
+    // a funnel, point down: half of it by volume is most of the way up
+    const cone = { h: 10, w0: 0, d0: 0, w1: 10, d1: 10 };
+    expect(levelIn([cone], 0.5)).toBeCloseTo(10 * Math.cbrt(0.5));
+    expect(levelIn([cone, box], 1)).toBeCloseTo(20);
+    expect(spaceOf([{ ...box, round: true }])).toBeCloseTo((Math.PI / 4) * 200);
   });
 });

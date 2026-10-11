@@ -3,7 +3,7 @@ import { temperature, type Fluid, type NetReaction, type ReactionNetwork } from 
 import { NS, SPECIES } from '../chem/species';
 import { beeper, type Beeper } from './beeper';
 import {
-  FLASK_CENTER, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, flip, hoseEndBox, hoseMouth, hoseStand, onBench, onScale,
+  FLASK_CENTER, FUNNEL_H, FUNNEL_R, FUNNEL_STEM_R, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, flip, hoseEndBox, hoseMouth, hoseStand, onBench, onScale,
   onTool, openingOf, scaleBox, scaleCenter, scaleSpot, spoutAt, standBase, tankMouth, toolBox, toolCenter, toolStands, valveNear,
   valveZ, type Stand,
 } from './bodies';
@@ -14,7 +14,7 @@ import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
 import { Flask, Vessel, fluidColor, transfer, volume, volumeUnit, type Point } from './flask';
 import { boxesOverlap, moveBox, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
-import { DEFAULT_PRESET, METER_AT, RECEPTACLE_AT, SPECTROMETER_AT, applyFill, type Preset } from './presets';
+import { DEFAULT_PRESET, METER_AT, RECEPTACLE_AT, SPECTROMETER_AT, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
@@ -186,6 +186,9 @@ const NOTE_MS = 1600;
 const FLASK_AREA = areaBelow(FLASK_OUTLINE, 0);
 /** Width of the stem a funnel-shaped tank narrows to, in local units. */
 const FUNNEL_STEM = 6;
+
+/** Where a tool stands, in the room, from a preset's spot for it. */
+const spotPose = (s: Spot): Pose => ({ ...fromFrac({ x: s.at[0], y: s.at[1] }, s.z), yaw: s.yaw ?? 0 });
 
 /** Owns the lab: what's in it, the player, input, the simulation loop, and the view that draws it. */
 export class GameEngine {
@@ -412,7 +415,7 @@ export class GameEngine {
     this.scales = (preset.scales ?? []).map(([fx, fy]) => new Scale({ ...fromFrac({ x: fx, y: fy }), yaw: 0 }));
     this.nextToolId = preset.tools?.length ?? 0;
     this.tools = (preset.tools ?? []).map((spec, i) => {
-      const t = new Tool(spec.kind, i, { ...fromFrac({ x: spec.at[0], y: spec.at[1] }), yaw: 0 }, spec.valves);
+      const t = new Tool(spec.kind, i, spotPose(spec), spec.valves);
       spec.tanks?.forEach((fill, k) => t.tanks[k] && applyFill(t.tanks[k], fill));
       return t;
     });
@@ -559,13 +562,16 @@ export class GameEngine {
       const first = this.tools.find((t) => t.kind === kind);
       this.tools = this.tools.filter((t) => t.kind !== kind || t === first);
     }
-    const add = (kind: ToolKind, at: [number, number]) => {
-      if (!this.tools.some((t) => t.kind === kind))
-        this.tools.push(new Tool(kind, this.nextToolId++, { ...fromFrac({ x: at[0], y: at[1] }), yaw: 0 }));
+    const add = (kind: ToolKind, at: Spot) => {
+      if (!this.tools.some((t) => t.kind === kind)) this.tools.push(new Tool(kind, this.nextToolId++, spotPose(at)));
     };
     add('spectrometer', SPECTROMETER_AT);
     add('meter', METER_AT);
     add('receptacle', RECEPTACLE_AT);
+    // the receptacle can't be moved, so one left where it can't stand (by an older save, from before it was as big as
+    // it is) goes where it starts
+    const rec = this.tools.find((t) => t.kind === 'receptacle')!;
+    if (toolStands(rec).some((st) => counterUnder(standBase(st, 0)) === null)) rec.pose = spotPose(RECEPTACLE_AT);
   }
 
   /**
@@ -1383,8 +1389,8 @@ export class GameEngine {
       }
     }
     for (const hose of this.hoses) {
-      // its funnel is 28 across at the mouth, 8 at the bottom, and 12 deep
-      const { h, w } = taper(share(hose.funnel), 12, 8, 28);
+      // its funnel narrows from its mouth to its stem
+      const { h, w } = taper(share(hose.funnel), FUNNEL_H, 2 * FUNNEL_STEM_R, 2 * FUNNEL_R);
       if (hose.funnel.N > 0) out.push([hose.funnel, exposure(h, w)]);
     }
     return out;

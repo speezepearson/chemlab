@@ -3,7 +3,9 @@ import { FLASK_H } from './flaskShape';
 import { placeBox, type Box } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { groundAt, toWorld, type Pose, type Vec3 } from './space';
-import { TANK_H, tankX, type Hose, type Mouth, type Tool, type ToolKind } from './tools';
+import {
+  HOSE_CAP, SHAPES, SPACE_PER_ATOM, TANK_H, tankDepth, tankX, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
+} from './tools';
 
 /**
  * Where the parts of everything in the lab are, in the room. Tools, flasks and scales are drawn in their own
@@ -12,21 +14,20 @@ import { TANK_H, tankX, type Hose, type Mouth, type Tool, type ToolKind } from '
  * room (see space.ts).
  */
 
-/** How deep each tool is front to back, all told, and how deep its tanks are inside. */
-export const TOOL_DEPTH: Record<ToolKind, { body: number; tank: number }> = {
-  dispenser: { body: 44, tank: 40 },
-  pipette: { body: 30, tank: 10 },
-  exchanger: { body: 44, tank: 40 },
-  separator: { body: 44, tank: 40 },
-  splitter: { body: 34, tank: 30 },
-  sorter: { body: 34, tank: 30 },
-  reference: { body: 44, tank: 40 },
-  spectrometer: { body: 84, tank: 24 },
-  heater: { body: 30, tank: 30 },
-  meter: { body: 40, tank: 30 },
-  tank: { body: 44, tank: 40 },
-  receptacle: { body: 70, tank: 60 },
-};
+/** How deep a tool's cabinet is front to back, for the tools that have one deeper than their tanks. */
+const CABINET_DEPTH: Partial<Record<ToolKind, number>> = { spectrometer: 84, meter: 40 };
+
+/**
+ * How deep each tool is front to back, all told, and how deep its tanks are inside: as deep as they need to be to
+ * hold what they hold (see tankDepth), and the tool a little deeper, or as deep as its cabinet or its tank's cup.
+ */
+export const TOOL_DEPTH = Object.fromEntries(
+  (Object.keys(SHAPES) as ToolKind[]).map((kind) => {
+    const tank = tankDepth(kind);
+    const cup = SHAPES[kind].cup;
+    return [kind, { tank, body: Math.max(CABINET_DEPTH[kind] ?? 0, tank + 4, cup ? 2 * cup.w + 2 : 0) }];
+  }),
+) as Record<ToolKind, { body: number; tank: number }>;
 
 /** A local x on a tool as it stands: negated if it's flipped (see Tool.flipped). */
 export const lx = (t: Tool, x: number) => (t.flipped ? -x : x);
@@ -176,11 +177,16 @@ export function scaleSpot(sc: Scale, p: Vec3, reach = 60): number | null {
 
 /* ---------------- hoses ---------------- */
 
-/** Half-width of a hose funnel's mouth. */
-export const FUNNEL_R = 14;
-/** How far a hose's funnel reaches below its mouth, and its nozzle above its tip. */
-export const FUNNEL_H = 12;
+/** Half-width of a hose funnel's mouth, and of its stem. */
+export const FUNNEL_R = 20;
+export const FUNNEL_STEM_R = 4;
+/** How far a hose's funnel reaches below its mouth, deep enough to hold what it holds; and its nozzle above its tip. */
+export const FUNNEL_H = (3 * HOSE_CAP * SPACE_PER_ATOM) / (Math.PI * (FUNNEL_R ** 2 + FUNNEL_R * FUNNEL_STEM_R + FUNNEL_STEM_R ** 2));
 export const NOZZLE_H = 10;
+/** A hose funnel's inside (see Piece). */
+export const HOSE_FUNNEL: readonly Piece[] = [
+  { h: FUNNEL_H, w0: 2 * FUNNEL_STEM_R, d0: 2 * FUNNEL_STEM_R, w1: 2 * FUNNEL_R, d1: 2 * FUNNEL_R, round: true },
+];
 
 export function hoseMouth(h: Hose): Mouth {
   const e = h.inlet;

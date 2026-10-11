@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { temperature, type Fluid } from '../chem/reactions';
 import { LOOK, coronaAlpha, coronaRadius, glowFalloff, haloAlpha, haloRadius } from './appearance';
 import {
-  FUNNEL_H, FUNNEL_R, NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, lx, onTool, openingOf, tankRect, valveLocal, valveZ, type Stand,
+  FUNNEL_H, FUNNEL_R, FUNNEL_STEM_R, HOSE_FUNNEL, NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, lx, onTool, openingOf, tankRect, valveLocal, valveZ, type Stand,
 } from './bodies';
 import { CAP, FLASK_L, GOAL_L, TRACE } from './config';
 import { Vessel, fluidAlpha, fluidRGB, glowColor, volume, type Flask } from './flask';
@@ -12,8 +12,8 @@ import { COUNTERS, LIFT, PAPER_Z, ROOM, groundAt, toWorld, type Vec3 } from './s
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
   HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, RECEPTACLE_BODY, RECEPTACLE_LAMPS,
-  SCAN_LIGHTS, SORTER_CHUTE, SPECTROMETER, SUMP_TIP, TANK_H, chuteY, cupFillHeight, meterText, sumpFillHeight, tankX,
-  type Hose, type Tool,
+  FUNNEL_TIP, SCAN_LIGHTS, SORTER_CHUTE, SPECTROMETER, SUMP_TIP, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
+  type Hose, type Piece, type Tool,
 } from './tools';
 
 /** What the crosshair is on. */
@@ -668,7 +668,7 @@ class ToolView {
       pipes(art, [[tankX(sh.tanks[0]), TH], [tankX(sh.tanks[0]), y - r + 1]]);
       for (const x of sh.spouts.slice(0, -1)) pipes(art, [[x, y + r - 1], [x, sh.spoutY - 4]]);
       pipes(art, [[x1 + r - 1, y], [end - 4, y], [end, y + 4], [end, sh.spoutY - 4]]);
-    } else if (t.kind === 'spectrometer') pipes(art, [[0, TH], [0, SPECTROMETER.body.y0]]);
+    } else if (t.kind === 'spectrometer') pipes(art, [[0, TH + (sh.catcher ?? 0)], [0, SPECTROMETER.body.y0]]);
     else if (t.kind === 'receptacle') pipes(art, [[sh.spouts[0], TH], [sh.spouts[0], sh.spoutY - 4]]);
     else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);
     for (const x of sh.spouts) block(art, pipeMat, x - 4, x + 4, sh.spoutY - 6, sh.spoutY, -4, 4);
@@ -681,21 +681,30 @@ class ToolView {
       const w = r.x1 - r.x0;
       const cx = (r.x0 + r.x1) / 2;
       let geoms: THREE.BufferGeometry[];
-      let level: (v: Vessel) => number;
       const share = (v: Vessel) => Math.min(1, volume(v) / v.cap);
-      if (sh.cup) {
+      // the fluid settles into the tank as it's drawn (see tankPieces), from its bottom up
+      const pieces = tankPieces(sh, k, d);
+      const bottom = r.y1 + (sh.catcher ?? (sh.cup || sh.funnel ? 0 : (sh.sump?.h ?? 0)));
+      const level = (v: Vessel) => onTool(t, 0, bottom - levelIn(pieces, share(v))).y;
+      if (sh.catcher) {
+        // an opaque funnel, holding nothing, over the little glass cell that holds it all
+        const c = sh.catcher;
+        const funnel = new THREE.Mesh(frustum(cx, r.y0, r.y1, w, d, FUNNEL_TIP, FUNNEL_TIP, true), pipeMat);
+        funnel.castShadow = true;
+        art.add(funnel);
+        glassFrom(art, new THREE.BoxGeometry(c + 1, c, c + 1).translate(cx, -(r.y1 + c / 2), 0));
+        geoms = [new THREE.BoxGeometry(c, c - 0.2, c).translate(cx, -(r.y1 + c / 2), 0)];
+      } else if (sh.cup) {
         openBox(art, r.x0, r.x1, r.y0, r.y1, d);
         glassFrom(art, frustum(cx, o.y, r.y0, 2 * sh.cup.w, 2 * sh.cup.w, w, d, true));
         geoms = [
           new THREE.BoxGeometry(w - 1, r.y1 - r.y0, d - 1).translate(cx, -(r.y0 + r.y1) / 2, 0),
           frustum(cx, o.y, r.y0, 2 * sh.cup.w - 1, 2 * sh.cup.w - 1, w - 1, d - 1, false),
         ];
-        level = (v) => onTool(t, 0, r.y1 - cupFillHeight(share(v), w, r.y1 - r.y0, 2 * sh.cup!.w, sh.cup!.h)).y;
-        this.graduations(r, o, sh.cup, d);
+        this.graduations(r, o, sh.cup, d, pieces);
       } else if (sh.funnel) {
-        glassFrom(art, frustum(cx, r.y0, r.y1, w, d, 6, 6, true));
-        geoms = [frustum(cx, r.y0 + 0.5, r.y1 - 0.5, w - 1.5, d - 1.5, 5, 5, false)];
-        level = (v) => onTool(t, 0, r.y1 - share(v) * (r.y1 - r.y0)).y;
+        glassFrom(art, frustum(cx, r.y0, r.y1, w, d, FUNNEL_TIP, FUNNEL_TIP, true));
+        geoms = [frustum(cx, r.y0 + 0.5, r.y1 - 0.5, w - 1.5, d - 1.5, FUNNEL_TIP - 1, FUNNEL_TIP - 1, false)];
       } else {
         openBox(art, r.x0, r.x1, r.y0, r.y1, d);
         // a thin metal rim
@@ -712,9 +721,8 @@ class ToolView {
           const sd = Math.min(d, sump.w);
           glassFrom(art, frustum(cx, r.y1, r.y1 + sump.h, sump.w, sd, SUMP_TIP, SUMP_TIP, true));
           geoms.push(frustum(cx, r.y1 - 0.5, r.y1 + sump.h - 0.3, sump.w - 1, sd - 1, SUMP_TIP - 0.6, SUMP_TIP - 0.6, false));
-          level = (v) => onTool(t, 0, r.y1 + sump.h - sumpFillHeight(share(v), w, r.y1 - r.y0, sump)).y;
-          if (t.kind === 'tank') this.tankLines(r, sump, d);
-        } else level = (v) => onTool(t, 0, r.y1 - share(v) * (r.y1 - r.y0)).y;
+          if (t.kind === 'tank') this.tankLines(r, bottom, d, pieces);
+        }
       }
       const fm = new FluidMesh(geoms, art);
       for (const m of fm.meshes) pick(m, 'tank', k);
@@ -784,22 +792,30 @@ class ToolView {
     scene.add(this.root);
   }
 
-  /** Ten marks up the left wall of a tank with a cup, at each tenth of its capacity as its fluid is shown (see cupFillHeight). */
-  private graduations(r: { x0: number; x1: number; y0: number; y1: number }, o: { x0: number }, cup: { w: number; h: number }, d: number): void {
-    const tubeW = r.x1 - r.x0;
+  /** Ten marks up the left wall of a tank with a cup, at each tenth of its capacity as its fluid is shown (see levelIn). */
+  private graduations(
+    r: { x0: number; x1: number; y0: number; y1: number },
+    o: { x0: number },
+    cup: { w: number; h: number },
+    d: number,
+    pieces: Piece[],
+  ): void {
     const tubeH = r.y1 - r.y0;
     for (let i = 1; i <= 10; i++) {
-      const h = cupFillHeight(i / 10, tubeW, tubeH, 2 * cup.w, cup.h);
-      const x = h <= tubeH ? r.x0 : r.x0 + ((h - tubeH) / cup.h) * (o.x0 - r.x0);
+      const h = levelIn(pieces, i / 10);
+      // up the cup, its walls lean out, and its front comes forward
+      const f = Math.max(0, (h - tubeH) / cup.h);
+      const x = r.x0 + f * (o.x0 - r.x0);
+      const z = d / 2 + f * (cup.w - d / 2);
       const len = i % 5 === 0 ? 5 : 3;
-      block(this.art, darkMat, x, x + len, r.y1 - h - 0.35, r.y1 - h + 0.35, d / 2, d / 2 + 0.3).castShadow = false;
+      block(this.art, darkMat, x, x + len, r.y1 - h - 0.35, r.y1 - h + 0.35, z, z + 0.3).castShadow = false;
     }
   }
 
   /** Ten thin, faint lines across the big tank's front, one at each tenth of its capacity as its fluid is shown, the last at the brim. */
-  private tankLines(r: { x0: number; x1: number; y0: number; y1: number }, sump: { w: number; h: number }, d: number): void {
+  private tankLines(r: { x0: number; x1: number }, bottom: number, d: number, pieces: Piece[]): void {
     for (let i = 1; i <= 10; i++) {
-      const y = r.y1 + sump.h - sumpFillHeight(i / 10, r.x1 - r.x0, r.y1 - r.y0, sump);
+      const y = bottom - levelIn(pieces, i / 10);
       block(this.art, faintMat, r.x0, r.x1, y - 0.3, y + 0.3, d / 2, d / 2 + 0.2).castShadow = false;
     }
   }
@@ -1197,8 +1213,8 @@ class ScaleView {
 
 /* ---------------- hoses ---------------- */
 
-const funnelGlass = new THREE.CylinderGeometry(FUNNEL_R, 4, FUNNEL_H, 20, 1, true).translate(0, -FUNNEL_H / 2, 0);
-const funnelFluid = new THREE.CylinderGeometry(FUNNEL_R - 1, 3.5, FUNNEL_H - 0.5, 20, 1).translate(0, -FUNNEL_H / 2, 0);
+const funnelGlass = new THREE.CylinderGeometry(FUNNEL_R, FUNNEL_STEM_R, FUNNEL_H, 20, 1, true).translate(0, -FUNNEL_H / 2, 0);
+const funnelFluid = new THREE.CylinderGeometry(FUNNEL_R - 1, FUNNEL_STEM_R - 0.5, FUNNEL_H - 0.5, 20, 1).translate(0, -FUNNEL_H / 2, 0);
 const nozzleGeom = new THREE.CylinderGeometry(4, 3, NOZZLE_H, 12).translate(0, NOZZLE_H / 2, 0);
 
 class HoseView {
@@ -1238,7 +1254,7 @@ class HoseView {
     this.inlet.updateMatrixWorld();
     this.note.set(h.note);
     const f = h.funnel;
-    this.fluid.update(f, h.inlet.y - FUNNEL_H + Math.min(1, volume(f) / f.cap) * FUNNEL_H);
+    this.fluid.update(f, h.inlet.y - FUNNEL_H + levelIn(HOSE_FUNNEL, volume(f) / f.cap));
     const key = [h.inlet.x, h.inlet.y, h.inlet.z, h.outlet.x, h.outlet.y, h.outlet.z].map((x) => x.toFixed(1)).join();
     if (key !== this.key) {
       this.key = key;

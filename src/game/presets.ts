@@ -15,25 +15,33 @@ export interface FlaskFill {
 }
 
 /**
- * Where the one and only mass spectrometer starts, as fractions of the home area (see HOME_W), unless a preset
- * places it itself: there's always exactly one.
+ * Where a tool stands: its top center, as fractions of the home area's width and height (see HOME_W); how far out
+ * from the back wall, if not Z_HOME; and which way it faces (see Pose), if not out from the back wall.
  */
-export const SPECTROMETER_AT: [number, number] = [1.12, 0.3];
+export interface Spot {
+  at: [number, number];
+  z?: number;
+  yaw?: number;
+}
 
 /**
- * Where the one and only receptacle stands, the same way: there's always exactly one of it too. Its hose runs down
- * between the last two flasks on the shelf.
+ * Where the one and only mass spectrometer starts, unless a preset places it itself: there's always exactly one. It
+ * stands on the back counter.
  */
-export const RECEPTACLE_AT: [number, number] = [0.875, 0.54];
+export const SPECTROMETER_AT: Spot = { at: [1.12, 0.3] };
+
+/**
+ * Where the one and only receptacle stands, the same way: there's always exactly one of it too. It's too big for the
+ * back counter, so it's on the first island, facing the back wall, high enough for a flask under its reject spout.
+ */
+export const RECEPTACLE_AT: Spot = { at: [-0.2, 0.306], z: 750, yaw: Math.PI };
 
 /** Where the one and only flow meter starts, the same way: there's always exactly one of it too. */
-export const METER_AT: [number, number] = [0.53, 0.55];
+export const METER_AT: Spot = { at: [0.53, 0.55] };
 
 /** A tool on the bench at the start. */
-export interface ToolSpec {
+export interface ToolSpec extends Spot {
   kind: ToolKind;
-  /** Top center of the tool, as fractions of the home area's width and height (see HOME_W). */
-  at: [number, number];
   /** Per tank, 0 (closed) to 1 (fully open); closed if left out. */
   valves?: number[];
   /** Starting contents of each tank, in the order the tool's shape lists them. */
@@ -137,8 +145,11 @@ export const PRESETS: readonly Preset[] = [
     name: 'Stranded',
     flasks: [],
     tools: [
-      // over the fourth flask, so opening its valve drips into it
-      { kind: 'reference', at: [0.44, 0.55], tanks: [{ contents: [{ species: TARGET, molecules: REFERENCE_CAP }], T: T_ROOM }] },
+      // on the first island, facing the back wall, high enough for a flask under it
+      {
+        kind: 'reference', at: [0.15, 0.442], z: 750, yaw: Math.PI,
+        tanks: [{ contents: [{ species: TARGET, molecules: REFERENCE_CAP }], T: T_ROOM }],
+      },
       { kind: 'separator', at: [0.2, 0.3] },
       { kind: 'dispenser', at: [0.47, 0.3] },
       { kind: 'exchanger', at: [0.62, 0.3] },
