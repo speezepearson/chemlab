@@ -1748,7 +1748,7 @@ export class GameEngine {
    * a scale or a tool that stands on the bench goes straight down until it stands on the counter under it, which its
    * whole footprint must be over (or a flask over a scale, onto its platform); a tool or hose end on a stand stays at
    * the height it's held, no higher than its stand reaches, while its stand's base goes down onto the counter, which
-   * its whole footprint and its stand's whole base must be over. Either way, it mustn't bump into anything on the way down, nor its stand's base sit
+   * the whole base must be over (what it holds can reach out past the counter's edge). Either way, it mustn't bump into anything on the way down, nor its stand's base sit
    * on anything but the counter. (Stands don't bump into each other: their rods can stand side by side.)
    */
   private rest(h: Held, p: Pose, obstacles: readonly Box[], solid: readonly Box[]): Rest | string {
@@ -1765,7 +1765,7 @@ export class GameEngine {
     const stands = this.standsAt(h, p);
     if (stands.length) {
       const tops = stands.map((st) => counterUnder(standBase(st, 0)));
-      if (tops.some((t) => t === null) || counterUnder(box) === null) return 'Set it down over a counter';
+      if (tops.some((t) => t === null)) return 'Its stand needs a counter under it';
       const drop = Math.max(0, ...stands.map((st, i) => st.clampY - tops[i]! - STAND_MAX));
       const to = { ...box, y: box.y - drop };
       if (blocked(span(to, box))) return 'No room';
