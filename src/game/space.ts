@@ -21,6 +21,12 @@ export const ORIGIN: Pose = { x: 0, y: 0, z: 0, yaw: 0 };
 
 /** The room's walls, floor and ceiling. The back wall, at z = 0, is the old bench. */
 export const ROOM = { x0: -700, x1: 2300, z0: 0, z1: 3000, y1: 1300 };
+/**
+ * How fast the ship turns, in radians per sim second: the lab is on the rim of a ring 10 km in radius, spun for 1 g,
+ * √(g / r), about one turn every 200 s. It turns about an axis running front to back through the room (z), so the
+ * stars sweep past the porthole in the left wall.
+ */
+export const SPIN = Math.sqrt(9.81 / 10_000);
 /** Height of every counter: the sink counters along the walls, and the islands. */
 export const LIFT = 420;
 /** How far the wall counters come out from the walls. */

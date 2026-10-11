@@ -25,6 +25,10 @@ export interface SaveState {
   chem?: { bonds: ChemParams['bonds']; swapA: number; heatCap: number };
   /** The target the receptacle has taken so far, by volume, toward the goal; none if left out. */
   delivered?: number;
+  /** Whether the alarms are silenced (see GameEngine); not if left out. */
+  alarmsOff?: boolean;
+  /** Whether the porthole's blinds are shut (see GameEngine); not if left out. */
+  blindsShut?: boolean;
   /** The player's sticky notes, the one on top last; none if left out. */
   papers?: SavedPaper[];
   /** Where the player stood and looked (see GameEngine); where they start if left out. */
@@ -193,13 +197,13 @@ const GOD_KEY = 'slurry-lab.god';
 
 /**
  * Whether god mode was on when the player last left it, kept beside the save (but not in it, so exporting a bench
- * doesn't carry it): on if it's never been set, or storage is blocked.
+ * doesn't carry it): off if it's never been set, or storage is blocked.
  */
 export function storedGod(): boolean {
   try {
-    return localStorage.getItem(GOD_KEY) !== '0';
+    return localStorage.getItem(GOD_KEY) === '1';
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -207,6 +211,6 @@ export function storeGod(on: boolean): void {
   try {
     localStorage.setItem(GOD_KEY, on ? '1' : '0');
   } catch {
-    // storage blocked: god mode just starts on next time
+    // storage blocked: god mode just starts off next time
   }
 }

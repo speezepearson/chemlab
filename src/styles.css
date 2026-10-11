@@ -127,26 +127,26 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .hints .mouse rect{fill:rgba(238,240,235,.85);stroke:#1b2320;stroke-width:1.2}
 .hints .mouse path{fill:none;stroke:#1b2320;stroke-width:1.2}
 .hints .mouse path.lit{fill:#2f6a56;stroke:none}
-.hints .mouse,.actions .mouse{width:12px;height:17px;opacity:.85}
-.actions{
+.hints .mouse,.doable .mouse{width:12px;height:17px;opacity:.85}
+.doable{
   position:absolute;left:12px;bottom:12px;z-index:2;pointer-events:none;display:flex;flex-direction:column;gap:3px;
   padding:7px 9px;border-radius:7px;background:rgba(12,17,15,.55);color:#dfe6e2;font-size:12px;line-height:1.2;
   max-width:min(340px,calc(50% - 150px));
 }
 /* where the window's too narrow for it beside the hotbar, it sits above it */
-@media (max-width:1240px){.actions{bottom:84px;max-width:340px}}
-.action{display:flex;align-items:center;gap:8px}
-.action.off{opacity:.45}
-.actions .keys{display:flex;align-items:center;gap:3px;flex:none;min-width:76px}
-.actions .plus{margin:0 2px;opacity:.7}
-.actions .twice{display:inline-flex;align-items:center;gap:1px}
-.actions kbd{
+@media (max-width:1240px){.doable{bottom:84px;max-width:340px}}
+.can{display:flex;align-items:center;gap:8px}
+.can.off{opacity:.45}
+.doable .keys{display:flex;align-items:center;gap:3px;flex:none;min-width:76px}
+.doable .plus{margin:0 2px;opacity:.7}
+.doable .twice{display:inline-flex;align-items:center;gap:1px}
+.doable kbd{
   font:600 11px "Schibsted Grotesk",sans-serif;color:#1b2320;background:rgba(238,240,235,.85);
   border-radius:4px;padding:1px 5px;
 }
-.actions .mouse rect{fill:rgba(238,240,235,.85);stroke:#1b2320;stroke-width:1.2}
-.actions .mouse path{fill:none;stroke:#1b2320;stroke-width:1.2}
-.actions .mouse path.lit{fill:#2f6a56;stroke:none}
+.doable .mouse rect{fill:rgba(238,240,235,.85);stroke:#1b2320;stroke-width:1.2}
+.doable .mouse path{fill:none;stroke:#1b2320;stroke-width:1.2}
+.doable .mouse path.lit{fill:#2f6a56;stroke:none}
 .aim{
   position:absolute;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;pointer-events:none;z-index:2;
   border:2px solid #fff;mix-blend-mode:difference;
@@ -155,16 +155,10 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
   position:absolute;left:50%;top:calc(50% + 40px);transform:translateX(-50%);pointer-events:none;z-index:2;
   color:#f3d9d4;background:rgba(40,14,10,.6);padding:3px 10px;border-radius:6px;font-size:13px;
 }
-.paused{
-  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:4;cursor:pointer;
-  background:rgba(8,12,11,.45);
+.start-hint{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
+  color:#eef0eb;background:rgba(8,12,11,.55);padding:6px 14px;border-radius:8px;font-size:15px;font-weight:600;
 }
-.paused .card{
-  background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:14px 18px;
-  max-width:min(520px,calc(100% - 32px));box-shadow:0 10px 30px var(--shadow);font-size:13px;
-}
-.paused b{display:block;font-size:16px;font-weight:600;margin-bottom:8px}
-.paused .card p{margin:0 0 8px;color:var(--muted)}
 .stick{
   position:absolute;bottom:84px;width:112px;height:112px;border-radius:50%;z-index:3;touch-action:none;
   background:rgba(20,26,24,.28);border:2px solid rgba(255,255,255,.35);
@@ -185,9 +179,6 @@ button.touch{
 button.touch.small{width:46px;height:46px;font-size:10px}
 button.touch.pad{width:78px;height:58px;border-radius:14px}
 button.touch.dim{opacity:.45}
-.paused dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0}
-.paused dt{font-weight:600;white-space:nowrap}
-.paused dd{margin:0;color:var(--muted)}
 canvas{display:block;width:100%;height:100%;touch-action:none}
 #info{
   position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);
@@ -263,24 +254,4 @@ canvas{display:block;width:100%;height:100%;touch-action:none}
 .intro-console .lvl-warn{color:#e2c044}
 .intro-console .lvl-erro{color:#ff7a66}
 .intro-console .lvl-CRIT{color:#ff3b30;font-weight:700}
-@keyframes intro-in{from{opacity:0}to{opacity:1}}
-.intro-notice{
-  margin:auto;max-width:700px;width:calc(100% - 32px);box-sizing:border-box;margin-block:24px;
-  background:#f5f8fc;color:#1d2a3a;border-radius:14px;padding:22px 28px 18px;
-  font-size:14px;line-height:1.45;animation:intro-in 1s ease both;box-shadow:0 20px 60px rgba(80,140,255,.15);
-}
-.intro-notice .brand{color:#4a6fa5;font-weight:600;letter-spacing:.04em;font-size:13px;margin-bottom:10px}
-.intro-notice h2{font-size:20px;font-weight:600;margin:0 0 6px}
-.intro-notice p{margin:6px 0}
-.intro-notice pre{
-  font:12.5px/1.45 ui-monospace,"SF Mono",Menlo,Consolas,monospace;background:#e8eef6;border-radius:8px;
-  padding:8px 12px;margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere;
-}
-.intro-notice hr{border:0;border-top:1px solid #d3dbe6;margin:12px 0}
-.intro-notice .crew{min-height:1.5em;margin:4px 0}
-.intro-notice .ok{display:flex;justify-content:flex-end;margin-top:14px}
-.intro-notice .ok button{
-  background:#2f5f9e;color:#fff;border:0;border-radius:8px;padding:7px 26px;font-weight:600;font-size:15px;
-}
-.intro-notice .ok button:hover{background:#3a70b6}
 .replay{margin-left:auto}

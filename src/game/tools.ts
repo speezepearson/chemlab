@@ -359,10 +359,10 @@ export function heatBy(f: Fluid, wireT: number, h: number): void {
 
 /**
  * How the flow meter reads, editable from the Chemistry panel:
- * - tau: how long, in sim seconds, its reading takes to close all but 1/e of the gap to a new flow. It averages
- *   over about that long, so a steady drip reads as a steady trickle rather than flickering.
+ * - window: how many sim seconds back its reading looks. It shows the average flow over just that long, so a steady
+ *   drip reads as a steady trickle rather than flickering, and a change shows in full once that long has passed.
  */
-export const METER = { tau: 1 };
+export const METER = { window: 0.5 };
 const DEFAULT_METER = { ...METER };
 
 export function restoreDefaultMeter(): void {
@@ -737,7 +737,7 @@ export function separatorShares(): number[][] {
  *   press) lids the vessel and thinks for a moment, beeping; then, if what's inside is more than GOAL_PURITY target,
  *   it flushes it down its hose, counting toward the goal, and otherwise pours it out its one spout.
  * - A **flow meter** has a funnel like the splitter's, with no valve, draining straight through to one spout, and
- *   shows what flows out, averaged over about METER.tau (see rate and meterText).
+ *   shows what flows out, averaged over the last METER.window (see rate and meterText).
  * - A **mass spectrometer** has a small sample cup and no spouts. Running it (see scan) reads the sample's
  *   spectrum onto a screen, then lids the cup and drains the sample away into the cabinet over the run.
  *
@@ -765,8 +765,10 @@ export class Tool {
   reading: number[] | null = null;
   /** Sim seconds since the spectrometer was last run (see SCAN_LIGHTS); Infinity if it isn't running. */
   scanAge = Infinity;
-  /** A meter's reading: what's flowed out of it, by volume per sim second, averaged over about METER.tau. */
+  /** A meter's reading: what's flowed out of it, by volume per sim second, averaged over the last METER.window. */
   rate = 0;
+  /** A meter's recent steps, oldest first: how long each was and what flowed out in it, back past METER.window. */
+  private recent: { h: number; v: number }[] = [];
   /**
    * The player's note about the whole tool, written above it; empty for none. Only a tool with more than one tank
    * has one: on a tool with one tank, its tank's label (Vessel.label) does the job.
@@ -839,8 +841,24 @@ export class Tool {
     if (this.kind === 'sorter') packets = sieve(packets[0]);
     this.out = packets.map((p) => (p.N > 0 ? p : null));
     this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
-    if (this.kind === 'meter') this.rate += (volume(packets[0]) / h - this.rate) * (1 - Math.exp(-h / Math.max(1e-9, METER.tau)));
+    if (this.kind === 'meter') this.measure(h, volume(packets[0]));
     return this.out;
+  }
+
+  /**
+   * A meter's reading after a step of h sim seconds that let out v: what's flowed in the last METER.window, or
+   * just over (back to the start of the oldest step it reaches into), per sim second. Until that long has passed,
+   * the time before counts as nothing flowing.
+   */
+  private measure(h: number, v: number): void {
+    const r = this.recent;
+    r.push({ h, v });
+    let span = 0;
+    for (const s of r) span += s.h;
+    while (r.length > 1 && span - r[0].h >= METER.window) span -= r.shift()!.h;
+    let sum = 0;
+    for (const s of r) sum += s.v;
+    this.rate = sum / Math.max(span, METER.window);
   }
 
   /**

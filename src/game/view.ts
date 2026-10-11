@@ -9,6 +9,9 @@ import { Vessel, fluidAlpha, fluidRGB, glowColor, volume, type Flask } from './f
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { COUNTERS, LIFT, PAPER_Z, ROOM, groundAt, toWorld, type Vec3 } from './space';
+import { PORT_FRAC, PORT_WALL, porthole, type Porthole } from './porthole';
+import { AIRLOCK, POD } from './airlock';
+import { notice } from '../intro/notice';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
   HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, RECEPTACLE_BODY, RECEPTACLE_LAMPS,
@@ -22,7 +25,13 @@ export type Pick =
   | { kind: 'tool'; t: Tool; part: 'body' | 'tank' | 'valve' | 'button'; k: number }
   | { kind: 'scale'; sc: Scale; part: 'body' | 'tare' }
   | { kind: 'hose'; h: Hose; end: 'inlet' | 'outlet' }
-  | { kind: 'faucet'; i: number };
+  | { kind: 'faucet'; i: number }
+  /** The button under the beacon that silences the alarms. */
+  | { kind: 'alarm' }
+  /** The button by the porthole that shuts its blinds, or opens them. */
+  | { kind: 'blinds' }
+  /** The OK on the message inside the cryopod. */
+  | { kind: 'wake' };
 
 /** A faucet where it is: its spout, where its pipe meets the wall, and what it pours. */
 export interface FaucetSpot {
@@ -68,6 +77,13 @@ export interface Frame {
   dt: number;
   /** The target the receptacle has taken so far, by volume, for its screen. */
   delivered: number;
+  /** Whether the alarms are silenced, which the button under the beacon shows. */
+  alarmsOff: boolean;
+  /** Whether the porthole's blinds are shut, leaving it solid black. */
+  blindsShut: boolean;
+  airlock: AirlockLook;
+  /** How far the ship has turned, in radians, which turns the stars about the room's front-to-back axis. */
+  spin: number;
   /**
    * The sticky notes on the back wall: each sheet with its top left corner, on the old flat bench (x across, y down);
    * whether the pencil's in hand (so each shows its handles); and a sheet being marked out, if one is.
@@ -98,6 +114,26 @@ const LOOK_RANK: Record<GuideLook | 'place' | 'bad', number> = { faint: 0, solid
 const STREAM_WIDTH = 4.5;
 /** Radius of a guide stream (see Frame.guides), about a slow stream's; and how wide the outline round its mouth is. */
 const GUIDE_R = 1.6;
+/** Marks only how near things are, for hiding guides behind glass (see View.renderGuides). */
+const depthOnly = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide });
+
+/** How long a guide's dashes are, and the gaps between them, in world units. */
+const GUIDE_DASH = { on: 9, off: 7 };
+/** The layer guides' streams are drawn on, apart from everything else (see View.render). */
+const GUIDE_LAYER = 3;
+
+/** Stripes for a guide's dashes, as an alpha map: on at the top of each repeat, off below. */
+const dashTexture = (() => {
+  const n = GUIDE_DASH.on + GUIDE_DASH.off;
+  const data = new Uint8Array(4 * n);
+  for (let i = 0; i < n; i++) data.fill(i >= GUIDE_DASH.off ? 255 : 0, 4 * i, 4 * i + 4);
+  const t = new THREE.DataTexture(data, 1, n);
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.NearestFilter;
+  t.wrapT = THREE.RepeatWrapping;
+  t.needsUpdate = true;
+  return t;
+})();
 const RIM_W = 1.6;
 /** Drawn radius of a DROP_R_ATOMS drop; it goes as the cube root of the drop's size. */
 const DROP_R = 3;
@@ -1476,8 +1512,8 @@ function panelTexture(): THREE.Texture {
   return t;
 }
 
-/** The porthole through the left wall: how high its middle is, its radius, and how thick the hull is around it. */
-const PORT = { y: 760, r: 150, depth: 40 };
+/** How thick the hull is round the porthole (see porthole for its size and shape). */
+const PORT_DEPTH = 40;
 
 /**
  * The stars, all round the ship, far enough off that they don't move as the player walks: seen only through the
@@ -1589,6 +1625,96 @@ function milkyWay(rnd: () => number): THREE.Group {
 /** How far off the stars are drawn: inside the camera's reach, outside the room's. */
 const STAR_R = 6000;
 
+/**
+ * A wall w long and as tall as the room, standing on its middle, facing +z; with a hole in it if `hole` is given, in
+ * the wall's own units from its middle.
+ */
+function wallMesh(w: number, hole?: THREE.Path): THREE.Mesh {
+  const H = ROOM.y1;
+  const tex = panelTexture();
+  let geom: THREE.BufferGeometry;
+  if (hole) {
+    const shape = new THREE.Shape().moveTo(-w / 2, -H / 2).lineTo(w / 2, -H / 2).lineTo(w / 2, H / 2).lineTo(-w / 2, H / 2).lineTo(-w / 2, -H / 2);
+    shape.holes.push(hole);
+    geom = new THREE.ShapeGeometry(shape, 24);
+    // its texture coordinates are in world units, from its bottom left, as a plane's are in fractions
+    tex.repeat.set(1 / 220, 1 / 440);
+    tex.offset.set(w / 2 / 220, H / 2 / 440);
+  } else {
+    geom = new THREE.PlaneGeometry(w, H);
+    tex.repeat.set(w / 220, H / 440);
+  }
+  const m = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, metalness: 0.1 }));
+  m.receiveShadow = true;
+  return m;
+}
+
+/** A rectangle w by h centered on (x, y), as a path. */
+function rectPath<P extends THREE.Path = THREE.Path>(x: number, y: number, w: number, h: number, path?: P): P {
+  const p = path ?? (new THREE.Path() as P);
+  p.moveTo(x - w / 2, y - h / 2);
+  p.lineTo(x + w / 2, y - h / 2);
+  p.lineTo(x + w / 2, y + h / 2);
+  p.lineTo(x - w / 2, y + h / 2);
+  p.lineTo(x - w / 2, y - h / 2);
+  return p;
+}
+
+/** A rounded rectangle w by h, with corners of radius c, centered on (x, y), drawn into `path`. */
+function roundRect<P extends THREE.Path>(path: P, x: number, y: number, w: number, h: number, c: number): P {
+  const [hw, hh] = [w / 2, h / 2];
+  const r = Math.max(0, Math.min(c, hw, hh));
+  path.moveTo(x + hw, y - hh + r);
+  path.lineTo(x + hw, y + hh - r);
+  path.absarc(x + hw - r, y + hh - r, r, 0, Math.PI / 2, false);
+  path.lineTo(x - hw + r, y + hh);
+  path.absarc(x - hw + r, y + hh - r, r, Math.PI / 2, Math.PI, false);
+  path.lineTo(x - hw, y - hh + r);
+  path.absarc(x - hw + r, y - hh + r, r, Math.PI, (3 * Math.PI) / 2, false);
+  path.lineTo(x + hw - r, y - hh);
+  path.absarc(x + hw - r, y - hh + r, r, (3 * Math.PI) / 2, Math.PI * 2, false);
+  return path;
+}
+
+/** The porthole's outline grown by d all round, centered on (0, y). */
+function portOutline<P extends THREE.Path>(path: P, p: Porthole, y: number, d: number): P {
+  return roundRect(path, 0, y, p.w + 2 * d, p.h + 2 * d, p.c + d);
+}
+
+/**
+ * The left wall, with a porthole through it onto the stars (see starField) taking up `frac` of it (see porthole): a
+ * frame round it, and the hull's thickness behind.
+ */
+function buildPort(frac: number): THREE.Group {
+  const H = ROOM.y1;
+  const p = porthole(frac);
+  const g = new THREE.Group();
+  // turned to face in, the wall's own x runs toward −z
+  g.position.set(ROOM.x0, 0, (ROOM.z0 + ROOM.z1) / 2);
+  g.rotation.y = Math.PI / 2;
+  const w = wallMesh(PORT_WALL.w, portOutline(new THREE.Path(), p, p.cy - H / 2, 0));
+  w.position.y = H / 2;
+  g.add(w);
+  const band = (d0: number, d1: number, depth: number, z: number, mat: THREE.Material, bevel: boolean) => {
+    const shape = portOutline(new THREE.Shape(), p, p.cy, d1);
+    shape.holes.push(portOutline(new THREE.Path(), p, p.cy, d0));
+    const geom = new THREE.ExtrudeGeometry(shape, {
+      depth,
+      bevelEnabled: bevel,
+      bevelThickness: 4,
+      bevelSize: 4,
+      bevelSegments: 2,
+      curveSegments: 24,
+    });
+    const m = new THREE.Mesh(geom, mat);
+    m.position.z = z;
+    g.add(m);
+  };
+  band(-6, 10, 6, -3, darkMat, true);
+  band(0, 4, PORT_DEPTH, -PORT_DEPTH - 1, new THREE.MeshStandardMaterial({ color: 0x2a302e, metalness: 0.5, roughness: 0.6 }), false);
+  return g;
+}
+
 function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.Mesh } {
   const W = ROOM.x1 - ROOM.x0;
   const Dp = ROOM.z1 - ROOM.z0;
@@ -1606,31 +1732,19 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
   ceil.rotation.x = Math.PI / 2;
   ceil.position.set(cx, H, cz);
   scene.add(ceil);
-  // a wall, with a round hole in it at (hx, hy) from its middle if `hole` is given
-  const wall = (w: number, x: number, z: number, ry: number, hole?: { x: number; y: number; r: number }) => {
-    const tex = panelTexture();
-    let geom: THREE.BufferGeometry;
-    if (hole) {
-      const shape = new THREE.Shape().moveTo(-w / 2, -H / 2).lineTo(w / 2, -H / 2).lineTo(w / 2, H / 2).lineTo(-w / 2, H / 2).lineTo(-w / 2, -H / 2);
-      shape.holes.push(new THREE.Path().absarc(hole.x, hole.y, hole.r, 0, Math.PI * 2, true));
-      geom = new THREE.ShapeGeometry(shape, 24);
-      // its texture coordinates are in world units, from its bottom left, as a plane's are in fractions
-      tex.repeat.set(1 / 220, 1 / 440);
-      tex.offset.set(w / 2 / 220, H / 2 / 440);
-    } else {
-      geom = new THREE.PlaneGeometry(w, H);
-      tex.repeat.set(w / 220, H / 440);
-    }
-    const m = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, metalness: 0.1 }));
+  const wall = (w: number, x: number, z: number, ry: number) => {
+    const m = wallMesh(w);
     m.position.set(x, H / 2, z);
     m.rotation.y = ry;
-    m.receiveShadow = true;
     scene.add(m);
   };
   wall(W, cx, ROOM.z0, 0);
-  wall(W, cx, ROOM.z1, Math.PI);
-  // the left wall has the porthole through it (see below); turned to face in, its own x runs toward −z
-  wall(Dp, ROOM.x0, cz, Math.PI / 2, { x: 0, y: PORT.y - H / 2, r: PORT.r });
+  // the front wall has the airlock's doorway in it (see AirlockView); turned to face in, its own x runs toward −x
+  const front = wallMesh(W, rectPath(cx - AIRLOCK.x, AIRLOCK.door.h / 2 - H / 2 + 0.25, AIRLOCK.door.w, AIRLOCK.door.h - 0.5));
+  front.position.set(cx, H / 2, ROOM.z1);
+  front.rotation.y = Math.PI;
+  scene.add(front);
+  // the left wall, with the porthole through it, is built apart (see buildPort)
   wall(Dp, ROOM.x1, cz, -Math.PI / 2);
   // ceiling light panels
   for (let x = ROOM.x0 + 300; x < ROOM.x1; x += 500)
@@ -1672,18 +1786,6 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
     grate.receiveShadow = true;
     scene.add(grate);
   }
-  // a porthole through the left wall, onto the stars (see starField): a ring round it, and the hull's thickness
-  const port = new THREE.Group();
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(PORT.r + 2, 12, 12, 48), darkMat);
-  port.add(ring);
-  const tunnel = new THREE.Mesh(
-    new THREE.CylinderGeometry(PORT.r, PORT.r, PORT.depth, 48, 1, true).rotateX(Math.PI / 2).translate(0, 0, -PORT.depth / 2),
-    new THREE.MeshStandardMaterial({ color: 0x2a302e, metalness: 0.5, roughness: 0.6, side: THREE.BackSide }),
-  );
-  port.add(tunnel);
-  port.position.set(ROOM.x0, PORT.y, cz);
-  port.rotation.y = Math.PI / 2;
-  scene.add(port);
   // an emergency beacon over the door, turning slowly
   const lamp = new THREE.Mesh(new THREE.SphereGeometry(14, 16, 10), new THREE.MeshStandardMaterial({ color: 0x5a1010, emissive: 0xff2010, emissiveIntensity: 0.6 }));
   lamp.position.set(cx, H - 120, ROOM.z1 - 16);
@@ -1692,6 +1794,420 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
   beacon.position.copy(lamp.position).add(new THREE.Vector3(0, 0, -30));
   scene.add(beacon);
   return { beacon, lamp };
+}
+
+/** How far in front of the player's eyes, in the pod, the message projected on its front is, and how wide. */
+const MESSAGE_AT = 44;
+const MESSAGE_W = 58;
+/** The message's canvas: how wide, its margins, and how far its OK button is from its bottom right. */
+const MSG_PX = 1280;
+const MSG_PAD = 44;
+const OK_PX = { w: 170, h: 64 };
+
+/** Text wrapped to fit `w` pixels in the canvas's current font, by words; explicit newlines and indents kept. */
+function wrapText(ctx: CanvasRenderingContext2D, text: string, w: number): string[] {
+  const out: string[] = [];
+  for (const para of text.split('\n')) {
+    const indent = /^ */.exec(para)![0];
+    let line = indent;
+    for (const word of para.slice(indent.length).split(' ')) {
+      const next = line.trim() ? `${line} ${word}` : line + word;
+      if (line.trim() && ctx.measureText(next).width > w) {
+        out.push(line);
+        line = word;
+      } else line = next;
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+/**
+ * The notice (see intro/notice.ts) as light projected on the inside of the pod's front: pale blue text on a faint
+ * glow, with room at the bottom right for the OK button, which is its own mesh. Returns the canvas, laid out to fit.
+ */
+function messageCanvas(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d')!;
+  const sans = (wt: number, px: number) => `${wt} ${px}px "Schibsted Grotesk", sans-serif`;
+  const mono = (px: number) => `${px}px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace`;
+  const inner = MSG_PX - 2 * MSG_PAD;
+  type Line = { text: string; font: string; color: string; y: number };
+  const lines: Line[] = [];
+  const rules: number[] = [];
+  const boxes: { y0: number; y1: number }[] = [];
+  let y = MSG_PAD;
+  for (const b of notice()) {
+    if (b.kind === 'hr') {
+      y += 16;
+      rules.push(y);
+      y += 18;
+      continue;
+    }
+    if (b.kind === 'list') {
+      y += 30;
+      continue;
+    }
+    const [font, size, color, gap] =
+      b.kind === 'brand' ? [sans(600, 24), 24, '#8cc4ff', 14]
+      : b.kind === 'h' ? [sans(600, 38), 38, '#f2f8ff', 8]
+      : b.kind === 'pre' ? [mono(21), 21, '#cfe7ff', 12]
+      : b.kind === 'small' ? [sans(400, 19), 19, '#a9c6e6', 8]
+      : [sans(400, 25), 25, '#dcecff', 8];
+    ctx.font = font;
+    const pad = b.kind === 'pre' ? 14 : 0;
+    const y0 = y;
+    y += pad;
+    for (const t of wrapText(ctx, b.text, inner - 2 * pad)) {
+      lines.push({ text: t, font, color, y: y + size * 0.8 });
+      y += size * 1.38;
+    }
+    y += pad;
+    if (b.kind === 'pre') boxes.push({ y0, y1: y });
+    y += gap;
+  }
+  y += OK_PX.h + MSG_PAD;
+  c.width = MSG_PX;
+  c.height = Math.ceil(y);
+  // a faint glow where the light falls, brighter at the middle
+  const g = ctx.createRadialGradient(c.width / 2, c.height / 2, 0, c.width / 2, c.height / 2, c.height * 0.75);
+  g.addColorStop(0, 'rgba(40, 110, 200, 0.30)');
+  g.addColorStop(1, 'rgba(20, 70, 150, 0.16)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.roundRect(0, 0, c.width, c.height, 28);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(140, 196, 255, 0.55)';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(120, 180, 255, 0.14)';
+  for (const bx of boxes) {
+    ctx.beginPath();
+    ctx.roundRect(MSG_PAD, bx.y0, inner, bx.y1 - bx.y0, 10);
+    ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(140, 196, 255, 0.35)';
+  for (const r of rules) ctx.fillRect(MSG_PAD, r, inner, 2);
+  ctx.textBaseline = 'alphabetic';
+  for (const l of lines) {
+    ctx.font = l.font;
+    ctx.fillStyle = l.color;
+    ctx.fillText(l.text, l.font.includes('monospace') ? MSG_PAD + 14 : MSG_PAD, l.y);
+  }
+  return c;
+}
+
+/** The OK button's face, lit brighter when the crosshair is on it. */
+function okTexture(hot: boolean): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = OK_PX.w;
+  c.height = OK_PX.h;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = hot ? 'rgba(110, 180, 255, 0.85)' : 'rgba(60, 130, 230, 0.6)';
+  ctx.beginPath();
+  ctx.roundRect(2, 2, c.width - 4, c.height - 4, 14);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(200, 228, 255, 0.9)';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '600 32px "Schibsted Grotesk", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('OK', c.width / 2, c.height / 2 + 1);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** How the airlock looks just now (see AirlockView.update). */
+export interface AirlockLook {
+  /** How far open the doors are, 0 to 1. */
+  door: number;
+  /** How far up the pod's front has slid, 0 (shut) to 1. */
+  front: number;
+  /** How far the room's lights are shut out by the pod, 1 while it's shut: only its emergency lights show inside. */
+  dark: number;
+  /** Whether the message shows on the inside of its front, with its OK button. */
+  message: boolean;
+  /** Whether the crosshair is on the OK button. */
+  okHot: boolean;
+}
+
+/**
+ * The airlock (see airlock.ts): its chamber behind the front wall, the doorway's sides, the two doors that slide
+ * apart into the wall, and the standing cryopod at the back, with the message projected inside its front, in front of the face of
+ * whoever's in it. The doorway itself is a hole in the room's front wall (see buildRoom).
+ */
+class AirlockView {
+  private doors: THREE.Mesh[] = [];
+  private front = new THREE.Group();
+  private message: THREE.Mesh;
+  private ok: THREE.Mesh;
+  private okTex = [okTexture(false), okTexture(true)];
+  private last: AirlockLook | null = null;
+
+  constructor(scene: THREE.Scene, pickables: Map<THREE.Object3D, Pick>, eye: number) {
+    const { x, w, d, h, wall, door } = AIRLOCK;
+    const z1 = ROOM.z1;
+    const g = new THREE.Group();
+    const panel = new THREE.MeshStandardMaterial({ color: 0x9ba5a1, roughness: 0.7, metalness: 0.15 });
+    const floor = new THREE.MeshStandardMaterial({ color: 0x3a403e, roughness: 0.8, metalness: 0.3 });
+    const hidden = new THREE.MeshBasicMaterial({ visible: false });
+    // the chamber, seen from inside; its front is the wall with the doorway, below
+    const room = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), [panel, panel, panel, floor, panel, hidden].map((m) => {
+      if (m === hidden) return m;
+      const c = m.clone();
+      c.side = THREE.BackSide;
+      return c;
+    }));
+    room.position.set(x, h / 2, z1 + wall + d / 2);
+    g.add(room);
+    const shape = rectPath(0, h / 2, w, h, new THREE.Shape());
+    shape.holes.push(rectPath(0, door.h / 2 + 0.25, door.w, door.h - 0.5));
+    const inside = new THREE.Mesh(new THREE.ShapeGeometry(shape), panel);
+    inside.position.set(x, 0, z1 + wall);
+    g.add(inside);
+    // the doorway's sides and top, through the wall's thickness: planes only, with nothing lying in either wall's face
+    const jambMat = darkMat.clone();
+    jambMat.side = THREE.DoubleSide;
+    for (const side of [-1, 1]) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(wall, door.h).rotateY(Math.PI / 2), jambMat);
+      m.position.set(x + (side * door.w) / 2, door.h / 2, z1 + wall / 2);
+      g.add(m);
+    }
+    const lintel = new THREE.Mesh(new THREE.PlaneGeometry(door.w, wall).rotateX(Math.PI / 2), jambMat);
+    lintel.position.set(x, door.h, z1 + wall / 2);
+    g.add(lintel);
+    // the doors, each half the doorway, sliding apart into the wall
+    const doorMat = new THREE.MeshStandardMaterial({ color: 0x9aa5a0, roughness: 0.5, metalness: 0.2 });
+    for (const side of [-1, 1]) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(door.w / 2, door.h, 12), doorMat);
+      m.position.set(x, door.h / 2, z1 + wall / 2);
+      m.userData.side = side;
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(door.w / 2 - 2, 26, 14), new THREE.MeshStandardMaterial({ color: 0xc9a227, roughness: 0.6 }));
+      stripe.position.y = -door.h / 2 + 120;
+      m.add(stripe);
+      this.doors.push(m);
+      g.add(m);
+    }
+    // the pod: a plinth, and a metal shell whose front half slides up into the ceiling
+    const shell = new THREE.MeshStandardMaterial({ color: 0x8c9692, roughness: 0.45, metalness: 0.35, side: THREE.DoubleSide });
+    const pod = new THREE.Group();
+    pod.position.set(POD.x, 0, POD.z);
+    const plinth = new THREE.Mesh(new THREE.CylinderGeometry(POD.r + 10, POD.r + 14, POD.base, 40), darkMat);
+    plinth.position.y = POD.base / 2;
+    pod.add(plinth);
+    const body = POD.top - POD.base;
+    // three.js puts theta 0 at +z: the back half faces +z, the front half (toward the room, −z) the other way
+    const half = (front: boolean, mat: THREE.Material, r: number) => {
+      const cyl = new THREE.Mesh(new THREE.CylinderGeometry(r, r, body, 40, 1, true, front ? Math.PI / 2 : -Math.PI / 2, Math.PI), mat);
+      cyl.position.y = POD.base + body / 2;
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(r, 40, 12, front ? Math.PI : 0, Math.PI, 0, Math.PI / 2), mat);
+      dome.position.y = POD.top;
+      return [cyl, dome];
+    };
+    for (const m of half(false, shell, POD.r + 2)) pod.add(m);
+    const band = new THREE.Mesh(new THREE.TorusGeometry(POD.r + 3, 3, 8, 48).rotateX(Math.PI / 2), darkMat);
+    band.position.y = POD.top;
+    pod.add(band);
+    for (const m of half(true, shell, POD.r)) {
+      m.castShadow = true;
+      this.front.add(m);
+    }
+    pod.add(this.front);
+    // two dim emergency lights on the inside of the front, either side of the message, the only light while it's
+    // shut (see View.render); they go up with it
+    for (const side of [-1, 1]) {
+      const bulb = new THREE.Mesh(
+        new THREE.SphereGeometry(2.5, 12, 8),
+        new THREE.MeshStandardMaterial({ color: 0x5a3010, emissive: 0xff9a3c, emissiveIntensity: 0.8 }),
+      );
+      const at = new THREE.Vector3(side * 42, eye + 20, -Math.sqrt(POD.r * POD.r - 42 * 42) + 2);
+      bulb.position.copy(at);
+      this.front.add(bulb);
+      const light = new THREE.PointLight(0xff9a3c, 300, 260, 2);
+      light.position.copy(at).add(new THREE.Vector3(-side * 5, 0, 5));
+      this.front.add(light);
+    }
+    // the message, projected on the inside of the front, in front of the face, facing in
+    const tex = new THREE.CanvasTexture(messageCanvas());
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    const img = tex.image as HTMLCanvasElement;
+    const mh = (MESSAGE_W * img.height) / img.width;
+    const msgMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false });
+    this.message = new THREE.Mesh(new THREE.PlaneGeometry(MESSAGE_W, mh), msgMat);
+    // it hangs a little low, so the eyes start on its heading and look down to OK
+    const cy = eye + 27 - mh / 2;
+    this.message.position.set(0, cy, -MESSAGE_AT);
+    pod.add(this.message);
+    const unit = MESSAGE_W / MSG_PX;
+    this.ok = new THREE.Mesh(
+      new THREE.PlaneGeometry(OK_PX.w * unit, OK_PX.h * unit),
+      new THREE.MeshBasicMaterial({ map: this.okTex[0], transparent: true, depthWrite: false, toneMapped: false }),
+    );
+    this.ok.position.set(MESSAGE_W / 2 - (MSG_PAD + OK_PX.w / 2) * unit, cy - mh / 2 + (MSG_PAD + OK_PX.h / 2) * unit, -MESSAGE_AT + 0.3);
+    pod.add(this.ok);
+    pickables.set(this.ok, { kind: 'wake' });
+    g.add(pod);
+    scene.add(g);
+  }
+
+  update(a: AirlockLook): void {
+    const l = this.last;
+    if (l && l.door === a.door && l.front === a.front && l.dark === a.dark && l.message === a.message && l.okHot === a.okHot) return;
+    this.last = { ...a };
+    const { x, door } = AIRLOCK;
+    for (const m of this.doors) m.position.x = x + m.userData.side * (door.w / 4 + a.door * (door.w / 2 + 6));
+    // up past the ceiling, out of sight
+    this.front.position.y = a.front * (AIRLOCK.h + 40);
+    // off its layer it's neither drawn nor hit by the crosshair
+    for (const m of [this.message, this.ok]) m.layers.set(a.message ? 0 : 1);
+    (this.ok.material as THREE.MeshBasicMaterial).map = this.okTex[a.okHot ? 1 : 0];
+  }
+}
+
+/** How high the middle of the alarms' silence button's plate is: about chest height. */
+const ALARM_Y = 480;
+
+/** The face of the silence button's plate: hazard stripes round the edge, and what it's for. */
+function alarmPlateTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 220;
+  c.height = 300;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#d9b42a';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.fillStyle = '#1b1d1c';
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, c.width, c.height);
+  ctx.rect(16, 16, c.width - 32, c.height - 32);
+  ctx.clip('evenodd');
+  for (let x = -c.height; x < c.width; x += 28) {
+    ctx.beginPath();
+    ctx.moveTo(x, c.height);
+    ctx.lineTo(x + 14, c.height);
+    ctx.lineTo(x + 14 + c.height, 0);
+    ctx.lineTo(x + c.height, 0);
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.fillStyle = '#3a403e';
+  ctx.fillRect(16, 16, c.width - 32, c.height - 32);
+  ctx.fillStyle = '#e7ebe6';
+  ctx.font = '600 30px "Schibsted Grotesk", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('ALARM', c.width / 2, 52);
+  ctx.fillText('SILENCE', c.width / 2, c.height - 48);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/**
+ * The alarms' silence button, on the wall under the beacon at chest height: a plate with a big red button, which
+ * stays pushed in while the alarms are silenced, and a lamp over it that glows amber while they are.
+ */
+class AlarmButton {
+  private button: THREE.Mesh;
+  private lamp: THREE.MeshStandardMaterial;
+  private off: boolean | null = null;
+
+  constructor(scene: THREE.Scene, pickables: Map<THREE.Object3D, Pick>) {
+    const g = new THREE.Group();
+    // on the front wall, facing into the room
+    g.position.set((ROOM.x0 + ROOM.x1) / 2, ALARM_Y, ROOM.z1);
+    g.rotation.y = Math.PI;
+    const face = new THREE.MeshStandardMaterial({ map: alarmPlateTexture(), roughness: 0.6, metalness: 0.2 });
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(110, 150, 8).translate(0, 0, 4), [darkMat, darkMat, darkMat, darkMat, face, darkMat]);
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(27, 29, 6, 32).rotateX(Math.PI / 2).translate(0, 0, 11), darkMat);
+    this.button = new THREE.Mesh(
+      new THREE.CylinderGeometry(21, 22, 14, 32).rotateX(Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: 0xb3221a, roughness: 0.35, metalness: 0.05 }),
+    );
+    this.lamp = new THREE.MeshStandardMaterial({ color: 0x6b5520, emissive: 0xffa21a, emissiveIntensity: 0 });
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(6, 16, 10), this.lamp);
+    lamp.position.set(0, 34, 9);
+    for (const m of [plate, collar, this.button, lamp]) {
+      m.castShadow = m.receiveShadow = true;
+      g.add(m);
+      pickables.set(m, { kind: 'alarm' });
+    }
+    scene.add(g);
+  }
+
+  update(off: boolean): void {
+    if (off === this.off) return;
+    this.off = off;
+    this.button.position.z = off ? 12 : 18;
+    this.lamp.emissiveIntensity = off ? 1.6 : 0;
+  }
+}
+
+/** The blinds button's face: a dark plate with BLINDS under where the button goes, small and muted. */
+function blindsPlateTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 120;
+  c.height = 160;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#3b4240';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.fillStyle = '#9aa4a0';
+  ctx.font = '500 17px "Schibsted Grotesk", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('BLINDS', c.width / 2, c.height - 26);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/**
+ * The porthole's blinds: a plain little button on the wall beside it, at chest height, which stays pushed in while
+ * they're shut; and the blinds themselves, solid black across the porthole, just behind its frame.
+ */
+class BlindsButton {
+  private button: THREE.Mesh;
+  private blind: THREE.Mesh;
+  private shut: boolean | null = null;
+
+  constructor(scene: THREE.Scene, pickables: Map<THREE.Object3D, Pick>) {
+    const p = porthole(PORT_FRAC);
+    // in the porthole's frame (see buildPort): x along the wall toward −z, y up, z out into the room
+    const g = new THREE.Group();
+    g.position.set(ROOM.x0, 0, (ROOM.z0 + ROOM.z1) / 2);
+    g.rotation.y = Math.PI / 2;
+    this.blind = new THREE.Mesh(new THREE.ShapeGeometry(portOutline(new THREE.Shape(), p, p.cy, 2), 24), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+    this.blind.position.z = -1.5;
+    g.add(this.blind);
+    // to the right of the porthole as you face it
+    const at = new THREE.Group();
+    at.position.set(p.w / 2 + 90, ALARM_Y, 0);
+    const face = new THREE.MeshStandardMaterial({ map: blindsPlateTexture(), roughness: 0.7, metalness: 0.2 });
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(42, 56, 4).translate(0, 0, 2), [darkMat, darkMat, darkMat, darkMat, face, darkMat]);
+    this.button = new THREE.Mesh(
+      new THREE.CylinderGeometry(8, 8.5, 6, 24).rotateX(Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: 0x8a948f, roughness: 0.5, metalness: 0.3 }),
+    );
+    this.button.position.y = 6;
+    for (const m of [plate, this.button]) {
+      m.castShadow = m.receiveShadow = true;
+      at.add(m);
+      pickables.set(m, { kind: 'blinds' });
+    }
+    g.add(at);
+    scene.add(g);
+  }
+
+  update(shut: boolean): void {
+    if (shut === this.shut) return;
+    this.shut = shut;
+    this.blind.visible = shut;
+    this.button.position.z = shut ? 5 : 7;
+  }
 }
 
 /** The faucets: a manifold along a wall, and each faucet a pipe out over the counter, a knob of its color, and a spout. */
@@ -1733,7 +2249,8 @@ function buildFaucets(
 
 /** Draws the lab with Three.js, from the player's eyes, and says what's under the crosshair. */
 export class View {
-  readonly camera = new THREE.PerspectiveCamera(72, 1, 2, 8000);
+  /** The field of view is 90°, top to bottom. */
+  readonly camera = new THREE.PerspectiveCamera(90, 1, 2, 8000);
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private pickables = new Map<THREE.Object3D, Pick>();
@@ -1752,11 +2269,17 @@ export class View {
   private rims: { g: THREE.Group; mat: THREE.MeshBasicMaterial; sides: THREE.Mesh[]; ring: THREE.Mesh }[] = [];
   private drops: THREE.Mesh[] = [];
   private beacon: { beacon: THREE.PointLight; lamp: THREE.Mesh };
+  private alarmButton: AlarmButton;
+  private blindsButton: BlindsButton;
+  private airlock: AirlockView;
+  /** The room's lights, and how bright each is, to be dimmed while the cryopod is shut (see AirlockLook.dark). */
+  private roomLights: { light: THREE.Light; base: number }[] = [];
   private raycaster = new THREE.Raycaster();
   private clock = 0;
   private stars = starField();
 
-  constructor(canvas: HTMLCanvasElement, faucets: readonly FaucetSpot[]) {
+  /** `eye` is how high the player's eyes are standing, for the message inside the cryopod. */
+  constructor(canvas: HTMLCanvasElement, faucets: readonly FaucetSpot[], eye: number) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.localClippingEnabled = true;
     this.renderer.shadowMap.enabled = true;
@@ -1764,7 +2287,8 @@ export class View {
     this.camera.rotation.order = 'YXZ';
     this.scene.background = new THREE.Color(0x010206);
     this.scene.add(this.stars);
-    this.scene.add(new THREE.HemisphereLight(0xe4eef0, 0x4a4440, 1.5));
+    const sky = new THREE.HemisphereLight(0xe4eef0, 0x4a4440, 1.5);
+    this.scene.add(sky);
     // the ceiling panels, as one light from overhead, so what hangs casts its shadow on the counter and floor
     const sun = new THREE.DirectionalLight(0xf4f8ff, 1.3);
     const [cx, cz] = [(ROOM.x0 + ROOM.x1) / 2, (ROOM.z0 + ROOM.z1) / 2];
@@ -1782,7 +2306,12 @@ export class View {
     sc.far = 4500;
     sun.shadow.bias = -0.0005;
     this.scene.add(sun, sun.target);
+    this.roomLights = [sky, sun].map((light) => ({ light, base: light.intensity }));
     this.beacon = buildRoom(this.scene);
+    this.scene.add(buildPort(PORT_FRAC));
+    this.alarmButton = new AlarmButton(this.scene, this.pickables);
+    this.blindsButton = new BlindsButton(this.scene, this.pickables);
+    this.airlock = new AirlockView(this.scene, this.pickables, eye);
     this.draft = new THREE.LineLoop(
       new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(12), 3)),
       new THREE.LineDashedMaterial({ color: 0x8ccbb0, dashSize: 4, gapSize: 3 }),
@@ -1826,6 +2355,7 @@ export class View {
     this.clock += fr.dt;
     const { scene, pickables } = this;
     this.look(fr.eye, fr.yaw, fr.pitch);
+    this.stars.rotation.z = fr.spin;
 
     this.sync(this.flasks, fr.flasks, (f) => new FlaskView(f, scene, pickables));
     this.sync(this.tools, fr.tools, (t) => new ToolView(t, scene, pickables));
@@ -1865,12 +2395,53 @@ export class View {
     this.updateStreams(fr);
     this.updateGuides(fr);
 
+    this.alarmButton.update(fr.alarmsOff);
+    this.blindsButton.update(fr.blindsShut);
+    this.airlock.update(fr.airlock);
     // the beacon turns slowly; real time, like the alarms it goes with
     const pulse = 0.5 + 0.5 * Math.sin(this.clock * 2.4);
-    this.beacon.beacon.intensity = 9000 * pulse * pulse;
+    const lit = 1 - fr.airlock.dark;
+    for (const { light, base } of this.roomLights) light.intensity = base * lit;
+    this.beacon.beacon.intensity = 9000 * pulse * pulse * lit;
     (this.beacon.lamp.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.3 + 1.2 * pulse;
 
     this.renderer.render(scene, this.camera);
+    this.renderGuides();
+  }
+
+  /**
+   * The guides' streams, over the frame just drawn, hidden behind anything in front of them, glass included. Glass
+   * and everything else see-through is drawn without marking how near it is, so first it's drawn again marking only
+   * that (no color, no shadows), and then the guides, which are on a layer of their own.
+   */
+  private renderGuides(): void {
+    if (!this.guides.some((m) => m.visible)) return;
+    const { renderer, scene, camera } = this;
+    const hidden: THREE.Object3D[] = [];
+    scene.traverse((o) => {
+      if (!o.visible || !(o instanceof THREE.Mesh || o instanceof THREE.Sprite || o instanceof THREE.Line || o instanceof THREE.Points)) return;
+      // opaque things marked their depth already; sprites (labels) and lines don't hide anything
+      const see = o instanceof THREE.Mesh && !Array.isArray(o.material) && o.material.transparent;
+      if (!see) {
+        o.visible = false;
+        hidden.push(o);
+      }
+    });
+    // a colored background would clear the frame on each draw, whatever autoClear says
+    const bg = scene.background;
+    scene.background = null;
+    renderer.autoClear = false;
+    renderer.shadowMap.autoUpdate = false;
+    scene.overrideMaterial = depthOnly;
+    renderer.render(scene, camera);
+    scene.overrideMaterial = null;
+    for (const o of hidden) o.visible = true;
+    camera.layers.set(GUIDE_LAYER);
+    renderer.render(scene, camera);
+    camera.layers.set(0);
+    renderer.shadowMap.autoUpdate = true;
+    renderer.autoClear = true;
+    scene.background = bg;
   }
 
   /** Every stand, its base on whatever's under it: a counter, or the floor under something held out over it. */
@@ -1889,8 +2460,10 @@ export class View {
 
   private updateGuides(fr: Frame): void {
     while (this.guides.length < fr.guides.length) {
-      const m = new THREE.Mesh(unitCylinder, new THREE.MeshBasicMaterial({ color: 0xb4bcb8, transparent: true, depthWrite: false }));
-      m.renderOrder = 5;
+      // each its own copy of the stripes, since each repeats them over its own length
+      const mat = new THREE.MeshBasicMaterial({ color: 0xb4bcb8, transparent: true, depthWrite: false, alphaMap: dashTexture.clone() });
+      const m = new THREE.Mesh(unitCylinder, mat);
+      m.layers.set(GUIDE_LAYER);
       this.scene.add(m);
       this.guides.push(m);
     }
@@ -1906,6 +2479,10 @@ export class View {
       const r = g.look === 'faint' ? GUIDE_R * 0.75 : GUIDE_R;
       m.position.set(g.from.x, g.from.y - len / 2, g.from.z);
       m.scale.set(r, len, r);
+      // dashes counted from the top, where it's from, so they stay put as its length changes
+      const reps = len / (GUIDE_DASH.on + GUIDE_DASH.off);
+      mat.alphaMap!.repeat.set(1, reps);
+      mat.alphaMap!.offset.set(0, Math.ceil(reps) - reps);
     });
     // each mouth a guide ends at, outlined once, in the look of the strongest guide into it
     const mouths = new Map<string, Frame['guides'][number]['mouth'] & { look: keyof typeof GUIDE_LOOKS }>();

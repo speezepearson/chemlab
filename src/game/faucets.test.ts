@@ -3,23 +3,25 @@ import { T_ROOM } from '../chem/params';
 import { testChemParams } from '../chem/testChem';
 import { ReactionNetwork, atomCounts, heatAt, temperature, type Fluid } from '../chem/reactions';
 import { equilibriumFluid } from '../chem/equilibrium';
-import { NS, SPECIES, bondParam } from '../chem/species';
+import { NS, SPECIES, bondParam, pairOf } from '../chem/species';
 import { CAP } from './config';
 import { Vessel } from './flask';
-import { FAUCETS, describeFaucet, faucetOutput, faucetTarget } from './faucets';
+import { FAUCETS, describeFaucet, faucetIndex, faucetOutput, faucetTarget, type Faucet } from './faucets';
 import type { Mouth } from './tools';
 
 describe('faucets', () => {
   const net = new ReactionNetwork(testChemParams());
 
-  it('are the six atoms and the twelve pairs that can bond, once each', () => {
+  it('are the six atoms, once each', () => {
     const starts = FAUCETS.map((fa) => SPECIES[fa.start]);
-    expect(new Set(starts).size).toBe(18);
-    expect(starts.filter((s) => s.size === 1)).toHaveLength(6);
-    expect(starts.filter((s) => s.size === 2)).toHaveLength(12);
+    expect(new Set(starts).size).toBe(6);
+    expect(starts.every((s) => s.size === 1)).toBe(true);
   });
 
-  for (const fa of FAUCETS) {
+  // faucets of pairs are gone from the lab, but faucetOutput still settles them, as it would anything
+  const pairs: Faucet[] = SPECIES.filter((s) => s.size === 2).map((s) => ({ start: s.i }));
+
+  for (const fa of [...FAUCETS, ...pairs]) {
     describe(`${describeFaucet(fa)} faucet`, () => {
       const out = faucetOutput(fa, net);
       const T = fa.T ?? T_ROOM;
@@ -64,12 +66,27 @@ describe('faucets', () => {
 
   it('settles again when the chemistry changes', () => {
     const own = new ReactionNetwork(testChemParams());
-    const cy = FAUCETS.find((fa) => describeFaucet(fa) === 'C–Y')!;
+    const cy: Faucet = { start: pairOf('C', 'Y') };
     const before = faucetOutput(cy, own).n[cy.start];
     expect(faucetOutput(cy, own).n[cy.start]).toBe(before); // cached
     own.params.bonds.CY.E *= 2;
     own.rebuild();
     expect(faucetOutput(cy, own).n[cy.start]).toBeGreaterThan(before);
+  });
+});
+
+describe('faucetIndex', () => {
+  it("is a faucet's own place in a save of today's faucets", () => {
+    FAUCETS.forEach((_, i) => expect(faucetIndex(i, FAUCETS.length)).toBe(i));
+  });
+
+  it("finds each atom's faucet among an old save's 18, and nothing for a pair's", () => {
+    const found = Array.from({ length: 18 }, (_, i) => faucetIndex(i, 18));
+    expect(found.filter((j) => j !== null).sort()).toEqual(FAUCETS.map((_, i) => i));
+  });
+
+  it('finds nothing in a save of any other number', () => {
+    expect(faucetIndex(0, 7)).toBeNull();
   });
 });
 

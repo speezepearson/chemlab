@@ -1,6 +1,8 @@
 import { equilibrate } from '../chem/equilibrium';
 import { temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
+import { POD, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
+import { hushAlarms } from './ambience';
 import { beeper, type Beeper } from './beeper';
 import {
   FLASK_CENTER, FUNNEL_H, FUNNEL_R, FUNNEL_STEM_R, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, flip, hoseEndBox, hoseMouth, hoseStand, onBench, onScale,
@@ -9,7 +11,7 @@ import {
 } from './bodies';
 import { CAP, FILL_RATE, GOAL_VOLUME, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
-import { FAUCETS, faucetOutput, faucetTarget } from './faucets';
+import { FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
 import { Flask, Vessel, fluidColor, transfer, volume, volumeUnit, type Point } from './flask';
 import { boxesOverlap, moveBox, roomBoxes, walk, type Box } from './physics';
@@ -19,7 +21,7 @@ import { rumble, type Rumble } from './rumble';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
 import {
-  COUNTERS, LIFT, PAPER_Z, ROOM, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, wrapAngle, type Pose, type Vec3,
+  COUNTERS, LIFT, PAPER_Z, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, wrapAngle, type Pose, type Vec3,
 } from './space';
 import {
   HEATER, HEATER_CELLS, HEATER_TUBE, Hose, MAX_FLOW, RECEPTACLE_TIMES, SCAN_LIGHTS, SHAPES, SUMP_TIP, TANK_H, TOOL_NAMES,
@@ -30,7 +32,7 @@ import {
   PAPER_HANDLE, PAPER_HEADER, PAPER_MIN, PAPER_TEXT, PAPER_TEXT_MAX, Paper, eraseAt, extend, loadPaper, savePaper,
   textAt,
 } from './paper';
-import { View, type FaucetSpot, type Frame, type Pick } from './view';
+import { View, type AirlockLook, type FaucetSpot, type Frame, type Pick } from './view';
 import { WaterSounds } from './water';
 
 /** What the info panel shows for one vessel: all of it in god mode, otherwise just its color. */
@@ -58,6 +60,8 @@ export interface Inspection {
 export interface Hud {
   /** Whether the mouse is captured for looking around; if not, the game shows how to start. */
   locked: boolean;
+  /** Whether the player is still shut in the cryopod, waking (see Wake), where the message inside it says what to do. */
+  inPod: boolean;
   /** Whether E would pick up what the crosshair is on. */
   grab: boolean;
   /** Whether something is being held. */
@@ -108,6 +112,8 @@ export interface EngineCallbacks {
   onPaperText(edit: PaperEdit | null): void;
   /** Whenever the heads-up display changes. */
   onHud(hud: Hud): void;
+  /** OK was pressed on the message inside the cryopod: the player is awake. */
+  onAwake(): void;
 }
 
 /**
@@ -178,7 +184,8 @@ const GRAVITY = 2000;
 const EYE = 620;
 const CROUCH_EYE = 330;
 const PLAYER_R = 45;
-const WALK = 560;
+/** Walking speed, in world units per real second. */
+const WALK = 840;
 /** How far away something can be and still be picked up or pressed. */
 const REACH = 460;
 /** The nearest and furthest something can be held, from the eyes to its middle, beyond its own size. */
@@ -259,6 +266,15 @@ export class GameEngine {
   private won = false;
   /** The target the receptacle has taken, all told, by volume: what counts toward the goal. */
   private delivered = 0;
+  /** Whether the alarms are silenced, by the button under the beacon (see hushAlarms). Saved, and kept through Reset. */
+  private alarmsOff = false;
+  /** Whether the porthole's blinds are shut, by the button beside it. Saved, and kept through Reset. */
+  private blindsShut = false;
+  /** Where the player is in waking up in the airlock (see Wake), and how many sim seconds it's been there. */
+  private wake: Wake = 'closed';
+  /** How far the ship has turned, in radians (see SPIN), for the stars. */
+  private spin = 0;
+  private wakeT = Infinity;
   /** Each receptacle's sounds, through its cycle (see Tool.press). */
   private beepers = new Map<Tool, Beeper>();
   /** The player's sticky notes, on the back wall, the one on top last (see paper.ts). They're notes, not lab, so Reset keeps them. */
@@ -310,7 +326,7 @@ export class GameEngine {
         note: '',
       };
     });
-    this.view = new View(canvas, this.faucets);
+    this.view = new View(canvas, this.faucets, EYE);
     this.resizeObserver = new ResizeObserver(() => this.layout());
     this.resizeObserver.observe(stage);
     this.layout();
@@ -493,6 +509,8 @@ export class GameEngine {
       // where they started on the old flat bench, so the save still loads there, with their notes
       faucets: this.faucets.map((fa, i, all) => ({ x: (i + 0.5) / all.length, y: 30 / HOME_H, ...(fa.note ? { note: fa.note } : {}) })),
       delivered: this.delivered,
+      ...(this.alarmsOff ? { alarmsOff: true } : {}),
+      ...(this.blindsShut ? { blindsShut: true } : {}),
       ...(this.papers.length ? { papers: this.papers.map(savePaper) } : {}),
       player: { x: this.player.x, z: this.player.z, yaw: this.player.yaw, pitch: this.player.pitch },
       chem: saveChem(this.chem.params),
@@ -549,24 +567,28 @@ export class GameEngine {
       return h;
     });
     // what each funnel hangs under, now that there's everything to hang under
+    const fs = s.faucets ?? [];
     s.hoses.forEach((sh, i) => {
       const on = sh.on;
       if (!on) return;
+      const fa = Number.isInteger(on.faucet) ? faucetIndex(on.faucet!, fs.length) : null;
       const t = this.tools.find((u) => u.id === on.tool);
       const mount: HoseMount | null =
         t && Number.isInteger(on.spout) && on.spout! >= 0 && on.spout! < t.shape.spouts.length ? { tool: t, spout: on.spout! }
-        : Number.isInteger(on.faucet) && this.faucets[on.faucet!] ? { faucet: on.faucet! }
+        : fa !== null ? { faucet: fa }
         : Number.isInteger(on.hose) && this.hoses[on.hose!] && on.hose !== i ? { hose: this.hoses[on.hose!] }
         : null;
       this.hoses[i].on = mount;
     });
     this.hang();
-    const fs = s.faucets ?? [];
-    this.faucets.forEach((fa, i) => {
-      const note = fs.length === this.faucets.length ? fs[i]?.note : undefined;
-      fa.note = typeof note === 'string' ? note : '';
+    for (const fa of this.faucets) fa.note = '';
+    fs.forEach((f, i) => {
+      const j = faucetIndex(i, fs.length);
+      if (j !== null && typeof f?.note === 'string') this.faucets[j].note = f.note;
     });
     this.delivered = Number.isFinite(s.delivered) ? Math.max(0, s.delivered!) : 0;
+    this.setAlarmsOff(!!s.alarmsOff);
+    this.blindsShut = !!s.blindsShut;
     this.papers = (Array.isArray(s.papers) ? s.papers : []).map(loadPaper).filter((p): p is Paper => !!p);
     this.paperDrag = null;
     this.cb.onPaperText(null);
@@ -646,6 +668,7 @@ export class GameEngine {
    * their hands are free. Returns whether it did.
    */
   spawn(kind: Item): boolean {
+    if (inPod(this.wake)) return false;
     if (this.held) {
       this.say('Hands full');
       return false;
@@ -783,7 +806,8 @@ export class GameEngine {
    * the stands holding up everything else (unless `bases` is false).
    */
   private obstacles(h: Held | null, bases = true): Box[] {
-    const room = roomBoxes(ROOM);
+    // while the airlock's doors are open, its doorway and chamber take the front wall's place
+    const room = this.wake === 'closed' ? roomBoxes(ROOM) : [...roomBoxes(ROOM, false), ...airlockBoxes()];
     const counters = COUNTERS.map((c) => ({
       x: (c.x0 + c.x1) / 2, y: LIFT / 2, z: (c.z0 + c.z1) / 2, yaw: 0, hx: (c.x1 - c.x0) / 2, hy: LIFT / 2, hz: (c.z1 - c.z0) / 2,
     }));
@@ -936,7 +960,14 @@ export class GameEngine {
     on(c, 'mousedown', (e) => {
       if (this.pencil && performance.now() - this.lastTouch < 1000) return;
       if (!this.locked) {
-        if (e.button === 0) this.lock();
+        if (e.button !== 0) return;
+        // the mouse is free, so it can press OK in the pod where it points, as well as capturing the mouse
+        if (this.wake === 'pod') {
+          const r = c.getBoundingClientRect();
+          const at = this.view.pick(REACH, null, ((e.clientX - r.left) / r.width) * 2 - 1, 1 - ((e.clientY - r.top) / r.height) * 2);
+          if (at?.kind === 'wake') this.pressOk();
+        }
+        this.lock();
         return;
       }
       e.preventDefault();
@@ -971,9 +1002,12 @@ export class GameEngine {
       this.held.dist = this.clampDist(this.held, this.held.dist * Math.exp(-px * 0.0012));
     });
     on(window, 'keydown', (e) => {
-      if (typingIn(e.target) || !this.locked || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (typingIn(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+      // Enter is OK on the message inside the cryopod, as it was on the notice it replaced
+      if (e.code === 'Enter' && this.wake === 'pod') this.pressOk();
+      if (!this.locked) return;
       this.keys.add(e.code);
-      if (e.repeat) return;
+      if (e.repeat || inPod(this.wake)) return;
       if (e.code === 'KeyE') this.grabOrRelease();
       if (e.code === 'KeyF') this.flipTarget();
       if (e.code === 'KeyP') this.setPencil(!this.pencil);
@@ -1047,6 +1081,7 @@ export class GameEngine {
   }
 
   private grabOrRelease(): void {
+    if (inPod(this.wake)) return;
     if (this.held) {
       this.release();
       return;
@@ -1054,7 +1089,7 @@ export class GameEngine {
     const p = this.target;
     if (!p) return;
     let h: Held;
-    if (p.kind === 'faucet') return;
+    if (p.kind === 'faucet' || p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake') return;
     if (p.kind === 'tool' && p.t.shape.fixed) {
       this.say('That stays where it is');
       return;
@@ -1110,6 +1145,7 @@ export class GameEngine {
 
   /** Flip the tool being held, or else the one looked at (see flip), if it's one that can be flipped. */
   private flipTarget(): void {
+    if (inPod(this.wake)) return;
     const t = this.held?.kind === 'tool' ? this.held.t : this.target?.kind === 'tool' ? this.target.t : null;
     if (t) flip(t);
   }
@@ -1124,6 +1160,19 @@ export class GameEngine {
           this.beepers.set(t, beeper(this.hear(this.machineAt(t))));
         }
       } else if (t.scan()) this.rumbles.set(t, rumble(this.hear(this.machineAt(t))));
+      return;
+    }
+    if (p?.kind === 'wake') {
+      this.pressOk();
+      return;
+    }
+    if (inPod(this.wake)) return;
+    if (p?.kind === 'alarm') {
+      this.setAlarmsOff(!this.alarmsOff);
+      return;
+    }
+    if (p?.kind === 'blinds') {
+      this.blindsShut = !this.blindsShut;
       return;
     }
     if (p?.kind === 'scale' && p.part === 'tare') {
@@ -1160,10 +1209,12 @@ export class GameEngine {
     }
     if (p.kind === 'scale') return `s${this.scales.indexOf(p.sc)}`;
     if (p.kind === 'hose') return `h${this.hoses.indexOf(p.h)}`;
+    if (p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake') return null;
     return `F${p.i}`;
   }
 
   private rightDown(): void {
+    if (inPod(this.wake)) return;
     this.rightHeld = true;
     if (this.held) return;
     const k = this.valveAimed();
@@ -1206,7 +1257,7 @@ export class GameEngine {
    * right; a click on a note types a line of text there (or edits the line clicked); and the right button erases.
    */
   setPencil(on: boolean): void {
-    if (on === this.pencil) return;
+    if (on === this.pencil || (on && inPod(this.wake))) return;
     this.pencil = on;
     this.paperDrag = null;
     this.turning = null;
@@ -1525,6 +1576,8 @@ export class GameEngine {
       p.yaw = wrapAngle(p.yaw - look.x * Math.abs(look.x) * STICK_TURN * dt);
       p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch - look.y * Math.abs(look.y) * STICK_TILT * dt));
     }
+    // shut in the pod, they can only look
+    if (inPod(this.wake)) return;
     const crouching = k.has('KeyC') || this.crouchHeld;
     p.crouch = Math.max(0, Math.min(1, p.crouch + (crouching ? 1 : -1) * dt * 5));
     const h = this.held;
@@ -1583,7 +1636,9 @@ export class GameEngine {
     this.inflow.clear();
     this.landed = [];
     this.pour = null;
-    const simDt = dt * this.speed;
+    // the lab waits for the player to press OK in the pod, as it did through the rest of the intro
+    const simDt = this.wake === 'pod' ? 0 : dt * this.speed;
+    this.spin = (this.spin + SPIN * simDt) % (2 * Math.PI);
     const mouths = (this.open = this.mouths());
     const h = this.held;
 
@@ -1636,6 +1691,7 @@ export class GameEngine {
       const stillTool = !this.rightHeld && h?.kind === 'tool' && h.t.shape.spouts.length ? h.t : null;
       const stillHose = !this.rightHeld && h?.kind === 'hose' ? h.h : null;
       for (let i = 0; i < sub; i++) {
+        this.stepWake(step);
         if (D && this.pour) {
           const out = new Vessel(Infinity);
           transfer(D, out, POUR_RATE * step);
@@ -2023,7 +2079,9 @@ export class GameEngine {
       eye: this.eye(), yaw: this.player.yaw, pitch: this.player.pitch,
       flasks: this.flasks, tools: this.tools, scales: this.scales, hoses: this.hoses, faucets: this.faucets,
       streams, drops,
-      tarePress: this.tarePress, hot: this.target, shake, dt, delivered: this.delivered, papers: this.paperFrame(),
+      tarePress: this.tarePress, hot: this.target, shake, dt, delivered: this.delivered, alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
+      airlock: this.airlockLook(),
+      papers: this.paperFrame(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(),
     });
   }
@@ -2077,6 +2135,12 @@ export class GameEngine {
     }
     const p = this.target;
     const h = this.held;
+    if (inPod(this.wake)) {
+      if (this.wake === 'pod') add(['LMB'], 'OK', p?.kind !== 'wake');
+      add(['Esc'], 'let go of the mouse');
+      add(['/'], 'hide this list');
+      return out;
+    }
     if (this.pencil) {
       add(['LMB'], 'drag to draw, or on bare wall to mark out a sheet');
       add(['LMB'], 'click a sheet to type on it');
@@ -2093,23 +2157,100 @@ export class GameEngine {
       if (h.kind === 'tool' && h.t.shape.flippable) add(['F'], 'flip it');
       if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it away');
     } else {
-      if (p && p.kind !== 'faucet' && !(p.kind === 'tool' && p.t.shape.fixed)) add(['E'], 'pick it up');
+      if (p && this.grabbable(p)) add(['E'], 'pick it up');
       if (!this.pencil && this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
       if (p?.kind === 'tool' && p.t.shape.flippable) add(['F'], 'flip it');
       add(['1–0, −'], 'make equipment in your hands');
     }
     if (!this.pencil) {
-      const press =
-        (p?.kind === 'tool' && p.part === 'button' && !(p.t.kind === 'receptacle' ? p.t.cycle : p.t.scanning)) ||
-        (p?.kind === 'scale' && p.part === 'tare');
-      if (press) add(['LMB'], 'press it');
+      if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
+      else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
+      else if (this.pressable()) add(['LMB'], 'press it');
       const id = this.targetNote();
       if (id) add(['LMB2'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
       add(['P'], 'pick up the pencil');
     }
     add(['C'], 'crouch');
     add(['Esc'], 'let go of the mouse');
+    add(['/'], 'hide this list');
     return out;
+  }
+
+  private setAlarmsOff(off: boolean): void {
+    this.alarmsOff = off;
+    hushAlarms(off);
+  }
+
+  /** Whether the left button would press the key or button the crosshair is on. */
+  private pressable(): boolean {
+    const p = this.target;
+    return (
+      (p?.kind === 'tool' && p.part === 'button' && !(p.t.kind === 'receptacle' ? p.t.cycle : p.t.scanning)) ||
+      (p?.kind === 'scale' && p.part === 'tare') ||
+      p?.kind === 'alarm' ||
+      p?.kind === 'blinds' ||
+      p?.kind === 'wake'
+    );
+  }
+
+  /** Whether E would pick up `p`: anything but what's fixed in place. */
+  private grabbable(p: Pick): boolean {
+    return p.kind !== 'faucet' && p.kind !== 'alarm' && p.kind !== 'blinds' && p.kind !== 'wake' && !(p.kind === 'tool' && p.t.shape.fixed);
+  }
+
+  /* ---------------- waking in the airlock ---------------- */
+
+  /**
+   * Put the player in the cryopod in the airlock, facing the lab through its open doors, with the message on its
+   * glass: the intro's last part, the first time and on a replay. They can look around, but nothing else, until
+   * they press OK (see pressOk). Whatever they held is set down if it can be, or else put away.
+   */
+  enterPod(): void {
+    if (this.held) this.release();
+    if (this.held && !(this.held.kind === 'tool' && UNIQUE_TOOLS.includes(this.held.t.kind))) this.putAway();
+    this.held = null;
+    this.setPencil(false);
+    this.turning = null;
+    this.rightHeld = false;
+    Object.assign(this.player, { x: POD.x, z: POD.z, yaw: 0, pitch: -0.12, crouch: 0 });
+    this.wake = 'pod';
+    this.wakeT = 0;
+  }
+
+  /** OK, on the message inside the pod: it flickers out, the pod's front slides up, and then the player can walk. */
+  private pressOk(): void {
+    if (this.wake !== 'pod') return;
+    this.wake = 'flicker';
+    this.wakeT = 0;
+    this.cb.onAwake();
+  }
+
+  /** On through waking up, over a sim substep of h seconds (see Wake), like everything else that happens. */
+  private stepWake(h: number): void {
+    const t = (this.wakeT += h);
+    const next = (w: Wake) => {
+      this.wake = w;
+      this.wakeT = 0;
+    };
+    if (this.wake === 'flicker' && t >= WAKE_S.flicker) next('opening');
+    else if (this.wake === 'opening' && t >= WAKE_S.open) next('out');
+    else if (this.wake === 'out' && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
+  }
+
+  /** How the airlock looks just now, for the view. */
+  private airlockLook(): AirlockLook {
+    const w = this.wake;
+    const t = this.wakeT;
+    // the message flickers, on less and less of the time, until it's gone
+    const flick = w === 'flicker' && Math.sin(t * 90) + Math.sin(t * 37) > 2.6 * (t / WAKE_S.flicker) - 0.6;
+    return {
+      door: w === 'closed' ? 1 - ease(t / WAKE_S.close) : 1,
+      front: w === 'opening' ? ease(t / WAKE_S.open) : inPod(w) ? 0 : 1,
+      // the room's light floods in as the front slides up
+      dark: w === 'opening' ? 1 - ease(t / WAKE_S.open) : inPod(w) ? 1 : 0,
+      message: w === 'pod' || flick,
+      okHot: w === 'pod' && this.target?.kind === 'wake',
+    };
   }
 
   private rightWouldDo(): boolean {
@@ -2133,12 +2274,11 @@ export class GameEngine {
     const h = this.held;
     const hud: Hud = {
       locked: this.locked,
-      grab: !this.held && !!p && p.kind !== 'faucet' && !(p.kind === 'tool' && p.t.shape.fixed),
+      grab: !this.held && !!p && this.grabbable(p),
+      inPod: inPod(this.wake),
       holding: !!this.held,
       drop: !!this.placed && 'rest' in this.placed,
-      press:
-        (p?.kind === 'tool' && p.part === 'button' && !(p.t.kind === 'receptacle' ? p.t.cycle : p.t.scanning)) ||
-        (p?.kind === 'scale' && p.part === 'tare'),
+      press: this.pressable(),
       right: this.rightWouldDo(),
       aim: this.pencil ? { ...this.cursor } : this.turning ? { ...this.turning.aim } : null,
       pencil: this.pencil,

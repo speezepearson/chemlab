@@ -59,6 +59,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `paper.ts` is sticky notes: the sheets, their strokes and text, in old-bench coordinates. They hang on the back
     wall. While the pencil is in hand, the mouse moves `cursor` rather than the view, and both buttons go to
     `pencilDown`, which works where the cursor's ray meets the wall (`wallAt`).
+  - `airlock.ts` is the airlock and cryopod where the player wakes: their size, collisions, and the `Wake` states.
+    `src/intro/notice.ts` is the message projected inside the pod.
+  - `porthole.ts` is the porthole's shape, for how much of the wall it takes up.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
     `volumes.ts`); `rumble.ts` is the spectrometer, `beeper.ts` the receptacle, `ambience.ts` the ship, `water.ts` drips and streams.
@@ -66,8 +69,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     in the lab goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),
     so it fades and pans with where it is relative to the player's head.
 - `src/intro/log.ts`: the intro's console script, deterministic from a seed. `src/components/Intro.tsx` plays it.
-- `src/components/`: the React UI around the canvas: the hotbar (`Palette.tsx`), the crosshair's hints and the controls card
-  (`Hud.tsx`), the Chemistry and Appearance panels, the editor.
+- `src/components/`: the React UI around the canvas: the hotbar (`Palette.tsx`), the crosshair's hints, the corner list of
+  actions and the start hint (`Hud.tsx`), the Chemistry and Appearance panels, the editor.
 
 ## Invariants and gotchas
 
@@ -79,7 +82,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   chemistry, cooling, the spectrometer's run and sound, the receptacle's cycle, and the drip and stream sounds. All of it
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
-  notice; and the player themselves (walking, looking, carrying, tipping a flask), which is input, not the sim.
+  notice; and the player themselves (walking, looking, carrying, tipping a flask), which is input, not the sim. Waking
+  in the airlock (the pod's message flickering out, its front opening, the doors closing) is sim time too.
   - Anything drawn per outlet must use totals over the whole frame. A single substep's output can be empty, for
     example when a wide-open valve drains its tank in the first substep.
 - **Landing fluid goes through `fill()`.** Anything that lands in a vessel (streams, drops, faucets, pours) must use
@@ -122,8 +126,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 ## Design preferences
 
 - Don't give away the chemistry. The player is meant to work it out. The mass spectrometer has no text and no
-  sextant divider lines, the size sorter's screens look plain, the hotbar has no names, and the faucets aren't labeled (they're pure atoms and
-  settled pairs, which the user chose). Ask before adding any visual cue that reveals how a tool or reaction works.
+  sextant divider lines, the size sorter's screens look plain, the hotbar has no names, and the faucets aren't labeled (they're the six pure
+  atoms, which the user chose). Ask before adding any visual cue that reveals how a tool or reaction works.
 - The game's text matches the intro's premise. The player is Nadia Hassan, the target species is the cryostabilizer,
   and the ship belongs to Celestia Starlines.
 - Commits are small, one behavior per commit, with a message explaining why. The README changes in the same commit.

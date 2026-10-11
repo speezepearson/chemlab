@@ -1,7 +1,7 @@
 import { type Atom } from '../chem/atoms';
 import { THERMO, T_ROOM } from '../chem/params';
 import { ReactionNetwork, heatAt, type Fluid } from '../chem/reactions';
-import { NS, SPECIES, pairOf, singleOf } from '../chem/species';
+import { NS, SPECIES, singleOf } from '../chem/species';
 import type { Vec3 } from './space';
 import { mouthBelow, type Mouth } from './tools';
 
@@ -15,23 +15,31 @@ export interface Faucet {
 
 /** A faucet of one atom, pure. */
 const pure = (a: Atom): Faucet => ({ start: singleOf(a) });
-/** A faucet of a pair of atoms that can bond, as the pair settles from pure. */
-const pair = (a: Atom, b: Atom): Faucet => ({ start: pairOf(a, b) });
 
 /**
- * One faucet for each of the six atoms and each of the twelve pairs that can bond, all at room temperature.
- * A pair's faucet is what that pair, started pure, settles to: some of it may come apart, unless its bond is
- * one that never breaks, as blue bonds don't. Left to right: the pairs of primaries, then the color wheel
- * (each atom with the pairs of its neighbors between them), then the pairs of secondaries.
+ * One faucet for each of the six atoms, pure, at room temperature, left to right round the color wheel. Every pair
+ * has to be made by mixing.
  */
-export const FAUCETS: readonly Faucet[] = [
-  pair('R', 'G'), pair('G', 'B'), pair('R', 'B'),
-  pure('R'), pair('R', 'Y'), pure('Y'), pair('G', 'Y'), pure('G'), pair('G', 'C'),
-  pure('C'), pair('B', 'C'), pure('B'), pair('B', 'M'), pure('M'), pair('R', 'M'),
-  pair('C', 'M'), pair('M', 'Y'), pair('C', 'Y'),
-];
+export const FAUCETS: readonly Faucet[] = [pure('R'), pure('Y'), pure('G'), pure('C'), pure('B'), pure('M')];
 
-/** A faucet as text, e.g. "R–G", or "B at T = 0.2". */
+/**
+ * Saves from when there were also faucets of the twelve pairs that can bond had 18, in this order, and the atoms'
+ * were at these places among them (see faucetIndex).
+ */
+const OLD_COUNT = 18;
+const OLD_PLACES = [3, 5, 7, 9, 11, 13];
+
+/**
+ * Which faucet a save's faucet `i` is, out of the `count` it had, as their notes and hoses refer to them: the same
+ * one, or for an old save with the pairs' faucets too, the same atom's. Null for a pair's, which is gone, or out of
+ * any other number, whose order isn't known.
+ */
+export function faucetIndex(i: number, count: number): number | null {
+  const j = count === OLD_COUNT ? OLD_PLACES.indexOf(i) : count === FAUCETS.length ? i : -1;
+  return Number.isInteger(j) && j >= 0 && j < FAUCETS.length ? j : null;
+}
+
+/** A faucet as text, e.g. "R", or "B at T = 0.2". */
 export function describeFaucet(fa: Faucet): string {
   const name = SPECIES[fa.start].name;
   return fa.T === undefined ? name : `${name} at T = ${fa.T}`;
