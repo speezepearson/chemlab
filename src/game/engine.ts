@@ -2119,6 +2119,7 @@ export class GameEngine {
     }
     add(['C'], 'crouch');
     add(['Esc'], 'let go of the mouse');
+    add(['/'], 'hide this list');
     return out;
   }
 

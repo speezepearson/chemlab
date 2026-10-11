@@ -175,9 +175,9 @@ function Actions({ actions }: { actions: readonly Action[] }) {
 
 /**
  * The crosshair, with hints by it for what E, F and the mouse buttons would do; the aim while a valve turns; and, on a
- * screen with a mouse and keys, everything else that can be done just now, in a corner.
+ * screen with a mouse and keys, everything else that can be done just now, in a corner, unless `/` has hidden it.
  */
-export function Hud({ hud }: { hud: HudState }) {
+export function Hud({ hud, help }: { hud: HudState; help: boolean }) {
   if (!hud.locked) return null;
   return (
     <>
@@ -190,7 +190,7 @@ export function Hud({ hud }: { hud: HudState }) {
       </div>
       {hud.aim && <div className="aim" style={{ left: hud.aim.x, top: hud.aim.y }} />}
       {hud.note && <div className="note">{hud.note}</div>}
-      {!TOUCH && <Actions actions={hud.actions} />}
+      {!TOUCH && help && <Actions actions={hud.actions} />}
     </>
   );
 }

@@ -16,6 +16,7 @@ import { SpeedControl } from './components/SpeedControl';
 import { ambience } from './game/ambience';
 import { GameEngine, type Hud as HudState, type Inspection, type PaperEdit } from './game/engine';
 import { DEFAULT_PRESET, PRESETS } from './game/presets';
+import { typingIn } from './game/typing';
 import { decodeSave, encodeSave, storeGod, storeSave, storedGod, storedSave, type SaveState } from './game/save';
 
 const INTRO_KEY = 'slurry-lab.introSeen';
@@ -31,6 +32,22 @@ const markIntroSeen = () => {
     localStorage.setItem(INTRO_KEY, '1');
   } catch {
     // storage blocked: the intro just plays again next time
+  }
+};
+
+const HELP_KEY = 'slurry-lab.help';
+const storedHelp = () => {
+  try {
+    return localStorage.getItem(HELP_KEY) !== '0';
+  } catch {
+    return true;
+  }
+};
+const storeHelp = (on: boolean) => {
+  try {
+    localStorage.setItem(HELP_KEY, on ? '1' : '0');
+  } catch {
+    // storage blocked: the list just shows again next time
   }
 };
 
@@ -70,6 +87,19 @@ export function App() {
   const [preLog, setPreLog] = useState(intro === 'first');
   const endLog = useCallback(() => setPreLog(false), []);
   useEffect(() => ambience(!preLog), [preLog]);
+  /** Whether the corner list of what can be done is showing: `/` shows or hides it, at any time. */
+  const [help, setHelp] = useState(storedHelp);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '/' || typingIn(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+      // and not Firefox's quick find
+      e.preventDefault();
+      setHelp((h) => !h);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  useEffect(() => storeHelp(help), [help]);
   const presetRef = useRef(preset);
   presetRef.current = preset;
   const stageRef = useRef<HTMLDivElement>(null);
@@ -206,7 +236,7 @@ export function App() {
       <div className="main">
         <div id="stage" ref={stageRef}>
           <canvas ref={canvasRef} />
-          {hud && <Hud hud={hud} />}
+          {hud && <Hud hud={hud} help={help} />}
           {engine && hud && <TouchControls engine={engine} hud={hud} />}
           {inspection && <InfoPanel info={inspection} />}
           {engine && <Palette engine={engine} pencil={pencil} />}
