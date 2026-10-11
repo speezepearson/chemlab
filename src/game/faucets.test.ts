@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { defaultChemParams, T_ROOM } from '../chem/params';
+import { T_ROOM } from '../chem/params';
+import { testChemParams } from '../chem/testChem';
 import { ReactionNetwork, atomCounts, heatAt, temperature, type Fluid } from '../chem/reactions';
 import { equilibriumFluid } from '../chem/equilibrium';
-import { NS, SPECIES } from '../chem/species';
+import { NS, SPECIES, bondParam } from '../chem/species';
 import { CAP } from './config';
 import { Vessel } from './flask';
 import { FAUCETS, describeFaucet, faucetOutput, faucetTarget } from './faucets';
 import type { Mouth } from './tools';
 
 describe('faucets', () => {
-  const net = new ReactionNetwork(defaultChemParams());
+  const net = new ReactionNetwork(testChemParams());
 
   it('are the six atoms and the twelve pairs that can bond, once each', () => {
     const starts = FAUCETS.map((fa) => SPECIES[fa.start]);
@@ -47,12 +48,13 @@ describe('faucets', () => {
       });
 
       if (start.size === 2) {
-        const blue = start.atoms.includes('B');
-        it(blue ? 'stays whole, since blue bonds never break' : 'settles to full equilibrium, since its bond can break', () => {
-          const atoms = Object.fromEntries(start.atoms.filter((a) => a).map((a) => [a!, 0.5]));
+        const [a, b] = start.atoms.filter((x) => x !== null);
+        const frozen = bondParam(net.params, a!, b!).A === 0;
+        it(frozen ? "stays whole, since its bond can't break" : 'settles to full equilibrium, since its bond can break', () => {
+          const atoms = Object.fromEntries([a, b].map((x) => [x!, 0.5]));
           const full = equilibriumFluid(atoms, net.U, T);
           for (let s = 0; s < NS; s++) {
-            const want = blue ? (s === fa.start ? 0.5 : 0) : full.n[s];
+            const want = frozen ? (s === fa.start ? 0.5 : 0) : full.n[s];
             expect(out.n[s], SPECIES[s].name).toBeCloseTo(want, 6);
           }
         });
@@ -61,7 +63,7 @@ describe('faucets', () => {
   }
 
   it('settles again when the chemistry changes', () => {
-    const own = new ReactionNetwork(defaultChemParams());
+    const own = new ReactionNetwork(testChemParams());
     const cy = FAUCETS.find((fa) => describeFaucet(fa) === 'C–Y')!;
     const before = faucetOutput(cy, own).n[cy.start];
     expect(faucetOutput(cy, own).n[cy.start]).toBe(before); // cached
@@ -72,36 +74,25 @@ describe('faucets', () => {
 });
 
 describe('faucetTarget', () => {
-  const spout = { x: 100, y: 60 };
+  const spout = { x: 100, y: 60, z: 0 };
   const reach = 24;
-  const mouth = (v: Vessel, y: number): Mouth => ({ v, x0: 80, x1: 120, y });
+  const mouth = (v: Vessel, y: number): Mouth => ({ v, x: 100, y, z: 0, hx: 20, hz: 20 });
 
   it('fills something parked under it, in reach', () => {
     const tank = new Vessel(CAP);
-    expect(faucetTarget([mouth(tank, 70)], spout, reach, new Set(), false)?.v).toBe(tank);
+    expect(faucetTarget([mouth(tank, 50)], spout, reach)?.v).toBe(tank);
   });
 
   it('fills nothing out of reach, but keeps filling something full (which overflows)', () => {
     const tank = new Vessel(CAP);
-    expect(faucetTarget([mouth(tank, 90)], spout, reach, new Set(), false)).toBeNull();
+    expect(faucetTarget([mouth(tank, 30)], spout, reach)).toBeNull();
     tank.N = CAP;
-    expect(faucetTarget([mouth(tank, 70)], spout, reach, new Set(), false)?.v).toBe(tank);
+    expect(faucetTarget([mouth(tank, 50)], spout, reach)?.v).toBe(tank);
   });
 
-  it("passes by anything carried unless the right button is held, whether it's a flask, a tank or a funnel", () => {
-    for (const cap of [CAP, 4 * CAP, CAP / 4]) {
-      const carried = new Vessel(cap);
-      const mouths = [mouth(carried, 70)];
-      expect(faucetTarget(mouths, spout, reach, new Set([carried]), false)).toBeNull();
-      expect(faucetTarget(mouths, spout, reach, new Set([carried]), true)?.v).toBe(carried);
-    }
-  });
-
-  it('fills what is parked below something carried, if that is in reach', () => {
-    const carried = new Vessel(4 * CAP);
+  it('fills only the first thing under it', () => {
+    const top = new Vessel(4 * CAP);
     const below = new Vessel(CAP);
-    const mouths = [mouth(carried, 70), mouth(below, 80)];
-    expect(faucetTarget(mouths, spout, reach, new Set([carried]), false)?.v).toBe(below);
-    expect(faucetTarget(mouths, spout, reach, new Set([carried]), true)?.v).toBe(carried);
+    expect(faucetTarget([mouth(below, 40), mouth(top, 50)], spout, reach)?.v).toBe(top);
   });
 });

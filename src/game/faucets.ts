@@ -2,7 +2,7 @@ import { type Atom } from '../chem/atoms';
 import { THERMO, T_ROOM } from '../chem/params';
 import { ReactionNetwork, heatAt, type Fluid } from '../chem/reactions';
 import { NS, SPECIES, pairOf, singleOf } from '../chem/species';
-import type { Point, Vessel } from './flask';
+import type { Vec3 } from './space';
 import { mouthBelow, type Mouth } from './tools';
 
 /** A faucet dispenses an unlimited supply of one fixed fluid. */
@@ -68,16 +68,9 @@ export function faucetOutput(fa: Faucet, net: ReactionNetwork): Fluid {
 
 /**
  * What a faucet whose spout is at `spout` fills: the first open top below it, if that's within `reach`. A
- * full one keeps filling, and overflows. Something being carried (a flask, a tool's tanks, a hose's funnel)
- * only catches the stream while the right button is held; otherwise the stream passes it by.
+ * full one keeps filling, and overflows. That includes something the player is holding there.
  */
-export function faucetTarget(
-  mouths: readonly Mouth[],
-  spout: Point,
-  reach: number,
-  carried: ReadonlySet<Vessel>,
-  rightHeld: boolean,
-): Mouth | null {
-  const m = mouthBelow(rightHeld ? mouths : mouths.filter((mo) => !carried.has(mo.v)), spout);
-  return m && m.y - spout.y <= reach ? m : null;
+export function faucetTarget(mouths: readonly Mouth[], spout: Vec3, reach: number): Mouth | null {
+  const m = mouthBelow(mouths, spout);
+  return m && spout.y - m.y <= reach ? m : null;
 }

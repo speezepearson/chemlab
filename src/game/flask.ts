@@ -3,6 +3,7 @@ import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions'
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { GOAL_PURITY, TRACE } from './config';
 import { GLASS_GRAMS } from './scale';
+import { ORIGIN, type Pose } from './space';
 import { LOOK, css, glowWhiteHeat, heatValue, whiteHeat, whiten, type RGB } from './appearance';
 
 export interface Point {
@@ -83,29 +84,20 @@ export class Vessel implements Fluid {
   }
 }
 
-/** Atoms of the target in a fluid that counts toward the goal: all of them if it's at least GOAL_PURITY target, else none. */
+/** Atoms of the target in a fluid the receptacle takes: all of them if it's more than GOAL_PURITY target, else none. */
 export function sustenance(f: Fluid): number {
   const t = f.n[TARGET] * SPECIES[TARGET].size;
-  return f.N > 0 && t >= GOAL_PURITY * f.N ? t : 0;
+  return f.N > 0 && t > GOAL_PURITY * f.N ? t : 0;
 }
 
-/** A flask on the shelf. It lives in a slot (`home`) and can be picked up and carried. */
+/** A flask. Wherever it's let go of, an arm from the ceiling holds it, unless it's standing on a scale. */
 export class Flask extends Vessel {
-  x: number;
-  y: number;
-  ang = 0;
+  /** Where its mouth's center is in the room, and which way it faces (see space.ts). */
+  pose: Pose = { ...ORIGIN };
+  /** How far it's tipped to pour, about its mouth, toward its own right (+x). */
+  tilt = 0;
   /** Weight of the empty flask, in grams. */
   glass = GLASS_GRAMS;
-
-  constructor(
-    public home: Point,
-    cap: number,
-    label = '',
-  ) {
-    super(cap, label);
-    this.x = home.x;
-    this.y = home.y;
-  }
 }
 
 /**
@@ -195,13 +187,19 @@ export function fluidAlpha(f: Fluid): number {
   return Math.max(0, Math.min(1, a));
 }
 
-/** The fluid's own color: its hue, darkened when cold and washed toward white when very hot. */
-export function fluidColor(f: Fluid): string {
+/** The fluid's own color, 0–255 per channel: its hue, darkened when cold and washed toward white when very hot; null if it's empty. */
+export function fluidRGB(f: Fluid): RGB | null {
   const hue = fluidHue(f);
-  if (!hue) return 'transparent';
+  if (!hue) return null;
   const T = temperature(f);
   const v = heatValue(T);
-  return css(whiten(hue.map((x) => x * v), whiteHeat(T)), fluidAlpha(f));
+  return whiten(hue.map((x) => x * v), whiteHeat(T));
+}
+
+/** fluidRGB, with fluidAlpha, as CSS. */
+export function fluidColor(f: Fluid): string {
+  const c = fluidRGB(f);
+  return c ? css(c, fluidAlpha(f)) : 'transparent';
 }
 
 /** Color of the light a hot fluid gives off. */

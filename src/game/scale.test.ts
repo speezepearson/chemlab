@@ -5,7 +5,7 @@ import { Flask } from './flask';
 import { GLASS_ERROR, GLASS_GRAMS, SCALE_MAX, Scale, flaskGrams, glassGrams } from './scale';
 
 const flask = (i: number, atoms = 0) => {
-  const f = new Flask({ x: 0, y: 0 }, CAP);
+  const f = new Flask(CAP);
   f.glass = glassGrams(i);
   f.setMolecules(singleOf('R'), atoms);
   return f;
@@ -27,7 +27,7 @@ describe('flask weights', () => {
 
 describe('Scale', () => {
   it('reads whole grams of everything on it', () => {
-    const sc = new Scale(0, 0);
+    const sc = new Scale();
     expect(sc.reading()).toBe(0);
     const a = flask(0, CAP / 4);
     sc.put(a, -40);
@@ -40,7 +40,7 @@ describe('Scale', () => {
   });
 
   it('tares to weigh just the fluid', () => {
-    const sc = new Scale(0, 0);
+    const sc = new Scale();
     const f = flask(5);
     sc.put(f, 0);
     sc.zero();
@@ -52,7 +52,7 @@ describe('Scale', () => {
   });
 
   it('reads OVER past its capacity, and will not tare there', () => {
-    const sc = new Scale(0, 0);
+    const sc = new Scale();
     const heavy = { ...flask(0, CAP), glass: SCALE_MAX } as Flask;
     sc.put(heavy, 0);
     expect(sc.reading()).toBeNull();

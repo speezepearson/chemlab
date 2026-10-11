@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { GameEngine } from '../game/engine';
+import { HOTKEYS, ITEMS, type GameEngine } from '../game/engine';
 
 /** Small drawings of each item, echoing how the bench draws it, in a 40 × 40 box. */
 const ICONS: Record<string, ReactNode> = {
@@ -47,6 +47,16 @@ const ICONS: Record<string, ReactNode> = {
       <path className="glass" d="M1 3 H13 L8 11 H6 Z" />
     </>
   ),
+  heater: (
+    <>
+      <path className="pipe" d="M9 27 V37 M20 27 V37 M31 27 V37 M36 23 Q39 23 39 27 V37" />
+      <path className="glass" d="M1 3 H11 L7 8 H5 Z" />
+      <rect className="glass" x="2" y="18" width="35" height="9" rx="4.5" />
+      <path d="M4 22.5 Q5.5 20 7 22.5 T10 22.5 T13 22.5 T16 22.5 T19 22.5 T22 22.5 T25 22.5 T28 22.5 V12" style={{ stroke: '#b87333', strokeWidth: 1.2 }} />
+      <rect className="valve" x="22" y="4" width="14" height="9" rx="2" />
+      <circle className="valve" cx="29" cy="8.5" r="2.5" />
+    </>
+  ),
   scale: (
     <>
       <path className="pipe" d="M4 20 H36" />
@@ -54,6 +64,14 @@ const ICONS: Record<string, ReactNode> = {
       <rect className="lcd" x="9" y="24.5" width="15" height="6" rx="1" style={{ fill: '#050603' }} />
       <path className="digits" d="M15 27.5 H22" style={{ stroke: 'yellowgreen' }} />
       <rect x="26" y="25" width="6" height="5" rx="1.2" style={{ fill: '#d8443b', stroke: 'none' }} />
+    </>
+  ),
+  tank: (
+    <>
+      <path className="pipe" d="M20 29 V37" />
+      <rect className="glass" x="3" y="6" width="34" height="23" rx="2" />
+      <path d="M4 11 H36 M4 16 H36 M4 20.5 H36 M4 25 H36" style={{ stroke: 'var(--glass)', strokeWidth: 0.5, opacity: 0.5 }} />
+      <circle className="valve" cx="20" cy="33" r="2.5" />
     </>
   ),
   hose: (
@@ -65,38 +83,54 @@ const ICONS: Record<string, ReactNode> = {
   ),
 };
 
-const ITEMS = [
-  ['flask', 'Flask'],
-  ['dispenser', 'Dispenser'],
-  ['pipette', 'Pipette'],
-  ['exchanger', 'Heat exchanger'],
-  ['separator', 'Separator'],
-  ['splitter', 'Splitter'],
-  ['sorter', 'Size sorter'],
-  ['scale', 'Scale'],
-  ['hose', 'Hose'],
-] as const;
-
-/** Prototypes to drag onto the bench to make more of them. Dropping anything back here puts it away. */
-export function Palette({ engine }: { engine: GameEngine }) {
+/**
+ * The equipment that can be made, along the bottom of the view: a key along the number row makes one in the player's
+ * hands, if there's room for it there. Clicking one does the same, when the mouse isn't captured. Last is the pencil,
+ * for sticky notes.
+ */
+export function Palette({ engine, pencil }: { engine: GameEngine; pencil: boolean }) {
   return (
-    <aside className="palette" aria-label="equipment" title="Drag out to add. Drop here to put away.">
-      {ITEMS.map(([kind, label]) => (
+    <div className="palette" aria-label="equipment">
+      {ITEMS.map((kind, i) => (
         <button
           key={kind}
-          aria-label={label}
+          aria-label={kind}
+          aria-keyshortcuts={HOTKEYS[i]}
           // no name in the tooltip: working out what each tool does is part of the game
-          title="Drag onto the bench for a new one, or back here to put one away"
-          onPointerDown={(e) => {
-            e.preventDefault();
-            engine.spawn(kind, e.clientX, e.clientY);
+          title={`Press ${HOTKEYS[i]} to make one in your hands`}
+          onClick={() => {
+            engine.lock();
+            engine.spawn(kind);
           }}
         >
           <svg viewBox="0 0 40 40" aria-hidden="true">
             {ICONS[kind]}
           </svg>
+          <kbd>{HOTKEYS[i]}</kbd>
         </button>
       ))}
-    </aside>
+      <button
+        className={`pencil${pencil ? ' on' : ''}`}
+        aria-label="Pencil"
+        aria-pressed={pencil}
+        aria-keyshortcuts="P"
+        title={
+          'Pencil (P): the mouse moves a pointer instead of your view. Drag on bare back wall for a sticky note, drag ' +
+          'on one to draw, click one to type, right-drag to erase. Drag a note by its top strip, resize it by its ' +
+          'corner, × throws it away. P puts it down.'
+        }
+        onClick={() => {
+          engine.lock();
+          engine.setPencil(!engine.pencilOn);
+        }}
+      >
+        <svg viewBox="0 0 40 40" aria-hidden="true">
+          <rect x="5" y="20" width="18" height="15" rx="1" style={{ fill: '#fbf0a2', stroke: 'var(--glass)' }} />
+          <path className="pipe" d="M17 30 L33 9" style={{ strokeWidth: 4 }} />
+          <path d="M15.2 32.4 L17 30 L19 31.5 Z" style={{ fill: 'var(--ink)', stroke: 'var(--ink)', strokeWidth: 1 }} />
+        </svg>
+        <kbd>P</kbd>
+      </button>
+    </div>
   );
 }

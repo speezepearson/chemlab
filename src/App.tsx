@@ -4,18 +4,18 @@ import { ReactionNetwork } from './chem/reactions';
 import { AppearancePanel } from './components/AppearancePanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
 import { FlaskEditor } from './components/FlaskEditor';
+import { Hud, Paused, TouchControls } from './components/Hud';
 import { LabelEditor } from './components/LabelEditor';
+import { PaperTextEditor } from './components/PaperTextEditor';
 import { SoundPanel } from './components/SoundPanel';
 import { Intro } from './components/Intro';
 import { InfoPanel } from './components/InfoPanel';
 import { Palette } from './components/Palette';
 import { SpeedControl } from './components/SpeedControl';
 import { ambience } from './game/ambience';
-import { GOAL_ATOMS, GOAL_PURITY } from './game/config';
-import { fmtCount } from './game/format';
-import { GameEngine, type Inspection } from './game/engine';
+import { GameEngine, type Hud as HudState, type Inspection, type PaperEdit } from './game/engine';
 import { DEFAULT_PRESET, PRESETS } from './game/presets';
-import { decodeSave, encodeSave, storeSave, storedSave, type SaveState } from './game/save';
+import { decodeSave, encodeSave, storeGod, storeSave, storedGod, storedSave, type SaveState } from './game/save';
 
 const INTRO_KEY = 'slurry-lab.introSeen';
 const introSeen = () => {
@@ -41,10 +41,10 @@ export function App() {
   const [network] = useState(() => new ReactionNetwork(defaultChemParams()));
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [speed, setSpeed] = useState(1);
-  const [god, setGod] = useState(true);
-  const [progress, setProgress] = useState(0);
+  const [god, setGod] = useState(storedGod);
   const [won, setWon] = useState(false);
   const [inspection, setInspection] = useState<Inspection | null>(null);
+  const [hud, setHud] = useState<HudState | null>(null);
   const [saved] = useState(storedSave);
   const [preset, setPreset] = useState(() => presetOf(saved));
   const [chemVersion, setChemVersion] = useState(0);
@@ -52,6 +52,10 @@ export function App() {
   const [editing, setEditing] = useState<string | null>(null);
   /** The flask whose label is being typed, outside god mode. */
   const [labeling, setLabeling] = useState<string | null>(null);
+  /** Whether the pencil is in hand, for sticky notes. */
+  const [pencil, setPencil] = useState(false);
+  /** The line of text on a sticky note being typed, and a fresh key for each one. */
+  const [paperEdit, setPaperEdit] = useState<{ edit: PaperEdit; key: number } | null>(null);
   /**
    * The intro, if it's showing: from its start button the first time, straight into the log on a replay, and
    * just the start button for a returning player, so there's a click to turn the sound on.
@@ -72,15 +76,18 @@ export function App() {
 
   useEffect(() => {
     const e = new GameEngine(canvasRef.current!, stageRef.current!, network, {
-      onProgress: setProgress,
       onWin: () => setWon(true),
       onInspect: setInspection,
       onEdit: setEditing,
       onLabel: setLabeling,
-      isDiscard: (x, y) => !!document.elementFromPoint(x, y)?.closest('.palette'),
+      onPencil: setPencil,
+      onPaperText: (edit) => setPaperEdit((was) => edit && { edit, key: (was?.key ?? 0) + 1 }),
+      onHud: setHud,
     }, presetRef.current);
     if (saved) e.restore(saved, presetRef.current);
     setEngine(e);
+    // for checks in a browser (see CLAUDE.md)
+    if (import.meta.env.DEV) (window as unknown as { lab?: GameEngine }).lab = e;
     const save = () => storeSave(e.snapshot());
     const timer = setInterval(save, AUTOSAVE_MS);
     window.addEventListener('pagehide', save);
@@ -100,6 +107,7 @@ export function App() {
   useEffect(() => {
     if (engine) engine.god = god;
     if (!god) setEditing(null);
+    storeGod(god);
   }, [engine, god]);
 
   const reset = () => {
@@ -154,14 +162,7 @@ export function App() {
     <>
       <header>
         <h1>Slurry Lab</h1>
-        <div className="goal">
-          <span>
-            {Math.round(100 * GOAL_PURITY)}+% pure cryostabilizer {fmtCount(progress)} / {fmtCount(GOAL_ATOMS)}
-          </span>
-          <div className="bar">
-            <i style={{ width: `${Math.min(100, (100 * progress) / GOAL_ATOMS)}%` }} />
-          </div>
-        </div>
+        <div className="spacer" />
         <div className="controls">
           <SpeedControl value={speed} onChange={setSpeed} />
           <label className="tog">
@@ -201,11 +202,19 @@ export function App() {
         {preset.description && <p className="hint">{preset.description}</p>}
       </header>
       <div className="main">
-        {engine && <Palette engine={engine} />}
         <div id="stage" ref={stageRef}>
           <canvas ref={canvasRef} />
+          {hud && <Hud hud={hud} />}
+          {engine && hud && <TouchControls engine={engine} hud={hud} />}
           {inspection && <InfoPanel info={inspection} />}
+          {engine && <Palette engine={engine} pencil={pencil} />}
+          {engine && hud && !hud.locked && !intro && editing === null && labeling === null && !paperEdit && (
+            <Paused onStart={() => engine.lock()} />
+          )}
           {engine && editing !== null && <FlaskEditor engine={engine} id={editing} onClose={() => setEditing(null)} />}
+          {engine && paperEdit && (
+            <PaperTextEditor key={paperEdit.key} engine={engine} edit={paperEdit.edit} onClose={() => setPaperEdit(null)} />
+          )}
           {engine && labeling !== null && (
             <LabelEditor key={labeling} engine={engine} id={labeling} onClose={() => setLabeling(null)} />
           )}

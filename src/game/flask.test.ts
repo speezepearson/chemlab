@@ -2,25 +2,28 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { SPECIES, TARGET, singleOf, speciesIndex } from '../chem/species';
 import { Flask, VOLUME, Vessel, sustenance, transfer, volume } from './flask';
 import { separate } from './tools';
+import { GOAL_PURITY } from './config';
 
 const atomTotal = (f: Flask) => SPECIES.reduce((t, s) => t + f.n[s.i] * s.size, 0);
 
 describe('sustenance', () => {
-  it('counts the target only in vessels at least 99% pure', () => {
-    const f = new Flask({ x: 0, y: 0 }, 1e6);
+  it('counts the target only in vessels more than GOAL_PURITY pure', () => {
+    const f = new Flask(1e6);
     f.setMolecules(TARGET, 1000);
     expect(sustenance(f)).toBe(3000);
-    f.setMolecules(singleOf('R'), 30); // exactly 99%
+    // R atoms that bring it to exactly GOAL_PURITY, then one fewer
+    const atGoal = Math.round(3000 / GOAL_PURITY - 3000);
+    f.setMolecules(singleOf('R'), atGoal - 1);
     expect(sustenance(f)).toBe(3000);
-    f.setMolecules(singleOf('R'), 31);
+    f.setMolecules(singleOf('R'), atGoal);
     expect(sustenance(f)).toBe(0);
-    expect(sustenance(new Flask({ x: 0, y: 0 }, 10))).toBe(0);
+    expect(sustenance(new Flask(10))).toBe(0);
   });
 });
 
 describe('Flask.setMolecules', () => {
   it('sets a count and keeps N equal to the atom total', () => {
-    const f = new Flask({ x: 0, y: 0 }, 300);
+    const f = new Flask(300);
     expect(f.setMolecules(TARGET, 40)).toBe(40);
     expect(f.setMolecules(singleOf('R'), 25)).toBe(25);
     expect(f.N).toBe(145);
@@ -30,7 +33,7 @@ describe('Flask.setMolecules', () => {
   });
 
   it('clamps to what fits in the flask', () => {
-    const f = new Flask({ x: 0, y: 0 }, 300);
+    const f = new Flask(300);
     f.setMolecules(singleOf('G'), 120);
     // room for 180 more molecules
     expect(f.setMolecules(TARGET, 1000)).toBe(180);
@@ -38,7 +41,7 @@ describe('Flask.setMolecules', () => {
   });
 
   it('clamps negative counts to zero', () => {
-    const f = new Flask({ x: 0, y: 0 }, 300);
+    const f = new Flask(300);
     f.setMolecules(TARGET, 5);
     expect(f.setMolecules(TARGET, -3)).toBe(0);
     expect(f.N).toBe(0);
@@ -49,7 +52,7 @@ describe('whole numbers', () => {
   const whole = (f: { n: Float64Array; Q: number }) => f.n.every(Number.isInteger) && Number.isInteger(f.Q);
 
   it('survive pouring, filling from a recipe, and splitting, with atoms and heat conserved', () => {
-    const a = new Flask({ x: 0, y: 0 }, 1e9);
+    const a = new Flask(1e9);
     // a faucet-style recipe: one atom's worth, fractional
     const recipe = { n: new Float64Array(SPECIES.length), N: 1, Q: 3 };
     recipe.n[singleOf('R')] = 0.3;
@@ -59,7 +62,7 @@ describe('whole numbers', () => {
     a.setTemperature(2.5);
     expect(whole(a)).toBe(true);
 
-    const b = new Flask({ x: 0, y: 0 }, 1e9);
+    const b = new Flask(1e9);
     const [N0, Q0] = [a.N, a.Q];
     transfer(a, b, 3.3e7);
     expect(whole(a) && whole(b)).toBe(true);
@@ -67,14 +70,14 @@ describe('whole numbers', () => {
     expect(a.Q + b.Q).toBe(Q0);
     expect(atomTotal(a) + atomTotal(b)).toBe(N0);
 
-    const [l, r] = separate(b);
-    expect(whole(l) && whole(r)).toBe(true);
-    expect(l.N + r.N).toBe(b.N);
-    expect(l.Q + r.Q).toBe(b.Q);
+    const parts = separate(b);
+    expect(parts.every(whole)).toBe(true);
+    expect(parts.reduce((t, v) => t + v.N, 0)).toBe(b.N);
+    expect(parts.reduce((t, v) => t + v.Q, 0)).toBe(b.Q);
   });
 
   it('round setMolecules to a whole count', () => {
-    const f = new Flask({ x: 0, y: 0 }, 300);
+    const f = new Flask(300);
     expect(f.setMolecules(TARGET, 12.6)).toBe(13);
     expect(whole(f)).toBe(true);
   });
