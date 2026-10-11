@@ -195,43 +195,10 @@ export function Hud({ hud }: { hud: HudState }) {
   );
 }
 
-/** Over the view while the mouse isn't captured: how to play, and a click to start. */
-export function Paused({ onStart }: { onStart(): void }) {
-  return (
-    <div className="paused" onClick={onStart}>
-      <div className="card">
-        <b>{TOUCH ? 'Tap to start' : 'Click to look around'}</b>
-        {TOUCH && (
-          <p>
-            The circle at the bottom left walks, and the one at the bottom right looks around. Tap the view to press what
-            you look at, and double-tap to write a note. The buttons above the circles do the rest.
-          </p>
-        )}
-        {/* the keys and mouse buttons, unless this is a touch screen, where they'd only be noise; in play, the corner
-            lists what can be done just now */}
-        {!TOUCH && (
-          <dl>
-            <dt>W A S D</dt>
-            <dd>walk, and the mouse looks · C crouches</dd>
-            <dt>E</dt>
-            <dd>pick up what you look at, or set it down: only squarely on a counter, or on a stand over one</dd>
-            <dt>Shift + mouse</dt>
-            <dd>turn what you hold · the wheel holds it nearer or further</dd>
-            <dt>Right button</dt>
-            <dd>tip a flask you hold to pour, or let a tool you hold flow · on a valve, point to turn it</dd>
-            <dt>Left button</dt>
-            <dd>press keys and buttons · double-click anything you can carry, or a faucet, to write a note</dd>
-            <dt>1 – 0, -</dt>
-            <dd>make equipment in your hands · Backspace puts away what you hold</dd>
-            <dt>F</dt>
-            <dd>flip the tool you hold or look at, left to right</dd>
-            <dt>P</dt>
-            <dd>pick up the pencil, to draw sticky notes on the back wall</dd>
-            <dt>Esc</dt>
-            <dd>let go of the mouse</dd>
-          </dl>
-        )}
-      </div>
-    </div>
-  );
+/**
+ * In the middle of the view while the mouse isn't captured, a line saying how to start. It takes no clicks, so a click
+ * there reaches the view, and the menus above stay usable.
+ */
+export function StartHint() {
+  return <div className="start-hint">{TOUCH ? 'Tap to start' : 'Click to look around'}</div>;
 }

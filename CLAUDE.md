@@ -66,8 +66,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     in the lab goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),
     so it fades and pans with where it is relative to the player's head.
 - `src/intro/log.ts`: the intro's console script, deterministic from a seed. `src/components/Intro.tsx` plays it.
-- `src/components/`: the React UI around the canvas: the hotbar (`Palette.tsx`), the crosshair's hints and the controls card
-  (`Hud.tsx`), the Chemistry and Appearance panels, the editor.
+- `src/components/`: the React UI around the canvas: the hotbar (`Palette.tsx`), the crosshair's hints, the corner list of
+  actions and the start hint (`Hud.tsx`), the Chemistry and Appearance panels, the editor.
 
 ## Invariants and gotchas
 

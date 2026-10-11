@@ -155,16 +155,10 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
   position:absolute;left:50%;top:calc(50% + 40px);transform:translateX(-50%);pointer-events:none;z-index:2;
   color:#f3d9d4;background:rgba(40,14,10,.6);padding:3px 10px;border-radius:6px;font-size:13px;
 }
-.paused{
-  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:4;cursor:pointer;
-  background:rgba(8,12,11,.45);
+.start-hint{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
+  color:#eef0eb;background:rgba(8,12,11,.55);padding:6px 14px;border-radius:8px;font-size:15px;font-weight:600;
 }
-.paused .card{
-  background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:14px 18px;
-  max-width:min(520px,calc(100% - 32px));box-shadow:0 10px 30px var(--shadow);font-size:13px;
-}
-.paused b{display:block;font-size:16px;font-weight:600;margin-bottom:8px}
-.paused .card p{margin:0 0 8px;color:var(--muted)}
 .stick{
   position:absolute;bottom:84px;width:112px;height:112px;border-radius:50%;z-index:3;touch-action:none;
   background:rgba(20,26,24,.28);border:2px solid rgba(255,255,255,.35);
@@ -185,9 +179,6 @@ button.touch{
 button.touch.small{width:46px;height:46px;font-size:10px}
 button.touch.pad{width:78px;height:58px;border-radius:14px}
 button.touch.dim{opacity:.45}
-.paused dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0}
-.paused dt{font-weight:600;white-space:nowrap}
-.paused dd{margin:0;color:var(--muted)}
 canvas{display:block;width:100%;height:100%;touch-action:none}
 #info{
   position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);

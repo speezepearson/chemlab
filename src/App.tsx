@@ -4,7 +4,7 @@ import { ReactionNetwork } from './chem/reactions';
 import { AppearancePanel } from './components/AppearancePanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
 import { FlaskEditor } from './components/FlaskEditor';
-import { Hud, Paused, TouchControls } from './components/Hud';
+import { Hud, StartHint, TouchControls } from './components/Hud';
 import { LabelEditor } from './components/LabelEditor';
 import { PaperTextEditor } from './components/PaperTextEditor';
 import { SoundPanel } from './components/SoundPanel';
@@ -208,8 +208,8 @@ export function App() {
           {engine && hud && <TouchControls engine={engine} hud={hud} />}
           {inspection && <InfoPanel info={inspection} />}
           {engine && <Palette engine={engine} pencil={pencil} />}
-          {engine && hud && !hud.locked && !intro && editing === null && labeling === null && !paperEdit && (
-            <Paused onStart={() => engine.lock()} />
+          {hud && !hud.locked && !intro && editing === null && labeling === null && !paperEdit && (
+            <StartHint />
           )}
           {engine && editing !== null && <FlaskEditor engine={engine} id={editing} onClose={() => setEditing(null)} />}
           {engine && paperEdit && (
