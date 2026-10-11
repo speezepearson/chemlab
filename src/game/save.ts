@@ -195,13 +195,13 @@ const GOD_KEY = 'slurry-lab.god';
 
 /**
  * Whether god mode was on when the player last left it, kept beside the save (but not in it, so exporting a bench
- * doesn't carry it): on if it's never been set, or storage is blocked.
+ * doesn't carry it): off if it's never been set, or storage is blocked.
  */
 export function storedGod(): boolean {
   try {
-    return localStorage.getItem(GOD_KEY) !== '0';
+    return localStorage.getItem(GOD_KEY) === '1';
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -209,6 +209,6 @@ export function storeGod(on: boolean): void {
   try {
     localStorage.setItem(GOD_KEY, on ? '1' : '0');
   } catch {
-    // storage blocked: god mode just starts on next time
+    // storage blocked: god mode just starts off next time
   }
 }
