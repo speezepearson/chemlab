@@ -115,6 +115,9 @@ const NOTE_Y = 13;
 
 const glassMat = new THREE.MeshStandardMaterial({
   color: 0xd6ecf2, transparent: true, opacity: 0.16, roughness: 0.08, metalness: 0.1, depthWrite: false, side: THREE.DoubleSide,
+  // a hair further off than it is, so where fluid lies right against it (a tank's floor), the fluid wins cleanly
+  // rather than the two flickering pixel by pixel
+  polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 4,
 });
 const edgeMat = new THREE.LineBasicMaterial({ color: 0xbfd4da, transparent: true, opacity: 0.5 });
 const pipeMat = new THREE.MeshStandardMaterial({ color: 0x7c8883, metalness: 0.55, roughness: 0.4 });
