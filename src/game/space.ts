@@ -21,20 +21,8 @@ export const ORIGIN: Pose = { x: 0, y: 0, z: 0, yaw: 0 };
 
 /** The room's walls, floor and ceiling. The back wall, at z = 0, is the old bench. */
 export const ROOM = { x0: -700, x1: 2300, z0: 0, z1: 3000, y1: 1300 };
-/**
- * Height of every counter: the sink counters along the walls, and the islands. For now it can be tried out at other
- * heights (see App's CounterHeight), kept in local storage under LIFT_KEY, until the right one is settled on.
- */
-export const LIFT_KEY = 'slurry-lab.counterHeight';
-export const LIFT: number = (() => {
-  try {
-    const v = Number(globalThis.localStorage?.getItem(LIFT_KEY));
-    if (v >= 150 && v <= 600) return v;
-  } catch {
-    // no storage: the usual height
-  }
-  return 300;
-})();
+/** Height of every counter: the sink counters along the walls, and the islands. */
+export const LIFT = 420;
 /** How far the wall counters come out from the walls. */
 export const COUNTER_D = 130;
 /** The islands' size, across and front to back, and where their grid starts and how far apart they are. */

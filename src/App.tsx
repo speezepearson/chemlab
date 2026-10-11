@@ -15,7 +15,6 @@ import { SpeedControl } from './components/SpeedControl';
 import { ambience } from './game/ambience';
 import { GameEngine, type Hud as HudState, type Inspection, type PaperEdit } from './game/engine';
 import { DEFAULT_PRESET, PRESETS } from './game/presets';
-import { LIFT, LIFT_KEY } from './game/space';
 import { decodeSave, encodeSave, storeGod, storeSave, storedGod, storedSave, type SaveState } from './game/save';
 
 const INTRO_KEY = 'slurry-lab.introSeen';
@@ -190,7 +189,6 @@ export function App() {
           {god && <ChemistryPanel key={chemVersion} network={network} />}
           {god && <AppearancePanel />}
           <SoundPanel god={god} />
-          <CounterHeight />
           <button
             className="replay"
             onClick={() => {
@@ -228,26 +226,3 @@ export function App() {
   );
 }
 
-/**
- * For now, a slider to try out the counters' height: letting go of it saves the lab and reloads it with the
- * counters (and everything on them) at the new height.
- */
-function CounterHeight() {
-  const [v, setV] = useState(LIFT);
-  const commit = () => {
-    if (v === LIFT) return;
-    try {
-      localStorage.setItem(LIFT_KEY, String(v));
-    } catch {
-      return;
-    }
-    location.reload();
-  };
-  return (
-    <label className="tog" title="Counter height, for trying out: the lab reloads at the new height">
-      counters
-      <input type="range" min={200} max={500} step={10} value={v} onChange={(e) => setV(Number(e.target.value))} onPointerUp={commit} onKeyUp={commit} />
-      {v}
-    </label>
-  );
-}
