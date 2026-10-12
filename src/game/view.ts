@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { temperature, type Fluid } from '../chem/reactions';
 import { LOOK, coronaAlpha, coronaRadius, glowFalloff, haloAlpha, haloRadius } from './appearance';
 import {
@@ -272,9 +273,10 @@ function glassFrom(parent: THREE.Object3D, g: THREE.BufferGeometry): void {
   parent.add(new THREE.LineSegments(new THREE.EdgesGeometry(g, 30), edgeMat));
 }
 
-/** A box of material `mat` over x0..x1, y0..y1 (flat frame, y down), z0..z1. */
-function block(parent: THREE.Object3D, mat: THREE.Material, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number): THREE.Mesh {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), mat);
+/** A box of material `mat` over x0..x1, y0..y1 (flat frame, y down), z0..z1, its edges rounded by `r` if given. */
+function block(parent: THREE.Object3D, mat: THREE.Material, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, r = 0): THREE.Mesh {
+  const [w, h, d] = [x1 - x0, y1 - y0, z1 - z0];
+  const m = new THREE.Mesh(r > 0 ? new RoundedBoxGeometry(w, h, d, 3, Math.min(r, w / 2, h / 2, d / 2)) : new THREE.BoxGeometry(w, h, d), mat);
   m.position.set((x0 + x1) / 2, -(y0 + y1) / 2, (z0 + z1) / 2);
   m.castShadow = true;
   m.receiveShadow = true;
@@ -698,7 +700,7 @@ class ToolView {
       // (so it doesn't look the same flipped; it says nothing about which side gets what)
       pipes(art, [[0, floor], [0, SEP_BODY.y0]]);
       for (const x of sh.spouts) pipes(art, [[x, SEP_BODY.y1], [x, sh.spoutY - 4]]);
-      block(art, panelMat, SEP_BODY.x0, SEP_BODY.x1, SEP_BODY.y0, SEP_BODY.y1, -10, 10);
+      block(art, panelMat, SEP_BODY.x0, SEP_BODY.x1, SEP_BODY.y0, SEP_BODY.y1, -10, 10, 2);
       for (let k = 1; k < sh.spouts.length; k++) {
         const x = (sh.spouts[k - 1] + sh.spouts[k]) / 2;
         block(art, darkMat, x - 0.8, x + 0.8, SEP_BODY.y0 + 4, SEP_BODY.y1, 10, 10.6);
@@ -952,7 +954,7 @@ class ToolView {
   private buildSpectrometer(pick: (m: THREE.Object3D, part: 'body' | 'button') => void): void {
     const { body: b, screen: s, button } = SPECTROMETER;
     const D = TOOL_DEPTH.spectrometer.body;
-    block(this.art, panelMat, b.x0, b.x1, b.y0, b.y1, -D / 2, D / 2);
+    block(this.art, panelMat, b.x0, b.x1, b.y0, b.y1, -D / 2, D / 2, 3);
     block(this.art, darkMat, s.x0 - 1.5, s.x1 + 1.5, s.y0 - 1.5, s.y1 + 1.5, D / 2, D / 2 + 0.6);
     this.screen = new Screen(this.art, s.x0, s.x1, s.y0, s.y1, D / 2 + 0.7, 5);
     this.lamp = new THREE.Mesh(unitSphere, new THREE.MeshStandardMaterial({ color: 0x5b665f }));
@@ -984,7 +986,7 @@ class ToolView {
       this.cells.push({ m, mat });
     }
     const B = HEATER_BOX;
-    block(this.art, panelMat, B.x0, B.x1, B.y0, B.y1, -12, 12);
+    block(this.art, panelMat, B.x0, B.x1, B.y0, B.y1, -12, 12, 2.5);
     // the wire, coiled along the tube and up into the box
     const lead = B.x0 + 32;
     const pts: THREE.Vector3[] = [];
@@ -1025,7 +1027,7 @@ class ToolView {
   private buildMeter(): void {
     const { display: d, ...b } = METER_BODY;
     const z = TOOL_DEPTH.meter.body / 2;
-    block(this.art, panelMat, b.x0, b.x1, b.y0, b.y1, -z, z);
+    block(this.art, panelMat, b.x0, b.x1, b.y0, b.y1, -z, z, 3);
     block(this.art, darkMat, d.x0, d.x1, d.y0, d.y1, z, z + 0.5);
     this.screen = new Screen(this.art, d.x0, d.x1, d.y0, d.y1, z + 0.6, 6);
   }
@@ -1038,7 +1040,7 @@ class ToolView {
   private buildReceptacle(pick: (m: THREE.Object3D, part: 'body' | 'button') => void): void {
     const { lamps, verdict, button, screen: s, ...b } = RECEPTACLE_BODY;
     const z = TOOL_DEPTH.receptacle.body / 2;
-    block(this.art, panelMat, b.x0, b.x1, b.y0, b.y1, -z, z);
+    block(this.art, panelMat, b.x0, b.x1, b.y0, b.y1, -z, z, 3);
     for (let i = 0; i < RECEPTACLE_LAMPS; i++) {
       const mat = new THREE.MeshStandardMaterial({ color: 0x5b665f });
       const m = new THREE.Mesh(unitSphere, mat);
@@ -1236,8 +1238,8 @@ class ScaleView {
     pickables: Map<THREE.Object3D, Pick>,
   ) {
     const { platform: pl, body, display: d, tare, depth } = SCALE_SHAPE;
-    pickables.set(block(this.root, panelMat, body.x0, body.x1, 4, body.y1, -depth + 4, depth - 4), { kind: 'scale', sc, part: 'body' });
-    pickables.set(block(this.root, pipeMat, pl.x0, pl.x1, 0, 5, -depth, depth), { kind: 'scale', sc, part: 'body' });
+    pickables.set(block(this.root, panelMat, body.x0, body.x1, 4, body.y1, -depth + 4, depth - 4, 2.5), { kind: 'scale', sc, part: 'body' });
+    pickables.set(block(this.root, pipeMat, pl.x0, pl.x1, 0, 5, -depth, depth, 1.5), { kind: 'scale', sc, part: 'body' });
     const z = depth - 4;
     block(this.root, darkMat, d.x0, d.x1, d.y0, d.y1, z, z + 0.5);
     this.display = new Screen(this.root, d.x0, d.x1, d.y0, d.y1, z + 0.6, 6);
@@ -1454,9 +1456,9 @@ class StandView {
 
   constructor(scene: THREE.Object3D) {
     const { hx, hz, h } = STAND_BASE;
-    this.base = new THREE.Mesh(new THREE.BoxGeometry(2 * hx, h, 2 * hz), darkMat);
+    this.base = new THREE.Mesh(new RoundedBoxGeometry(2 * hx, h, 2 * hz, 3, Math.min(3, h / 2)), darkMat);
     this.rod = new THREE.Mesh(unitCylinder, rodMat);
-    this.boss = new THREE.Mesh(new THREE.BoxGeometry(9, 12, 9), darkMat);
+    this.boss = new THREE.Mesh(new RoundedBoxGeometry(9, 12, 9, 2, 1.5), darkMat);
     this.arm = new THREE.Mesh(unitBox, rodMat);
     this.jaw = new THREE.Mesh(new THREE.BoxGeometry(12, 9, 4), darkMat);
     this.parts = [this.base, this.rod, this.boss, this.arm, this.jaw];
