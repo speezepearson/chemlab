@@ -151,16 +151,27 @@ const NOTE_Y = 13;
 /* ---------------- materials ---------------- */
 
 const glassMat = new THREE.MeshStandardMaterial({
-  color: 0xd6ecf2, transparent: true, opacity: 0.16, roughness: 0.08, metalness: 0.1, depthWrite: false, side: THREE.DoubleSide,
+  color: 0xd6ecf2, transparent: true, opacity: 0.1, roughness: 0.04, metalness: 0, depthWrite: false, side: THREE.DoubleSide,
+  envMapIntensity: 1.4, premultipliedAlpha: true,
   // a hair further off than it is, so where fluid lies right against it (a tank's floor), the fluid wins cleanly
   // rather than the two flickering pixel by pixel
   polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 4,
 });
-const edgeMat = new THREE.LineBasicMaterial({ color: 0xbfd4da, transparent: true, opacity: 0.5 });
-const pipeMat = new THREE.MeshStandardMaterial({ color: 0x7c8883, metalness: 0.55, roughness: 0.4 });
-const darkMat = new THREE.MeshStandardMaterial({ color: 0x343b39, metalness: 0.4, roughness: 0.55 });
-const panelMat = new THREE.MeshStandardMaterial({ color: 0xb9c1bc, metalness: 0.15, roughness: 0.6 });
-const leverMat = new THREE.MeshStandardMaterial({ color: 0x1d2321, metalness: 0.3, roughness: 0.5 });
+// glass: what it reflects is added in full, however clear it is, and only what's behind it is dimmed by its opacity,
+// so it glints and shows the room in it as real glass does, and more so edge on
+glassMat.onBeforeCompile = (sh) => {
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <opaque_fragment>', 'gl_FragColor = vec4( totalDiffuse * diffuseColor.a + totalSpecular + totalEmissiveRadiance, diffuseColor.a );')
+    .replace('#include <premultiplied_alpha_fragment>', '');
+};
+glassMat.customProgramCacheKey = () => 'glass';
+const edgeMat = new THREE.LineBasicMaterial({ color: 0xbfd4da, transparent: true, opacity: 0.3 });
+// stainless pipework, dark anodized fittings, light powder-coated cabinets and black plastic levers, all of them
+// reflecting the room (see View's environment)
+const pipeMat = new THREE.MeshStandardMaterial({ color: 0xa4adac, metalness: 0.9, roughness: 0.28 });
+const darkMat = new THREE.MeshStandardMaterial({ color: 0x30373a, metalness: 0.6, roughness: 0.42 });
+const panelMat = new THREE.MeshPhysicalMaterial({ color: 0xc4cbc7, metalness: 0.1, roughness: 0.5, clearcoat: 0.4, clearcoatRoughness: 0.35 });
+const leverMat = new THREE.MeshPhysicalMaterial({ color: 0x15191a, metalness: 0, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.2 });
 const keyMats = {
   up: new THREE.MeshStandardMaterial({ color: 0xd8443b, roughness: 0.45 }),
   hot: new THREE.MeshStandardMaterial({ color: 0xf06358, roughness: 0.45, emissive: 0x401010 }),
@@ -168,7 +179,9 @@ const keyMats = {
 };
 const hidden = new THREE.MeshBasicMaterial({ visible: false });
 const faintMat = new THREE.MeshBasicMaterial({ color: 0xd6ecf2, transparent: true, opacity: 0.3, depthWrite: false });
-const rodMat = new THREE.MeshStandardMaterial({ color: 0xb4bcb9, metalness: 0.75, roughness: 0.3 });
+const rodMat = new THREE.MeshStandardMaterial({ color: 0xc8cfcd, metalness: 1, roughness: 0.18 });
+/** Polished chrome, for the faucets. */
+const chromeMat = new THREE.MeshStandardMaterial({ color: 0xe2e7e8, metalness: 1, roughness: 0.08 });
 
 /** Points in a flat frame (x right, y down), placed at depth z, as a vector in an object's own frame (y up). */
 const v3 = (x: number, y: number, z = 0) => new THREE.Vector3(x, -y, z);
@@ -560,10 +573,10 @@ class Glow {
 const FLASK_PROFILE = FLASK_OUTLINE.filter((p) => p.x >= 0 && !(p.x === 11 && p.y === 0) && p.y > 0)
   .map((p) => new THREE.Vector2(p.x, -p.y))
   .sort((a, b) => a.y - b.y);
-const flaskGlassGeom = new THREE.LatheGeometry([new THREE.Vector2(0, -FLASK_H), ...FLASK_PROFILE, new THREE.Vector2(11, 0), new THREE.Vector2(12.5, 0.5)], 28);
+const flaskGlassGeom = new THREE.LatheGeometry([new THREE.Vector2(0, -FLASK_H), ...FLASK_PROFILE, new THREE.Vector2(11, 0), new THREE.Vector2(12.5, 0.5)], 48);
 const flaskFluidGeom = new THREE.LatheGeometry(
   [new THREE.Vector2(0, -FLASK_H + 0.6), ...FLASK_PROFILE.map((p) => new THREE.Vector2(p.x * 0.95, Math.max(p.y, -FLASK_H + 0.6))), new THREE.Vector2(10.4, -0.4), new THREE.Vector2(0, -0.4)],
-  28,
+  48,
 );
 
 class FlaskView {
@@ -2012,7 +2025,7 @@ class AirlockView {
     lintel.position.set(x, door.h, z1 + wall / 2);
     g.add(lintel);
     // the doors, each half the doorway, sliding apart into the wall
-    const doorMat = new THREE.MeshStandardMaterial({ color: 0x9aa5a0, roughness: 0.5, metalness: 0.2 });
+    const doorMat = new THREE.MeshPhysicalMaterial({ color: 0xa3ada9, roughness: 0.45, metalness: 0.35, clearcoat: 0.3 });
     for (const side of [-1, 1]) {
       const m = new THREE.Mesh(new THREE.BoxGeometry(door.w / 2, door.h, 12), doorMat);
       m.position.set(x, door.h / 2, z1 + wall / 2);
@@ -2247,25 +2260,48 @@ function buildFaucets(
   scene: THREE.Scene,
   faucets: readonly FaucetSpot[],
   pickables: Map<THREE.Object3D, Pick>,
-): { mats: THREE.MeshStandardMaterial[]; notes: Label[] } {
+): { mats: THREE.MeshPhysicalMaterial[]; notes: Label[] } {
   if (!faucets.length) return { mats: [], notes: [] };
   const g = new THREE.Group();
   const at = (p: Vec3) => new THREE.Vector3(p.x, p.y, p.z);
   const first = at(faucets[0].wall);
   const last = at(faucets[faucets.length - 1].wall);
   const along = last.clone().sub(first).normalize().multiplyScalar(60);
-  rod(g, pipeMat, first.clone().sub(along), last.clone().add(along), 6);
+  rod(g, chromeMat, first.clone().sub(along), last.clone().add(along), 6);
+  // the manifold's end caps, and brackets holding it to the wall
+  const out = new THREE.Vector3(faucets[0].spout.x - faucets[0].wall.x, 0, faucets[0].spout.z - faucets[0].wall.z).normalize();
+  for (const [end, s] of [[first, -1], [last, 1]] as const) {
+    const cap = new THREE.Mesh(unitSphere, chromeMat);
+    cap.position.copy(end).addScaledVector(along, s);
+    cap.scale.setScalar(6);
+    g.add(cap);
+    const foot = end.clone().addScaledVector(along, s * 0.5);
+    rod(g, darkMat, foot.clone().addScaledVector(out, -12), foot, 3);
+    const plate = new THREE.Mesh(unitCylinder, darkMat);
+    plate.position.copy(foot).addScaledVector(out, -12);
+    plate.scale.set(12, 3, 12);
+    plate.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), out);
+    g.add(plate);
+  }
   const notes: Label[] = [];
   const mats = faucets.map(({ wall, spout }, i) => {
     const elbow = new THREE.Vector3(spout.x, wall.y, spout.z);
-    pickables.set(rod(g, pipeMat, at(wall), elbow, 3.5), { kind: 'faucet', i });
-    pickables.set(rod(g, pipeMat, elbow, new THREE.Vector3(spout.x, spout.y + 6, spout.z), 3), { kind: 'faucet', i });
+    pickables.set(rod(g, chromeMat, at(wall), elbow, 3.5), { kind: 'faucet', i });
+    pickables.set(rod(g, chromeMat, elbow, new THREE.Vector3(spout.x, spout.y + 6, spout.z), 3), { kind: 'faucet', i });
+    // a collar where it leaves the manifold
+    const collar = new THREE.Mesh(unitCylinder, chromeMat);
+    collar.position.copy(at(wall)).addScaledVector(out, 7);
+    collar.scale.set(5, 6, 5);
+    collar.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), out);
+    g.add(collar);
+    pickables.set(collar, { kind: 'faucet', i });
     notes.push(new Label(g, elbow.clone().setY(elbow.y + 16 + LABEL_H / 2)));
-    const tip = new THREE.Mesh(new THREE.CylinderGeometry(5, 4, 7, 12), pipeMat);
+    const tip = new THREE.Mesh(new THREE.CylinderGeometry(5, 4, 7, 16), chromeMat);
     tip.position.set(spout.x, spout.y + 3.5, spout.z);
     g.add(tip);
-    const mat = new THREE.MeshStandardMaterial({ roughness: 0.25, metalness: 0.1 });
-    const knob = new THREE.Mesh(new THREE.SphereGeometry(10, 18, 12), mat);
+    // a glossy knob in its fluid's color, on a chrome stem
+    const mat = new THREE.MeshPhysicalMaterial({ roughness: 0.3, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.08 });
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(10, 24, 16), mat);
     knob.position.copy(elbow);
     knob.castShadow = true;
     g.add(knob);
