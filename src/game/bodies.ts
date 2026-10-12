@@ -2,7 +2,7 @@ import type { Flask } from './flask';
 import { FLASK_H } from './flaskShape';
 import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
-import { groundAt, toWorld, type Pose, type Vec3 } from './space';
+import { CELL, groundAt, toCardinal, toCell, toWorld, type Pose, type Vec3 } from './space';
 import {
   HELIX, HOSE_CAP, SHAPES, SPACE_PER_ATOM, TANK_H, tankDepth, tankX, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
 } from './tools';
@@ -28,6 +28,22 @@ export const TOOL_DEPTH = Object.fromEntries(
     return [kind, { tank, body: Math.max(CABINET_DEPTH[kind] ?? 0, tank + 4, cup ? 2 * cup.w + 2 : 0) }];
   }),
 ) as Record<ToolKind, { body: number; tank: number }>;
+
+/**
+ * A pose on the grid (see CELL): turned to the nearest of the four ways along it, and slid the least way that brings
+ * `anchor`, a point in its own frame, over the middle of a cell.
+ */
+export function onGrid(p: Pose, anchor: Vec3 = { x: 0, y: 0, z: 0 }): Pose {
+  const q = { ...p, yaw: toCardinal(p.yaw) };
+  const a = toWorld(q, anchor);
+  return { ...q, x: q.x + toCell(a.x) - a.x, z: q.z + toCell(a.z) - a.z };
+}
+
+/**
+ * The point of a tool that goes over the middle of a grid cell: the middle of its first tank's mouth. Its other mouths
+ * and its spouts are a whole number of cells from it along the tool, so once it's on the grid, they are too.
+ */
+export const toolAnchor = (t: Tool): Vec3 => ({ x: lx(t, tankX(t.shape.tanks[0])), y: 0, z: 0 });
 
 /** A local x on a tool as it stands: negated if it's flipped (see Tool.flipped). */
 export const lx = (t: Tool, x: number) => (t.flipped ? -x : x);
@@ -128,13 +144,15 @@ export function toolCenter(t: Tool): Vec3 {
 }
 
 /**
- * Flip a tool left to right (see Tool.flipped), about the middle of its box, so it stays where it is. Does nothing,
- * returning false, if its shape isn't flippable.
+ * Flip a tool left to right (see Tool.flipped), about the middle of its box as near as keeps it on the grid, so it
+ * stays where it is. Does nothing, returning false, if its shape isn't flippable.
  */
 export function flip(t: Tool): boolean {
   if (!t.shape.flippable) return false;
-  // the box's middle is at c now and will be at −c, so move the tool 2c along its own x to keep it put
-  const c = toolCenter(t).x;
+  // the box's middle is at c now and will be at −c, so move the tool 2c along its own x to keep it put: c to the
+  // nearest half cell, so it moves a whole number of cells, and its mouths and spouts (half a cell or a whole number
+  // of cells from its middle) stay over cells' middles
+  const c = Math.round(toolCenter(t).x / (CELL / 2)) * (CELL / 2);
   const p = toWorld(t.pose, { x: 2 * c, y: 0, z: 0 });
   t.pose = { ...p, yaw: t.pose.yaw };
   t.flipped = !t.flipped;
@@ -187,8 +205,10 @@ export function onScale(sc: Scale, dx: number): Pose {
   return { ...toWorld(sc.pose, { x: dx, y: FLASK_H, z: 0 }), yaw: sc.pose.yaw };
 }
 
-/** How far from the platform's ends a flask's middle can stand. */
-export const SCALE_INSET = 24;
+/** Where along its platform a scale stands flasks: half a grid cell either side of its middle, a cell apart. */
+export const SCALE_SLOTS = [-CELL / 2, CELL / 2];
+/** The point of a scale that goes over the middle of a grid cell: one of its places for a flask, so both are. */
+export const SCALE_ANCHOR: Vec3 = { x: SCALE_SLOTS[1], y: 0, z: 0 };
 
 /**
  * A scale's body and platform in the room; with `load`, reaching up over whatever's standing on it too (as it's
@@ -210,8 +230,9 @@ export function scaleCenter(sc: Scale): Vec3 {
 }
 
 /**
- * Where a flask let go of with its mouth at `p` would stand on a scale: `dx` along the platform, if it's over the
- * platform, above it but no more than `reach` above it. Null if it isn't.
+ * Where a flask let go of with its mouth at `p` would stand on a scale: `dx` along the platform, at the nearer of its
+ * places for a flask (see SCALE_SLOTS), if it's over the platform, above it but no more than `reach` above it. Null if
+ * it isn't.
  */
 export function scaleSpot(sc: Scale, p: Vec3, reach = 60): number | null {
   const { platform: pl, depth } = SCALE_SHAPE;
@@ -223,7 +244,7 @@ export function scaleSpot(sc: Scale, p: Vec3, reach = 60): number | null {
   const lz = dx * s + dz * c;
   const above = p.y - FLASK_H - sc.pose.y;
   if (lx < pl.x0 || lx > pl.x1 || Math.abs(lz) > depth || above < -10 || above > reach) return null;
-  return Math.max(pl.x0 + SCALE_INSET, Math.min(pl.x1 - SCALE_INSET, lx));
+  return lx < 0 ? SCALE_SLOTS[0] : SCALE_SLOTS[1];
 }
 
 /* ---------------- hoses ---------------- */

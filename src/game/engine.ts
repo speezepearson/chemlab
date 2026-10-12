@@ -5,9 +5,9 @@ import { POD, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from 
 import { hushAlarms } from './ambience';
 import { beeper, type Beeper } from './beeper';
 import {
-  FLASK_CENTER, FUNNEL_H, FUNNEL_R, FUNNEL_STEM_R, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, flip, hoseEndBox, hoseMouth, hoseStand, onBench, onScale,
-  onTool, openingOf, scaleBox, scaleCenter, scaleSpot, spoutAt, standBase, tankMouth, toolBox, toolCenter, toolStands, valveNear,
-  valveZ, type Stand,
+  FLASK_CENTER, FUNNEL_H, FUNNEL_R, FUNNEL_STEM_R, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, flip, hoseEndBox, hoseMouth,
+  hoseStand, onBench, onGrid, onScale, onTool, openingOf, scaleBox, scaleCenter, scaleSpot, spoutAt, standBase, tankMouth, toolAnchor, toolBox,
+  toolCenter, toolStands, valveNear, valveZ, type Stand,
 } from './bodies';
 import { CAP, FILL_RATE, GOAL_VOLUME, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
@@ -21,18 +21,19 @@ import { rumble, type Rumble } from './rumble';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
 import {
-  CELL, COUNTERS, LIFT, PAPER_Z, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, wrapAngle, type Pose, type Vec3,
+  CELL, COUNTERS, LIFT, PAPER_Z, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toCardinal, toFrac, toLocal, toWorld, wrapAngle,
+  type Pose, type Vec3,
 } from './space';
 import {
   HEATER, HEATER_CELLS, HEATER_TUBE, Hose, MAX_FLOW, RECEPTACLE_TIMES, SCAN_LIGHTS, SHAPES, SUMP_TIP, TANK_H, TOOL_NAMES,
-  Tool, UNIQUE_TOOLS, aimAt, cupFillHeight, type HoseMount, drip, mouthBelow, scanLevel, snapInto, sumpFillHeight, tankX, type Mouth, type ToolKind,
+  Tool, UNIQUE_TOOLS, aimAt, cupFillHeight, type HoseMount, drip, mouthBelow, scanLevel, sumpFillHeight, tankX, type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
 import {
   PAPER_HANDLE, PAPER_HEADER, PAPER_MIN, PAPER_TEXT, PAPER_TEXT_MAX, Paper, eraseAt, extend, loadPaper, savePaper,
   textAt,
 } from './paper';
-import { View, type AirlockLook, type FaucetSpot, type Frame, type Pick } from './view';
+import { View, type AirlockLook, type FaucetSpot, type Frame, type GuideLook, type Pick } from './view';
 import { WaterSounds } from './water';
 
 /** What the info panel shows for one vessel: all of it in god mode, otherwise just its color. */
@@ -642,6 +643,7 @@ export class GameEngine {
    * things in the air, where arms from the ceiling used to hold them.
    */
   private restAll(): void {
+    this.toGrid();
     const riders = this.standing();
     const down = (b: Box, move: (dy: number) => void) => {
       const top = counterUnder(b);
@@ -652,6 +654,35 @@ export class GameEngine {
     for (const sc of this.scales) down(scaleBox(sc), (dy) => (sc.pose = { ...sc.pose, y: sc.pose.y - dy }));
     for (const t of this.tools) if (onBench(t)) down(toolBox(t), (dy) => (t.pose = { ...t.pose, y: t.pose.y - dy }));
     this.settle();
+  }
+
+  /**
+   * Put everything on the grid (see onGrid), as it would be set down: presets and older saves can leave things
+   * anywhere. A tool whose stand that leaves off the counter (as one an older save left near the back wall can be)
+   * comes forward a cell or two, as it faces, until its stand is on it. A flask on a scale goes to the nearer of its
+   * places, or off it if the other flask there has it.
+   */
+  private toGrid(): void {
+    const onCounter = (t: Tool) => toolStands(t).every((st) => counterUnder(standBase(st, 0)) !== null);
+    for (const t of this.tools) {
+      t.pose = onGrid(t.pose, toolAnchor(t));
+      for (let i = 0; i < 2 && !onCounter(t); i++) t.pose = { ...toWorld(t.pose, { x: 0, y: 0, z: CELL }), yaw: t.pose.yaw };
+    }
+    for (const sc of this.scales) {
+      sc.pose = onGrid(sc.pose, SCALE_ANCHOR);
+      const load = sc.load.splice(0);
+      for (const { f, dx } of load) {
+        const slot = dx < 0 ? SCALE_SLOTS[0] : SCALE_SLOTS[1];
+        if (!sc.load.some((l) => l.dx === slot)) sc.put(f, slot);
+      }
+    }
+    const riders = this.standing();
+    for (const f of this.flasks) if (!riders.has(f)) f.pose = onGrid(f.pose);
+    for (const h of this.hoses) {
+      const g = onGrid({ ...h.outlet, yaw: 0 });
+      Object.assign(h.outlet, { x: g.x, z: g.z });
+      h.turn.outlet = toCardinal(h.turn.outlet);
+    }
   }
 
   /** Stand each flask on a scale where the scale now is. */
@@ -775,11 +806,14 @@ export class GameEngine {
     return toWorld({ ...p, yaw: this.player.yaw + h.relYaw }, { x: 70, y: -30, z: 0 });
   }
 
-  /** Where what's held would be, in front of the eyes. */
+  /**
+   * Where what's held would be, in front of the eyes: facing the nearest way along the grid to how it's turned from
+   * the player, so it turns in quarter turns.
+   */
   private gripPose(h: Held): Pose {
     const eye = this.eye();
     const d = this.lookDir();
-    const yaw = h.kind === 'hose' ? 0 : wrapAngle(this.player.yaw + h.relYaw);
+    const yaw = h.kind === 'hose' ? 0 : toCardinal(this.player.yaw + h.relYaw);
     const off = toWorld({ x: 0, y: 0, z: 0, yaw }, this.anchor(h));
     return { x: eye.x + d.x * h.dist - off.x, y: eye.y + d.y * h.dist - off.y, z: eye.z + d.z * h.dist - off.z, yaw };
   }
@@ -1134,7 +1168,7 @@ export class GameEngine {
     }
     if (h.kind === 'hose') {
       if (h.end !== 'outlet') h.h.on = pl.rest.mount ?? null;
-      if (h.end === 'outlet') h.h.turn.outlet = this.player.yaw;
+      if (h.end === 'outlet') h.h.turn.outlet = toCardinal(this.player.yaw);
       // a new hose's funnel is hung, and its nozzle stays in hand, to be set down next
       if (h.end === 'both') {
         const next: Held = { kind: 'hose', h: h.h, end: 'outlet', relYaw: 0, dist: 0 };
@@ -1602,11 +1636,16 @@ export class GameEngine {
       }
     }
     if (!h || !load) return;
-    // what's held goes toward where it'd be in front of the eyes, the short way round
+    // what's held goes toward where it'd be in front of the eyes, and then turns there in a quarter turn, all at once,
+    // if there's room; a flask's box doesn't turn (see flaskBox): it's turned to face the player after it's moved, below
     const want = this.boxAt(h, this.gripPose(h));
-    // a flask's box doesn't turn (see flaskBox): it's turned to face the player after it's moved, below
-    want.yaw = h.kind === 'flask' ? load.yaw : load.yaw + wrapAngle(want.yaw - load.yaw);
-    this.placeHeld(h, this.poseForBox(h, moveBox(load, want, obstacles)));
+    const turn = h.kind === 'flask' ? 0 : wrapAngle(want.yaw - load.yaw);
+    let moved = moveBox(load, { ...want, yaw: load.yaw }, obstacles);
+    if (Math.abs(turn) > 1e-9) {
+      const turned = { ...moved, yaw: load.yaw + turn };
+      if (!obstacles.some((o) => boxesOverlap(turned, o) && !boxesOverlap(moved, o))) moved = turned;
+    }
+    this.placeHeld(h, this.poseForBox(h, moved));
     if (h.kind === 'flask') {
       this.faceFlask(h.f);
       const goal = this.rightHeld ? POUR_ANG : 0;
@@ -1806,12 +1845,11 @@ export class GameEngine {
   }
 
   /**
-   * Each outlet that lines up with a mouth, for the guides and for snapping: from each outlet of what's held (a
-   * flask's lip, tipped as it would be to pour; a tool's spouts; a hose's nozzle) to the mouth it would land in, or
-   * would just miss; and the same from every other outlet (spouts, nozzles, faucets) to what's held.
+   * Each outlet that lines up with one of `mouths`, for the guides: from each outlet of what's held (a flask's lip,
+   * tipped as it would be to pour; a tool's spouts; a hose's nozzle) to the mouth it would land in, or would just
+   * miss; and the same from every other outlet (spouts, nozzles, faucets) to what's held.
    */
-  private aims(h: Held): Aim[] {
-    const mouths = this.open;
+  private aims(h: Held, mouths: readonly Mouth[]): Aim[] {
     // what's held, as outlets and as vessels that can be landed in
     const mine = new Set<Vessel>();
     const outlets: { at: Vec3; lip: boolean }[] = [];
@@ -1842,25 +1880,20 @@ export class GameEngine {
   }
 
   /**
-   * The ways what's held could snap into line with one of its aims (see aims), least shift first: sliding sideways
-   * just far enough to bring the outlet over the middle of its mouth. Not a flask's lip, which pours only while held.
+   * Where what's held would be set down, at pose p: on the grid (see onGrid), facing the nearest way along it, with its
+   * mouths and spouts over the middles of cells.
    */
-  private snaps(aims: readonly Aim[]): { a: Aim; d: Vec3 }[] {
-    return aims
-      .filter((a) => a.held !== 'lip')
-      .map((a) => {
-        const s = snapInto(a.m, a.from.x, a.from.z);
-        return { a, d: a.held === 'outlet' ? { x: s.dx, y: 0, z: s.dz } : { x: -s.dx, y: 0, z: -s.dz } };
-      })
-      .sort((p, q) => Math.hypot(p.d.x, p.d.z) - Math.hypot(q.d.x, q.d.z));
+  private gridded(h: Held, p: Pose): Pose {
+    if (h.kind === 'tool') return onGrid(p, toolAnchor(h.t));
+    if (h.kind === 'scale') return onGrid(p, SCALE_ANCHOR);
+    return onGrid(p);
   }
 
   /**
-   * Where what's held would come to rest if let go now, and how it got there: snapped into line with one of its aims,
-   * the least shift that leaves somewhere it can rest (see rest); or else, if none does, right where it is. A flask
-   * that would stand on a scale isn't snapped. If it can't rest where it is either, why not.
+   * Where what's held would come to rest if let go now (see rest): on the grid (see gridded), in the cell under where
+   * it's held. If it can't rest there, why not.
    */
-  private placement(h: Held): { rest: Rest; snap: { a: Aim; d: Vec3 } | null } | { why: string } {
+  private placement(h: Held): { rest: Rest } | { why: string } {
     const p = this.heldPose(h);
     const obstacles = this.obstacles(h);
     const solid = this.obstacles(h, false);
@@ -1870,17 +1903,13 @@ export class GameEngine {
       for (const m of this.mounts(h.h, p)) {
         const o = this.outletOf(m)!;
         const r = this.rest(h, { x: o.x, y: o.y - HOSE_HANG, z: o.z, yaw: 0 }, obstacles, solid);
-        if (typeof r !== 'string') return { rest: { ...r, mount: m }, snap: null };
+        if (typeof r !== 'string') return { rest: { ...r, mount: m } };
         why = r;
       }
       return { why };
     }
-    for (const sn of this.snaps(this.aims(h))) {
-      const r = this.rest(h, { ...p, x: p.x + sn.d.x, z: p.z + sn.d.z }, obstacles, solid);
-      if (typeof r !== 'string' && !r.scale) return { rest: r, snap: sn };
-    }
-    const r = this.rest(h, p, obstacles, solid);
-    return typeof r === 'string' ? { why: r } : { rest: r, snap: null };
+    const r = this.rest(h, this.gridded(h, p), obstacles, solid);
+    return typeof r === 'string' ? { why: r } : { rest: r };
   }
 
   /**
@@ -1935,8 +1964,8 @@ export class GameEngine {
   private standsAt(h: Held, p: Pose): Stand[] {
     if (h.kind === 'tool') return toolStands(h.t, p);
     if (h.kind !== 'hose') return [];
-    // a hose end held faces the player, so its stand is behind it
-    const yaw = this.player.yaw;
+    // a hose end held faces the way along the grid nearest the player's, so its stand is behind it
+    const yaw = toCardinal(this.player.yaw);
     // its funnel hangs under an outlet instead (see placement), and a new hose's nozzle stays in hand (see release)
     return h.end === 'outlet' ? [hoseStand(p, 'outlet', yaw)] : [];
   }
@@ -1994,42 +2023,44 @@ export class GameEngine {
         const inHand = held?.kind === 'hose' && held.h === h && (held.end === end || held.end === 'both');
         // a funnel hangs under an outlet, or will once let go; only one from before funnels had to has a stand
         if (end === 'inlet' && (h.on || inHand)) continue;
-        out.push({ s: hoseStand(h[end], end, inHand ? this.player.yaw : h.turn[end]), of: { kind: 'hose', h, end } });
+        out.push({ s: hoseStand(h[end], end, inHand ? toCardinal(this.player.yaw) : h.turn[end]), of: { kind: 'hose', h, end } });
       }
     return out;
   }
 
   /**
    * Guides for lining up what's held (see aims), shown only while something's held, since that's when things are
-   * being lined up: solid where fluid would land in a mouth, faint where it would just miss; and the aim it would snap
-   * to if let go, as it would be once let go.
+   * being lined up: solid where fluid would land in a mouth, faint where it would just miss; and green, as it will be
+   * once let go and set down on the grid, wherever fluid would land in a mouth then.
    */
   private guides(pl: ReturnType<GameEngine['placement']> | null): Frame['guides'] {
     const h = this.held;
     if (!h) return [];
-    let aims = this.aims(h);
-    const sn = pl && 'rest' in pl ? pl.snap : null;
-    const at = this.heldPose(h);
-    // a hose's funnel to be hung under an outlet: that outlet's guide is to where it'll hang
-    const mount = pl && 'rest' in pl && pl.rest.mount ? this.outletOf(pl.rest.mount) : null;
-    const hung: Frame['guides'][number][] = [];
-    if (mount && pl && 'rest' in pl) {
-      const r = pl.rest.pose;
-      aims = aims.filter((a) => a.from.x !== mount.x || a.from.y !== mount.y || a.from.z !== mount.z);
-      hung.push({ from: mount, toY: r.y, look: 'snap', mouth: { x: r.x, y: r.y, z: r.z, hx: FUNNEL_R, hz: FUNNEL_R, yaw: 0 } });
-    }
-    return aims.map((a): Frame['guides'][number] => {
+    const guide = (a: Aim, look: GuideLook): Frame['guides'][number] => {
       const { x, y, z, hx, hz, yaw = 0 } = a.m;
-      // the snapped aim is matched up by where it's from and what it's into, since the snap was worked out from aims of its own
-      const same = sn && sn.a.m.v === a.m.v && sn.a.from.x === a.from.x && sn.a.from.y === a.from.y && sn.a.from.z === a.from.z;
-      if (!same || !pl || !('rest' in pl))
-        return { from: a.from, toY: y, look: a.hit ? 'solid' : 'faint', mouth: { x, y, z, hx, hz, yaw } };
-      // where it'll be, all told, once let go: snapped, and come to rest
+      return { from: a.from, toY: y, look, mouth: { x, y, z, hx, hz, yaw } };
+    };
+    let aims = this.aims(h, this.open);
+    const out: Frame['guides'][number][] = [];
+    if (pl && 'rest' in pl) {
       const r = pl.rest.pose;
-      const d = { x: r.x - at.x, y: r.y - at.y, z: r.z - at.z };
-      if (a.held === 'outlet') return { from: { x: a.from.x + d.x, y: a.from.y + d.y, z: a.from.z + d.z }, toY: y, look: 'snap', mouth: { x, y, z, hx, hz, yaw } };
-      return { from: a.from, toY: y + d.y, look: 'snap', mouth: { x: x + d.x, y: y + d.y, z: z + d.z, hx, hz, yaw } };
-    }).concat(hung);
+      // a hose's funnel to be hung under an outlet: that outlet's guide is to where it'll hang
+      const mount = pl.rest.mount ? this.outletOf(pl.rest.mount) : null;
+      if (mount) {
+        aims = aims.filter((a) => a.from.x !== mount.x || a.from.y !== mount.y || a.from.z !== mount.z);
+        out.push({ from: mount, toY: r.y, look: 'snap', mouth: { x: r.x, y: r.y, z: r.z, hx: FUNNEL_R, hz: FUNNEL_R, yaw: 0 } });
+      } else {
+        // what it'll line up with once let go: put it there, upright, for a moment, to see
+        const at = this.heldPose(h);
+        const tilt = h.kind === 'flask' ? h.f.tilt : 0;
+        if (h.kind === 'flask') h.f.tilt = 0;
+        this.placeHeld(h, r);
+        for (const a of this.aims(h, this.mouths())) if (a.hit && a.held !== 'lip') out.push(guide(a, 'snap'));
+        this.placeHeld(h, at);
+        if (h.kind === 'flask') h.f.tilt = tilt;
+      }
+    }
+    return aims.map((a) => guide(a, a.hit ? 'solid' : 'faint')).concat(out);
   }
 
   /**

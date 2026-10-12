@@ -6,7 +6,7 @@ import { Vessel, roomFor, volume } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PIPETTE_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
-  RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, SEPARATOR, SEPARATOR_PERFECT, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, aimAt, counterflow, snapInto, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, mouthGap, scanLevel, separate, spectrum, type Mouth,
+  RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, SEPARATOR, SEPARATOR_PERFECT, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, aimAt, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, mouthGap, scanLevel, separate, spectrum, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -660,26 +660,6 @@ describe('aimAt', () => {
   it('turns a hit too far below into a near miss, as from a faucet', () => {
     expect(aimAt([low], { x: 0, y: 0, z: 0 }, 30, 24)).toEqual({ m: low, hit: false });
     expect(aimAt([low], { x: 0, y: -80, z: 0 }, 30, 24)).toEqual({ m: low, hit: true });
-  });
-});
-
-describe('snapInto', () => {
-  const v = new Vessel(CAP);
-  it('shifts a point just enough to bring it over the middle half of a mouth', () => {
-    const m: Mouth = { v, x: 0, y: 0, z: 0, hx: 10, hz: 20 };
-    expect(snapInto(m, 2, -3)).toEqual({ dx: 0, dz: 0 });
-    const s = snapInto(m, 30, -25);
-    expect(s.dx).toBeCloseTo(-25);
-    expect(s.dz).toBeCloseTo(15);
-  });
-
-  it('works in the frame of a turned mouth', () => {
-    // turned a quarter, its width runs front to back
-    const m: Mouth = { v, x: 100, y: 0, z: 50, hx: 10, hz: 20, yaw: Math.PI / 2 };
-    const s = snapInto(m, 100, 80);
-    expect(s.dx).toBeCloseTo(0);
-    expect(s.dz).toBeCloseTo(-25);
-    expect(snapInto(m, 115, 50).dx).toBeCloseTo(-5);
   });
 });
 
