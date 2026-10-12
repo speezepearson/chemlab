@@ -1131,51 +1131,26 @@ export function aimAt(mouths: readonly Mouth[], p: Vec3, near: number, reach = I
   return best && { m: best, hit: false };
 }
 
-/** How much a hose's funnel holds, in atoms: just a buffer, so a loop can't spin forever in one step. */
-export const HOSE_CAP = CAP / 4;
-/** How fast a hose's pump moves fluid from its inlet to its outlet, in atoms per sim second. */
-export const PUMP_RATE = 2 * MAX_FLOW;
+/** What a hose runs from: a tool's spout, or a faucet (by its place in the lab's list). */
+export type HoseMount = { tool: Tool; spout: number } | { faucet: number };
+
+/** Whether two mounts are the same spout or faucet. */
+export const sameMount = (a: HoseMount, b: HoseMount) =>
+  'tool' in a ? 'tool' in b && a.tool === b.tool && a.spout === b.spout : 'faucet' in b && a.faucet === b.faucet;
 
 /**
- * A hose: a funnel inlet anywhere, a spout outlet anywhere, and a magic pump
- * between them. Whatever falls into the funnel comes out of the outlet, up to
- * PUMP_RATE; anything arriving faster overflows the funnel to the sink.
+ * A hose pulled out of a spout or a faucet: whatever would leave the spout comes out of the hose's nozzle instead,
+ * wherever that's been set down, and falls from there. Every spout and faucet has one, rolled up inside it until it's
+ * pulled out.
  */
-/** What a hose's funnel can hang under: a tool's spout, a faucet (by its place in the lab's list), or another hose's nozzle. */
-export type HoseMount = { tool: Tool; spout: number } | { faucet: number } | { hose: Hose };
-
 export class Hose {
-  readonly funnel = new Vessel(HOSE_CAP);
-  /** What left the outlet on the last step, for drawing; null if nothing did. */
-  out: Vessel | null = null;
-  /** The drop hanging at the outlet, gathering a flow too slow to stream (see drip). */
-  readonly drop = new Vessel(Infinity);
-  /** Whether the outlet streamed on the last step, rather than dripped. Set by whoever runs drip. */
-  streaming = false;
-  /** The flow on the last step, in flasks per second. */
-  flow = 0;
-  /** The player's note, written above its funnel; empty for none. */
-  note = '';
-  /** Which way each end faces, about the vertical (see Pose), with the stand holding it up behind it. */
-  turn = { inlet: 0, outlet: 0 };
-  /**
-   * The outlet its funnel hangs just under, following it wherever it goes; null for a funnel on a stand of its own
-   * (only from before funnels had to hang under something).
-   */
-  on: HoseMount | null = null;
+  /** Which way its nozzle faces, about the vertical (see Pose), with the stand holding it up behind it. */
+  turn = 0;
 
   constructor(
-    /** The funnel's mouth and the outlet's tip, in the room. */
-    public inlet: Vec3,
+    /** The spout or faucet it runs from. */
+    readonly on: HoseMount,
+    /** Its nozzle's tip, in the room. */
     public outlet: Vec3,
   ) {}
-
-  /** Run for `h` sim seconds. Returns what left the outlet, or null if nothing did. */
-  step(h: number): Vessel | null {
-    const p = new Vessel(Infinity);
-    transfer(this.funnel, p, PUMP_RATE * h);
-    this.out = p.N > 0 ? p : null;
-    this.flow = volume(p) / (MAX_FLOW * h);
-    return this.out;
-  }
 }

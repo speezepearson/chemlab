@@ -50,13 +50,13 @@ export interface ToolSpec extends Spot {
 }
 
 /**
- * A hose on the bench at the start, running from just under one tool's spout to just above one of a
- * tool's tanks (the same tool's, to loop it back on itself). Tools are indexed in the preset's list.
+ * A hose on the bench at the start, pulled out of one tool's spout with its nozzle over one of a tool's tanks (the
+ * same tool's, to loop it back on itself). Tools are indexed in the preset's list.
  */
 export interface HoseSpec {
   from: { tool: number; spout: number };
-  /** `dx` shifts the outlet sideways from the tank's center, in the tool's local units. */
-  to: { tool: number; tank?: number; dx?: number };
+  /** `up` is how far above the tank's mouth the nozzle is, if not 24: two over one tank go at different heights. */
+  to: { tool: number; tank?: number; up?: number };
 }
 
 /** A starting layout: one entry per shelf slot (null for an empty flask), plus any tools. */
@@ -123,15 +123,15 @@ export const WASH_PRESET: Preset = {
       tanks: [{ contents: [...settled(WASH_FEED, 1), atomsOf(singleOf('B'), 1.5 * CAP)], T: WASH_T }],
     },
     {
-      kind: 'dispenser', at: [WASH_AT[0], 0.14], valves: [0.003],
+      kind: 'dispenser', at: [WASH_AT[0], 0.1], valves: [0.003],
       tanks: [{ contents: [atomsOf(singleOf('B'), 4 * CAP)], T: WASH_T }],
     },
     // under the separator's far right spout, two grid cells right of its center
     { kind: 'dispenser', at: [WASH_AT[0] + (2 * CELL) / HOME_W, WASH_AT[1] + 0.25] },
   ],
   hoses: [
-    { from: { tool: 0, spout: 0 }, to: { tool: 0, dx: -20 } },
-    { from: { tool: 0, spout: 1 }, to: { tool: 0, dx: -6 } },
+    { from: { tool: 0, spout: 0 }, to: { tool: 0 } },
+    { from: { tool: 0, spout: 1 }, to: { tool: 0, up: 44 } },
   ],
   defaultChem: true,
 };

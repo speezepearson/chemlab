@@ -99,8 +99,15 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - Presets and saves store across and up as fractions of the old 1000 × 620 home area (`fromFrac` and `toFrac` in
     `space.ts`), which is now the back wall, plus optional `z` and `yaw`, so old saves keep working.
   - Everything turns only about the vertical, except a flask tipped to pour, and nothing falls: whatever the player
-    lets go of is set down squarely on a counter, or held over one by its clamp stands (`toolStands`, `hoseStand`), or
+    lets go of is set down squarely on a counter, or held over one by its clamp stands (`toolStands`, `nozzleStand`), or
     stays in hand (see `GameEngine.placement`). Keep it that way, or `physics.ts` won't do.
+  - **The grid.** Whatever's set down is on the floor's grid of `CELL` (100) squares: facing one of the four ways
+    along it, with every mouth and spout over a cell's middle (`onGrid`, `toolAnchor` and `SCALE_ANCHOR` in
+    `bodies.ts`; the engine's `gridded` and `toGrid`). So a tool's tanks and spouts must be a whole number of cells
+    apart along it (`bodies.test.ts` checks every shape), and the counters' edges run along cells' edges. Height is free.
+- **Hoses** aren't a tool: every spout and faucet has one, pulled out with the left button (`Hose.on` says which). A
+  spout's fluid leaves at its hose's nozzle if it's out, so wherever fluid leaves a spout or faucet, use the engine's
+  `outletAt` and `faucetOutlet`, not `spoutAt` or `fa.spout`.
 - **What's drawn is what's hit.** Every mesh a `ToolView` builds is registered as part of the tool for the crosshair's
   raycast, so empty space around it isn't. Register a mesh yourself only to make it a specific part (a tank, valve
   or button); sprites (labels) aren't hit.
@@ -112,7 +119,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially.
   - `ITEMS` and `HOTKEYS` in `engine.ts` (the hotbar's order and keys) and `ICONS` in `Palette.tsx`, unless the tool is
-    unique. The number row is all taken.
+    unique. Only `-` is left on the number row.
   - Tests and the README.
   - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `flippable`, `fixed`, `sealed`, `maxFlow`, `label`, `bench`.
 - **Unique tools** (`UNIQUE_TOOLS`: the spectrometer, the cryostabilizer reference, the flow meter and the receptacle)

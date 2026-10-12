@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FLASK_R, SCALE_ANCHOR, SCALE_SLOTS, STAND_BASE, aimValve, onGrid, toolAnchor, flaskBox, flaskLip, flaskMouth, flip, hoseStand, onScale, scaleSpot, spoutAt, standBase,
+  FLASK_R, SCALE_ANCHOR, SCALE_SLOTS, STAND_BASE, aimValve, onGrid, toolAnchor, flaskBox, flaskLip, flaskMouth, flip, nozzleStand, onScale, scaleSpot, spoutNear, spoutAt, standBase,
   tankMouth, toolBox, toolStands, valveLocal, valveNear,
 } from './bodies';
 import { CAP } from './config';
@@ -118,6 +118,19 @@ describe('tools in the room', () => {
     expect(boxesOverlap(toolBox(a), toolBox(new Tool('dispenser', 1, at(60, 500, 0))))).toBe(true);
     expect(boxesOverlap(toolBox(a), toolBox(new Tool('dispenser', 1, at(80, 500, 0))))).toBe(false);
     expect(boxesOverlap(toolBox(a), toolBox(new Tool('dispenser', 1, at(0, 300, 0))))).toBe(false);
+  });
+});
+
+describe('spoutNear', () => {
+  it("finds the spout whose tip, or the pipe just above it, is under the crosshair, as the tool stands", () => {
+    const sep = new Tool('separator', 0);
+    const y = sep.shape.spoutY;
+    expect(spoutNear(sep, sep.shape.spouts[1] + 3, y - 2)).toBe(1);
+    expect(spoutNear(sep, sep.shape.spouts[4], y - 25)).toBe(4);
+    expect(spoutNear(sep, sep.shape.spouts[4], y - 60)).toBeNull();
+    expect(spoutNear(sep, (sep.shape.spouts[1] + sep.shape.spouts[2]) / 2, y)).toBeNull();
+    sep.flipped = true;
+    expect(spoutNear(sep, -sep.shape.spouts[0], y)).toBe(0);
   });
 });
 
@@ -262,11 +275,11 @@ describe('stands', () => {
     expect(toolStands(new Tool('spectrometer', 0, at(0, 600, 0)))).toHaveLength(0);
   });
 
-  it("hold a hose end from behind it, as it faces", () => {
+  it("hold a hose's nozzle from behind it, as it faces", () => {
     const e = { x: 10, y: 500, z: 300 };
-    expect(hoseStand(e, 'inlet', 0).z).toBeLessThan(300);
-    expect(hoseStand(e, 'outlet', Math.PI).z).toBeGreaterThan(300);
-    expect(hoseStand(e, 'outlet', Math.PI).x).toBeCloseTo(10);
+    expect(nozzleStand(e, 0).z).toBeLessThan(300);
+    expect(nozzleStand(e, Math.PI).z).toBeGreaterThan(300);
+    expect(nozzleStand(e, Math.PI).x).toBeCloseTo(10);
   });
 });
 

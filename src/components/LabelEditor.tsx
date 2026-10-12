@@ -5,7 +5,7 @@ import type { GameEngine } from '../game/engine';
 export const MAX_LABEL = 24;
 
 /**
- * A text field where a note goes (see GameEngine.note for its id), above a flask, tank, tool, scale, hose or faucet:
+ * A text field where a note goes (see GameEngine.note for its id), above a flask, tank, tool, scale or faucet:
  * Enter or clicking away keeps it, Escape leaves it as it was, and an empty one clears it.
  */
 export function LabelEditor({ engine, id, onClose }: { engine: GameEngine; id: string; onClose(): void }) {
