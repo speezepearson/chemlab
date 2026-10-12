@@ -62,6 +62,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `airlock.ts` is the airlock and cryopod where the player wakes: their size, collisions, and the `Wake` states.
     `src/intro/notice.ts` is the message projected inside the pod.
   - `porthole.ts` is the porthole's shape, for how much of the wall it takes up.
+  - `surfaces.ts` paints the room's textures (walls, deck, ceiling, counters, cabinets) from noise, pure and DOM-free;
+    `surfaceWorker.ts` runs it off the main thread, and `textures.ts` turns the results into materials, plain until
+    their maps arrive, and gives geometry texture coordinates in world units (`boxUV`, `planeUV`).
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
     `volumes.ts`); `rumble.ts` is the spectrometer, `beeper.ts` the receptacle, `ambience.ts` the ship, `water.ts` drips and streams.

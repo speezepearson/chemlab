@@ -12,6 +12,7 @@ import { COUNTERS, LIFT, PAPER_Z, ROOM, groundAt, toWorld, type Vec3 } from './s
 import { PORT_FRAC, PORT_WALL, porthole, type Porthole } from './porthole';
 import { AIRLOCK, POD } from './airlock';
 import { notice } from '../intro/notice';
+import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
   HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, RECEPTACLE_BODY, RECEPTACLE_LAMPS,
@@ -1471,47 +1472,6 @@ class StandView {
 
 /* ---------------- the room ---------------- */
 
-/** A tiled floor texture: dark ship decking. */
-function deckTexture(): THREE.Texture {
-  const c = document.createElement('canvas');
-  c.width = c.height = 256;
-  const ctx = c.getContext('2d')!;
-  ctx.fillStyle = '#2a302e';
-  ctx.fillRect(0, 0, 256, 256);
-  ctx.strokeStyle = '#1c2120';
-  ctx.lineWidth = 4;
-  ctx.strokeRect(2, 2, 252, 252);
-  ctx.fillStyle = '#333a37';
-  for (const [x, y] of [[20, 20], [236, 20], [20, 236], [236, 236]]) {
-    ctx.beginPath();
-    ctx.arc(x, y, 5, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  return t;
-}
-
-/** Wall panels: light, with seams. */
-function panelTexture(): THREE.Texture {
-  const c = document.createElement('canvas');
-  c.width = 256;
-  c.height = 512;
-  const ctx = c.getContext('2d')!;
-  ctx.fillStyle = '#a3afb0';
-  ctx.fillRect(0, 0, 256, 512);
-  ctx.fillStyle = '#8e9a9b';
-  ctx.fillRect(0, 0, 4, 512);
-  ctx.fillRect(0, 0, 256, 4);
-  ctx.fillStyle = '#b1bcbd';
-  ctx.fillRect(24, 40, 208, 6);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  return t;
-}
-
 /** How thick the hull is round the porthole (see porthole for its size and shape). */
 const PORT_DEPTH = 40;
 
@@ -1631,23 +1591,23 @@ const STAR_R = 6000;
  */
 function wallMesh(w: number, hole?: THREE.Path): THREE.Mesh {
   const H = ROOM.y1;
-  const tex = panelTexture();
   let geom: THREE.BufferGeometry;
   if (hole) {
     const shape = new THREE.Shape().moveTo(-w / 2, -H / 2).lineTo(w / 2, -H / 2).lineTo(w / 2, H / 2).lineTo(-w / 2, H / 2).lineTo(-w / 2, -H / 2);
     shape.holes.push(hole);
     geom = new THREE.ShapeGeometry(shape, 24);
-    // its texture coordinates are in world units, from its bottom left, as a plane's are in fractions
-    tex.repeat.set(1 / 220, 1 / 440);
-    tex.offset.set(w / 2 / 220, H / 2 / 440);
-  } else {
-    geom = new THREE.PlaneGeometry(w, H);
-    tex.repeat.set(w / 220, H / 440);
-  }
-  const m = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, metalness: 0.1 }));
+  } else geom = new THREE.PlaneGeometry(w, H, 1, 1);
+  // three panels from floor to ceiling, from the wall's left end
+  const m = new THREE.Mesh(planeUV(geom, 'walls', -w / 2, -H / 2), wallMat());
   m.receiveShadow = true;
   return m;
 }
+
+/** The walls' paneling, shared by every wall. */
+const wallMat = (() => {
+  let m: THREE.MeshStandardMaterial | null = null;
+  return () => (m ??= surfaceMat('walls', { metalness: 0.15, normalScale: new THREE.Vector2(0.9, 0.9) }));
+})();
 
 /** A rectangle w by h centered on (x, y), as a path. */
 function rectPath<P extends THREE.Path = THREE.Path>(x: number, y: number, w: number, h: number, path?: P): P {
@@ -1715,20 +1675,62 @@ function buildPort(frac: number): THREE.Group {
   return g;
 }
 
+/** A ceiling fixture's diffuser: bright, with a row of louvers across it and a soft falloff to its edges. */
+function diffuserTexture(): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 104;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createRadialGradient(128, 52, 10, 128, 52, 150);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(1, '#d9e4e0');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 104);
+  ctx.fillStyle = 'rgba(70, 82, 80, 0.55)';
+  for (let x = 16; x < 256; x += 20) ctx.fillRect(x, 0, 3, 104);
+  ctx.fillRect(0, 50, 256, 4);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** A cabinet door's pull: a bar on two posts, standing out from a face at (x, y, z) whose outward normal is (nx, 0, nz). */
+function pull(scene: THREE.Object3D, x: number, y: number, z: number, nx: number, nz: number): void {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.rotation.y = Math.atan2(nx, nz);
+  const bar = new THREE.Mesh(unitCylinder, rodMat);
+  bar.scale.set(2.6, 70, 2.6);
+  bar.rotation.z = Math.PI / 2;
+  bar.position.z = 9;
+  g.add(bar);
+  for (const s of [-1, 1]) {
+    const post = new THREE.Mesh(unitCylinder, rodMat);
+    post.scale.set(2.2, 9, 2.2);
+    post.rotation.x = Math.PI / 2;
+    post.position.set(s * 28, 0, 4.5);
+    g.add(post);
+  }
+  scene.add(g);
+}
+
 function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.Mesh } {
   const W = ROOM.x1 - ROOM.x0;
   const Dp = ROOM.z1 - ROOM.z0;
   const H = ROOM.y1;
   const cx = (ROOM.x0 + ROOM.x1) / 2;
   const cz = (ROOM.z0 + ROOM.z1) / 2;
-  const deck = deckTexture();
-  deck.repeat.set(W / 160, Dp / 160);
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, Dp), new THREE.MeshStandardMaterial({ map: deck, roughness: 0.8, metalness: 0.2 }));
+  // the deck's plates run from the room's back left corner
+  const floor = new THREE.Mesh(planeUV(new THREE.PlaneGeometry(W, Dp), 'deck', -W / 2, -Dp / 2), surfaceMat('deck', { metalness: 0.55 }));
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(cx, 0, cz);
   floor.receiveShadow = true;
   scene.add(floor);
-  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(W, Dp), new THREE.MeshStandardMaterial({ color: 0x5d6763, emissive: 0x1c2120, roughness: 0.9 }));
+  // lit from below by the fixtures' light coming back off everything, which nothing here models, so it glows a little
+  const ceil = new THREE.Mesh(
+    planeUV(new THREE.PlaneGeometry(W, Dp), 'ceiling', -W / 2, -Dp / 2),
+    surfaceMat('ceiling', { emissive: 0x6c7472, glowMap: true, metalness: 0.2 }),
+  );
   ceil.rotation.x = Math.PI / 2;
   ceil.position.set(cx, H, cz);
   scene.add(ceil);
@@ -1746,45 +1748,79 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
   scene.add(front);
   // the left wall, with the porthole through it, is built apart (see buildPort)
   wall(Dp, ROOM.x1, cz, -Math.PI / 2);
-  // ceiling light panels
+  // ceiling light fixtures: a dark frame round a glowing diffuser behind louvers
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0x2c3231, metalness: 0.6, roughness: 0.45 });
+  const diffuser = new THREE.MeshBasicMaterial({ map: diffuserTexture(), toneMapped: false });
   for (let x = ROOM.x0 + 300; x < ROOM.x1; x += 500)
     for (let z = 350; z < ROOM.z1; z += 600) {
-      const p = new THREE.Mesh(new THREE.PlaneGeometry(220, 90), new THREE.MeshBasicMaterial({ color: 0xe8f0ea }));
+      const f = new THREE.Mesh(new THREE.BoxGeometry(240, 8, 110), frameMat);
+      f.position.set(x, H - 4, z);
+      scene.add(f);
+      const p = new THREE.Mesh(new THREE.PlaneGeometry(220, 90), diffuser);
       p.rotation.x = Math.PI / 2;
-      p.position.set(x, H - 1, z);
+      p.position.set(x, H - 8.5, z);
       scene.add(p);
     }
+  // a dark rubber kick strip along the foot of every wall, but across the airlock's doorway
+  const kickMat = new THREE.MeshStandardMaterial({ color: 0x1e2322, roughness: 0.8, metalness: 0.1 });
+  const KICK = 48;
+  const strip = (x0: number, x1: number, z0: number, z1: number) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, KICK, z1 - z0), kickMat);
+    m.position.set((x0 + x1) / 2, KICK / 2, (z0 + z1) / 2);
+    m.receiveShadow = true;
+    scene.add(m);
+  };
+  const doorX = [AIRLOCK.x - AIRLOCK.door.w / 2, AIRLOCK.x + AIRLOCK.door.w / 2];
+  strip(ROOM.x0, ROOM.x0 + 3, ROOM.z0, ROOM.z1);
+  strip(ROOM.x1 - 3, ROOM.x1, ROOM.z0, ROOM.z1);
+  strip(ROOM.x0, ROOM.x1, ROOM.z0, ROOM.z0 + 3);
+  strip(ROOM.x0, doorX[0], ROOM.z1 - 3, ROOM.z1);
+  strip(doorX[1], ROOM.x1, ROOM.z1 - 3, ROOM.z1);
   // the sink counters along the back wall and under the faucets, and the islands out in the room: whatever falls past
   // everything ends up on one of them, or on the floor
-  const steel = new THREE.MeshStandardMaterial({ color: 0x6f7975, metalness: 0.5, roughness: 0.4 });
-  const cabinet = new THREE.MeshStandardMaterial({ color: 0x8b948f, metalness: 0.2, roughness: 0.7 });
-  const epoxy = new THREE.MeshStandardMaterial({ color: 0x1d2322, metalness: 0.1, roughness: 0.35 });
+  const steel = surfaceMat('brushedSteel', { metalness: 0.85 });
+  const doors = surfaceMat('cabinet', { metalness: 0.3 });
+  const top = surfaceMat('epoxy', { metalness: 0.05 });
+  const drain = surfaceMat('grate', { metalness: 0.7 });
   for (const c of COUNTERS) {
     const w = c.x1 - c.x0;
     const d = c.z1 - c.z0;
     const [x, z] = [(c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2];
-    if (c.island) {
-      // a cabinet, set in a little at the foot, under a dark top
-      const top = 24;
-      const body = new THREE.Mesh(new THREE.BoxGeometry(w - 24, LIFT - top, d - 24), cabinet);
-      body.position.set(x, (LIFT - top) / 2, z);
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(w, top, d), epoxy);
-      slab.position.set(x, LIFT - top / 2, z);
-      for (const m of [body, slab]) {
-        m.receiveShadow = m.castShadow = true;
-        scene.add(m);
-      }
-      continue;
+    // a dark toe kick, set in under it
+    const kick = new THREE.Mesh(new THREE.BoxGeometry(w - 60, KICK, d - 60), kickMat);
+    kick.position.set(x, KICK / 2, z);
+    scene.add(kick);
+    // a cabinet, set in a little at the foot, under a dark epoxy top (the islands) or a steel one with a drain grate
+    // in it (the sink counters)
+    const th = c.island ? 24 : 30;
+    // the sink counters run into the walls, so only their fronts need setting in
+    const inset = c.island ? 12 : 6;
+    const [bw, bd, bh] = [w - 2 * inset, d - 2 * inset, LIFT - th - KICK];
+    // a whole number of doors along each face, from the kick to the top
+    const [nx, nz] = [Math.max(1, Math.round(bw / 250)), Math.max(1, Math.round(bd / 250))];
+    const body = new THREE.Mesh(boxUV(new THREE.BoxGeometry(bw, bh, bd), 'cabinet', { x: bw / nx, y: bh, z: bd / nz }), doors);
+    body.position.set(x, KICK + bh / 2, z);
+    const slab = c.island
+      ? new THREE.Mesh(boxUV(new THREE.BoxGeometry(w, th, d), 'epoxy'), top)
+      : new THREE.Mesh(boxUV(new THREE.BoxGeometry(w, th, d), 'brushedSteel'), steel);
+    slab.position.set(x, LIFT - th / 2, z);
+    for (const m of [body, slab]) {
+      m.receiveShadow = m.castShadow = true;
+      scene.add(m);
     }
-    const counter = new THREE.Mesh(new THREE.BoxGeometry(w, LIFT, d), steel);
-    counter.position.set(x, LIFT / 2, z);
-    counter.receiveShadow = counter.castShadow = true;
-    scene.add(counter);
-    const grate = new THREE.Mesh(new THREE.PlaneGeometry(w - 16, d - 16), new THREE.MeshStandardMaterial({ color: 0x1a1f1e, metalness: 0.6, roughness: 0.5 }));
-    grate.rotation.x = -Math.PI / 2;
-    grate.position.set(x, LIFT + 0.5, z);
-    grate.receiveShadow = true;
-    scene.add(grate);
+    // a pull near the top of each door, on every side that's out in the room
+    const hy = KICK + bh - 34;
+    const faces: [number, number][] = c.island ? [[0, -1], [0, 1], [-1, 0], [1, 0]] : c.z0 === ROOM.z0 && c.x1 < ROOM.x1 ? [[0, 1]] : [[-1, 0]];
+    for (const [fx, fz] of faces) {
+      if (fz) for (let i = 0; i < nx; i++) pull(scene, x - bw / 2 + (i + 0.5) * (bw / nx), hy, z + fz * (bd / 2), 0, fz);
+      else for (let i = 0; i < nz; i++) pull(scene, x + fx * (bw / 2), hy, z - bd / 2 + (i + 0.5) * (bd / nz), fx, 0);
+    }
+    if (c.island) continue;
+    const g = new THREE.Mesh(planeUV(new THREE.PlaneGeometry(w - 16, d - 16), 'grate', 0, 0), drain);
+    g.rotation.x = -Math.PI / 2;
+    g.position.set(x, LIFT + 0.5, z);
+    g.receiveShadow = true;
+    scene.add(g);
   }
   // an emergency beacon over the door, turning slowly
   const lamp = new THREE.Mesh(new THREE.SphereGeometry(14, 16, 10), new THREE.MeshStandardMaterial({ color: 0x5a1010, emissive: 0xff2010, emissiveIntensity: 0.6 }));
@@ -1951,21 +1987,17 @@ class AirlockView {
     const { x, w, d, h, wall, door } = AIRLOCK;
     const z1 = ROOM.z1;
     const g = new THREE.Group();
-    const panel = new THREE.MeshStandardMaterial({ color: 0x9ba5a1, roughness: 0.7, metalness: 0.15 });
-    const floor = new THREE.MeshStandardMaterial({ color: 0x3a403e, roughness: 0.8, metalness: 0.3 });
+    const panel = surfaceMat('walls', { tint: 0xc4cac8, metalness: 0.15 });
     const hidden = new THREE.MeshBasicMaterial({ visible: false });
-    // the chamber, seen from inside; its front is the wall with the doorway, below
-    const room = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), [panel, panel, panel, floor, panel, hidden].map((m) => {
-      if (m === hidden) return m;
-      const c = m.clone();
-      c.side = THREE.BackSide;
-      return c;
-    }));
+    // the chamber, seen from inside, paneled like the lab and on the same deck; its front is the wall with the
+    // doorway, below
+    const [walls, floor] = [surfaceMat('walls', { tint: 0xc4cac8, metalness: 0.15, side: THREE.BackSide }), surfaceMat('deck', { metalness: 0.55, side: THREE.BackSide })];
+    const room = new THREE.Mesh(boxUV(new THREE.BoxGeometry(w, h, d), 'walls', { z: 440 }), [walls, walls, walls, floor, walls, hidden]);
     room.position.set(x, h / 2, z1 + wall + d / 2);
     g.add(room);
     const shape = rectPath(0, h / 2, w, h, new THREE.Shape());
     shape.holes.push(rectPath(0, door.h / 2 + 0.25, door.w, door.h - 0.5));
-    const inside = new THREE.Mesh(new THREE.ShapeGeometry(shape), panel);
+    const inside = new THREE.Mesh(planeUV(new THREE.ShapeGeometry(shape), 'walls', -w / 2, 0), panel);
     inside.position.set(x, 0, z1 + wall);
     g.add(inside);
     // the doorway's sides and top, through the wall's thickness: planes only, with nothing lying in either wall's face
@@ -2312,6 +2344,17 @@ export class View {
     this.alarmButton = new AlarmButton(this.scene, this.pickables);
     this.blindsButton = new BlindsButton(this.scene, this.pickables);
     this.airlock = new AirlockView(this.scene, this.pickables, eye);
+    // what metal and glass reflect: the room itself, seen from its middle at eye height, before anything's in it, and
+    // again once its surfaces have their textures (see textures.ts)
+    const reflect = () => {
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      const was = this.scene.environment;
+      this.scene.environment = pmrem.fromScene(this.scene, 0.02, 10, 8000, { size: 256, position: new THREE.Vector3(cx, eye, cz) }).texture;
+      was?.dispose();
+      pmrem.dispose();
+    };
+    reflect();
+    whenSurfaced(reflect);
     this.draft = new THREE.LineLoop(
       new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(12), 3)),
       new THREE.LineDashedMaterial({ color: 0x8ccbb0, dashSize: 4, gapSize: 3 }),
@@ -2402,6 +2445,7 @@ export class View {
     const pulse = 0.5 + 0.5 * Math.sin(this.clock * 2.4);
     const lit = 1 - fr.airlock.dark;
     for (const { light, base } of this.roomLights) light.intensity = base * lit;
+    scene.environmentIntensity = lit;
     this.beacon.beacon.intensity = 9000 * pulse * pulse * lit;
     (this.beacon.lamp.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.3 + 1.2 * pulse;
 
