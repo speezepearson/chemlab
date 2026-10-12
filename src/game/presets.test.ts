@@ -4,6 +4,9 @@ import { NS, TARGET } from '../chem/species';
 import { CAP, N_FLASKS } from './config';
 import { Flask, roomFor } from './flask';
 import { REFERENCE_CAP, SHAPES, TANK_CAP, Tool } from './tools';
+import { onGrid, toolAnchor, toolBox } from './bodies';
+import { boxesOverlap } from './physics';
+import { fromFrac } from './space';
 import { DEFAULT_PRESET, PRESETS, applyFill, fillAtoms, type FlaskFill } from './presets';
 
 /** How much room a fill takes, by volume. */
@@ -39,6 +42,19 @@ describe('presets', () => {
         expect((t.tanks ?? []).length).toBeLessThanOrEqual(SHAPES[t.kind].tanks.length);
         for (const fill of t.tanks ?? []) if (fill) expect(fillVolume(fill)).toBeLessThanOrEqual(SHAPES[t.kind].tankCap ?? TANK_CAP);
       }
+    });
+  }
+
+  for (const p of PRESETS) {
+    it(`${p.name} lays its tools out on the grid, clear of each other`, () => {
+      const tools = (p.tools ?? []).map((spec, i) => {
+        const t = new Tool(spec.kind, i, { ...fromFrac({ x: spec.at[0], y: spec.at[1] }, spec.z), yaw: spec.yaw ?? 0 });
+        const g = onGrid(t.pose, toolAnchor(t));
+        expect(g.x).toBeCloseTo(t.pose.x, 6);
+        expect(g.z).toBeCloseTo(t.pose.z, 6);
+        return t;
+      });
+      for (const a of tools) for (const b of tools) if (a !== b) expect(boxesOverlap(toolBox(a), toolBox(b))).toBe(false);
     });
   }
 

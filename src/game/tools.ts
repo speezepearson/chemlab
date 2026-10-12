@@ -5,7 +5,7 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP } from './config';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
-import { ORIGIN, type Pose, type Vec3 } from './space';
+import { CELL, ORIGIN, type Pose, type Vec3 } from './space';
 
 /** Capacity of each tank on a tool, in atoms. */
 export const TANK_CAP = 4 * CAP;
@@ -331,14 +331,17 @@ export function restoreDefaultHeater(): void {
   Object.assign(HEATER, DEFAULT_HEATER);
 }
 
-/** The heater's tube, in local units: from x0 to x1 (cut into HEATER_CELLS equal stretches), centered at y, of radius r. */
-export const HEATER_TUBE = { x0: -144, x1: 144, y: 48, r: 7 };
+/**
+ * The heater's tube, in local units: from x0 to x1 (cut into HEATER_CELLS equal stretches), centered at y, of radius r.
+ * Its taps' stretches, and its last, are a grid cell apart (see CELL), so each tap's spout and the end's can be over one.
+ */
+export const HEATER_TUBE = { x0: -11.5 * (CELL / 6), x1: 12.5 * (CELL / 6), y: 48, r: 7 };
 /** The middle of stretch c of the heater's tube, in local units. */
 export function heaterCellX(c: number): number {
   return HEATER_TUBE.x0 + ((c + 0.5) * (HEATER_TUBE.x1 - HEATER_TUBE.x0)) / HEATER_CELLS;
 }
 /** The heater's control box, above the right end of its tube, with the dial (see SHAPES.heater.valves) on it. */
-export const HEATER_BOX = { x0: 100, x1: 140, y0: 2, y1: 36 };
+export const HEATER_BOX = { x0: 150, x1: 190, y0: 2, y1: 36 };
 
 /**
  * The heater's wire temperature for a dial setting from 0 to 1: off at 0 (it heats nothing), then rising
@@ -474,69 +477,69 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   },
   exchanger: {
     tanks: [
-      { name: 'A', x0: -64, x1: -6 },
-      { name: 'B', x0: 6, x1: 64 },
+      { name: 'A', x0: -79, x1: -21 },
+      { name: 'B', x0: 21, x1: 79 },
     ],
     sump: { w: 14, h: 7 },
-    // the streams cross over in the exchanger, so each leaves on the other side
-    spouts: [35, -35],
+    // the streams cross over in the exchanger, so each leaves on the other side, a grid cell apart (see CELL)
+    spouts: [CELL / 2, -CELL / 2],
     valveY: 97,
     spoutY: 136,
-    box: { x0: -68, x1: 68, y0: -6, y1: 138 },
+    box: { x0: -83, x1: 83, y0: -6, y1: 138 },
   },
   separator: {
     tanks: [{ name: 'tank', x0: -30, x1: 30 }],
-    // one outlet per mix of primary and secondary (see SEPARATOR_OUTLET), far enough apart for a flask, or a
-    // tool's tank, under each
-    spouts: [-144, -72, 0, 72, 144],
+    // one outlet per mix of primary and secondary (see SEPARATOR_OUTLET), a grid cell apart (see CELL), so a flask
+    // or a tool's tank fits under each
+    spouts: [-2 * CELL, -CELL, 0, CELL, 2 * CELL],
     sump: { w: 14, h: 7 },
     flippable: true,
     valveY: 96,
     spoutY: 126,
     // the manifold under it (see the engine's SEP_BODY), with a handle on its left end
-    box: { x0: -160, x1: 154, y0: -6, y1: 128 },
+    box: { x0: -220, x1: 214, y0: -6, y1: 128 },
   },
   splitter: {
     tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
     tankH: 30,
     tankCap: FUNNEL_CAP,
     funnel: true,
-    // as far apart as the separator's
-    spouts: [-36, 36],
+    // a grid cell either side of its funnel, like the separator's
+    spouts: [-CELL, CELL],
     valveY: 42,
     spoutY: 84,
-    box: { x0: -40, x1: 40, y0: -6, y1: 86 },
+    box: { x0: -116, x1: 116, y0: -6, y1: 86 },
   },
   sorter: {
     // a funnel at the high end of the chute (see SORTER_CHUTE), which drops through two screens, then off its end
-    tanks: [{ name: 'funnel', x0: -90, x1: -46 }],
+    tanks: [{ name: 'funnel', x0: -CELL - 22, x1: -CELL + 22 }],
     tankH: 30,
     tankCap: FUNNEL_CAP,
     funnel: true,
     noValve: true,
     flippable: true,
-    // as far apart as the separator's
-    spouts: [-24, 48, 120],
+    // a grid cell apart, like the separator's, the first a cell on from the funnel
+    spouts: [0, CELL, 2 * CELL],
     valveY: 30,
     spoutY: 104,
-    box: { x0: -94, x1: 126, y0: -6, y1: 106 },
+    box: { x0: -126, x1: 206, y0: -6, y1: 106 },
   },
   heater: {
     // a funnel over the left end of a long tube (see HEATER_TUBE) with a wire down its middle; three taps
     // along it and its far end turning down are the spouts, and the dial on a box above its right end sets
     // the wire's heat
-    tanks: [{ name: 'funnel', x0: -160, x1: -116 }],
+    tanks: [{ name: 'funnel', x0: -2 * CELL - 22, x1: -2 * CELL + 22 }],
     tankH: 30,
     tankCap: FUNNEL_CAP,
     funnel: true,
-    valves: [...HEATER_TAPS.map((c) => ({ x: heaterCellX(c), y: 72 })), { x: 120, y: 20 }],
+    valves: [...HEATER_TAPS.map((_, j) => ({ x: (j - 1) * CELL, y: 72 })), { x: 170, y: 20 }],
     dial: HEATER_TAPS.length,
     flippable: true,
-    // as far apart as the separator's, with the end a little further on
-    spouts: [...HEATER_TAPS.map(heaterCellX), 158],
+    // a grid cell apart, like the separator's, under the taps' stretches (see heaterCellX) and then the last
+    spouts: [-CELL, 0, CELL, 2 * CELL],
     valveY: 72,
     spoutY: 92,
-    box: { x0: -166, x1: 168, y0: -6, y1: 94 },
+    box: { x0: -228, x1: 216, y0: -6, y1: 94 },
   },
   reference: {
     // a hundred flasks' worth, sealed, draining a trickle through its valve
@@ -573,7 +576,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     noValve: true,
     fixed: true,
     label: ['cryostabilizer', 'receptacle'],
-    spouts: [34],
+    spouts: [CELL],
     valveY: REC_H + 78,
     spoutY: REC_H + 92,
     box: { x0: -REC_W / 2 - 4, x1: REC_W / 2 + 4, y0: -26, y1: REC_H + 94 },
@@ -606,7 +609,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
 };
 
 /** The size sorter's chute, in local units: it slopes down from (x0, y0) to (x1, y1), where it turns down into the last spout. */
-export const SORTER_CHUTE = { x0: -80, x1: 120, y0: 44, y1: 68 };
+export const SORTER_CHUTE = { x0: -112, x1: 200, y0: 44, y1: 68 };
 /** Height of the sorter's chute at x, in local units. */
 export const chuteY = (x: number) =>
   SORTER_CHUTE.y0 + ((x - SORTER_CHUTE.x0) / (SORTER_CHUTE.x1 - SORTER_CHUTE.x0)) * (SORTER_CHUTE.y1 - SORTER_CHUTE.y0);
@@ -644,7 +647,7 @@ export const tankX = (tk: { x0: number; x1: number }) => (tk.x0 + tk.x1) / 2;
  * one end to the bottom of the other, so a stream comes down from its tank,
  * winds across, and drops out the far side.
  */
-export const HELIX = { x0: -35, x1: 35, y: 110, r: 6, halfTwists: 9 };
+export const HELIX = { x0: -CELL / 2, x1: CELL / 2, y: 110, r: 6, halfTwists: 9 };
 
 export const TOOL_NAMES: Record<ToolKind, string> = {
   dispenser: 'Dispenser',
@@ -1128,67 +1131,26 @@ export function aimAt(mouths: readonly Mouth[], p: Vec3, near: number, reach = I
   return best && { m: best, hit: false };
 }
 
-/**
- * The least sideways shift that brings (x, z) over the middle half of a mouth (half as wide and half as deep, about
- * its center), for snapping something falling from there well into it: nothing if it's already there.
- */
-export function snapInto(m: Mouth, x: number, z: number): { dx: number; dz: number } {
-  const c = Math.cos(m.yaw ?? 0);
-  const s = Math.sin(m.yaw ?? 0);
-  const dx = x - m.x;
-  const dz = z - m.z;
-  const u = dx * c - dz * s;
-  const w = dx * s + dz * c;
-  const du = Math.max(-m.hx / 2, Math.min(m.hx / 2, u)) - u;
-  const dw = Math.max(-m.hz / 2, Math.min(m.hz / 2, w)) - w;
-  return { dx: du * c + dw * s, dz: -du * s + dw * c };
-}
+/** What a hose runs from: a tool's spout, or a faucet (by its place in the lab's list). */
+export type HoseMount = { tool: Tool; spout: number } | { faucet: number };
 
-/** How much a hose's funnel holds, in atoms: just a buffer, so a loop can't spin forever in one step. */
-export const HOSE_CAP = CAP / 4;
-/** How fast a hose's pump moves fluid from its inlet to its outlet, in atoms per sim second. */
-export const PUMP_RATE = 2 * MAX_FLOW;
+/** Whether two mounts are the same spout or faucet. */
+export const sameMount = (a: HoseMount, b: HoseMount) =>
+  'tool' in a ? 'tool' in b && a.tool === b.tool && a.spout === b.spout : 'faucet' in b && a.faucet === b.faucet;
 
 /**
- * A hose: a funnel inlet anywhere, a spout outlet anywhere, and a magic pump
- * between them. Whatever falls into the funnel comes out of the outlet, up to
- * PUMP_RATE; anything arriving faster overflows the funnel to the sink.
+ * A hose pulled out of a spout or a faucet: whatever would leave the spout comes out of the hose's nozzle instead,
+ * wherever that's been set down, and falls from there. Every spout and faucet has one, rolled up inside it until it's
+ * pulled out.
  */
-/** What a hose's funnel can hang under: a tool's spout, a faucet (by its place in the lab's list), or another hose's nozzle. */
-export type HoseMount = { tool: Tool; spout: number } | { faucet: number } | { hose: Hose };
-
 export class Hose {
-  readonly funnel = new Vessel(HOSE_CAP);
-  /** What left the outlet on the last step, for drawing; null if nothing did. */
-  out: Vessel | null = null;
-  /** The drop hanging at the outlet, gathering a flow too slow to stream (see drip). */
-  readonly drop = new Vessel(Infinity);
-  /** Whether the outlet streamed on the last step, rather than dripped. Set by whoever runs drip. */
-  streaming = false;
-  /** The flow on the last step, in flasks per second. */
-  flow = 0;
-  /** The player's note, written above its funnel; empty for none. */
-  note = '';
-  /** Which way each end faces, about the vertical (see Pose), with the stand holding it up behind it. */
-  turn = { inlet: 0, outlet: 0 };
-  /**
-   * The outlet its funnel hangs just under, following it wherever it goes; null for a funnel on a stand of its own
-   * (only from before funnels had to hang under something).
-   */
-  on: HoseMount | null = null;
+  /** Which way its nozzle faces, about the vertical (see Pose), with the stand holding it up behind it. */
+  turn = 0;
 
   constructor(
-    /** The funnel's mouth and the outlet's tip, in the room. */
-    public inlet: Vec3,
+    /** The spout or faucet it runs from. */
+    readonly on: HoseMount,
+    /** Its nozzle's tip, in the room. */
     public outlet: Vec3,
   ) {}
-
-  /** Run for `h` sim seconds. Returns what left the outlet, or null if nothing did. */
-  step(h: number): Vessel | null {
-    const p = new Vessel(Infinity);
-    transfer(this.funnel, p, PUMP_RATE * h);
-    this.out = p.N > 0 ? p : null;
-    this.flow = volume(p) / (MAX_FLOW * h);
-    return this.out;
-  }
 }

@@ -74,13 +74,6 @@ const ICONS: Record<string, ReactNode> = {
       <circle className="valve" cx="20" cy="33" r="2.5" />
     </>
   ),
-  hose: (
-    <>
-      <path className="pipe" d="M10 12 C10 34 30 12 30 30" />
-      <path className="glass" d="M4 6 H16 L12 12 H8 Z" />
-      <rect className="valve" x="28" y="30" width="4" height="5" />
-    </>
-  ),
 };
 
 /**

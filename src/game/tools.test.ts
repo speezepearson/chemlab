@@ -5,8 +5,8 @@ import { heatAt, temperature } from '../chem/reactions';
 import { Vessel, roomFor, volume } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PIPETTE_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
-  RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, SEPARATOR, SEPARATOR_PERFECT, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, aimAt, counterflow, snapInto, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, mouthGap, scanLevel, separate, spectrum, type Mouth,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, SAMPLE_CAP, SCAN_LIGHTS,
+  RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, SEPARATOR, SEPARATOR_PERFECT, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, aimAt, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, mouthGap, scanLevel, separate, spectrum, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -66,6 +66,11 @@ describe('pipette', () => {
 });
 
 describe('resistive heater', () => {
+  it("has its taps' spouts, and the end's, under the stretches they draw from", () => {
+    const sp = SHAPES.heater.spouts;
+    [...HEATER_TAPS, HEATER_CELLS - 1].forEach((c, j) => expect(heaterCellX(c)).toBeCloseTo(sp[j], 9));
+  });
+
   /** A heater fed a steady room-temperature stream of R for `t` sim seconds, catching what leaves each spout. */
   function run(valves: number[], t = 3 * HEATER.transit, feed = 0.25 * CAP) {
     const ht = new Tool('heater', 0, undefined, valves);
@@ -658,26 +663,6 @@ describe('aimAt', () => {
   });
 });
 
-describe('snapInto', () => {
-  const v = new Vessel(CAP);
-  it('shifts a point just enough to bring it over the middle half of a mouth', () => {
-    const m: Mouth = { v, x: 0, y: 0, z: 0, hx: 10, hz: 20 };
-    expect(snapInto(m, 2, -3)).toEqual({ dx: 0, dz: 0 });
-    const s = snapInto(m, 30, -25);
-    expect(s.dx).toBeCloseTo(-25);
-    expect(s.dz).toBeCloseTo(15);
-  });
-
-  it('works in the frame of a turned mouth', () => {
-    // turned a quarter, its width runs front to back
-    const m: Mouth = { v, x: 100, y: 0, z: 50, hx: 10, hz: 20, yaw: Math.PI / 2 };
-    const s = snapInto(m, 100, 80);
-    expect(s.dx).toBeCloseTo(0);
-    expect(s.dz).toBeCloseTo(-25);
-    expect(snapInto(m, 115, 50).dx).toBeCloseTo(-5);
-  });
-});
-
 describe('mouthBelow', () => {
   const v = new Vessel(CAP);
   const mouths: Mouth[] = [
@@ -796,18 +781,18 @@ describe('separator', () => {
 });
 
 describe('hose', () => {
-  it('pumps what falls in its funnel out of its outlet, up to PUMP_RATE', () => {
-    const hose = new Hose({ x: 0, y: 0, z: 0 }, { x: 1, y: -1, z: 0 });
-    const src = filled(new Vessel(CAP), R, CAP, 2);
-    hose.funnel.addFrom(src, HOSE_CAP * 2); // more than it holds: the rest overflows
-    expect(hose.funnel.N / HOSE_CAP).toBeCloseTo(1, 6);
-    const out = hose.step(0.01)!;
-    expect(out.N / (PUMP_RATE * 0.01)).toBeCloseTo(1, 6);
-    expect(temperature(out)).toBe(2);
-    expect(hose.funnel.N / (HOSE_CAP - PUMP_RATE * 0.01)).toBeCloseTo(1, 6);
-    expect(PUMP_RATE).toBeGreaterThan(MAX_FLOW);
+  it('tells whether two hoses are on the same spout or faucet', () => {
+    const t = new Tool('separator', 0);
+    const u = new Tool('separator', 1);
+    expect(sameMount({ tool: t, spout: 2 }, { tool: t, spout: 2 })).toBe(true);
+    expect(sameMount({ tool: t, spout: 2 }, { tool: t, spout: 1 })).toBe(false);
+    expect(sameMount({ tool: t, spout: 2 }, { tool: u, spout: 2 })).toBe(false);
+    expect(sameMount({ faucet: 3 }, { faucet: 3 })).toBe(true);
+    expect(sameMount({ faucet: 0 }, { tool: t, spout: 0 })).toBe(false);
+    expect(new Hose({ faucet: 3 }, { x: 1, y: 2, z: 3 }).outlet).toEqual({ x: 1, y: 2, z: 3 });
   });
 });
+
 
 describe('dripping', () => {
   const packet = (atoms: number) => filled(new Vessel(Infinity), R, atoms, 2);
