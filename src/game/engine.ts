@@ -21,7 +21,7 @@ import { rumble, type Rumble } from './rumble';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
 import {
-  COUNTERS, LIFT, PAPER_Z, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, wrapAngle, type Pose, type Vec3,
+  CELL, COUNTERS, LIFT, PAPER_Z, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, wrapAngle, type Pose, type Vec3,
 } from './space';
 import {
   HEATER, HEATER_CELLS, HEATER_TUBE, Hose, MAX_FLOW, RECEPTACLE_TIMES, SCAN_LIGHTS, SHAPES, SUMP_TIP, TANK_H, TOOL_NAMES,
@@ -203,11 +203,14 @@ const STICK_TILT = 1.6;
 export const TOUCH = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 /** How long two clicks can be apart and count as a double-click, in ms. */
 const DOUBLE_MS = 380;
-/** Where the faucets are: along the right wall over its counter, this high, this far apart. */
+/**
+ * Where the faucets are: along the right wall over its counter, this high, a grid cell apart, each spout over the
+ * middle of a cell of the counter's row nearest the wall (see CELL).
+ */
 const FAUCET_Y = LIFT + 300;
-const FAUCET_Z0 = 360;
-const FAUCET_GAP = 64;
-const FAUCET_OUT = 70;
+const FAUCET_Z0 = 3.5 * CELL;
+const FAUCET_GAP = CELL;
+const FAUCET_OUT = CELL / 2;
 /** How long a note stays up, in ms. */
 const NOTE_MS = 1600;
 /** A flask's outline's area, in local units squared, for how exposed its fluid is (see exposures). */
@@ -443,7 +446,7 @@ export class GameEngine {
     this.preset = preset;
     this.flasks = Array.from({ length: N_FLASKS }, (_, i) => {
       const f = new Flask(CAP);
-      f.pose = { x: (HOME_W * (i + 0.5)) / N_FLASKS, y: LIFT + FLASK_H, z: Z_HOME, yaw: 0 };
+      f.pose = { x: (i + 0.5) * CELL, y: LIFT + FLASK_H, z: Z_HOME, yaw: 0 };
       f.glass = glassGrams(i);
       applyFill(f, preset.flasks[i] ?? null);
       return f;

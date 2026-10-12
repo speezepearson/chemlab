@@ -8,8 +8,8 @@ import { Flask } from './flask';
 import { FLASK_H } from './flaskShape';
 import { boxesOverlap } from './physics';
 import { Scale } from './scale';
-import { COUNTERS, LIFT, counterUnder, fromFrac, toFrac } from './space';
-import { Tool, mouthBelow } from './tools';
+import { CELL, COUNTERS, LIFT, counterUnder, fromFrac, toFrac } from './space';
+import { SHAPES, Tool, mouthBelow, tankX, type ToolKind } from './tools';
 
 const at = (x: number, y: number, z: number, yaw = 0) => ({ x, y, z, yaw });
 
@@ -21,6 +21,23 @@ describe('fromFrac', () => {
     expect(toFrac(p).y).toBeCloseTo(0.4);
     // further down the old bench is lower in the room
     expect(fromFrac({ x: 0, y: 0.6 }).y).toBeLessThan(p.y);
+  });
+});
+
+describe('the grid', () => {
+  it("runs along every counter's edges", () => {
+    for (const c of COUNTERS) for (const v of [c.x0, c.x1, c.z0, c.z1]) expect(v / CELL).toBeCloseTo(Math.round(v / CELL), 9);
+  });
+
+  it("has every tool's mouths and spouts a whole number of cells apart, so they can all be over cells' middles", () => {
+    for (const kind of Object.keys(SHAPES) as ToolKind[]) {
+      const sh = SHAPES[kind];
+      const xs = [...sh.tanks.map(tankX), ...sh.spouts];
+      for (const x of xs) {
+        const cells = (x - xs[0]) / CELL;
+        expect(cells, kind).toBeCloseTo(Math.round(cells), 9);
+      }
+    }
   });
 });
 

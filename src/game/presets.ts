@@ -4,6 +4,7 @@ import { T_ROOM, defaultChemParams } from '../chem/params';
 import { SPECIES, TARGET, singleOf, speciesEnergies } from '../chem/species';
 import { CAP, HOME_W } from './config';
 import type { Vessel } from './flask';
+import { CELL } from './space';
 import { REFERENCE_CAP, type ToolKind } from './tools';
 
 /** Starting contents of one shelf slot. */
@@ -28,16 +29,16 @@ export interface Spot {
  * Where the one and only mass spectrometer starts, unless a preset places it itself: there's always exactly one. It
  * stands on the back counter.
  */
-export const SPECTROMETER_AT: Spot = { at: [1.12, 0.3] };
+export const SPECTROMETER_AT: Spot = { at: [1.15, 0.3] };
 
 /**
  * Where the one and only receptacle stands, the same way: there's always exactly one of it too. It's too big for the
  * back counter, so it's on the first island, facing the back wall, high enough for a flask under its reject spout.
  */
-export const RECEPTACLE_AT: Spot = { at: [-0.2, 0.306], z: 750, yaw: Math.PI };
+export const RECEPTACLE_AT: Spot = { at: [-0.25, 0.306], z: 750, yaw: Math.PI };
 
 /** Where the one and only flow meter starts, the same way: there's always exactly one of it too. */
-export const METER_AT: Spot = { at: [0.53, 0.55] };
+export const METER_AT: Spot = { at: [0.85, 0.55] };
 
 /** A tool on the bench at the start. */
 export interface ToolSpec extends Spot {
@@ -102,7 +103,7 @@ function settled(mix: readonly [Recipe, number][], T: number): { species: number
 }
 
 /** Where the wash route's separator stands; its feed and catch tanks are placed relative to it. */
-const WASH_AT: [number, number] = [0.36, 0.4];
+const WASH_AT: [number, number] = [0.35, 0.4];
 const WASH_T = 12;
 
 /** The wash route's starting bench. route.test.ts runs the same thing without the UI. */
@@ -125,8 +126,8 @@ export const WASH_PRESET: Preset = {
       kind: 'dispenser', at: [WASH_AT[0], 0.14], valves: [0.003],
       tanks: [{ contents: [atomsOf(singleOf('B'), 4 * CAP)], T: WASH_T }],
     },
-    // under the separator's far right spout, 144 local units right of its center
-    { kind: 'dispenser', at: [WASH_AT[0] + 144 / HOME_W, WASH_AT[1] + 0.25] },
+    // under the separator's far right spout, two grid cells right of its center
+    { kind: 'dispenser', at: [WASH_AT[0] + (2 * CELL) / HOME_W, WASH_AT[1] + 0.25] },
   ],
   hoses: [
     { from: { tool: 0, spout: 0 }, to: { tool: 0, dx: -20 } },
@@ -150,11 +151,13 @@ export const PRESETS: readonly Preset[] = [
         kind: 'reference', at: [0.15, 0.442], z: 750, yaw: Math.PI,
         tanks: [{ contents: [{ species: TARGET, molecules: REFERENCE_CAP }], T: T_ROOM }],
       },
-      { kind: 'separator', at: [0.2, 0.3] },
-      { kind: 'dispenser', at: [0.47, 0.3] },
-      { kind: 'exchanger', at: [0.62, 0.3] },
+      { kind: 'separator', at: [0.25, 0.3] },
+      { kind: 'dispenser', at: [0.55, 0.3] },
+      // its tanks half a grid cell either side of its middle
+      { kind: 'exchanger', at: [0.7, 0.3] },
     ],
-    scales: [[1.36, 0.62]],
+    // its two places for flasks half a grid cell either side of its middle
+    scales: [[1.4, 0.62]],
   },
   {
     id: 'exchanger',
@@ -164,9 +167,10 @@ export const PRESETS: readonly Preset[] = [
       'mixing: the red comes out cool and the green hot. Slower flows trade more. Look at a valve and hold the right button: point up to open it, right to close it.',
     flasks: [],
     tools: [
-      { kind: 'dispenser', at: [0.5625, 0.22], valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('R'), 4 * CAP)], T: 10 }] },
-      { kind: 'dispenser', at: [0.6545, 0.22], valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('G'), 4 * CAP)], T: T_ROOM }] },
-      { kind: 'exchanger', at: [0.5625 + 0.046, 0.48], valves: [0.25, 0.25] },
+      // over the exchanger's two tanks, half a grid cell either side of its middle
+      { kind: 'dispenser', at: [0.65, 0.22], valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('R'), 4 * CAP)], T: 10 }] },
+      { kind: 'dispenser', at: [0.75, 0.22], valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('G'), 4 * CAP)], T: T_ROOM }] },
+      { kind: 'exchanger', at: [0.7, 0.48], valves: [0.25, 0.25] },
     ],
   },
   {
@@ -179,11 +183,12 @@ export const PRESETS: readonly Preset[] = [
     flasks: [],
     tools: [
       {
-        kind: 'separator', at: [0.3, 0.2], valves: [0.3],
+        kind: 'separator', at: [0.35, 0.2], valves: [0.3],
         tanks: [{ contents: [atomsOf(singleOf('R'), 2 * CAP), atomsOf(singleOf('C'), 2 * CAP)], T: T_ROOM }],
       },
-      { kind: 'dispenser', at: [0.3 - 0.144, 0.5] },
-      { kind: 'dispenser', at: [0.3 + 0.144, 0.5] },
+      // under its end spouts, two grid cells either side of its middle
+      { kind: 'dispenser', at: [0.15, 0.5] },
+      { kind: 'dispenser', at: [0.55, 0.5] },
     ],
   },
   WASH_PRESET,

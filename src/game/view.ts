@@ -141,7 +141,7 @@ const DROP_R_ATOMS = 1.5e6;
 /** A CRT's phosphor green. */
 const PHOSPHOR = '64, 255, 110';
 /** The separator's splitter, below its valve, in local units (y down). */
-const SEP_BODY = { x0: -150, x1: 150, y0: 100, y1: 112 };
+const SEP_BODY = { x0: -210, x1: 210, y0: 100, y1: 112 };
 /** Height of each line of a label, in world units. */
 const LABEL_H = 10;
 /** How far above a flask's mouth, a hose's funnel, or a scale's platform its note sits, to the note's middle. */
@@ -700,13 +700,11 @@ class ToolView {
       pipes(art, [[x, TH], [x, chuteY(x)]]);
       sh.spouts.forEach((x, k) => pipes(art, [[x, k < sh.spouts.length - 1 ? chuteY(x) + 8 : SORTER_CHUTE.y1], [x, sh.spoutY - 4]]));
     } else if (t.kind === 'heater') {
-      // the funnel's stem down into the tube, a pipe from the tube down through each tap, and the far end turning
-      // down into the last spout
-      const { x1, y, r } = HEATER_TUBE;
-      const end = sh.spouts[sh.spouts.length - 1];
+      // the funnel's stem down into the tube, and a pipe from the tube down through each tap, and from its last
+      // stretch down into the last spout
+      const { y, r } = HEATER_TUBE;
       pipes(art, [[tankX(sh.tanks[0]), TH], [tankX(sh.tanks[0]), y - r + 1]]);
-      for (const x of sh.spouts.slice(0, -1)) pipes(art, [[x, y + r - 1], [x, sh.spoutY - 4]]);
-      pipes(art, [[x1 + r - 1, y], [end - 4, y], [end, y + 4], [end, sh.spoutY - 4]]);
+      for (const x of sh.spouts) pipes(art, [[x, y + r - 1], [x, sh.spoutY - 4]]);
     } else if (t.kind === 'spectrometer') pipes(art, [[0, TH], [0, SPECTROMETER.body.y0]]);
     else if (t.kind === 'receptacle') pipes(art, [[sh.spouts[0], TH], [sh.spouts[0], sh.spoutY - 4]]);
     else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);

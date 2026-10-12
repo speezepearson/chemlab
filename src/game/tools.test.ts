@@ -5,7 +5,7 @@ import { heatAt, temperature } from '../chem/reactions';
 import { Vessel, roomFor, volume } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PIPETTE_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, HOSE_CAP, Hose, MAX_FLOW, PIPETTE_FLOW, PUMP_RATE, SAMPLE_CAP, SCAN_LIGHTS,
   RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, SEPARATOR, SEPARATOR_PERFECT, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, aimAt, counterflow, snapInto, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, mouthGap, scanLevel, separate, spectrum, type Mouth,
 } from './tools';
 
@@ -66,6 +66,11 @@ describe('pipette', () => {
 });
 
 describe('resistive heater', () => {
+  it("has its taps' spouts, and the end's, under the stretches they draw from", () => {
+    const sp = SHAPES.heater.spouts;
+    [...HEATER_TAPS, HEATER_CELLS - 1].forEach((c, j) => expect(heaterCellX(c)).toBeCloseTo(sp[j], 9));
+  });
+
   /** A heater fed a steady room-temperature stream of R for `t` sim seconds, catching what leaves each spout. */
   function run(valves: number[], t = 3 * HEATER.transit, feed = 0.25 * CAP) {
     const ht = new Tool('heater', 0, undefined, valves);
