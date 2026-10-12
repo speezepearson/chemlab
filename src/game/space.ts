@@ -27,12 +27,28 @@ export const ROOM = { x0: -700, x1: 2300, z0: 0, z1: 3000, y1: 1300 };
  * stars sweep past the porthole in the left wall.
  */
 export const SPIN = Math.sqrt(9.81 / 10_000);
+/**
+ * The side of a cell of the room's grid, across the floor: whatever's set down stands squarely in it, facing one of
+ * the four ways along it, with every mouth and spout over the middle of a cell (see toCell). Cells' edges are at whole
+ * multiples of it, so the walls, and every counter's edges, run along them.
+ */
+export const CELL = 100;
+
+/** The middle of the grid cell that x (or z) is in. */
+export const toCell = (v: number) => (Math.floor(v / CELL) + 0.5) * CELL;
+
+/** The nearest of the four ways along the grid: a yaw of a whole number of quarter turns. */
+export const toCardinal = (yaw: number) => wrapAngle(Math.round(yaw / (Math.PI / 2)) * (Math.PI / 2));
+
 /** Height of every counter: the sink counters along the walls, and the islands. */
 export const LIFT = 420;
-/** How far the wall counters come out from the walls. */
-export const COUNTER_D = 130;
-/** The islands' size, across and front to back, and where their grid starts and how far apart they are. */
-const ISLAND = { w: 1000, d: 380, x0: -400, z0: 560, dx: 1300, dz: 780, cols: 2, rows: 3 };
+/** How far the wall counters come out from the walls: two grid cells. */
+export const COUNTER_D = 2 * CELL;
+/**
+ * The islands' size, across and front to back, and where their grid starts and how far apart they are, all in whole
+ * grid cells: each is ten cells by four.
+ */
+const ISLAND = { w: 10 * CELL, d: 4 * CELL, x0: -4 * CELL, z0: 6 * CELL, dx: 13 * CELL, dz: 8 * CELL, cols: 2, rows: 3 };
 /** A counter: its x and z extents, and whether it's an island out in the room rather than a sink counter on a wall. */
 export interface Counter {
   x0: number;
@@ -74,8 +90,11 @@ export function counterUnder(f: { x: number; z: number; hx: number; hz: number; 
 }
 /** How far out from the back wall sticky notes are, so they lie on its face. */
 export const PAPER_Z = 0.6;
-/** How far out from the back wall things stand when nothing says otherwise: over the counter. */
-export const Z_HOME = 76;
+/**
+ * How far out from the back wall things stand when nothing says otherwise: over the counter, in the middle of its
+ * second row of grid cells, so a tool's stand behind it has the first.
+ */
+export const Z_HOME = 1.5 * CELL;
 /** Where the old bench's sink was, in its own units, down from the top of its home area. */
 const SINK_2D = HOME_H - 16;
 

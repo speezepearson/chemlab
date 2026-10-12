@@ -2,10 +2,8 @@ import type { Flask } from './flask';
 import { FLASK_H } from './flaskShape';
 import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
-import { groundAt, toWorld, type Pose, type Vec3 } from './space';
-import {
-  HELIX, HOSE_CAP, SHAPES, SPACE_PER_ATOM, TANK_H, tankDepth, tankX, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
-} from './tools';
+import { CELL, groundAt, toCardinal, toCell, toWorld, type Pose, type Vec3 } from './space';
+import { HELIX, SHAPES, TANK_H, tankDepth, tankX, type Hose, type Mouth, type Tool, type ToolKind } from './tools';
 
 /**
  * Where the parts of everything in the lab are, in the room. Tools, flasks and scales are drawn in their own
@@ -28,6 +26,22 @@ export const TOOL_DEPTH = Object.fromEntries(
     return [kind, { tank, body: Math.max(CABINET_DEPTH[kind] ?? 0, tank + 4, cup ? 2 * cup.w + 2 : 0) }];
   }),
 ) as Record<ToolKind, { body: number; tank: number }>;
+
+/**
+ * A pose on the grid (see CELL): turned to the nearest of the four ways along it, and slid the least way that brings
+ * `anchor`, a point in its own frame, over the middle of a cell.
+ */
+export function onGrid(p: Pose, anchor: Vec3 = { x: 0, y: 0, z: 0 }): Pose {
+  const q = { ...p, yaw: toCardinal(p.yaw) };
+  const a = toWorld(q, anchor);
+  return { ...q, x: q.x + toCell(a.x) - a.x, z: q.z + toCell(a.z) - a.z };
+}
+
+/**
+ * The point of a tool that goes over the middle of a grid cell: the middle of its first tank's mouth. Its other mouths
+ * and its spouts are a whole number of cells from it along the tool, so once it's on the grid, they are too.
+ */
+export const toolAnchor = (t: Tool): Vec3 => ({ x: lx(t, tankX(t.shape.tanks[0])), y: 0, z: 0 });
 
 /** A local x on a tool as it stands: negated if it's flipped (see Tool.flipped). */
 export const lx = (t: Tool, x: number) => (t.flipped ? -x : x);
@@ -128,13 +142,15 @@ export function toolCenter(t: Tool): Vec3 {
 }
 
 /**
- * Flip a tool left to right (see Tool.flipped), about the middle of its box, so it stays where it is. Does nothing,
- * returning false, if its shape isn't flippable.
+ * Flip a tool left to right (see Tool.flipped), about the middle of its box as near as keeps it on the grid, so it
+ * stays where it is. Does nothing, returning false, if its shape isn't flippable.
  */
 export function flip(t: Tool): boolean {
   if (!t.shape.flippable) return false;
-  // the box's middle is at c now and will be at −c, so move the tool 2c along its own x to keep it put
-  const c = toolCenter(t).x;
+  // the box's middle is at c now and will be at −c, so move the tool 2c along its own x to keep it put: c to the
+  // nearest half cell, so it moves a whole number of cells, and its mouths and spouts (half a cell or a whole number
+  // of cells from its middle) stay over cells' middles
+  const c = Math.round(toolCenter(t).x / (CELL / 2)) * (CELL / 2);
   const p = toWorld(t.pose, { x: 2 * c, y: 0, z: 0 });
   t.pose = { ...p, yaw: t.pose.yaw };
   t.flipped = !t.flipped;
@@ -187,8 +203,10 @@ export function onScale(sc: Scale, dx: number): Pose {
   return { ...toWorld(sc.pose, { x: dx, y: FLASK_H, z: 0 }), yaw: sc.pose.yaw };
 }
 
-/** How far from the platform's ends a flask's middle can stand. */
-export const SCALE_INSET = 24;
+/** Where along its platform a scale stands flasks: half a grid cell either side of its middle, a cell apart. */
+export const SCALE_SLOTS = [-CELL / 2, CELL / 2];
+/** The point of a scale that goes over the middle of a grid cell: one of its places for a flask, so both are. */
+export const SCALE_ANCHOR: Vec3 = { x: SCALE_SLOTS[1], y: 0, z: 0 };
 
 /**
  * A scale's body and platform in the room; with `load`, reaching up over whatever's standing on it too (as it's
@@ -210,8 +228,9 @@ export function scaleCenter(sc: Scale): Vec3 {
 }
 
 /**
- * Where a flask let go of with its mouth at `p` would stand on a scale: `dx` along the platform, if it's over the
- * platform, above it but no more than `reach` above it. Null if it isn't.
+ * Where a flask let go of with its mouth at `p` would stand on a scale: `dx` along the platform, at the nearer of its
+ * places for a flask (see SCALE_SLOTS), if it's over the platform, above it but no more than `reach` above it. Null if
+ * it isn't.
  */
 export function scaleSpot(sc: Scale, p: Vec3, reach = 60): number | null {
   const { platform: pl, depth } = SCALE_SHAPE;
@@ -223,41 +242,43 @@ export function scaleSpot(sc: Scale, p: Vec3, reach = 60): number | null {
   const lz = dx * s + dz * c;
   const above = p.y - FLASK_H - sc.pose.y;
   if (lx < pl.x0 || lx > pl.x1 || Math.abs(lz) > depth || above < -10 || above > reach) return null;
-  return Math.max(pl.x0 + SCALE_INSET, Math.min(pl.x1 - SCALE_INSET, lx));
+  return lx < 0 ? SCALE_SLOTS[0] : SCALE_SLOTS[1];
 }
 
 /* ---------------- hoses ---------------- */
 
-/** Half-width of a hose funnel's mouth, and of its stem. */
-export const FUNNEL_R = 20;
-export const FUNNEL_STEM_R = 4;
-/** How far a hose's funnel reaches below its mouth, deep enough to hold what it holds; and its nozzle above its tip. */
-export const FUNNEL_H = (3 * HOSE_CAP * SPACE_PER_ATOM) / (Math.PI * (FUNNEL_R ** 2 + FUNNEL_R * FUNNEL_STEM_R + FUNNEL_STEM_R ** 2));
+/** How tall a hose's nozzle is, up from its tip, and how far it reaches either side of its middle. */
 export const NOZZLE_H = 10;
-/** A hose funnel's inside (see Piece). */
-export const HOSE_FUNNEL: readonly Piece[] = [
-  { h: FUNNEL_H, w0: 2 * FUNNEL_STEM_R, d0: 2 * FUNNEL_STEM_R, w1: 2 * FUNNEL_R, d1: 2 * FUNNEL_R, round: true },
-];
+export const NOZZLE_R = 5;
 
-export function hoseMouth(h: Hose): Mouth {
-  const e = h.inlet;
-  return { v: h.funnel, ...e, hx: FUNNEL_R, hz: FUNNEL_R, rim: { x: e.x + FUNNEL_R + 1, y: e.y, z: e.z } };
+/** A hose's nozzle's box: a little upright cylinder up from its tip. */
+export function nozzleBox(h: Hose): Box {
+  const box = placeBox({ ...h.outlet, yaw: 0 }, { x: 0, y: NOZZLE_H / 2, z: 0 }, { x: NOZZLE_R, y: NOZZLE_H / 2, z: NOZZLE_R });
+  return { ...box, round: true };
 }
 
-export function hoseEndBox(h: Hose, end: 'inlet' | 'outlet'): Box {
-  const e = h[end];
-  const pose = { ...e, yaw: 0 };
-  const box =
-    end === 'inlet'
-      ? placeBox(pose, { x: 0, y: -FUNNEL_H / 2, z: 0 }, { x: FUNNEL_R, y: FUNNEL_H / 2, z: FUNNEL_R })
-      : placeBox(pose, { x: 0, y: NOZZLE_H / 2, z: 0 }, { x: 5, y: NOZZLE_H / 2, z: 5 });
-  return { ...box, round: true };
+/**
+ * How near a spout's tip, across and up, in a tool's flat frame, the crosshair can be on the tool and still be on
+ * the spout: its tip, and the pipe just above it.
+ */
+export const SPOUT_REACH = { x: 12, up: 30, down: 4 };
+
+/** The spout of a tool nearest (x, y) in its flat frame as it stands, if that's within SPOUT_REACH of its tip; null if none is. */
+export function spoutNear(t: Tool, x: number, y: number): number | null {
+  let best: number | null = null;
+  let reach = SPOUT_REACH.x;
+  t.shape.spouts.forEach((sx, j) => {
+    const dx = Math.abs(x - lx(t, sx));
+    const dy = t.shape.spoutY - y;
+    if (dx <= reach && dy <= SPOUT_REACH.up && dy >= -SPOUT_REACH.down) [best, reach] = [j, dx];
+  });
+  return best;
 }
 
 /* ---------------- stands ---------------- */
 
 /**
- * A clamp stand, holding up a tool or a hose end: a base plate on whatever's below, a rod straight up from it, and a
+ * A clamp stand, holding up a tool or a hose's nozzle: a base plate on whatever's below, a rod straight up from it, and a
  * clamp at the rod's top reaching out to what it holds. Its rod stands at (x, z), behind what it holds as that faces,
  * the clamp is `clampY` high, and its arm reaches what it holds at `to`.
  */
@@ -301,15 +322,12 @@ export function toolStands(t: Tool, pose = t.pose): Stand[] {
   });
 }
 
-/**
- * The stand holding up one end of a hose, at `e`, facing `yaw`: behind it, clamped round its funnel or nozzle.
- */
-export function hoseStand(e: Vec3, end: 'inlet' | 'outlet', yaw: number): Stand {
-  const y = end === 'inlet' ? e.y - FUNNEL_H / 2 : e.y + NOZZLE_H / 2;
-  const r = end === 'inlet' ? FUNNEL_R : 5;
+/** The stand holding up a hose's nozzle, with its tip at `e`, facing `yaw`: behind it, clamped round it. */
+export function nozzleStand(e: Vec3, yaw: number): Stand {
+  const y = e.y + NOZZLE_H / 2;
   const pose = { ...e, yaw };
-  const rod = toWorld(pose, { x: 0, y: 0, z: -rodBack(2 * r) });
-  return { x: rod.x, z: rod.z, clampY: y, to: { ...toWorld(pose, { x: 0, y: 0, z: -r }), y }, yaw };
+  const rod = toWorld(pose, { x: 0, y: 0, z: -rodBack(2 * NOZZLE_R) });
+  return { x: rod.x, z: rod.z, clampY: y, to: { ...toWorld(pose, { x: 0, y: 0, z: -NOZZLE_R }), y }, yaw };
 }
 
 /** A stand's base plate, standing at height `y` (the counter's top, or the floor's under it if left out). */

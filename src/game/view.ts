@@ -3,7 +3,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { temperature, type Fluid } from '../chem/reactions';
 import { LOOK, coronaAlpha, coronaRadius, glowFalloff, haloAlpha, haloRadius } from './appearance';
 import {
-  FUNNEL_H, FUNNEL_R, FUNNEL_STEM_R, HOSE_FUNNEL, NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, lx, onTool, openingOf, tankRect, valveLocal, valveZ, type Stand,
+  NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, lx, onTool, openingOf, tankRect, valveLocal, valveZ, type Stand,
 } from './bodies';
 import { CAP, FLASK_L, GOAL_L, TRACE } from './config';
 import { Vessel, fluidAlpha, fluidRGB, glowColor, volume, type Flask } from './flask';
@@ -24,10 +24,12 @@ import {
 /** What the crosshair is on. */
 export type Pick =
   | { kind: 'flask'; f: Flask }
-  | { kind: 'tool'; t: Tool; part: 'body' | 'tank' | 'valve' | 'button'; k: number }
+  | { kind: 'tool'; t: Tool; part: 'body' | 'tank' | 'valve' | 'button' | 'spout'; k: number }
   | { kind: 'scale'; sc: Scale; part: 'body' | 'tare' }
-  | { kind: 'hose'; h: Hose; end: 'inlet' | 'outlet' }
-  | { kind: 'faucet'; i: number }
+  /** A hose's nozzle. */
+  | { kind: 'hose'; h: Hose }
+  /** A faucet: its spout, or the pipe down to it, if `spout`; else its knob or the pipe from the wall. */
+  | { kind: 'faucet'; i: number; spout?: boolean }
   /** The button under the beacon that silences the alarms. */
   | { kind: 'alarm' }
   /** The button by the porthole that shuts its blinds, or opens them. */
@@ -52,7 +54,8 @@ export interface Frame {
   flasks: readonly Flask[];
   tools: readonly Tool[];
   scales: readonly Scale[];
-  hoses: readonly Hose[];
+  /** Each hose, from the spout or faucet it's pulled out of, with what's running through it. */
+  hoses: readonly { h: Hose; from: Vec3; fluid: Fluid | null }[];
   faucets: readonly FaucetSpot[];
   streams: readonly { from: Vec3; toY: number; fluid: Fluid; flow: number }[];
   /**
@@ -143,10 +146,10 @@ const DROP_R_ATOMS = 1.5e6;
 /** A CRT's phosphor green. */
 const PHOSPHOR = '64, 255, 110';
 /** The separator's splitter, below its valve, in local units (y down). */
-const SEP_BODY = { x0: -150, x1: 150, y0: 100, y1: 112 };
+const SEP_BODY = { x0: -210, x1: 210, y0: 100, y1: 112 };
 /** Height of each line of a label, in world units. */
 const LABEL_H = 10;
-/** How far above a flask's mouth, a hose's funnel, or a scale's platform its note sits, to the note's middle. */
+/** How far above a flask's mouth or a scale's platform its note sits, to the note's middle. */
 const NOTE_Y = 13;
 
 /* ---------------- materials ---------------- */
@@ -679,7 +682,7 @@ class ToolView {
     const sh = t.shape;
     const { art, upright } = this;
     const D = TOOL_DEPTH[t.kind];
-    const pick = (m: THREE.Object3D, part: 'body' | 'tank' | 'valve' | 'button', k = 0) => pickables.set(m, { kind: 'tool', t, part, k });
+    const pick = (m: THREE.Object3D, part: 'body' | 'tank' | 'valve' | 'button' | 'spout', k = 0) => pickables.set(m, { kind: 'tool', t, part, k });
     /** Where something at local x stands, for what's kept upright. */
     const ux = (x: number) => lx(t, x);
     this.flipped = t.flipped;
@@ -716,17 +719,15 @@ class ToolView {
       pipes(art, [[x, TH], [x, chuteY(x)]]);
       sh.spouts.forEach((x, k) => pipes(art, [[x, k < sh.spouts.length - 1 ? chuteY(x) + 8 : SORTER_CHUTE.y1], [x, sh.spoutY - 4]]));
     } else if (t.kind === 'heater') {
-      // the funnel's stem down into the tube, a pipe from the tube down through each tap, and the far end turning
-      // down into the last spout
-      const { x1, y, r } = HEATER_TUBE;
-      const end = sh.spouts[sh.spouts.length - 1];
+      // the funnel's stem down into the tube, and a pipe from the tube down through each tap, and from its last
+      // stretch down into the last spout
+      const { y, r } = HEATER_TUBE;
       pipes(art, [[tankX(sh.tanks[0]), TH], [tankX(sh.tanks[0]), y - r + 1]]);
-      for (const x of sh.spouts.slice(0, -1)) pipes(art, [[x, y + r - 1], [x, sh.spoutY - 4]]);
-      pipes(art, [[x1 + r - 1, y], [end - 4, y], [end, y + 4], [end, sh.spoutY - 4]]);
+      for (const x of sh.spouts) pipes(art, [[x, y + r - 1], [x, sh.spoutY - 4]]);
     } else if (t.kind === 'spectrometer') pipes(art, [[0, TH], [0, SPECTROMETER.body.y0]]);
     else if (t.kind === 'receptacle') pipes(art, [[sh.spouts[0], TH], [sh.spouts[0], sh.spoutY - 4]]);
     else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);
-    for (const x of sh.spouts) block(art, pipeMat, x - 4, x + 4, sh.spoutY - 6, sh.spoutY, -4, 4);
+    sh.spouts.forEach((x, k) => pick(block(art, pipeMat, x - 4, x + 4, sh.spoutY - 6, sh.spoutY, -4, 4), 'spout', k));
 
     // tanks, with their fluid
     t.tanks.forEach((_, k) => {
@@ -1283,53 +1284,41 @@ class ScaleView {
 
 /* ---------------- hoses ---------------- */
 
-const funnelGlass = new THREE.CylinderGeometry(FUNNEL_R, FUNNEL_STEM_R, FUNNEL_H, 20, 1, true).translate(0, -FUNNEL_H / 2, 0);
-const funnelFluid = new THREE.CylinderGeometry(FUNNEL_R - 1, FUNNEL_STEM_R - 0.5, FUNNEL_H - 0.5, 20, 1).translate(0, -FUNNEL_H / 2, 0);
 const nozzleGeom = new THREE.CylinderGeometry(4, 3, NOZZLE_H, 12).translate(0, NOZZLE_H / 2, 0);
 
+/**
+ * A hose pulled out of a spout or a faucet: a translucent tube drooping from the spout down to its nozzle, showing
+ * what's running through it.
+ */
 class HoseView {
-  private inlet = new THREE.Group();
   private outlet = new THREE.Group();
   private tube: THREE.Mesh;
   private core: THREE.Mesh;
   private coreMat = new THREE.MeshBasicMaterial();
-  private fluid: FluidMesh;
   private key = '';
-  private note: Label;
 
   constructor(
     readonly h: Hose,
     scene: THREE.Object3D,
     pickables: Map<THREE.Object3D, Pick>,
   ) {
-    const glass = new THREE.Mesh(funnelGlass, glassMat);
-    this.inlet.add(glass, new THREE.LineSegments(new THREE.EdgesGeometry(funnelGlass, 30), edgeMat));
-    this.fluid = new FluidMesh([funnelFluid], this.inlet);
-    pickables.set(glass, { kind: 'hose', h, end: 'inlet' });
-    for (const m of this.fluid.meshes) pickables.set(m, { kind: 'hose', h, end: 'inlet' });
     const nozzle = new THREE.Mesh(nozzleGeom, pipeMat);
     nozzle.castShadow = true;
     this.outlet.add(nozzle);
-    pickables.set(nozzle, { kind: 'hose', h, end: 'outlet' });
+    pickables.set(nozzle, { kind: 'hose', h });
     this.tube = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({ color: 0x7c8883, transparent: true, opacity: 0.45, roughness: 0.3, depthWrite: false }));
     this.core = new THREE.Mesh(new THREE.BufferGeometry(), this.coreMat);
-    this.note = new Label(this.inlet, new THREE.Vector3(0, NOTE_Y, 0));
-    scene.add(this.inlet, this.outlet, this.tube, this.core);
+    scene.add(this.outlet, this.tube, this.core);
   }
 
-  update(): void {
+  update(from: Vec3, fluid: Fluid | null): void {
     const { h } = this;
-    this.inlet.position.set(h.inlet.x, h.inlet.y, h.inlet.z);
     this.outlet.position.set(h.outlet.x, h.outlet.y, h.outlet.z);
-    this.inlet.updateMatrixWorld();
-    this.note.set(h.note);
-    const f = h.funnel;
-    this.fluid.update(f, h.inlet.y - FUNNEL_H + levelIn(HOSE_FUNNEL, volume(f) / f.cap));
-    const key = [h.inlet.x, h.inlet.y, h.inlet.z, h.outlet.x, h.outlet.y, h.outlet.z].map((x) => x.toFixed(1)).join();
+    const key = [from.x, from.y, from.z, h.outlet.x, h.outlet.y, h.outlet.z].map((x) => x.toFixed(1)).join();
     if (key !== this.key) {
       this.key = key;
-      // drooping below the funnel, and coming down into the nozzle from above
-      const a = new THREE.Vector3(h.inlet.x, h.inlet.y - FUNNEL_H, h.inlet.z);
+      // drooping below the spout, and coming down into the nozzle from above
+      const a = new THREE.Vector3(from.x, from.y + 2, from.z);
       const b = new THREE.Vector3(h.outlet.x, h.outlet.y + NOZZLE_H, h.outlet.z);
       const droop = 70;
       const curve = new THREE.CubicBezierCurve3(a, a.clone().setY(a.y - droop), b.clone().setY(b.y + droop), b);
@@ -1338,16 +1327,15 @@ class HoseView {
       this.tube.geometry = new THREE.TubeGeometry(curve, 40, 3.5, 8);
       this.core.geometry = new THREE.TubeGeometry(curve, 40, 2, 6);
     }
-    const rgb = h.out ? fluidRGB(h.out) : null;
+    const rgb = fluid && fluid.N > 0 ? fluidRGB(fluid) : null;
     this.core.visible = !!rgb;
     if (rgb) this.coreMat.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
   }
 
   dispose(): void {
-    for (const o of [this.inlet, this.outlet, this.tube, this.core]) o.removeFromParent();
+    for (const o of [this.outlet, this.tube, this.core]) o.removeFromParent();
     this.tube.geometry.dispose();
     this.core.geometry.dispose();
-    this.fluid.dispose();
   }
 }
 
@@ -2289,7 +2277,7 @@ function buildFaucets(
   const mats = faucets.map(({ wall, spout }, i) => {
     const elbow = new THREE.Vector3(spout.x, wall.y, spout.z);
     pickables.set(rod(g, chromeMat, at(wall), elbow, 3.5), { kind: 'faucet', i });
-    pickables.set(rod(g, chromeMat, elbow, new THREE.Vector3(spout.x, spout.y + 6, spout.z), 3), { kind: 'faucet', i });
+    pickables.set(rod(g, chromeMat, elbow, new THREE.Vector3(spout.x, spout.y + 6, spout.z), 3), { kind: 'faucet', i, spout: true });
     // a collar where it leaves the manifold
     const collar = new THREE.Mesh(unitCylinder, chromeMat);
     collar.position.copy(at(wall)).addScaledVector(out, 7);
@@ -2308,7 +2296,7 @@ function buildFaucets(
     knob.castShadow = true;
     g.add(knob);
     pickables.set(knob, { kind: 'faucet', i });
-    pickables.set(tip, { kind: 'faucet', i });
+    pickables.set(tip, { kind: 'faucet', i, spout: true });
     return mat;
   });
   scene.add(g);
@@ -2441,7 +2429,7 @@ export class View {
     this.sync(this.flasks, fr.flasks, (f) => new FlaskView(f, scene, pickables));
     this.sync(this.tools, fr.tools, (t) => new ToolView(t, scene, pickables));
     this.sync(this.scales, fr.scales, (s) => new ScaleView(s, scene, pickables));
-    this.sync(this.hoses, fr.hoses, (h) => new HoseView(h, scene, pickables));
+    this.sync(this.hoses, fr.hoses.map((x) => x.h), (h) => new HoseView(h, scene, pickables));
     for (const v of this.flasks.values()) v.update();
     // a tool flipped since it was built is built again
     for (const [t, v] of this.tools)
@@ -2452,7 +2440,7 @@ export class View {
       }
     for (const v of this.tools.values()) v.update(fr.hot, fr.shake.get(v.t) ?? 0, fr.delivered);
     for (const v of this.scales.values()) v.update(fr.tarePress === v.sc, fr.hot);
-    for (const v of this.hoses.values()) v.update();
+    for (const { h, from, fluid } of fr.hoses) this.hoses.get(h)!.update(from, fluid);
     fr.faucets.forEach((fa, i) => {
       const rgb = fluidRGB(fa.output);
       if (rgb && this.faucetMats[i]) setRGB(this.faucetMats[i].color, rgb);

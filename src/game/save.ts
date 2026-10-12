@@ -84,20 +84,23 @@ export interface SavedScale extends SavedDepth {
   note?: string;
 }
 
+/**
+ * A hose pulled out of a spout or a faucet. Older saves' hoses had a funnel inlet anywhere, hung under a spout, a
+ * faucet or another hose's nozzle or on a stand of its own, so the fields they kept for it (inlet, funnel, drop, note,
+ * and on.hose) are only read to tell which spout or faucet a hose is on.
+ */
 export interface SavedHose {
   /**
-   * Each end as fractions of the home area (see HOME_W), and how far out from the back wall and which way it faces
+   * Its nozzle as fractions of the home area (see HOME_W), and how far out from the back wall and which way it faces
    * (see Hose.turn), each optional.
    */
-  inlet: { x: number; y: number; z?: number; yaw?: number };
   outlet: { x: number; y: number; z?: number; yaw?: number };
-  funnel: SavedVessel;
-  /** The drop hanging at the outlet, if any. */
-  drop?: SavedVessel;
-  /** The player's note about it, if any. */
-  note?: string;
-  /** What its funnel hangs under, if anything (see Hose.on): a tool by its id and a spout, a faucet, or a hose by its place. */
+  /** The spout (a tool by its id, and a spout) or faucet it's on; an older save's hose with neither is dropped. */
   on?: { tool?: number; spout?: number; faucet?: number; hose?: number };
+  inlet?: { x: number; y: number; z?: number; yaw?: number };
+  funnel?: SavedVessel;
+  drop?: SavedVessel;
+  note?: string;
 }
 
 const BY_NAME = new Map(SPECIES.map((s) => [s.name, s.i]));
