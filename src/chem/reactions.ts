@@ -85,6 +85,8 @@ export class ReactionNetwork {
   private stamp = 0;
   /** The reactions a step found able to happen, in order. */
   private active = new Int32Array(0);
+  /** The highest barrier among the reactions the last step ran (see Lag.bar). */
+  private barMax = 0;
 
   constructor(readonly params: ChemParams) {
     this.rebuild();
@@ -297,10 +299,15 @@ export class ReactionNetwork {
    * negative, then each becomes a whole number of events by roundRandom.
    * Reaction heat goes into the fluid's heat, also in whole quanta; there is
    * no cooling.
+   *
+   * Returns how long the fluid takes to change appreciably, at the rates it had as the step began: the shortest of
+   * how long any species in it would take to be used up by the reactions using it (gross, not net of what makes it),
+   * and how long the heat they give off would take to change their rates by a factor of e. Infinity if nothing
+   * reacts, or dt is 0.
    */
-  step(f: Fluid, dt: number): void {
+  step(f: Fluid, dt: number): number {
     const N = f.N;
-    if (N <= 0) return;
+    if (N <= 0 || dt <= 0) return Infinity;
     const { n } = f;
     const { ra, rb, p1, p2, k, barOf, barList, boltz, seen, dU, flux, cons, first, active } = this;
     const invT = 1 / Math.max(temperature(f), 0.05);
@@ -308,6 +315,7 @@ export class ReactionNetwork {
 
     // only reactions whose reactants are all present can happen; each barrier's exp is worked out once
     let na = 0;
+    let barMax = 0;
     for (let s = 0; s < NS; s++) {
       const a = n[s];
       if (a <= 0) continue;
@@ -327,15 +335,23 @@ export class ReactionNetwork {
         }
         flux[i] = ev * k[i] * boltz[j] * dt;
         active[na++] = i;
+        if (barList[j] > barMax) barMax = barList[j];
       }
     }
 
+    this.barMax = barMax;
+
     cons.fill(0);
+    let warming = 0;
     for (let m = 0; m < na; m++) {
       const i = active[m];
       cons[ra[i]] += flux[i];
       if (rb[i] >= 0) cons[rb[i]] += flux[i];
+      warming -= dU[i] * flux[i];
     }
+    // the rates change by a factor of e when 1/T moves by 1/barMax, and heat q moves it by q / (heatCap · N · T²)
+    let tau = (THERMO.heatCap * N) / (invT * invT * barMax * Math.abs(warming / dt));
+    for (let s = 0; s < NS; s++) if (cons[s] > 0) tau = Math.min(tau, (n[s] * dt) / cons[s]);
     for (let m = 0; m < na; m++) {
       const i = active[m];
       let sc = 1;
@@ -363,7 +379,76 @@ export class ReactionNetwork {
       heat -= dU[i] * v;
     }
     f.Q = Math.max(0, f.Q + roundRandom(heat));
+    return tau;
   }
+
+  /**
+   * Advance a fluid by h, a sim substep, or put it off while the fluid is quiet. A step is at most
+   * QUIET.share of how long the fluid takes to change appreciably (see step), so a fluid whose reactions are all
+   * slow, gross rather than net, can go some substeps between steps, each as accurate as a substep's and nowhere near
+   * long enough to overshoot. It's stepped through all it's owed as soon as that's up, or the chemistry is edited, or
+   * anything about it that sets its rates moves by more than QUIET.drift: its temperature, or any species' share of
+   * it (fluid running in, say, or a species appearing). After such a change the time owed is caught up in steps as
+   * long as the fluid as it is now allows, the first of them a single substep.
+   */
+  tick(f: Fluid, h: number, lag: Lag): void {
+    if (f.N <= 0) {
+      lag.owed = 0;
+      lag.slack = 0;
+      return;
+    }
+    lag.owed += h;
+    // a fluid stepped every substep anyway needn't be watched
+    const moved = lag.slack > h && this.moved(f, lag);
+    if (!moved && lag.owed < lag.slack) return;
+    let left = lag.owed;
+    let most = moved ? h : left;
+    let tau = Infinity;
+    lag.owed = 0;
+    while (left > 0) {
+      const dt = left - most < 1e-9 ? left : most;
+      tau = this.step(f, dt);
+      left -= dt;
+      most = Math.max(h, QUIET.share * tau);
+    }
+    lag.slack = Math.min(QUIET.most, QUIET.share * tau);
+    lag.version = this.version;
+    lag.invT = 1 / Math.max(temperature(f), 0.05);
+    lag.bar = this.barMax;
+    for (let s = 0; s < NS; s++) lag.x[s] = f.n[s] / f.N;
+  }
+
+  /** Whether anything that sets f's rates has moved by more than QUIET.drift since it was last stepped (see tick). */
+  private moved(f: Fluid, lag: Lag): boolean {
+    if (lag.version !== this.version) return true;
+    if (Math.abs(1 / Math.max(temperature(f), 0.05) - lag.invT) * lag.bar > QUIET.drift) return true;
+    for (let s = 0; s < NS; s++) {
+      const x0 = lag.x[s];
+      const x = f.n[s] / f.N;
+      if (x0 === 0 ? x > 0 : Math.abs(x - x0) > QUIET.drift * x0) return true;
+    }
+    return false;
+  }
+}
+
+/**
+ * How far a quiet fluid's chemistry may be put off (see ReactionNetwork.tick): a step consumes at most `share` of
+ * any species, or changes the rates by about that much through its heat; one waits `most` sim seconds at the most;
+ * and it's stepped at once when its temperature or makeup moves its rates by `drift`.
+ */
+export const QUIET = { share: 0.05, most: 0.25, drift: 0.05 };
+
+/** A fluid's chemistry put off while it's quiet (see ReactionNetwork.tick). */
+export class Lag {
+  /** Sim seconds of chemistry not yet stepped. */
+  owed = 0;
+  /** How long it can go between steps, from how it was last stepped: 0 to be stepped every substep. */
+  slack = 0;
+  /** As it was last stepped: the chemistry's version, 1/T, the highest barrier reacting, each species' share. */
+  version = 0;
+  invT = 0;
+  bar = 0;
+  readonly x = new Float64Array(NS);
 }
 
 /** Atom count per ATOMS entry. */

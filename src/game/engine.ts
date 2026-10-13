@@ -1,5 +1,5 @@
 import { equilibrate } from '../chem/equilibrium';
-import { temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
+import { Lag, temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { POD, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
@@ -354,6 +354,8 @@ export class GameEngine {
   private inflow = new Map<Vessel, number>();
   /** Where each drop that landed in a vessel this frame landed, for its sound. */
   private landed: Vec3[] = [];
+  /** Each vessel's chemistry, put off while it's quiet (see ReactionNetwork.tick). */
+  private lags = new WeakMap<Vessel, Lag>();
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -2234,7 +2236,9 @@ export class GameEngine {
           return !lands && d.y > groundAt(d.x, d.z);
         });
         for (const v of vessels) {
-          this.chem.step(v, step);
+          let lag = this.lags.get(v);
+          if (!lag) this.lags.set(v, (lag = new Lag()));
+          this.chem.tick(v, step, lag);
           // by molecules, breaking bonds swells a fluid, and whatever no longer fits spills
           this.overflow(v);
         }
