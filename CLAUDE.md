@@ -61,6 +61,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     wall. While the pencil is in hand, the mouse moves `cursor` rather than the view, and both buttons go to
     `pencilDown`, which works where the cursor's ray meets the wall (`wallAt`).
   - `airlock.ts` is the airlock and cryopod where the player wakes: their size, collisions, and the `Wake` states.
+    `dream.ts` fast-forwards the lab while the player sleeps there; `supply.ts` judges the flow into the station.
     `src/intro/notice.ts` is the message projected inside the pod.
   - `porthole.ts` is the porthole's shape, for how much of the wall it takes up.
   - `surfaces.ts` paints the room's textures (walls, deck, ceiling, counters, cabinets) from noise, pure and DOM-free;
@@ -97,7 +98,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   exception. Waking in the airlock (the pod's message flickering out, its front opening, the doors closing) is sim
   time too, and so is going back to sleep (the front shutting, the fades to and from black and to white). Asleep, the
   lab fast-forwards by running more sim time per frame (`dreamDt`), still in the same substeps, never by taking bigger
-  ones.
+  ones; and once it's steady, by jumping its slow vessels on by their measured rates (`Dream` in `dream.ts`), between
+  bursts of those substeps. Any sim-time state that a jump should move on (clocks, `Supply`) is moved in the engine's
+  substep loop, where `Dream.after` reports a jump.
   - Anything drawn per outlet must use totals over the whole frame. A single substep's output can be empty, for
     example when a wide-open valve drains its tank in the first substep.
 - **Landing fluid goes through `fill()`.** Anything that lands in a vessel (streams, drops, faucets, pours) must use

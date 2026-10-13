@@ -18,6 +18,10 @@ import { roomFor, volume, type Vessel } from './flask';
  * - curve, kink: in a jump, the change in a rate's projection from its own change stays under `curve` of its vessel,
  *   and the neglected next term under `kink`.
  * - trace: a species making up less than this share of its vessel is left as it is.
+ * - slow: only a vessel that takes at least this long to turn over what it holds is moved on in a jump (see
+ *   Tool.turnover); one quicker, like a funnel or a tank on a wide-open valve, settles back by itself as the next burst
+ *   runs. Moving those on by their measured rates only adds their noise, and that can tip a line over the station's
+ *   purity line.
  * - gap: no jump while a burst's longest wait between deliveries into the reference is more than this, well short of
  *   SUPPLY.gap, which wakes the player. A jump can't see a gap open, so it mustn't come near one.
  */
@@ -33,6 +37,7 @@ export const DREAM = {
   curve: 0.05,
   kink: 0.002,
   trace: 1e-6,
+  slow: 200,
   gap: 1.5,
 };
 
@@ -90,9 +95,10 @@ interface Last {
 /**
  * The fast-forward of a sleeping lab (see DREAM): told after every substep of the ordinary simulation, it measures the
  * vessels in bursts, and when they're steady (every species and heat moving at a rate that holds from one burst to the
- * next, and within each), moves them all on at once by as long as that can be trusted, projecting each rate as it's been
- * changing. It stops a burst short of the goal in the reference, so the ordinary simulation always takes it the rest of
- * the way, and the ship's checks see every substep that matters.
+ * next, and within each), moves the slow ones on at once by as long as that can be trusted, projecting each rate as
+ * it's been changing (and in what nothing drains, which feeds nothing back, just at its rate); the quick ones settle
+ * back by themselves. It stops a burst short of the goal in the reference, so the ordinary simulation always takes it
+ * the rest of the way, and the ship's checks see every substep that matters.
  *
  * Its vessels are fixed when it's made: the lab's arrangement doesn't change while the player sleeps.
  */
@@ -119,6 +125,8 @@ export class Dream {
 
   constructor(
     private readonly vessels: readonly Vessel[],
+    /** How long each vessel takes to turn over what it holds, in sim seconds (see DREAM.slow). */
+    private readonly turnover: readonly number[],
     /** The cryostabilizer reference, which only fills, and the target in it at which the player wins. */
     private readonly ref: Vessel,
     private readonly goal: number,
@@ -177,8 +185,10 @@ export class Dream {
     const last = this.last;
     let steady = true;
     let pending = false;
+    const k = vessels.indexOf(this.ref);
     const moving = fits.map(({ all, a, b }, j) => {
       const on = new Uint8Array(NS + 1);
+      const slow = j === k || this.turnover[j] >= DREAM.slow;
       let molecules = 0;
       for (let s = 0; s < NS; s++) molecules += all.most[s];
       for (let c = 0; c <= NS; c++) {
@@ -189,10 +199,10 @@ export class Dream {
         const was = last?.rates[j][c];
         const tol = 0.3 * Math.abs(r) + noise(all.scatter[c], span) + (last?.noise[j][c] ?? Infinity);
         if (was === undefined || Math.sign(was) !== Math.sign(r) || Math.abs(was - r) > tol) {
-          if (Math.abs(r) > 1e-3 * molecules || !last) pending = true;
+          if (slow && (Math.abs(r) > 1e-3 * molecules || !last)) pending = true;
           continue;
         }
-        on[c] = 1;
+        on[c] = slow ? 1 : 0;
         // and holds within the burst: its two halves agree
         if (Math.abs(a.rate[c] - b.rate[c]) > 2 * noise(all.scatter[c], span / 2) + 0.1 * Math.abs(r)) steady = false;
       }
@@ -214,7 +224,6 @@ export class Dream {
     const limit = (x: number) => {
       if (x < J) J = x;
     };
-    const k = vessels.indexOf(this.ref);
     // nothing but the reference moving: its gain is pooled over every burst of the run
     const drifting = moving.some((on, j) => j !== k && on.some((x) => x));
     const xr = xs[k];
@@ -223,7 +232,18 @@ export class Dream {
     if (drifting) this.pool = { gain: 0, time: 0 };
     else fits[k].all.rate[TARGET] = this.pool.gain / this.pool.time;
     const since = last ? this.t - last.t : 0;
-    const bend = last ? fits.map((f, j) => f.all.rate.map((r, c) => (r - last.rates[j][c]) / since)) : undefined;
+    // how each rate's been changing, from the burst before, and how that's been changing, from the one before that: only
+    // where the change stands clear of the noise, else not at all
+    const bend = last
+      ? fits.map((f, j) => f.all.rate.map((r, c) => (Math.abs(r - last.rates[j][c]) > noises[j][c] + last.noise[j][c] ? (r - last.rates[j][c]) / since : 0)))
+      : undefined;
+    const lb = last?.bend;
+    const kink =
+      bend && lb
+        ? bend.map((b, j) =>
+            b.map((x, c) => (x && lb[j][c] && Math.abs(x - lb[j][c]) * since > 2 * (noises[j][c] + last!.noise[j][c]) ? (x - lb[j][c]) / since : 0)),
+          )
+        : undefined;
     vessels.forEach((v, j) => {
       const r = fits[j].all.rate;
       let molecules = 0;
@@ -234,15 +254,14 @@ export class Dream {
         if (!moving[j][c]) continue;
         const x = c === NS ? v.Q : v.n[c];
         if (c < NS) grows += r[c] * roomFor(c);
-        if (r[c] < 0 && x > 0) limit((0.5 * x) / -r[c]);
-        if (j === k) continue;
+        // nothing much of its vessel empties by more than half (a trace may run out: it's floored at none)
+        if (r[c] < 0 && x > (c === NS ? 0 : 1e-3 * scale)) limit((0.5 * x) / -r[c]);
+        // the reference, and a vessel nothing drains (a flask, a tank shut), feeds nothing back into the line: it's
+        // only moved on at its rate, and can't hold a jump back but by running out or over
+        if (j === k || this.turnover[j] === Infinity) continue;
         if (c < NS) limit((DREAM.share * scale) / Math.abs(r[c]));
-        if (bend && bend[j][c]) {
-          limit(Math.sqrt((2 * DREAM.curve * scale) / Math.abs(bend[j][c])));
-          const kink = last?.bend ? (bend[j][c] - last.bend[j][c]) / since : 0;
-          if (kink) limit(Math.cbrt((6 * DREAM.kink * scale) / Math.abs(kink)));
-          else if (!last?.bend) limit(Math.sqrt((2 * DREAM.kink * scale) / Math.abs(bend[j][c])));
-        }
+        if (bend?.[j][c]) limit(Math.sqrt((2 * DREAM.curve * scale) / Math.abs(bend[j][c])));
+        if (kink?.[j][c]) limit(Math.cbrt((6 * DREAM.kink * scale) / Math.abs(kink[j][c])));
       }
       if (j !== k && grows > 0) limit((0.5 * Math.max(0, v.cap - volume(v))) / grows);
     });
@@ -253,7 +272,7 @@ export class Dream {
     if (last && meanGap > last.meanGap) limit((0.5 * (DREAM.gap - (meanGap + 6 * sdGap))) / ((meanGap - last.meanGap) / since));
     this.last = { t: this.t, rates: fits.map((f) => f.all.rate), noise: noises, meanGap, bend };
     if (pending || !(J > dt)) return 0;
-    this.jump(J, fits.map((f) => f.all.rate), moving, drifting ? bend : undefined, drifting ? last?.bend : undefined, since, half);
+    this.jump(J, fits.map((f) => f.all.rate), moving, drifting ? bend : undefined, drifting ? kink : undefined, since, half);
     return J;
   }
 
@@ -261,15 +280,19 @@ export class Dream {
    * Move every moving component on by J: by its rate, measured at the middle of the burst, `half` ago, and as that rate
    * has been bending (a Taylor series to the third order about that middle).
    */
-  private jump(J: number, rates: Float64Array[], moving: Uint8Array[], bend: Float64Array[] | undefined, bent: Float64Array[] | undefined, since: number, half: number): void {
+  private jump(J: number, rates: Float64Array[], moving: Uint8Array[], bend: Float64Array[] | undefined, kinks: Float64Array[] | undefined, since: number, half: number): void {
+    const k = this.vessels.indexOf(this.ref);
     this.vessels.forEach((v, j) => {
       let any = false;
       for (let c = 0; c <= NS; c++) {
         if (!moving[j][c]) continue;
         const r = rates[j][c];
-        const b = bend?.[j][c] ?? 0;
+        // the reference only fills, at the rate measured, as does whatever nothing drains: their rates' changes come of
+        // the rest, already measured there
+        const sink = j === k || this.turnover[j] === Infinity;
+        const b = sink ? 0 : (bend?.[j][c] ?? 0);
+        const kink = sink ? 0 : (kinks?.[j][c] ?? 0);
         // the bend is a backward difference, centred half the time between bursts before now
-        const kink = bend && bent && since ? (b - bent[j][c]) / since : 0;
         const bc = b + (kink * since) / 2;
         const integral = (t: number) => r * t + (bc * t * t) / 2 + (kink * t * t * t) / 6;
         const d = Math.round(integral(half + J) - integral(half));

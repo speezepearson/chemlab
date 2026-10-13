@@ -80,7 +80,8 @@ class Lab {
   sleep(goal: number, dream: boolean): { end: 'win' | 'wake'; t: number; skipped: number } {
     this.warm();
     const t0 = this.clock;
-    const d = dream ? new Dream(this.vessels(), this.ref, goal) : null;
+    const turnover = this.tools.flatMap(({ t }) => t.tanks.map((_, k) => t.turnover(k)));
+    const d = dream ? new Dream(this.vessels(), turnover, this.ref, goal) : null;
     for (;;) {
       const held = this.ref.n[TARGET];
       const end = this.step(goal);
@@ -128,7 +129,7 @@ describe('dream', () => {
     still.setMolecules(singleOf('R'), 0.5 * CAP);
     const ref = new Vessel(Infinity);
     const per = 1e6;
-    const d = new Dream([still, ref], ref, 1e18);
+    const d = new Dream([still, ref], [Infinity, Infinity], ref, 1e18);
     const lengths: number[] = [];
     for (let i = 0; i < 300 / H; i++) {
       ref.setMolecules(TARGET, ref.n[TARGET] + per);
@@ -147,7 +148,7 @@ describe('dream', () => {
     const ref = new Vessel(Infinity);
     const per = 1e6;
     const goal = 5e10;
-    const d = new Dream([ref], ref, goal);
+    const d = new Dream([ref], [Infinity], ref, goal);
     while (ref.n[TARGET] + per <= goal) {
       ref.setMolecules(TARGET, ref.n[TARGET] + per);
       if (d.after(H, true)) expect(goal - ref.n[TARGET]).toBeGreaterThan((DREAM.heal + 2 * DREAM.later) * (per / H) * 0.9);
@@ -157,7 +158,7 @@ describe('dream', () => {
 
   it("doesn't jump while the waits between deliveries come anywhere near waking the player", () => {
     const ref = new Vessel(Infinity);
-    const d = new Dream([ref], ref, Infinity);
+    const d = new Dream([ref], [Infinity], ref, Infinity);
     const every = Math.round((DREAM.gap + 0.1) / H);
     for (let i = 0; i < 5000 / H; i++) {
       const on = i % every === 0;
@@ -171,7 +172,7 @@ describe('dream', () => {
     const s = singleOf('G');
     tank.setMolecules(s, 1e9);
     const ref = new Vessel(Infinity);
-    const d = new Dream([tank, ref], ref, Infinity);
+    const d = new Dream([tank, ref], [Infinity, Infinity], ref, Infinity);
     for (let i = 0; i < 20000 / H && tank.n[s] > 1e7; i++) {
       // drains in proportion to what's left, as a valve does, all of it into the reference
       const out = Math.round(tank.n[s] * 1e-3 * H);

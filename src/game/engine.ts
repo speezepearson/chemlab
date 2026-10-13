@@ -5,6 +5,7 @@ import { notice, welcomeNotice, type Block } from '../intro/notice';
 import { POD, WAKE_S, airlockBoxes, doorsOpen, ease, inCryopod, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import { beeper, type Beeper } from './beeper';
+import { Dream } from './dream';
 import {
   FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, nozzleBox,
   docked, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
@@ -335,6 +336,8 @@ export class GameEngine {
   private slept = false;
   /** Sim seconds to run each frame while the player sleeps: as many as fit in SLEEP_MS (see simulate). */
   private dreamDt = 1;
+  /** While the player sleeps, the fast-forward that moves the lab on in jumps once it's steady (see Dream). */
+  private dreamer: Dream | null = null;
   /** While the player sleeps, when (by performance.now) and with how much target in the reference it began, for how long it'll take. */
   private dreamFrom: { at: number; held: number } | null = null;
   /** How far the ship has turned, in radians (see SPIN), for the stars. */
@@ -545,6 +548,7 @@ export class GameEngine {
       this.slept = false;
       this.arrival = false;
       this.dreamFrom = null;
+      this.dreamer = null;
     }
     this.beeper?.stop();
     this.beeper = null;
@@ -1964,6 +1968,14 @@ export class GameEngine {
   }
 
   /**
+   * How long each vessel (in the order of vessels) takes to turn over what it holds, in sim seconds (see Tool.turnover):
+   * a flask never does, as nothing drains it; a heater's tube carries what's in it through in HEATER.transit.
+   */
+  private turnovers(): number[] {
+    return [...this.flasks.map(() => Infinity), ...this.tools.flatMap((t) => [...t.tanks.map((_, k) => t.turnover(k)), ...t.tube.map(() => HEATER.transit)])];
+  }
+
+  /**
    * Every vessel holding fluid, with how exposed that fluid is to the room (see exposure): how deep it stands, and
    * how wide on average, as it's shown, taking the flat outline its shape is built from. A flask fills its wide base
    * first; a tank fills straight up, a funnel from its narrow stem; a pipette fills its tube, then its cup; a sump
@@ -2156,6 +2168,7 @@ export class GameEngine {
     const asleep = this.wake === 'asleep';
     let simDt = this.wake === 'pod' ? 0 : asleep ? (this.speed > 0 ? this.dreamDt : 0) : dt * this.speed;
     const began = performance.now();
+    let jumped = 0;
     const mouths = (this.open = this.mouths());
     const h = this.held;
 
@@ -2251,6 +2264,13 @@ export class GameEngine {
           this.overflow(v);
         }
         for (const [v, e] of exposures) cool(v, e, step);
+        // asleep, a steady lab is moved on in jumps (see Dream), and the sim-time clocks with it
+        const J = asleep ? (this.dreamer?.after(step, this.station().supply!.since === 0) ?? 0) : 0;
+        if (J) {
+          jumped += J;
+          this.wakeT += J;
+          this.station().supply!.skip(J);
+        }
       }
       this.tools.forEach((t, j) =>
         toolTotals[j].forEach(({ v, streamed }, k) => {
@@ -2260,8 +2280,8 @@ export class GameEngine {
         }),
       );
     }
-    this.spin = (this.spin + SPIN * simDt) % (2 * Math.PI);
-    this.clock += simDt;
+    this.spin = (this.spin + SPIN * (simDt + jumped)) % (2 * Math.PI);
+    this.clock += simDt + jumped;
     this.spillTime = simDt;
     // asleep, run as much more or less next frame as fits in SLEEP_MS
     if (asleep && this.speed > 0) {
@@ -2785,6 +2805,7 @@ export class GameEngine {
     this.wake = 'waking';
     this.wakeT = 0;
     this.dreamFrom = null;
+    this.dreamer = null;
   }
 
   /** On through waking up or falling asleep, over a sim substep of h seconds (see Wake), like everything else that happens. */
@@ -2805,6 +2826,7 @@ export class GameEngine {
     else if (w === 'dozing' && t >= WAKE_S.doze) {
       next('asleep');
       this.dreamFrom = { at: performance.now(), held: this.station().tanks[1].n[TARGET] };
+      this.dreamer = new Dream(this.vessels(), this.turnovers(), this.station().tanks[1], GOAL_TARGET);
     } else if (w === 'asleep') {
       const st = this.station();
       if (st.tanks[1].n[TARGET] >= GOAL_TARGET) this.wakeTo('arrival');

@@ -1009,6 +1009,19 @@ export class Tool {
   }
 
   /**
+   * About how long tank k takes to turn over what it holds, in sim seconds, draining as it does: what it holds over
+   * how fast it lets out when full (Infinity if it doesn't drain at all). For the fast-forward while the player sleeps,
+   * which leaves what turns over quickly to settle by itself (see Dream).
+   */
+  turnover(k: number): number {
+    const cap = this.tanks[k].cap;
+    if (this.kind === 'heater') return cap / HEATER.feed;
+    if (this.kind === 'receptacle') return k === 0 ? cap / FUNNEL_RATE : cap / (this.valves[0] * REFERENCE_FLOW);
+    if (this.kind === 'meter' || this.kind === 'splitter' || this.kind === 'sorter' || INLINE_TOOLS.includes(this.kind)) return cap / FUNNEL_RATE;
+    return cap / (this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW));
+  }
+
+  /**
    * Which way a receptacle's diverter is sending what comes through it, for its diagram, its lamp and its sound: the
    * way it last went, if anything has in the last DIVERT_HOLD; null if nothing has.
    */
