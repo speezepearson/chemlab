@@ -14,7 +14,7 @@ import { cool, exposure, taper } from './cooling';
 import { FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
 import { Flask, Vessel, fluidColor, roomFor, transfer, volume, volumeUnit, type Point } from './flask';
-import { boxesOverlap, moveBox, roomBoxes, walk, type Box } from './physics';
+import { boxesOverlap, moveBox, roomBoxes, segmentHitsBox, solids, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
 import { DEFAULT_PRESET, METER_AT, REFERENCE_FILL, SPECTROMETER_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
@@ -189,6 +189,8 @@ const TIP_S = 0.3;
  */
 const POUR_GAP = 20;
 const POUR_RISE = 300;
+/** How long, in real seconds, the spot what's held is wanted at must stay clear for it to jump there when stuck (see move). */
+const SNAP_S = 0.2;
 /** How far across, in world units, an outlet can miss a mouth by and still show a faint guide to it (see guides). */
 const GUIDE_NEAR = 40;
 /** How fast a falling drop speeds up, in world units per sim second squared: a 500-unit fall takes 0.7 s. */
@@ -270,6 +272,8 @@ export class GameEngine {
   private falling: { v: Vessel; x: number; y: number; z: number; vy: number }[] = [];
   /** The faucets pouring into something this frame: where from (the faucet, or its hose's nozzle), and into what. */
   private faucetFlows: { fa: FaucetSpot; from: Vec3; m: Mouth }[] = [];
+  /** How long, in real seconds, what's held has been stuck short of a clear spot it's wanted at (see move). */
+  private snapFor = 0;
   /** Where the held flask is kept, over the mouth the right button was pressed on, while it's held (see pourPose). */
   private pinned: Pose | null = null;
   /** Where the held flask poured this frame, if it did: its lip, and what it poured into (null: the sink). */
@@ -1771,7 +1775,10 @@ export class GameEngine {
       }
     }
     if (h?.kind !== 'flask' || !this.rightHeld) this.pinned = null;
-    if (!h || !load) return;
+    if (!h || !load) {
+      this.snapFor = 0;
+      return;
+    }
     // what's held goes toward where it'd be in front of the eyes (or a flask pouring into something, over it), and then turns there in a quarter turn, all at once,
     // if there's room; a flask's box doesn't turn (see flaskBox): it's turned to face the player after it's moved, below
     const want = this.boxAt(h, this.pinned ?? this.gripPose(h));
@@ -1780,6 +1787,18 @@ export class GameEngine {
     if (Math.abs(turn) > 1e-9) {
       const turned = { ...moved, yaw: load.yaw + turn };
       if (!obstacles.some((o) => boxesOverlap(turned, o) && !boxesOverlap(moved, o))) moved = turned;
+    }
+    // stuck short of where it's wanted, as on the wrong side of something it was swung into, it jumps straight there
+    // once that's been clear for SNAP_S, and in sight: nothing between its middle, where the crosshair is, and the eyes
+    const short = Math.hypot(moved.x - want.x, moved.y - want.y, moved.z - want.z) > 1 || Math.abs(wrapAngle(moved.yaw - want.yaw)) > 1e-6;
+    const eye = this.eye();
+    const clear =
+      short && !obstacles.some((o) => boxesOverlap(want, o)) &&
+      !obstacles.some((o) => segmentHitsBox(eye, want, o) && solids(o).some((p) => segmentHitsBox(eye, want, p)));
+    this.snapFor = clear ? this.snapFor + dt : 0;
+    if (this.snapFor >= SNAP_S) {
+      moved = want;
+      this.snapFor = 0;
     }
     this.placeHeld(h, this.poseForBox(h, moved));
     if (h.kind === 'flask') {
