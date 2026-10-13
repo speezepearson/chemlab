@@ -80,6 +80,8 @@ export interface Hud {
   pencil: boolean;
   /** Whether F would flip something: the tool held, or else the one looked at, if it can be flipped. */
   flip: boolean;
+  /** Whether N would write a note about what the crosshair is on (see GameEngine.note). */
+  label: boolean;
   /** What the right button does now, in a word, for the touch screen's button that stands in for it. */
   hand: 'Pour' | 'Flow' | 'Turn' | 'Erase';
   /** A brief note, like there being no room for something. */
@@ -90,8 +92,7 @@ export interface Hud {
 
 /**
  * Something the player can do just now: the keys or buttons that do it, pressed together, and what it does, in a few
- * words. Keys are named as on the keyboard; 'LMB' and 'RMB' are the mouse's left and right buttons, 'LMB2' a
- * double-click, 'Wheel' its wheel, '←→' moving it across and '↑↓' up and down. `off` if it can't be done here, though
+ * words. Keys are named as on the keyboard; 'LMB' and 'RMB' are the mouse's left and right buttons, 'Wheel' its wheel, '←→' moving it across and '↑↓' up and down. `off` if it can't be done here, though
  * it could elsewhere.
  */
 export interface Action {
@@ -105,9 +106,9 @@ export interface EngineCallbacks {
   onWin(): void;
   /** Throttled to ~10 Hz; null when nothing is inspected. */
   onInspect(info: Inspection | null): void;
-  /** A vessel was double-clicked in god mode; look it up with GameEngine.vessel(id). */
+  /** N was pressed on a vessel in god mode; look it up with GameEngine.vessel(id). */
   onEdit(id: string): void;
-  /** Something that can be carried was double-clicked to write a note about it: the note's id (see GameEngine.note). */
+  /** N was pressed on something, to write a note about it: the note's id (see GameEngine.note). */
   onLabel(id: string): void;
   /** The pencil was picked up or put down (see setPencil). */
   onPencil(on: boolean): void;
@@ -200,8 +201,6 @@ const STICK_TURN = 2.4;
 const STICK_TILT = 1.6;
 /** Whether the screen is mainly touched, rather than pointed at with a mouse: then the on-screen sticks walk and look. */
 export const TOUCH = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
-/** How long two clicks can be apart and count as a double-click, in ms. */
-const DOUBLE_MS = 380;
 /**
  * Where the faucets are: along the right wall over its counter, a grid cell apart, each spout over the middle of a
  * cell of the counter's one row (see CELL, SINK_D). Their spouts are a little under eye level, high enough over the
@@ -265,7 +264,6 @@ export class GameEngine {
   private target: (Pick & { point: Vec3; distance: number }) | null = null;
   /** A brief note on the display, like there being no room for something (see say). */
   private flash: { text: string; until: number } | null = null;
-  private lastClick = { at: 0, id: '' };
   private won = false;
   /** Whether the alarms are silenced, by the button under the beacon (see hushAlarms). Saved, and kept through Reset. */
   private alarmsOff = false;
@@ -910,6 +908,11 @@ export class GameEngine {
     if (this.locked) this.flipTarget();
   }
 
+  /** N: write a note about what the crosshair is on. */
+  touchNote(): void {
+    if (this.locked) this.writeNote();
+  }
+
   /** Backspace: put away what's held. */
   touchPutAway(): void {
     if (this.locked) this.putAway();
@@ -1045,6 +1048,11 @@ export class GameEngine {
       if (e.code === 'KeyE') this.grabOrRelease();
       if (e.code === 'KeyF') this.flipTarget();
       if (e.code === 'KeyP') this.setPencil(!this.pencil);
+      if (e.code === 'KeyN') {
+        // the note's text box opens at once, and N mustn't be typed into it
+        e.preventDefault();
+        this.writeNote();
+      }
       const item = HOTKEY_CODES.indexOf(e.code);
       if (item >= 0) {
         this.spawn(ITEMS[item]);
@@ -1274,20 +1282,19 @@ export class GameEngine {
     if (p?.kind === 'scale' && p.part === 'tare') {
       p.sc.zero();
       this.tarePress = p.sc;
-      return;
     }
-    // a double-click on anything that can be carried writes a note about it; in god mode a flask or tank opens the
-    // editor instead, which has a field for its label
+  }
+
+  /**
+   * Write a note about what the crosshair is on, if it can have one (see targetNote): the mouse is let go, to type it.
+   * In god mode a flask or tank opens the editor instead, which has a field for its label.
+   */
+  private writeNote(): void {
     const id = this.targetNote();
-    const now = performance.now();
-    if (id && id === this.lastClick.id && now - this.lastClick.at < DOUBLE_MS) {
-      this.lastClick = { at: 0, id: '' };
-      document.exitPointerLock();
-      if (this.god && /^(f\d+|t\d+\.\d+)$/.test(id)) this.cb.onEdit(id);
-      else this.cb.onLabel(id);
-      return;
-    }
-    this.lastClick = { at: now, id: id ?? '' };
+    if (!id || inPod(this.wake)) return;
+    document.exitPointerLock();
+    if (this.god && /^(f\d+|t\d+\.\d+)$/.test(id)) this.cb.onEdit(id);
+    else this.cb.onLabel(id);
   }
 
   /**
@@ -2223,7 +2230,7 @@ export class GameEngine {
       if (m) add(['LMB'], this.hoseOn(m) ? 'take hold of its hose' : 'pull out its hose');
       else if (!h && p?.kind === 'hose') add(['LMB'], 'take hold of it');
       const id = this.targetNote();
-      if (id) add(['LMB2'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
+      if (id) add(['N'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
       add(['P'], 'pick up the pencil');
     }
     add(['Esc'], 'let go of the mouse');
@@ -2352,6 +2359,7 @@ export class GameEngine {
       aim: this.pencil ? { ...this.cursor } : this.turning ? { ...this.turning.aim } : null,
       pencil: this.pencil,
       flip: !!(h?.kind === 'tool' ? h.t : !h && p?.kind === 'tool' ? p.t : null)?.shape.flippable,
+      label: !inPod(this.wake) && !!this.targetNote(),
       hand: this.pencil ? 'Erase' : h?.kind === 'flask' ? 'Pour' : h ? 'Flow' : 'Turn',
       note: this.flash?.text ?? null,
       actions: this.actions(),

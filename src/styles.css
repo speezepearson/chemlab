@@ -139,7 +139,6 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .can.off{opacity:.45}
 .doable .keys{display:flex;align-items:center;gap:3px;flex:none;min-width:76px}
 .doable .plus{margin:0 2px;opacity:.7}
-.doable .twice{display:inline-flex;align-items:center;gap:1px}
 .doable kbd{
   font:600 11px "Schibsted Grotesk",sans-serif;color:#1b2320;background:rgba(238,240,235,.85);
   border-radius:4px;padding:1px 5px;

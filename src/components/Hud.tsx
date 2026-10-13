@@ -99,8 +99,8 @@ function TouchButton({
 /**
  * On a touch screen, while playing: the stick that walks, bottom left, and the one that looks, bottom right; and
  * buttons standing in for the keys and the right button. Over the look stick, Grab (E) and the right button, which
- * is named for what it'll do and, while a valve turns, aims its lever as the finger drags; and Flip (F) when there's
- * something to flip. Over the move stick, while something's held, a pad to drag (across to turn it,
+ * is named for what it'll do and, while a valve turns, aims its lever as the finger drags; Flip (F) when there's
+ * something to flip; and Note (N) when there's something to write a note about. Over the move stick, while something's held, a pad to drag (across to turn it,
  * up and down to hold it further or nearer, or for a hose's nozzle, to slide its stand out or in) and Put away
  * (Backspace).
  */
@@ -112,6 +112,7 @@ export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudSta
       <Stick engine={engine} which="look" />
       <div className="touch-buttons right">
         {hud.flip && <TouchButton label="Flip" className="small" down={() => engine.touchFlip()} />}
+        {hud.label && <TouchButton label="Note" className="small" down={() => engine.touchNote()} />}
         <TouchButton
           label={hud.hand}
           lit={hud.right || hud.pencil}
@@ -143,12 +144,6 @@ function MouseHint({ side }: { side: 'left' | 'right' }) {
 /** One key or button of an action (see Action): a key cap, or a little mouse with the button lit. */
 function Key({ k }: { k: string }) {
   if (k === 'LMB' || k === 'RMB') return <MouseHint side={k === 'LMB' ? 'left' : 'right'} />;
-  if (k === 'LMB2')
-    return (
-      <span className="twice">
-        <MouseHint side="left" />×2
-      </span>
-    );
   return <kbd>{k}</kbd>;
 }
 
