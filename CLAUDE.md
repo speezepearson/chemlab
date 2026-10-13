@@ -51,7 +51,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `engine.ts` owns the lab: what's in it, the player, input, carrying, the pencil and the sim loop.
   - `view.ts` draws it all with Three.js, and raycasts for what the crosshair is on.
   - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room.
-  - `physics.ts` is the collisions: yawed boxes, the player's cylinder, `moveBox` and `walk`.
+  - `physics.ts` is the collisions: yawed boxes, the player's cylinder and `walk`. What's held collides with nothing; only
+    where it would be set down is checked (the engine's `placement` and `rest`).
   - `space.ts` is the room, poses, and the mapping from the old flat bench to its back wall.
   - `tools.ts` holds tool shapes (flat outlines, y down) and per-step logic, plus drips and the instruments' readings (the spectroscope's graph is `spectroscopeAt`).
   - `flask.ts` has `Vessel`, `transfer`, volume and colors.

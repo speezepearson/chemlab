@@ -3,8 +3,9 @@ import { toWorld, type Pose, type Vec3 } from './space';
 /**
  * Collisions in the lab. Nothing falls (whatever the player lets go of is set down on a counter, or on a stand), and
  * nothing turns except about the vertical, so every body is a box turned by some yaw, or an upright cylinder, or
- * made of several such parts, and the player is an upright cylinder. The only things that move are the player and what they're carrying, so the physics is all
- * about stopping those short of whatever they'd run into, and letting them slide along it.
+ * made of several such parts, and the player is an upright cylinder. What they carry passes through everything, and is
+ * only checked for room where it's set down, so the only thing that moves is the player: the physics is all about
+ * stopping them short of whatever they'd run into, and letting them slide along it.
  */
 
 /**
@@ -110,8 +111,6 @@ export function cylinderHitsBox(c: Cylinder, b: Box, slop = 0.01): boolean {
   });
 }
 
-const free = (b: Box, obstacles: readonly Box[]) => !obstacles.some((o) => boxesOverlap(b, o));
-
 /** Whether the straight line from a to b passes through a box, taken as solid all through (its parts aren't looked at). */
 export function segmentHitsBox(a: Vec3, b: Vec3, box: Box): boolean {
   // in the box's own frame (see footprint), where it's square to the axes
@@ -137,67 +136,24 @@ export function segmentHitsBox(a: Vec3, b: Vec3, box: Box): boolean {
   return true;
 }
 
-/** How finely a move is stepped, so nothing thinner than this is passed through: in world units, and radians. */
+/** How finely a walk is stepped, so nothing thinner than this is passed through: in world units. */
 const STEP = 3;
-const TURN_STEP = 0.04;
 
 /**
- * Move a box toward `to`, stopping short of anything in its way and sliding along it: each step goes as far
- * toward `to` as it can, and if the whole step is blocked, takes whichever parts of it (along x, y, z, or the
- * turn) aren't. Obstacles it already overlaps are ignored, so something stuck can always be pulled free.
+ * Walk the player by (dx, dz), sliding along whatever's in the way: each axis goes only if they wouldn't run into
+ * anything. Obstacles they already overlap are ignored, so they don't get stuck.
  */
-export function moveBox(from: Box, to: Pose, obstacles: readonly Box[]): Box {
-  const live = obstacles.filter((o) => !boxesOverlap(from, o));
-  const dyaw = to.yaw - from.yaw;
-  const n = Math.min(
-    400,
-    Math.max(1, Math.ceil(Math.max(Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z) / STEP, Math.abs(dyaw) / TURN_STEP))),
-  );
-  const step = { x: (to.x - from.x) / n, y: (to.y - from.y) / n, z: (to.z - from.z) / n, yaw: dyaw / n };
-  let cur = from;
-  for (let i = 0; i < n; i++) {
-    const next = { ...cur, x: cur.x + step.x, y: cur.y + step.y, z: cur.z + step.z, yaw: cur.yaw + step.yaw };
-    if (free(next, live)) {
-      cur = next;
-      continue;
-    }
-    for (const k of ['x', 'y', 'z', 'yaw'] as const) {
-      if (!step[k]) continue;
-      const cand = { ...cur, [k]: cur[k] + step[k] };
-      if (free(cand, live)) cur = cand;
-    }
-  }
-  return cur;
-}
-
-/**
- * Walk the player (and whatever they carry, which moves with them) by (dx, dz), sliding along whatever's in
- * the way: each axis goes only if neither the player nor the load would run into anything. Obstacles the
- * player or the load already overlaps are ignored for that one, so neither gets stuck.
- */
-export function walk(
-  player: Cylinder,
-  load: Box | null,
-  dx: number,
-  dz: number,
-  obstacles: readonly Box[],
-): { player: Cylinder; load: Box | null } {
-  const forPlayer = obstacles.filter((o) => !cylinderHitsBox(player, o));
-  const forLoad = load ? obstacles.filter((o) => !boxesOverlap(load, o)) : [];
+export function walk(player: Cylinder, dx: number, dz: number, obstacles: readonly Box[]): Cylinder {
+  const live = obstacles.filter((o) => !cylinderHitsBox(player, o));
   const n = Math.max(1, Math.ceil(Math.hypot(dx, dz) / STEP));
   let p = player;
-  let l = load;
   for (let i = 0; i < n; i++)
     for (const [ax, az] of [[dx / n, 0], [0, dz / n]]) {
       if (!ax && !az) continue;
       const np = { ...p, x: p.x + ax, z: p.z + az };
-      const nl = l && { ...l, x: l.x + ax, z: l.z + az };
-      if (forPlayer.some((o) => cylinderHitsBox(np, o))) continue;
-      if (nl && !free(nl, forLoad)) continue;
-      p = np;
-      l = nl;
+      if (!live.some((o) => cylinderHitsBox(np, o))) p = np;
     }
-  return { player: p, load: l };
+  return p;
 }
 
 /**
