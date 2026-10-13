@@ -140,8 +140,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 
 - Don't give away the chemistry. The player is meant to work it out. The composition analyzer has no text and no
   sextant divider lines, the size sorter's screens look plain, the hotbar has no names, and the faucets aren't labeled (they're the six pure
-  atoms, which the user chose). The spectroscope's axes are labeled lnE and f, at the user's request, with only lnE's
-  whole numbers marked and no peak labeled. Ask before adding any visual cue that reveals how a tool or reaction works.
+  atoms, which the user chose). The spectroscope's axes are labeled E and f, at the user's request: E on a log scale with
+  base-10 log-paper ticks, only the powers of ten numbered, and no peak labeled. It plots each bond at the size of its
+  energy, so uphill and downhill bonds look alike, which the user chose to keep. Ask before adding any visual cue that reveals how a tool or reaction works.
 - The game's text matches the intro's premise. The player is Nadia Hassan, the target species is the cryostabilizer,
   and the ship belongs to Celestia Starlines.
 - Commits are small, one behavior per commit, with a message explaining why. The README changes in the same commit.
