@@ -51,7 +51,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `engine.ts` owns the lab: what's in it, the player, input, carrying, the pencil and the sim loop.
   - `view.ts` draws it all with Three.js, and raycasts for what the crosshair is on.
   - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room.
-  - `physics.ts` is the collisions: yawed boxes, the player's cylinder, `moveBox` and `walk`.
+  - `physics.ts` is the collisions: yawed boxes, the player's cylinder and `walk`. What's held collides with nothing; only
+    where it would be set down is checked (the engine's `placement` and `rest`).
   - `space.ts` is the room, poses, and the mapping from the old flat bench to its back wall.
   - `tools.ts` holds tool shapes (flat outlines, y down) and per-step logic, plus drips and the instruments' readings (the spectroscope's graph is `spectroscopeAt`).
   - `flask.ts` has `Vessel`, `transfer`, volume and colors.
@@ -90,10 +91,13 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
-  notice; and the player themselves (walking, looking, carrying, tipping a flask), which is input, not the sim. Waking
-  in the airlock (the pod's message flickering out, its front opening, the doors closing) is sim time too, and so is
-  going back to sleep (the front shutting, the fades to and from black and to white). Asleep, the lab fast-forwards by
-  running more sim time per frame (`dreamDt`), still in the same substeps, never by taking bigger ones.
+  notice; the player themselves (walking, looking, carrying, tipping a flask), which is input, not the sim; and what
+  isn't in the world (the HUD, the guides' flashing). Everything in the world is on sim time, lights included, like
+  the emergency beacon; going with the ambience (as the beacon goes with the alarms) doesn't make something an
+  exception. Waking in the airlock (the pod's message flickering out, its front opening, the doors closing) is sim
+  time too, and so is going back to sleep (the front shutting, the fades to and from black and to white). Asleep, the
+  lab fast-forwards by running more sim time per frame (`dreamDt`), still in the same substeps, never by taking bigger
+  ones.
   - Anything drawn per outlet must use totals over the whole frame. A single substep's output can be empty, for
     example when a wide-open valve drains its tank in the first substep.
 - **Landing fluid goes through `fill()`.** Anything that lands in a vessel (streams, drops, faucets, pours) must use

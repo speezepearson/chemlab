@@ -86,9 +86,9 @@ export interface Frame {
   tarePress: Scale | null;
   /** The key or button under the crosshair, to light it. */
   hot: Pick | null;
-  /** Real seconds since the last frame, for the beacon. */
+  /** Real seconds since the last frame, for the guides' flash, which isn't part of the lab. */
   dt: number;
-  /** Sim seconds the lab has run, for what blinks on sim time (the station's gauge). */
+  /** Sim seconds the lab has run, for what blinks on sim time (the station's gauge, the beacon). */
   clock: number;
   /** Each bond's energy, in BOND_KEYS order, for the spectroscope's graph. */
   energies: readonly number[];
@@ -2344,6 +2344,13 @@ class AirlockView {
     const lintel = new THREE.Mesh(new THREE.PlaneGeometry(door.w, wall).rotateX(Math.PI / 2), jambMat);
     lintel.position.set(x, door.h, z1 + wall / 2);
     g.add(lintel);
+    // and its sill, the deck through the wall's thickness, between the lab's floor and the chamber's, so nothing shows
+    // through under the doors
+    const sill = new THREE.Mesh(planeUV(new THREE.PlaneGeometry(door.w, wall), 'deck', -door.w / 2, -wall / 2), surfaceMat('deck', { metalness: 0.55 }));
+    sill.rotation.x = -Math.PI / 2;
+    sill.position.set(x, 0, z1 + wall / 2);
+    sill.receiveShadow = true;
+    g.add(sill);
     // the doors, each half the doorway, sliding apart into the wall
     const doorMat = new THREE.MeshPhysicalMaterial({ color: 0xa3ada9, roughness: 0.45, metalness: 0.35, clearcoat: 0.3 });
     for (const side of [-1, 1]) {
@@ -2812,8 +2819,8 @@ export class View {
     this.alarmButton.update(fr.alarmsOff);
     this.blindsButton.update(fr.blindsShut);
     this.airlock.update(fr.airlock);
-    // the beacon turns slowly; real time, like the alarms it goes with
-    const pulse = 0.5 + 0.5 * Math.sin(this.clock * 2.4);
+    // the beacon turns slowly, on sim time like everything else in the lab
+    const pulse = 0.5 + 0.5 * Math.sin(fr.clock * 2.4);
     const lit = 1 - fr.airlock.dark;
     for (const { light, base } of this.roomLights) light.intensity = base * lit;
     scene.environmentIntensity = lit;

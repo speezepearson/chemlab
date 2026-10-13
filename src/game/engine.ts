@@ -16,7 +16,7 @@ import { FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
 import { Flask, Vessel, fluidColor, roomFor, transfer, volume, volumeUnit, type Point } from './flask';
 import { History, arrange, arrangement, type Arrangement } from './history';
-import { boxesOverlap, moveBox, roomBoxes, segmentHitsBox, solids, walk, type Box } from './physics';
+import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
 import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
@@ -216,8 +216,6 @@ const POUR_GAP = 20;
 const POUR_RISE = 300;
 /** How far above a mouth, at least, a held nozzle goes with the crosshair on it (see nozzleOver), up to POUR_RISE. */
 const NOZZLE_GAP = 15;
-/** How long, in real seconds, the spot what's held is wanted at must stay clear for it to jump there when stuck (see move). */
-const SNAP_S = 0.2;
 /** How fast a falling drop speeds up, in world units per sim second squared: a 500-unit fall takes 0.7 s. */
 const GRAVITY = 2000;
 /** The player's eyes, and their body's radius. */
@@ -232,6 +230,12 @@ const HOLD_NEAR = 40;
 /** How much further off than other things a flask is held to start with (see holdDist). */
 const FLASK_HOLD = 1.7;
 const HOLD_FAR = 520;
+/** The counters, as boxes from the floor up to their tops. */
+const COUNTER_BOXES: readonly Box[] = COUNTERS.map((c) => ({
+  x: (c.x0 + c.x1) / 2, y: LIFT / 2, z: (c.z0 + c.z1) / 2, yaw: 0, hx: (c.x1 - c.x0) / 2, hy: LIFT / 2, hz: (c.z1 - c.z0) / 2,
+}));
+/** How far, in grid cells, what's let go of can be moved from the cell it's held over to find room for it (see placement). */
+const SEEK = 2;
 /** How far from straight ahead, in radians, the middle of what's held can be, so it's always in view (see holdInPlace). */
 const HOLD_CONE = Math.PI / 6;
 /** Radians the view turns per pixel the mouse moves, and that something held turns with Shift. */
@@ -305,8 +309,6 @@ export class GameEngine {
   private falling: { v: Vessel; x: number; y: number; z: number; vy: number }[] = [];
   /** The faucets pouring into something this frame: where from (the faucet, or its hose's nozzle), and into what. */
   private faucetFlows: { fa: FaucetSpot; from: Vec3; m: Mouth }[] = [];
-  /** How long, in real seconds, what's held has been stuck short of a clear spot it's wanted at (see move). */
-  private snapFor = 0;
   /** Where the held flask is kept, over the mouth the right button was pressed on, while it's held (see pourPose). */
   private pinned: Pose | null = null;
   /** Where the held flask poured this frame, if it did: its lip, and what it poured into (null: the sink). */
@@ -840,8 +842,8 @@ export class GameEngine {
   /* ---------------- making and putting away ---------------- */
 
   /**
-   * Make a new flask, tool or scale in the player's grip, facing them, if there's room for it there and
-   * their hands are free. Returns whether it did.
+   * Make a new flask, tool or scale in the player's grip, facing them, if their hands are free (what's held passes
+   * through everything, so there's always room). Returns whether it did.
    */
   spawn(kind: Item): boolean {
     if (inPod(this.wake)) return false;
@@ -859,11 +861,6 @@ export class GameEngine {
     held.dist = this.holdDist(held);
     this.placeHeld(held, this.gripPose(held));
     held.dist = this.clampDist(held, held.dist);
-    const box = this.heldBox(held);
-    if (this.obstacles(held).some((o) => boxesOverlap(box, o))) {
-      this.say('No room');
-      return false;
-    }
     this.mark();
     if (held.kind === 'flask') this.flasks.push(held.f);
     if (held.kind === 'scale') this.scales.push(held.sc);
@@ -973,12 +970,6 @@ export class GameEngine {
     return { ...this.heldBox(h), ...c, yaw: h.kind === 'flask' ? 0 : p.yaw };
   }
 
-  /** The pose what's held would have for its box to be at b. */
-  private poseForBox(h: Held, b: Box): Pose {
-    const off = toWorld({ x: 0, y: 0, z: 0, yaw: b.yaw }, this.anchor(h));
-    return { x: b.x - off.x, y: b.y - off.y, z: b.z - off.z, yaw: wrapAngle(b.yaw) };
-  }
-
   /**
    * The walls, counters, and everything in the room but what's held (and what rides on it), including the bases of
    * the stands holding up everything else (unless `bases` is false). A held tool's own hoses' nozzles don't get in its
@@ -988,11 +979,8 @@ export class GameEngine {
   private obstacles(h: Held | null, bases = true, away: Tool | null = null, skip: ReadonlySet<Hose> = new Set()): Box[] {
     // while the airlock's doors are open, its doorway and chamber take the front wall's place
     const room = this.wake === 'closed' && this.doorOpen === 0 ? roomBoxes(ROOM) : [...roomBoxes(ROOM, false), ...airlockBoxes()];
-    const counters = COUNTERS.map((c) => ({
-      x: (c.x0 + c.x1) / 2, y: LIFT / 2, z: (c.z0 + c.z1) / 2, yaw: 0, hx: (c.x1 - c.x0) / 2, hy: LIFT / 2, hz: (c.z1 - c.z0) / 2,
-    }));
     const riders = h?.kind === 'scale' ? new Set(h.sc.load.map((l) => l.f)) : new Set<Flask>();
-    const out: Box[] = [...room, ...counters];
+    const out: Box[] = [...room, ...COUNTER_BOXES];
     for (const f of this.flasks) if (!(h?.kind === 'flask' && h.f === f) && !riders.has(f)) out.push(flaskBox(f));
     const gone = (t: Tool) => (h?.kind === 'tool' && h.t === t) || t === away;
     for (const t of this.tools) if (!gone(t)) out.push(toolBox(t));
@@ -1422,7 +1410,7 @@ export class GameEngine {
       const solid = this.obstacles(fh, false, null, unplaced);
       let res: Rest | null = null;
       for (const y of ys) {
-        const r1 = this.rest(fh, { ...tip, y }, obstacles, solid, null);
+        const r1 = this.rest(fh, { ...tip, y }, obstacles, solid);
         if (typeof r1 !== 'string' && mouthBelow(mouths, r1.pose)?.v === f.into) {
           res = r1;
           break;
@@ -2088,7 +2076,7 @@ export class GameEngine {
     this.raf = requestAnimationFrame(this.frame);
   };
 
-  /** Walk, and carry: what's held follows the eyes, stopping short of whatever's in its way. */
+  /** Walk, and carry: what's held follows the eyes, through anything in its way (see placement for where it goes). */
   private move(dt: number): void {
     const p = this.player;
     const k = this.keys;
@@ -2103,8 +2091,6 @@ export class GameEngine {
     // shut in the pod, they can only look
     if (inPod(this.wake)) return;
     const h = this.held;
-    const obstacles = this.obstacles(h);
-    let load = h ? this.heldBox(h) : null;
     if (fwd || side) {
       // keys walk at full speed whichever way; the move stick as far as it's pushed
       const len = Math.hypot(fwd, side);
@@ -2112,49 +2098,21 @@ export class GameEngine {
       const dx = (-Math.sin(p.yaw) * fwd + Math.cos(p.yaw) * side) * sp;
       const dz = (-Math.cos(p.yaw) * fwd - Math.sin(p.yaw) * side) * sp;
       const body = { x: p.x, z: p.z, r: PLAYER_R, y0: 0, y1: EYE + 20 };
-      const r = walk(body, load, dx, dz, obstacles);
-      p.x = r.player.x;
-      p.z = r.player.z;
-      if (h && r.load) {
-        this.placeHeld(h, this.poseForBox(h, r.load));
-        load = r.load;
-      }
+      const r = walk(body, dx, dz, this.obstacles(h));
+      p.x = r.x;
+      p.z = r.z;
     }
     if (h?.kind !== 'flask' || !this.rightHeld) this.pinned = null;
-    if (!h || !load) {
-      this.snapFor = 0;
-      return;
-    }
+    if (!h) return;
     // a nozzle held with the crosshair on an open top goes straight over it, where it would be set down to pour in
     const over = h.kind === 'hose' ? this.nozzleOver(h) : null;
     if (over) {
       this.placeHeld(h, over);
-      this.snapFor = 0;
       return;
     }
-    // what's held goes toward where it'd be in front of the eyes (or a flask pouring into something, over it), and
-    // then turns there in a quarter turn, all at once, if there's room; a flask's box doesn't turn (see flaskBox): it's
-    // turned to face the player after it's moved, below
-    const want = this.boxAt(h, this.pinned ?? this.gripPose(h));
-    const turn = h.kind === 'flask' ? 0 : wrapAngle(want.yaw - load.yaw);
-    let moved = moveBox(load, { ...want, yaw: load.yaw }, obstacles);
-    if (Math.abs(turn) > 1e-9) {
-      const turned = { ...moved, yaw: load.yaw + turn };
-      if (!obstacles.some((o) => boxesOverlap(turned, o) && !boxesOverlap(moved, o))) moved = turned;
-    }
-    // stuck short of where it's wanted, as on the wrong side of something it was swung into, it jumps straight there
-    // once that's been clear for SNAP_S, and in sight: nothing between its middle, where the crosshair is, and the eyes
-    const short = Math.hypot(moved.x - want.x, moved.y - want.y, moved.z - want.z) > 1 || Math.abs(wrapAngle(moved.yaw - want.yaw)) > 1e-6;
-    const eye = this.eye();
-    const clear =
-      short && !obstacles.some((o) => boxesOverlap(want, o)) &&
-      !obstacles.some((o) => segmentHitsBox(eye, want, o) && solids(o).some((p) => segmentHitsBox(eye, want, p)));
-    this.snapFor = clear ? this.snapFor + dt : 0;
-    if (this.snapFor >= SNAP_S) {
-      moved = want;
-      this.snapFor = 0;
-    }
-    this.placeHeld(h, this.poseForBox(h, moved));
+    // what's held goes where it'd be in front of the eyes (or a flask pouring into something, over it), turned as
+    // it's held
+    this.placeHeld(h, this.pinned ?? this.gripPose(h));
     if (h.kind === 'flask') {
       this.faceFlask(h.f);
       const goal = this.rightHeld ? POUR_ANG : 0;
@@ -2401,47 +2359,58 @@ export class GameEngine {
 
   /**
    * Where what's held would come to rest if let go now (see rest): on the grid (see gridded), in the cell under where
-   * it's held. If it can't rest there, why not.
+   * it's held if it can rest there, or else the nearest cell, no more than SEEK cells off, where it can, clear of the
+   * player too. If it can't rest anywhere near, why not where it's held.
    */
   private placement(h: Held): { rest: Rest } | { why: string } {
     const p = this.heldPose(h);
-    const obstacles = this.obstacles(h);
-    const solid = this.obstacles(h, false);
-    const r = this.rest(h, this.gridded(h, p), obstacles, solid);
-    if (typeof r === 'string') return { why: r };
-    if (!h.follow?.length) return { rest: r };
-    const follow = this.followRests(h, r);
-    return typeof follow === 'string' ? { why: follow } : { rest: { ...r, follow } };
+    const { x, z } = this.player;
+    const me: Box = { x, y: (EYE + 20) / 2, z, yaw: 0, hx: PLAYER_R, hy: (EYE + 20) / 2, hz: PLAYER_R, round: true };
+    const obstacles = [...this.obstacles(h), me];
+    const solid = [...this.obstacles(h, false), me];
+    // each cell's spot, nearest where it's held first; that's the cell it's held over
+    const spots: Pose[] = [];
+    for (let i = -SEEK; i <= SEEK; i++)
+      for (let j = -SEEK; j <= SEEK; j++) {
+        const g = this.gridded(h, { ...p, x: p.x + i * CELL, z: p.z + j * CELL });
+        if (Math.hypot(g.x - p.x, g.z - p.z) <= SEEK * CELL) spots.push(g);
+      }
+    spots.sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z));
+    let why: string | null = null;
+    for (const g of spots) {
+      const r = this.rest(h, g, obstacles, solid);
+      const follow = typeof r === 'string' || !h.follow?.length ? null : this.followRests(h, r);
+      const out = typeof r === 'string' ? r : typeof follow === 'string' ? follow : { rest: follow ? { ...r, follow } : r };
+      if (typeof out !== 'string') return out;
+      why ??= out;
+    }
+    return { why: why! };
   }
 
   /**
    * Where what's held, at pose p, would come to rest if let go, or why it can't. Only squarely on a counter: a flask,
-   * a scale or a tool that stands on the bench goes straight down until it stands on the counter under it, which its
-   * whole footprint must be over (or a flask over a scale, onto its platform); a tool or hose's nozzle on a stand stays at
-   * the height it's held, no higher than its stand reaches, while its stand's base goes down onto the counter, which
-   * the whole base must be over (what it holds can reach out past the counter's edge). Either way, it mustn't bump into anything on the way down, nor its stand's base sit
-   * on anything but the counter. (Stands don't bump into each other: their rods can stand side by side.) A hose's
+   * a scale or a tool that stands on the bench goes straight up or down until it stands on the counter under it, which
+   * its whole footprint must be over (or a flask over a scale, onto its platform); a tool or hose's nozzle on a stand
+   * stays at the height it's held, no higher than its stand reaches and no lower than the top of a counter it's held
+   * sunk into, while its stand's base goes down onto the counter, which the whole base must be over (what it holds can
+   * reach out past the counter's edge). Either way, it mustn't overlap anything where it comes to rest (what's held passes through everything, so there's no way down to look
+   * at), nor its stand's base sit on anything but the counter. (Stands don't bump into each other: their rods can stand side by side.) A hose's
    * nozzle's stand goes where it's wanted (see nozzleWant) if it can, or else the first place it can of nozzleMounts.
    */
-  private rest(h: Held, p: Pose, obstacles: readonly Box[], solid: readonly Box[], now: Box | null = this.heldBox(h)): Rest | string {
-    // what's in the way of a box, besides whatever what's held is already stuck in (`now`)
-    const blocked = (b: Box) => obstacles.some((o) => boxesOverlap(b, o) && !(now && boxesOverlap(now, o)));
-    // box `to`, stretched up to the height of box `from`: what it passes through, going straight down
-    const span = (to: Box, from: Box): Box => {
-      const y0 = Math.min(to.y - to.hy, from.y - from.hy);
-      const y1 = Math.max(to.y + to.hy, from.y + from.hy);
-      // the whole of it, not just its parts, since its parts don't stretch
-      return { ...to, y: (y0 + y1) / 2, hy: (y1 - y0) / 2, parts: undefined };
-    };
+  private rest(h: Held, p: Pose, obstacles: readonly Box[], solid: readonly Box[]): Rest | string {
+    const blocked = (b: Box) => obstacles.some((o) => boxesOverlap(b, o));
     const box = this.boxAt(h, p);
     const onStands = (stands: Stand[]): Rest | string => {
       const tops = stands.map((st) => counterUnder(standBase(st, 0)));
       if (tops.some((t) => t === null)) return 'Its stand needs a counter under it';
-      const drop = Math.max(0, ...stands.map((st, i) => st.clampY - tops[i]! - STAND_MAX));
-      const to = { ...box, y: box.y - drop };
-      if (blocked(span(to, box))) return 'No room';
+      let dy = -Math.max(0, ...stands.map((st, i) => st.clampY - tops[i]! - STAND_MAX));
+      // held sunk into a counter, it comes up to stand on it
+      const sunk = LIFT - (box.y + dy - box.hy);
+      if (sunk > 0 && COUNTER_BOXES.some((c) => boxesOverlap({ ...box, y: box.y + dy }, c))) dy += sunk;
+      const to = { ...box, y: box.y + dy };
+      if (blocked(to)) return 'No room';
       if (stands.some((st, i) => solid.some((o) => boxesOverlap(standBase(st, tops[i]!), o)))) return 'No room for its stand';
-      return { pose: { ...p, y: p.y - drop } };
+      return { pose: { ...p, y: p.y + dy } };
     };
     if (h.kind === 'hose') {
       // the nozzle itself is in the way, wherever its stand goes
@@ -2463,13 +2432,13 @@ export class GameEngine {
         if (dx === null) continue;
         const pose = onScale(sc, dx);
         const to = this.boxAt(h, pose);
-        return blocked(span(to, { ...to, y: box.y })) ? 'No room' : { pose, scale: { sc, dx } };
+        return blocked(to) ? 'No room' : { pose, scale: { sc, dx } };
       }
     const top = counterUnder(box);
     if (top === null) return 'Set it down on a counter';
     const dy = box.y - box.hy - top;
     const to = { ...box, y: box.y - dy };
-    if (blocked(span(to, box))) return 'No room';
+    if (blocked(to)) return 'No room';
     return { pose: { ...p, y: p.y - dy } };
   }
 
