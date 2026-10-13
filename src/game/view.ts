@@ -733,7 +733,11 @@ class ToolView {
   private body = new THREE.Group();
   private art = new THREE.Group();
   private upright = new THREE.Group();
-  private fluids: { fm: FluidMesh; level: (v: Vessel) => number }[] = [];
+  /**
+   * Each tank's fluid, and how high it stands in the room; `fit`, if given, sizes the fluid's solid to that height
+   * itself, so it has a top, rather than leaving it to be cut off open there.
+   */
+  private fluids: { fm: FluidMesh; level: (v: Vessel) => number; fit?: (v: Vessel) => void }[] = [];
   private levers = new Map<number, THREE.Group>();
   private dial?: THREE.Group;
   private lids: THREE.Mesh[] = [];
@@ -1157,11 +1161,19 @@ class ToolView {
       const x = tankX(tk);
       // the column's back, its fluid, and the glass in front
       block(art, darkMat, x - paneW / 2, x + paneW / 2, 0, H, wall, wall + 0.5);
-      // held a little off the column's back and the pane, so where they'd meet they don't flicker into each other
-      // (seen through the fluid's open top)
-      const fm = new FluidMesh([new THREE.BoxGeometry(paneW - 1, H, plate - 4).translate(x, -H / 2, wall + 1.5 + (plate - 4) / 2)], art);
-      for (const m of fm.meshes) pick(m, 'tank', k);
-      this.fluids.push({ fm, level: (v) => onTool(t, 0, H * (1 - Math.min(1, volume(v) / v.cap))).y });
+      // a box standing on the column's floor, as tall as the fluid stands, so it has a top surface; held a little off
+      // the column's back and the pane, so where they'd meet they don't flicker into each other
+      const fm = new FluidMesh([new THREE.BoxGeometry(paneW - 1, 1, plate - 4).translate(x, 0.5, wall + 1.5 + (plate - 4) / 2)], art);
+      const [solid] = fm.meshes;
+      solid.position.y = -H;
+      pick(solid, 'tank', k);
+      const height = (v: Vessel) => H * Math.min(1, volume(v) / v.cap);
+      this.fluids.push({
+        fm,
+        // never cut off, above the column's top: it's already just as tall as the fluid
+        level: () => onTool(t, 0, -1).y,
+        fit: (v) => (solid.scale.y = Math.max(0.01, height(v))),
+      });
       const pane = new THREE.Mesh(new THREE.PlaneGeometry(paneW, H).translate(x, -H / 2, face - 0.5), glassMat);
       art.add(pane);
       pick(pane, 'tank', k);
@@ -1245,8 +1257,9 @@ class ToolView {
     this.body.position.set(shake * (2 * Math.random() - 1), shake * (2 * Math.random() - 1), 0);
     this.body.updateMatrixWorld();
     t.tanks.forEach((v, k) => {
-      const { fm, level } = this.fluids[k];
+      const { fm, level, fit } = this.fluids[k];
       fm.update(v, level(v));
+      fit?.(v);
       this.lids[k].visible = t.lidded;
       this.labels[k].set(v.label);
       const r = tankRect(t, k);
