@@ -91,8 +91,11 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
-  notice; and the player themselves (walking, looking, carrying, tipping a flask), which is input, not the sim. Waking
-  in the airlock (the pod's message flickering out, its front opening, the doors closing) is sim time too.
+  notice; the player themselves (walking, looking, carrying, tipping a flask), which is input, not the sim; and what
+  isn't in the world (the HUD, the guides' flashing). Everything in the world is on sim time, lights included, like
+  the emergency beacon; going with the ambience (as the beacon goes with the alarms) doesn't make something an
+  exception. Waking in the airlock (the pod's message flickering out, its front opening, the doors closing) is sim
+  time too.
   - Anything drawn per outlet must use totals over the whole frame. A single substep's output can be empty, for
     example when a wide-open valve drains its tank in the first substep.
 - **Landing fluid goes through `fill()`.** Anything that lands in a vessel (streams, drops, faucets, pours) must use
