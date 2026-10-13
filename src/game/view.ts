@@ -1104,12 +1104,12 @@ class ToolView {
     pl.position.z = wall;
     pl.receiveShadow = true;
     art.add(pl);
-    // one rubber seam all round it, over the edge of the hole, as if the block could be pulled and another put in its
-    // place
-    const seam = rectPath(...rect(4), new THREE.Shape());
-    seam.holes.push(rectPath(...rect(-4)));
-    const gasket = new THREE.Mesh(new THREE.ExtrudeGeometry(seam, { depth: 3, bevelEnabled: true, bevelThickness: 1, bevelSize: 1, bevelSegments: 2 }), rubberMat);
-    gasket.position.z = face - 1;
+    // one rubber seam all round its edge, its outside on the wall's panels' seams, as if the block could be pulled and
+    // another put in its place (the bevel grows the outline by 1 and shrinks the hole by 1)
+    const seam = rectPath(...rect(-1), new THREE.Shape());
+    seam.holes.push(rectPath(...rect(-7)));
+    const gasket = new THREE.Mesh(new THREE.ExtrudeGeometry(seam, { depth: 1.5, bevelEnabled: true, bevelThickness: 0.5, bevelSize: 1, bevelSegments: 2 }), rubberMat);
+    gasket.position.z = face - 0.5;
     art.add(gasket);
     sh.tanks.forEach((tk, k) => {
       const x = tankX(tk);
