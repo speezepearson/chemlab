@@ -1219,35 +1219,6 @@ export function mouthBelow(mouths: readonly Mouth[], p: Vec3): Mouth | null {
   return best;
 }
 
-/** How far across, in world units, something falling straight down at (x, z) would miss a mouth by: 0 if it's over it. */
-export function mouthGap(m: Mouth, x: number, z: number): number {
-  const c = Math.cos(m.yaw ?? 0);
-  const s = Math.sin(m.yaw ?? 0);
-  const dx = x - m.x;
-  const dz = z - m.z;
-  const lx = Math.max(0, Math.abs(dx * c - dz * s) - m.hx);
-  const lz = Math.max(0, Math.abs(dx * s + dz * c) - m.hz);
-  return Math.hypot(lx, lz);
-}
-
-/**
- * Where something falling from `p` would go, for lining things up: the mouth it lands in, if it lands in one within
- * `reach` below (a hit); or else, as a near miss, the mouth below p that it misses by least, if that's within `near`
- * across (one it's straight over but too far below for `reach` misses by nothing). Null if there's neither.
- */
-export function aimAt(mouths: readonly Mouth[], p: Vec3, near: number, reach = Infinity): { m: Mouth; hit: boolean } | null {
-  const m = mouthBelow(mouths, p);
-  if (m && p.y - m.y <= reach) return { m, hit: true };
-  let best: Mouth | null = null;
-  let gap = near;
-  for (const mo of mouths) {
-    if (mo.y >= p.y) continue;
-    const g = mouthGap(mo, p.x, p.z);
-    if (g < gap || (g === gap && best && mo.y > best.y)) [best, gap] = [mo, g];
-  }
-  return best && { m: best, hit: false };
-}
-
 /** What a hose runs from: a tool's spout, or a faucet (by its place in the lab's list). */
 export type HoseMount = { tool: Tool; spout: number } | { faucet: number };
 

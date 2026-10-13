@@ -26,7 +26,7 @@ import {
 } from './space';
 import {
   ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, Hose, INLINE_TOOLS, MAX_FLOW, RECEPTACLE_TIMES, SHAPES, STATION, SUMP_TIP, TANK_H,
-  TOOL_NAMES, Tool, UNIQUE_TOOLS, aimAt, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, tankX,
+  TOOL_NAMES, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, tankX,
   type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
@@ -120,13 +120,12 @@ export interface EngineCallbacks {
 }
 
 /**
- * An outlet lined up with a mouth below it (see GameEngine.aims): whether fluid from it would land there (a hit) or
- * just miss, and which of them is held: the outlet, a held flask's lip (as it would pour), or the mouth.
+ * An outlet lined up with a mouth below it (see GameEngine.aims), which fluid from it would land in, and which of them is
+ * held: the outlet, a held flask's lip (as it would pour), or the mouth.
  */
 interface Aim {
   from: Vec3;
   m: Mouth;
-  hit: boolean;
   held: 'outlet' | 'lip' | 'mouth';
 }
 
@@ -174,8 +173,6 @@ const HOTKEY_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'
 const POUR_ANG = Math.PI * 0.61;
 /** How long a flask takes to tip to pour, or stand back up, in real seconds. */
 const TIP_S = 0.3;
-/** How far across, in world units, an outlet can miss a mouth by and still show a faint guide to it (see guides). */
-const GUIDE_NEAR = 40;
 /** How fast a falling drop speeds up, in world units per sim second squared: a 500-unit fall takes 0.7 s. */
 const GRAVITY = 2000;
 /** The player's eyes, standing and crouching; their body's radius; and how fast they walk, per real second. */
@@ -1908,8 +1905,8 @@ export class GameEngine {
 
   /**
    * Each outlet that lines up with one of `mouths`, for the guides: from each outlet of what's held (a flask's lip,
-   * tipped as it would be to pour; a tool's spouts; a hose's nozzle) to the mouth it would land in, or would just
-   * miss; and the same from every other outlet (spouts, nozzles, faucets) to what's held.
+   * tipped as it would be to pour; a tool's spouts; a hose's nozzle) to the mouth it would land in; and the same from
+   * every other outlet (spouts, nozzles, faucets) to what's held.
    */
   private aims(h: Held, mouths: readonly Mouth[]): Aim[] {
     // what's held, as outlets and as vessels that can be landed in
@@ -1928,9 +1925,9 @@ export class GameEngine {
     else outlets.push({ at: h.h.outlet, lip: false });
     const out: Aim[] = [];
     const aim = (from: Vec3, held: Aim['held']) => {
-      const a = aimAt(mouths, from, GUIDE_NEAR);
-      if (!a || mine.has(a.m.v) !== (held === 'mouth')) return;
-      out.push({ from, m: a.m, hit: a.hit, held });
+      const m = mouthBelow(mouths, from);
+      if (!m || mine.has(m.v) !== (held === 'mouth')) return;
+      out.push({ from, m, held });
     };
     for (const o of outlets) aim(o.at, o.lip ? 'lip' : 'outlet');
     if (mine.size) {
@@ -2065,8 +2062,8 @@ export class GameEngine {
 
   /**
    * Guides for lining up what's held (see aims), shown only while something's held, since that's when things are
-   * being lined up: solid where fluid would land in a mouth, faint where it would just miss; and green, as it will be
-   * once let go and set down on the grid, wherever fluid would land in a mouth then.
+   * being lined up: gray from a held flask's lip to where it would pour; and green, as it will be once let go and set
+   * down on the grid, wherever fluid would land in a mouth then.
    */
   private guides(pl: ReturnType<GameEngine['placement']> | null): Frame['guides'] {
     const h = this.held;
@@ -2075,14 +2072,14 @@ export class GameEngine {
       const { x, y, z, hx, hz, yaw = 0 } = a.m;
       return { from: a.from, toY: y, look, mouth: { x, y, z, hx, hz, yaw } };
     };
-    const out = this.aims(h, this.open).map((a) => guide(a, a.hit ? 'solid' : 'faint'));
+    const out = this.aims(h, this.open).filter((a) => a.held === 'lip').map((a) => guide(a, 'solid'));
     if (pl && 'rest' in pl) {
       // what it'll line up with once let go: put it there, upright, for a moment, to see
       const at = this.heldPose(h);
       const tilt = h.kind === 'flask' ? h.f.tilt : 0;
       if (h.kind === 'flask') h.f.tilt = 0;
       this.placeHeld(h, pl.rest.pose);
-      for (const a of this.aims(h, this.mouths())) if (a.hit && a.held !== 'lip') out.push(guide(a, 'snap'));
+      for (const a of this.aims(h, this.mouths())) if (a.held !== 'lip') out.push(guide(a, 'snap'));
       this.placeHeld(h, at);
       if (h.kind === 'flask') h.f.tilt = tilt;
     }

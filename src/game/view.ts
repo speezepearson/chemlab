@@ -61,9 +61,8 @@ export interface Frame {
   faucets: readonly FaucetSpot[];
   streams: readonly { from: Vec3; toY: number; fluid: Fluid; flow: number }[];
   /**
-   * Streams for lining things up: solid gray where fluid would land in a mouth, faint gray where it would just miss
-   * one, green for what will snap together when what's held is let go; each with that mouth, whose rim is outlined to
-   * match.
+   * Streams for lining things up: gray where a held flask would pour, green for what will line up when what's held is
+   * let go; each with the mouth it lands in, whose rim is outlined to match.
    */
   guides: readonly { from: Vec3; toY: number; look: GuideLook; mouth: Vec3 & { hx: number; hz: number; yaw: number } }[];
   /**
@@ -102,20 +101,19 @@ export interface Frame {
   };
 }
 
-export type GuideLook = 'faint' | 'solid' | 'snap';
+export type GuideLook = 'solid' | 'snap';
 /**
  * How each look of guide is drawn: the color and opacity of its stream, and of its rim; and the same for the outline
  * of where what's held will stand, `place`, or can't, `bad` (see Frame.footprints), which have no stream.
  */
 const GUIDE_LOOKS: Record<GuideLook | 'place' | 'bad', { color: number; stream: number; edge: number; rim: number }> = {
-  faint: { color: 0xb4bcb8, stream: 0.18, edge: 0xdfe6e2, rim: 0.4 },
   solid: { color: 0xb4bcb8, stream: 0.6, edge: 0xdfe6e2, rim: 0.85 },
   snap: { color: 0x7fd4ad, stream: 0.8, edge: 0x7fd4ad, rim: 0.95 },
   place: { color: 0, stream: 0, edge: 0xe8eeea, rim: 0.75 },
   bad: { color: 0, stream: 0, edge: 0xe0604c, rim: 0.85 },
 };
 /** Which look wins where guides of several looks end at the same mouth. */
-const LOOK_RANK: Record<GuideLook | 'place' | 'bad', number> = { faint: 0, solid: 1, snap: 2, place: 3, bad: 3 };
+const LOOK_RANK: Record<GuideLook | 'place' | 'bad', number> = { solid: 1, snap: 2, place: 3, bad: 3 };
 
 /** Width of a stream flowing one flask per second; it goes as the square root of the flow. */
 const STREAM_WIDTH = 4.5;
@@ -2809,9 +2807,8 @@ export class View {
       mat.color.setHex(look.color);
       mat.opacity = look.stream;
       const len = Math.max(0.1, g.from.y - g.toY);
-      const r = g.look === 'faint' ? GUIDE_R * 0.75 : GUIDE_R;
       m.position.set(g.from.x, g.from.y - len / 2, g.from.z);
-      m.scale.set(r, len, r);
+      m.scale.set(GUIDE_R, len, GUIDE_R);
       // dashes counted from the top, where it's from, so they stay put as its length changes
       const reps = len / (GUIDE_DASH.on + GUIDE_DASH.off);
       mat.alphaMap!.repeat.set(1, reps);
