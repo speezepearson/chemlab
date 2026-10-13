@@ -565,8 +565,9 @@ function drawAnalysis(sc: Screen, t: Tool): void {
 }
 
 /**
- * A spectroscope's screen: a graph of the bonds that passed through it over the last sim second, by energy (see
- * spectroscopeAt), lnE across with its whole numbers marked, and f up, scaled to the tallest peak, with no numbers.
+ * A spectroscope's screen: a graph of the bonds passing through it lately, by energy (see spectroscopeAt): E across on
+ * a log scale, with ticks as on log paper (at 1 to 9 times each power of ten, the powers of ten longer and numbered),
+ * and f up, scaled to the tallest peak, with no numbers.
  */
 function drawSpectroscope(sc: Screen, t: Tool, energies: readonly number[]): void {
   const key = `${t.bonds.map((c) => c.toPrecision(3)).join(',')}|${energies.join(',')}`;
@@ -597,15 +598,19 @@ function drawSpectroscope(sc: Screen, t: Tool, energies: readonly number[]): voi
   ctx.font = '5px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  for (let l = Math.ceil(lnE0); l <= lnE1; l++) {
-    ctx.beginPath();
-    ctx.moveTo(X(l), p.y1);
-    ctx.lineTo(X(l), p.y1 + 1.5);
-    ctx.stroke();
-    ctx.fillText(String(l), X(l), p.y1 + 2.5);
-  }
+  for (let d = Math.floor(lnE0 / Math.LN10); d <= Math.ceil(lnE1 / Math.LN10); d++)
+    for (let m = 1; m <= 9; m++) {
+      const e = m * 10 ** d;
+      const l = Math.log(e);
+      if (l < lnE0 || l > lnE1) continue;
+      ctx.beginPath();
+      ctx.moveTo(X(l), p.y1);
+      ctx.lineTo(X(l), p.y1 + (m === 1 ? 2 : 1));
+      ctx.stroke();
+      if (m === 1) ctx.fillText(String(+e.toPrecision(1)), X(l), p.y1 + 2.5);
+    }
   ctx.textAlign = 'right';
-  ctx.fillText('lnE', p.x1, p.y1 + 2.5);
+  ctx.fillText('E', p.x1, p.y1 + 2.5);
   ctx.textAlign = 'center';
   ctx.fillText('f', (s.x0 + p.x0) / 2, p.y0);
   // the curve, glowing, over a faint fill
