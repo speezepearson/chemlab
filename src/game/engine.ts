@@ -1211,14 +1211,14 @@ export class GameEngine {
   }
 
   /**
-   * Keep a tool about to be picked up pouring into whatever it pours into: each of its spouts with no hose out, over an
-   * open top (but its own), gets its hose pulled out, the nozzle left just where the spout is, on a stand wherever
+   * Keep a tool about to be picked up pouring into whatever it pours into: each of its spouts with no hose out letting
+   * something out (see flowing) over an open top (but its own) gets its hose pulled out, the nozzle left just where the spout is, on a stand wherever
    * there's room for one (see standFor). Returns those hoses, or if one has no room for its stand, why it can't be.
    */
   private keepPouring(t: Tool): Hose[] | string {
     const made: Hose[] = [];
     for (let j = 0; j < t.shape.spouts.length; j++) {
-      if (this.hoseOn({ tool: t, spout: j })) continue;
+      if (this.hoseOn({ tool: t, spout: j }) || !this.flowing(t, j)) continue;
       const sp = spoutAt(t, j);
       const m = mouthBelow(this.open, sp);
       if (!m || t.tanks.includes(m.v)) continue;
