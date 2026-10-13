@@ -1850,10 +1850,9 @@ export class GameEngine {
     this.tools.forEach((t, j) => {
       const from = cycleFrom[j];
       const c = t.cycle;
-      if (c && !from) {
-        this.beepers.get(t)?.stop();
-        this.beepers.set(t, beeper(this.hear(this.machineAt(t))));
-      }
+      // a cycle under way with no sounds yet: one its button started between frames (before cycleFrom saw it), or one
+      // it started itself as it filled
+      if (c && !this.beepers.has(t)) this.beepers.set(t, beeper(this.hear(this.machineAt(t))));
       const b = this.beepers.get(t);
       if (!b) return;
       b.place(this.hear(this.machineAt(t)));
