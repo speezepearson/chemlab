@@ -178,9 +178,8 @@ const TIP_S = 0.3;
 const GUIDE_NEAR = 40;
 /** How fast a falling drop speeds up, in world units per sim second squared: a 500-unit fall takes 0.7 s. */
 const GRAVITY = 2000;
-/** The player's eyes, standing and crouching; their body's radius; and how fast they walk, per real second. */
+/** The player's eyes, and their body's radius. */
 const EYE = 620;
-const CROUCH_EYE = 330;
 const PLAYER_R = 45;
 /** Walking speed, in world units per real second. */
 const WALK = 840;
@@ -234,13 +233,11 @@ export class GameEngine {
   private scales: Scale[] = [];
   private hoses: Hose[] = [];
   private faucets: (FaucetSpot & { start: (typeof FAUCETS)[number] })[];
-  /** Where the player stands, which way they look (yaw about the vertical, pitch up), and how far they crouch (0 to 1). */
-  private player = { x: 480, z: 380, yaw: 0, pitch: -0.08, crouch: 0 };
+  /** Where the player stands, and which way they look (yaw about the vertical, pitch up). */
+  private player = { x: 480, z: 380, yaw: 0, pitch: -0.08 };
   private keys = new Set<string>();
   /** Where the on-screen sticks are pushed (see stick). */
   private sticks = { move: { x: 0, y: 0 }, look: { x: 0, y: 0 } };
-  /** Whether the touch screen's crouch button is held (see touchCrouch). */
-  private crouchHeld = false;
   /** When the pencil last drew by touch, so the mouse events a browser makes up from a touch are ignored. */
   private lastTouch = -Infinity;
   private held: Held | null = null;
@@ -865,12 +862,8 @@ export class GameEngine {
     return out;
   }
 
-  private eyeHeight(): number {
-    return EYE + (CROUCH_EYE - EYE) * this.player.crouch;
-  }
-
   private eye(): Vec3 {
-    return { x: this.player.x, y: this.eyeHeight(), z: this.player.z };
+    return { x: this.player.x, y: EYE, z: this.player.z };
   }
 
   /** The way the player looks, as a unit vector. */
@@ -920,11 +913,6 @@ export class GameEngine {
   /** Backspace: put away what's held. */
   touchPutAway(): void {
     if (this.locked) this.putAway();
-  }
-
-  /** C, held or let go. */
-  touchCrouch(on: boolean): void {
-    this.crouchHeld = on;
   }
 
   /**
@@ -1667,7 +1655,7 @@ export class GameEngine {
     this.raf = requestAnimationFrame(this.frame);
   };
 
-  /** Walk, crouch, and carry: what's held follows the eyes, stopping short of whatever's in its way. */
+  /** Walk, and carry: what's held follows the eyes, stopping short of whatever's in its way. */
   private move(dt: number): void {
     const p = this.player;
     const k = this.keys;
@@ -1681,8 +1669,6 @@ export class GameEngine {
     }
     // shut in the pod, they can only look
     if (inPod(this.wake)) return;
-    const crouching = k.has('KeyC') || this.crouchHeld;
-    p.crouch = Math.max(0, Math.min(1, p.crouch + (crouching ? 1 : -1) * dt * 5));
     const h = this.held;
     const obstacles = this.obstacles(h);
     let load = h ? this.heldBox(h) : null;
@@ -1692,7 +1678,7 @@ export class GameEngine {
       const sp = (WALK * dt * Math.min(1, len)) / len;
       const dx = (-Math.sin(p.yaw) * fwd + Math.cos(p.yaw) * side) * sp;
       const dz = (-Math.cos(p.yaw) * fwd - Math.sin(p.yaw) * side) * sp;
-      const body = { x: p.x, z: p.z, r: PLAYER_R, y0: 0, y1: this.eyeHeight() + 20 };
+      const body = { x: p.x, z: p.z, r: PLAYER_R, y0: 0, y1: EYE + 20 };
       const r = walk(body, load, dx, dz, obstacles);
       p.x = r.player.x;
       p.z = r.player.z;
@@ -2240,7 +2226,6 @@ export class GameEngine {
       if (id) add(['LMB2'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
       add(['P'], 'pick up the pencil');
     }
-    add(['C'], 'crouch');
     add(['Esc'], 'let go of the mouse');
     add(['/'], 'hide this list');
     return out;
@@ -2291,7 +2276,7 @@ export class GameEngine {
     this.setPencil(false);
     this.turning = null;
     this.rightHeld = false;
-    Object.assign(this.player, { x: POD.x, z: POD.z, yaw: 0, pitch: -0.12, crouch: 0 });
+    Object.assign(this.player, { x: POD.x, z: POD.z, yaw: 0, pitch: -0.12 });
     this.wake = 'pod';
     this.wakeT = 0;
   }
