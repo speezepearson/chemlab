@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   FLASK_R, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_BASE, aimValve, onGrid, toolAnchor, flaskBox, flaskLip, flaskMouth, flip,
-  nozzleMounts, nozzleStand, onScale, scaleSpot, snapReach, spoutNear, spoutAt, standBase, tankMouth, toolBox, toolStands, valveLocal,
+  docked, nozzleBox, nozzleMounts, nozzleStand, onScale, scaleSpot, snapReach, spoutNear, spoutAt, standBase, tankMouth, toolBox, toolStands, valveLocal,
   valveNear,
 } from './bodies';
 import { CAP } from './config';
@@ -10,7 +10,7 @@ import { FLASK_H } from './flaskShape';
 import { boxesOverlap } from './physics';
 import { Scale } from './scale';
 import { CELL, COUNTERS, LIFT, counterUnder, fromFrac, toCell, toFrac } from './space';
-import { SHAPES, Tool, mouthBelow, tankX, type ToolKind } from './tools';
+import { Hose, INLINE_DOCK, SHAPES, Tool, mouthBelow, tankX, type ToolKind } from './tools';
 
 const at = (x: number, y: number, z: number, yaw = 0) => ({ x, y, z, yaw });
 
@@ -267,13 +267,13 @@ describe('stands', () => {
     expect(st.z + STAND_BASE.hz).toBeLessThan(sp.z - FLASK_R);
   });
 
-  it('turn with the tool, two to a wide tool, and none for one that stands on the bench', () => {
+  it('turn with the tool, two to a wide tool, and none for one built into a wall', () => {
     const t = new Tool('dispenser', 0, at(0, 600, 0, Math.PI / 2));
     // turned a quarter, its back is toward −x
     expect(toolStands(t)[0].x).toBeLessThan(0);
     expect(toolStands(t)[0].z).toBeCloseTo(0);
     expect(toolStands(new Tool('separator', 0, at(0, 600, 0)))).toHaveLength(2);
-    expect(toolStands(new Tool('spectrometer', 0, at(0, 600, 0)))).toHaveLength(0);
+    expect(toolStands(new Tool('receptacle', 0, at(0, 600, 0)))).toHaveLength(0);
   });
 
   it("hold a hose's nozzle from behind it, as it faces", () => {
@@ -307,14 +307,32 @@ describe('stands', () => {
     expect(new Set(ms.map((m) => `${m.turn.toFixed(3)} ${m.reach}`)).size).toBe(ms.length);
   });
 
-  it("find somewhere for a nozzle's stand clear of the spectrometer when its nozzle is over the cup", () => {
-    const spec = new Tool('spectrometer', 0, at(500, LIFT + 106, 150));
-    const cup = tankMouth(spec, 0);
-    const e = { x: cup.x, y: cup.y + 40, z: cup.z };
+  it("find somewhere for a nozzle's stand clear of a cabinet behind the tube it's over", () => {
+    // turned a quarter, the analyzer's cabinet reaches back from its tube, toward the wall, standing on the counter
+    const spec = new Tool('analyzer', 0, at(500, LIFT + 96, 250, Math.PI / 2));
+    const tube = tankMouth(spec, 0);
+    const e = { x: tube.x, y: tube.y + 40, z: tube.z };
     const clear = (m: { turn: number; reach: number }) => !boxesOverlap(standBase(nozzleStand(e, m.turn, m.reach), LIFT), toolBox(spec));
     expect(clear({ turn: 0, reach: NOZZLE_REACH.min })).toBe(false);
     const m = nozzleMounts({ turn: 0, reach: NOZZLE_REACH.min }).find(clear);
     expect(m?.turn).toBe(0);
+  });
+});
+
+describe('docking', () => {
+  it("snaps a nozzle down onto an inline instrument's tube it's over, from not too far above, and nothing else", () => {
+    const a = new Tool('analyzer', 0, at(450, 800, 150));
+    const d = new Tool('dispenser', 1, at(750, 800, 150));
+    const top = tankMouth(a, 0);
+    const over = (dy: number, x = top.x) => ({ x, y: top.y + dy, z: top.z, yaw: 0 });
+    expect(docked(over(100), [a, d]).y).toBeCloseTo(top.y + 1);
+    expect(docked(over(INLINE_DOCK + 1), [a, d]).y).toBeCloseTo(top.y + INLINE_DOCK + 1);
+    expect(docked(over(-20), [a, d]).y).toBeCloseTo(top.y - 20);
+    expect(docked(over(100, top.x + 30), [a, d]).y).toBeCloseTo(top.y + 100);
+    const tank = tankMouth(d, 0);
+    expect(docked({ ...over(100), x: tank.x }, [a, d]).y).toBeCloseTo(top.y + 100);
+    // docked, the nozzle sits clear of the tube
+    expect(boxesOverlap(nozzleBox(new Hose({ faucet: 0 }, docked(over(100), [a]), 0)), toolBox(a))).toBe(false);
   });
 });
 

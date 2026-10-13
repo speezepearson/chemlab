@@ -3,7 +3,10 @@ import { FLASK_H } from './flaskShape';
 import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { CELL, groundAt, toCardinal, toCell, toWorld, type Pose, type Vec3 } from './space';
-import { HELIX, SHAPES, STATION, TANK_H, tankDepth, tankX, type Hose, type Mouth, type Tool, type ToolKind } from './tools';
+import {
+  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, SHAPES, STATION, TANK_H, tankDepth, tankX, overMouth, type Hose, type Mouth, type Tool,
+  type ToolKind,
+} from './tools';
 
 /**
  * Where the parts of everything in the lab are, in the room. Tools, flasks and scales are drawn in their own
@@ -13,7 +16,7 @@ import { HELIX, SHAPES, STATION, TANK_H, tankDepth, tankX, type Hose, type Mouth
  */
 
 /** How deep a tool's cabinet is front to back, for the tools that have one deeper than their tanks. */
-const CABINET_DEPTH: Partial<Record<ToolKind, number>> = { spectrometer: 84, meter: 40 };
+const CABINET_DEPTH: Partial<Record<ToolKind, number>> = { analyzer: 50, spectroscope: 50, meter: 40 };
 
 /**
  * How deep each tool is front to back, all told, and how deep its tanks are inside: as deep as they need to be to
@@ -104,7 +107,7 @@ export function tankMouth(t: Tool, k: number): Mouth {
 }
 
 /** The tools whose bodies are a cabinet as wide as they are, under their tanks, rather than pipes and valves. */
-const CABINETS: readonly ToolKind[] = ['spectrometer', 'meter'];
+const CABINETS: readonly ToolKind[] = ['meter'];
 
 /**
  * Where, in a tool's flat frame, the player's note about tank k is written (its middle's height): above the tank's
@@ -122,6 +125,8 @@ export function tankNoteY(t: Tool, k: number): number {
  * reaching `hz` either side of `z` (its middle, if left out) front to back: its tanks (round, for a round tank), and
  * under them its cabinet, or else the pipes, valves and spouts there, across only as far as they reach. The
  * cryostabilizer station's are its funnel, the plate in the wall with its button, and its spouts' pipes out from it.
+ * An inline instrument's are its tube and the pipe down from it, the cabinet beside them, and any pipe on to a
+ * spout past the cabinet; the tube's top is flush with its opening, for a nozzle to snap onto (see INLINE_DOCK).
  */
 export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean }[] {
   const sh = t.shape;
@@ -140,6 +145,17 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
   }
   const D = TOOL_DEPTH[t.kind];
   const bottom = (sh.tankH ?? TANK_H) + (sh.sump?.h ?? 0);
+  if (INLINE_TOOLS.includes(t.kind)) {
+    const c = INSTRUMENT.body;
+    const r = D.tank / 2 + 2;
+    const past = sh.spouts.filter((x) => x > c.x1);
+    return [
+      { x0: -r, x1: r, y0: 0, y1: bottom, hz: r, round: true },
+      { x0: -6, x1: 6, y0: bottom, y1: b.y1, hz: 6 },
+      { x0: c.x0, x1: c.x1, y0: c.y0, y1: c.y1, hz: D.body / 2 },
+      ...past.map((x) => ({ x0: c.x1, x1: x + 6, y0: ANALYZER.wasteY - 6, y1: b.y1, hz: 6 })),
+    ];
+  }
   const x0s = sh.tanks.map((k) => (sh.cup ? tankX(k) - sh.cup.w : k.x0));
   const x1s = sh.tanks.map((k) => (sh.cup ? tankX(k) + sh.cup.w : k.x1));
   const tanks = {
@@ -283,6 +299,19 @@ export function scaleSpot(sc: Scale, p: Vec3, reach = 60): number | null {
 
 /* ---------------- hoses ---------------- */
 
+/**
+ * A hose's nozzle at p, snapped down onto the top of the tube of the inline instrument among `tools` it's over (see
+ * INLINE_TOOLS), if it's over one, no more than INLINE_DOCK above it; otherwise just p.
+ */
+export function docked(p: Pose, tools: readonly Tool[]): Pose {
+  for (const t of tools) {
+    if (!INLINE_TOOLS.includes(t.kind)) continue;
+    const m = tankMouth(t, 0);
+    if (overMouth(m, p.x, p.z) && p.y >= m.y && p.y - m.y <= INLINE_DOCK) return { ...p, y: m.y + 1 };
+  }
+  return p;
+}
+
 /** How tall a hose's nozzle is, up from its tip, and how far it reaches either side of its middle. */
 export const NOZZLE_H = 10;
 export const NOZZLE_R = 5;
@@ -341,12 +370,9 @@ const TWO_STANDS = 300;
 const STAND_CLEAR = 6;
 const rodBack = (body: number) => Math.max(body / 2, FLASK_R) + STAND_CLEAR + STAND_BASE.hz;
 
-/** Whether a tool stands straight on a counter, rather than being held up on a stand. */
-export const onBench = (t: Tool) => !!t.shape.bench;
-
-/** The stands holding up a tool, unless it stands on the bench or is built into a wall: clamped near its top, behind it. */
+/** The stands holding up a tool, unless it's built into a wall: clamped near its top, behind it. */
 export function toolStands(t: Tool, pose = t.pose): Stand[] {
-  if (onBench(t) || t.shape.wall) return [];
+  if (t.shape.wall) return [];
   const at = (x: number, y: number, z: number) => toWorld(pose, { x: lx(t, x), y: -y, z });
   const b = t.shape.box;
   const body = TOOL_DEPTH[t.kind].body;

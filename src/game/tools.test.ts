@@ -2,14 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { SPECIES, TARGET, singleOf, speciesIndex } from '../chem/species';
 import { CAP, GOAL_PURITY, GOAL_TARGET } from './config';
 import { heatAt, temperature } from '../chem/reactions';
+import { testChemParams } from '../chem/testChem';
 import { Vessel, roomFor, volume } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
 import { STATION_POSE } from './presets';
 import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, SAMPLE_CAP, SCAN_LIGHTS,
-  RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, aimAt, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, mouthGap, scanLevel, separate, spectrum, type Mouth,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, BOND_KEYS, SPECTROSCOPE, bondCounts, spectroscopeAt, INSTRUMENT_WINDOW, TUBE_CAP,
+  RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -539,21 +540,21 @@ describe('size sorter', () => {
   });
 });
 
-describe('mass spectrometer', () => {
+describe('composition analyzer', () => {
   const RG = speciesIndex(['R', 'G', null], 1);
   const B = singleOf('B');
   const at = (size: number, atom: 'R' | 'G' | 'B' | 'C' | 'M' | 'Y') => (size - 1) * 6 + SEXTANT_ATOMS.indexOf(atom);
 
   const CUP = 1e7;
-  /** A cup's reading, filled with each species by volume. */
+  /** A sample's reading against CUP, filled with each species by volume. */
   const read = (fill: [number, number][]) => {
     const v = new Vessel(CUP);
     for (const [s, room] of fill) v.setMolecules(s, room / roomFor(s));
-    return spectrum(v, CUP);
+    return composition(v, CUP);
   };
 
-  it("reads the share of the cup each size's molecules with each color fill", () => {
-    // a full cup: 20% R, 20% G, 30% B and 30% R–G
+  it("reads the share of the sample each size's molecules with each color make up", () => {
+    // 20% R, 20% G, 30% B and 30% R–G
     const r = read([[R, 0.2 * CUP], [G, 0.2 * CUP], [B, 0.3 * CUP], [RG, 0.3 * CUP]]);
     const want = new Array(18).fill(0);
     want[at(1, 'R')] = 0.2;
@@ -564,7 +565,7 @@ describe('mass spectrometer', () => {
     r.forEach((x, i) => expect(x).toBeCloseTo(want[i], 9));
   });
 
-  it('lights a full cup of one species fully in each of its sextants', () => {
+  it('lights a sample of one species fully in each of its sextants', () => {
     expect(read([[R, CUP]])[at(1, 'R')]).toBe(1);
     const rg = read([[RG, CUP]]);
     expect([rg[at(2, 'R')], rg[at(2, 'G')]]).toEqual([1, 1]);
@@ -573,48 +574,102 @@ describe('mass spectrometer', () => {
     for (const a of ['R', 'G', 'B'] as const) expect(t[at(3, a)]).toBeCloseTo(1, 6);
   });
 
-  it('reads a half-full cup half as bright, and an empty one dark', () => {
+  it('reads a half share half as bright, and nothing dark', () => {
     expect(read([[R, CUP]])[at(1, 'R')]).toBe(2 * read([[R, 0.5 * CUP], [G, 0.1 * CUP]])[at(1, 'R')]);
-    expect(spectrum(new Vessel(CUP), CUP).every((x) => x === 0)).toBe(true);
+    expect(composition(new Vessel(CUP), CUP).every((x) => x === 0)).toBe(true);
   });
 
-  it('reads its sample when run, lids it and drains it evenly over the run, ignoring the button until the end', () => {
-    const sp = new Tool('spectrometer', 0);
-    const cup = sp.tanks[0];
-    expect(cup.cap).toBe(SAMPLE_CAP);
-    expect(sp.step(0.1)).toEqual([]);
-    expect(sp.lidded).toBe(false);
-    cup.setMolecules(TARGET, SAMPLE_CAP / 2 / roomFor(TARGET));
-    cup.setTemperature(5);
-    const full = volume(cup);
-    expect(sp.scan()).toBe(true);
-    // half full of the triangle
-    expect(sp.reading![2 * 6 + SEXTANT_ATOMS.indexOf('R')]).toBeCloseTo(0.5, 6);
-    expect(sp.lidded).toBe(true);
-    const end = SCAN_LIGHTS[2];
-    let t = 0;
-    for (; t < end / 2 - 1e-9; t += 0.02) sp.step(0.02);
-    expect(volume(cup) / full).toBeCloseTo(0.5, 2);
-    expect(temperature(cup)).toBeCloseTo(5, 2);
-    expect(sp.scan()).toBe(false);
-    for (; sp.scanning; t += 0.02) sp.step(0.02);
-    expect(Math.abs(t - end)).toBeLessThanOrEqual(0.02 + 1e-9);
-    expect([cup.N, cup.Q]).toEqual([0, 0]);
-    expect(sp.lidded).toBe(false);
-    expect(sp.scan()).toBe(true);
-    expect(sp.reading!.every((x) => x === 0)).toBe(true);
+  it('drains its tube straight through, drawing off a share out its waste spout', () => {
+    const a = new Tool('analyzer', 0);
+    expect(a.shape.noValve).toBe(true);
+    expect(a.tanks[0].cap).toBe(TUBE_CAP);
+    filled(a.tanks[0], R, TUBE_CAP, 3);
+    const [main, waste] = a.step(0.01);
+    const out = main!.N + waste!.N;
+    expect(out / (FUNNEL_RATE * 0.01)).toBeCloseTo(1, 6);
+    expect(waste!.N / out).toBeCloseTo(ANALYZER_SAMPLE, 3);
+    expect(temperature(main!)).toBeCloseTo(3, 6);
+    expect(temperature(waste!)).toBeCloseTo(3, 2);
   });
 
-  it('rumbles a step harder each phase, steady within one, then stops', () => {
-    const [a, b, c] = SCAN_LIGHTS;
-    const levels = [0, a - 0.01, a, b - 0.01, b, c - 0.01].map(scanLevel);
-    expect(levels[1]).toBe(levels[0]);
-    expect(levels[3]).toBe(levels[2]);
-    expect(levels[5]).toBe(levels[4]);
-    expect(levels[2]).toBeGreaterThan(levels[1]);
-    expect(levels[4]).toBeGreaterThan(levels[3]);
-    expect(scanLevel(SCAN_LIGHTS[2])).toBe(0);
-    expect(scanLevel(Infinity)).toBe(0);
+  it("reads what it drew off over the last INSTRUMENT_WINDOW, as shares of it, and goes dark once that's passed", () => {
+    const a = new Tool('analyzer', 0);
+    expect(a.reading).toBeNull();
+    const src = new Vessel(Infinity);
+    src.setMolecules(R, CAP);
+    src.setMolecules(RG, CAP);
+    const run = (secs: number, on: boolean) => {
+      for (let i = 0; i < Math.round(secs / 0.02); i++) {
+        if (on) a.tanks[0].addFrom(src, 0.25 * CAP * 0.02);
+        a.step(0.02);
+      }
+    };
+    run(2 * INSTRUMENT_WINDOW, true);
+    // by volume, half R and half R–G
+    expect(a.reading![at(1, 'R')]).toBeCloseTo(0.5, 1);
+    expect(a.reading![at(2, 'R')]).toBeCloseTo(0.5, 1);
+    expect(a.reading![at(2, 'G')]).toBeCloseTo(0.5, 1);
+    expect(a.reading![at(3, 'R')]).toBe(0);
+    run(INSTRUMENT_WINDOW / 2, false);
+    expect(a.reading).not.toBeNull();
+    run(INSTRUMENT_WINDOW, false);
+    expect(a.reading).toBeNull();
+  });
+});
+
+describe('spectroscope', () => {
+  const bond = (k: string) => BOND_KEYS.indexOf(k);
+
+  it('knows every bond the chemistry has, once each', () => {
+    expect([...BOND_KEYS].sort()).toEqual(Object.keys(testChemParams().bonds).sort());
+  });
+
+  it("counts each molecule's bonds", () => {
+    const v = new Vessel(Infinity);
+    v.setMolecules(R, 5);
+    v.setMolecules(TARGET, 7);
+    v.setMolecules(speciesIndex(['R', 'G', 'Y'], 3), 2); // G–R–Y
+    const c = bondCounts(v);
+    expect(c[bond('RG')]).toBe(9);
+    expect(c[bond('RB')]).toBe(7);
+    expect(c[bond('GB')]).toBe(7);
+    expect(c[bond('RY')]).toBe(2);
+    expect(c.reduce((a, b) => a + b, 0)).toBe(25);
+  });
+
+  it("draws each bond as a Gaussian peak as tall as its count, at the log of its energy's size", () => {
+    const energies = BOND_KEYS.map((_, i) => (i === 0 ? 8 : i === 1 ? -3 : 0));
+    const counts = BOND_KEYS.map((_, i) => (i === 0 ? 100 : i === 1 ? 40 : i === 2 ? 1e6 : 0));
+    expect(spectroscopeAt(Math.log(8), counts, energies)).toBeCloseTo(100, 6);
+    expect(spectroscopeAt(Math.log(3), counts, energies)).toBeCloseTo(40, 6);
+    const w = SPECTROSCOPE.width;
+    expect(spectroscopeAt(Math.log(8) + w, counts, energies)).toBeCloseTo(100 * Math.exp(-0.5), 6);
+    // far from both, nothing; and the bond with no energy shows nowhere
+    expect(spectroscopeAt(Math.log(5), counts, energies)).toBeLessThan(1e-6);
+    // two bonds at one energy add up
+    const same = BOND_KEYS.map(() => 2);
+    expect(spectroscopeAt(Math.log(2), BOND_KEYS.map(() => 1), same)).toBeCloseTo(BOND_KEYS.length, 6);
+  });
+
+  it('lets everything through, reading the bonds that passed over the last INSTRUMENT_WINDOW, per sim second', () => {
+    const sc = new Tool('spectroscope', 0);
+    expect(sc.shape.spouts).toHaveLength(1);
+    const src = new Vessel(Infinity);
+    src.setMolecules(TARGET, CAP);
+    const feed = 0.1 * CAP; // molecules per sim second
+    let through = 0;
+    const run = (secs: number, on: boolean) => {
+      for (let i = 0; i < Math.round(secs / 0.02); i++) {
+        if (on) sc.tanks[0].addFrom(src, feed * 0.02);
+        through += sc.step(0.02)[0]?.n[TARGET] ?? 0;
+      }
+    };
+    run(2 * INSTRUMENT_WINDOW, true);
+    expect(through / (2 * INSTRUMENT_WINDOW * feed)).toBeCloseTo(1, 2);
+    for (const k of ['RG', 'RB', 'GB']) expect(sc.bonds[bond(k)] / feed).toBeCloseTo(1, 2);
+    expect(sc.bonds[bond('CM')]).toBe(0);
+    run(2 * INSTRUMENT_WINDOW, false);
+    expect(sc.bonds.every((c) => c === 0)).toBe(true);
   });
 });
 
@@ -671,29 +726,6 @@ describe('counterflow', () => {
     const b = { n: new Float64Array(1), N: 0, Q: 0 };
     counterflow(a, b, 1000);
     expect(temperature(a)).toBe(1);
-  });
-});
-
-describe('aimAt', () => {
-  const v = new Vessel(CAP);
-  const low: Mouth = { v, x: 0, y: -100, z: 0, hx: 10, hz: 10 };
-  const high: Mouth = { v, x: 0, y: -20, z: 0, hx: 10, hz: 10 };
-
-  it("hits the first mouth something falling would land in", () => {
-    expect(aimAt([low, high], { x: 5, y: 0, z: 0 }, 30)).toEqual({ m: high, hit: true });
-  });
-
-  it('measures a near miss across, and finds the mouth missed by least', () => {
-    expect(mouthGap(low, 13, 14)).toBeCloseTo(5);
-    const beside: Mouth = { ...low, x: 40 };
-    expect(aimAt([low, beside], { x: 18, y: 0, z: 0 }, 30)).toEqual({ m: low, hit: false });
-    expect(aimAt([low, beside], { x: 24, y: 0, z: 0 }, 30)).toEqual({ m: beside, hit: false });
-    expect(aimAt([low], { x: 50, y: 0, z: 0 }, 30)).toBeNull();
-  });
-
-  it('turns a hit too far below into a near miss, as from a faucet', () => {
-    expect(aimAt([low], { x: 0, y: 0, z: 0 }, 30, 24)).toEqual({ m: low, hit: false });
-    expect(aimAt([low], { x: 0, y: -80, z: 0 }, 30, 24)).toEqual({ m: low, hit: true });
   });
 });
 

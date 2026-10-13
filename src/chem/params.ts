@@ -34,13 +34,15 @@ export const THERMO = { heatCap: 3.0 };
 const DEFAULT_HEAT_CAP = THERMO.heatCap;
 
 export function defaultChemParams(): ChemParams {
+  // each bond energy is a round number times a random factor from 0.8 to 1.2, drawn once (and redrawn until no two
+  // were within 5% of each other), so no two bonds sit on the same line in the spectroscope
   const bonds: Record<string, Omit<BondParams, 'A'> & { A?: number }> = {
-    RG: { E: 20, Ea: 2 }, RM: { E: 3, Ea: 3 }, CG: { E: 2, Ea: 4 }, CM: { E: 5, Ea: 2 },
-    RY: { E: 4, Ea: 10 }, CY: { E: 1, Ea: 10 }, GY: { E: 4, Ea: 10 }, MY: { E: 2, Ea: 10 },
+    RG: { E: 20.72, Ea: 2 }, RM: { E: 3.44, Ea: 3 }, CG: { E: 2.3, Ea: 4 }, CM: { E: 4.92, Ea: 2 },
+    RY: { E: 4.28, Ea: 10 }, CY: { E: 1.03, Ea: 10 }, GY: { E: 4.64, Ea: 10 }, MY: { E: 1.96, Ea: 10 },
     // blue: uphill (E < 0), and never formed or broken directly (A = 0), so
     // blue only enters or leaves a molecule by swapping places with yellow
-    RB: { E: -1, Ea: 1, A: 0 }, CB: { E: -1, Ea: 1, A: 0 },
-    GB: { E: -1, Ea: 1, A: 0 }, MB: { E: -1, Ea: 1, A: 0 },
+    RB: { E: -0.92, Ea: 1, A: 0 }, CB: { E: -0.85, Ea: 1, A: 0 },
+    GB: { E: -0.97, Ea: 1, A: 0 }, MB: { E: -1.13, Ea: 1, A: 0 },
   };
   return {
     bonds: Object.fromEntries(
