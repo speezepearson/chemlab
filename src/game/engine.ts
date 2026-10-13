@@ -227,6 +227,12 @@ const HOLD_NEAR = 40;
 /** How much further off than other things a flask is held to start with (see holdDist). */
 const FLASK_HOLD = 1.7;
 const HOLD_FAR = 520;
+/** The counters, as boxes from the floor up to their tops. */
+const COUNTER_BOXES: readonly Box[] = COUNTERS.map((c) => ({
+  x: (c.x0 + c.x1) / 2, y: LIFT / 2, z: (c.z0 + c.z1) / 2, yaw: 0, hx: (c.x1 - c.x0) / 2, hy: LIFT / 2, hz: (c.z1 - c.z0) / 2,
+}));
+/** How far, in grid cells, what's let go of can be moved from the cell it's held over to find room for it (see placement). */
+const SEEK = 2;
 /** Radians the view turns per pixel the mouse moves, and that something held turns with Shift. */
 const LOOK_SENS = 0.0022;
 const TURN_SENS = 0.008;
@@ -933,11 +939,8 @@ export class GameEngine {
   private obstacles(h: Held | null, bases = true, away: Tool | null = null, skip: ReadonlySet<Hose> = new Set()): Box[] {
     // while the airlock's doors are open, its doorway and chamber take the front wall's place
     const room = this.wake === 'closed' ? roomBoxes(ROOM) : [...roomBoxes(ROOM, false), ...airlockBoxes()];
-    const counters = COUNTERS.map((c) => ({
-      x: (c.x0 + c.x1) / 2, y: LIFT / 2, z: (c.z0 + c.z1) / 2, yaw: 0, hx: (c.x1 - c.x0) / 2, hy: LIFT / 2, hz: (c.z1 - c.z0) / 2,
-    }));
     const riders = h?.kind === 'scale' ? new Set(h.sc.load.map((l) => l.f)) : new Set<Flask>();
-    const out: Box[] = [...room, ...counters];
+    const out: Box[] = [...room, ...COUNTER_BOXES];
     for (const f of this.flasks) if (!(h?.kind === 'flask' && h.f === f) && !riders.has(f)) out.push(flaskBox(f));
     const gone = (t: Tool) => (h?.kind === 'tool' && h.t === t) || t === away;
     for (const t of this.tools) if (!gone(t)) out.push(toolBox(t));
@@ -2314,26 +2317,41 @@ export class GameEngine {
 
   /**
    * Where what's held would come to rest if let go now (see rest): on the grid (see gridded), in the cell under where
-   * it's held. If it can't rest there, why not.
+   * it's held if it can rest there, or else the nearest cell, no more than SEEK cells off, where it can, clear of the
+   * player too. If it can't rest anywhere near, why not where it's held.
    */
   private placement(h: Held): { rest: Rest } | { why: string } {
     const p = this.heldPose(h);
-    const obstacles = this.obstacles(h);
-    const solid = this.obstacles(h, false);
-    const r = this.rest(h, this.gridded(h, p), obstacles, solid);
-    if (typeof r === 'string') return { why: r };
-    if (!h.follow?.length) return { rest: r };
-    const follow = this.followRests(h, r);
-    return typeof follow === 'string' ? { why: follow } : { rest: { ...r, follow } };
+    const { x, z } = this.player;
+    const me: Box = { x, y: (EYE + 20) / 2, z, yaw: 0, hx: PLAYER_R, hy: (EYE + 20) / 2, hz: PLAYER_R, round: true };
+    const obstacles = [...this.obstacles(h), me];
+    const solid = [...this.obstacles(h, false), me];
+    // each cell's spot, nearest where it's held first; that's the cell it's held over
+    const spots: Pose[] = [];
+    for (let i = -SEEK; i <= SEEK; i++)
+      for (let j = -SEEK; j <= SEEK; j++) {
+        const g = this.gridded(h, { ...p, x: p.x + i * CELL, z: p.z + j * CELL });
+        if (Math.hypot(g.x - p.x, g.z - p.z) <= SEEK * CELL) spots.push(g);
+      }
+    spots.sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z));
+    let why: string | null = null;
+    for (const g of spots) {
+      const r = this.rest(h, g, obstacles, solid);
+      const follow = typeof r === 'string' || !h.follow?.length ? null : this.followRests(h, r);
+      const out = typeof r === 'string' ? r : typeof follow === 'string' ? follow : { rest: follow ? { ...r, follow } : r };
+      if (typeof out !== 'string') return out;
+      why ??= out;
+    }
+    return { why: why! };
   }
 
   /**
    * Where what's held, at pose p, would come to rest if let go, or why it can't. Only squarely on a counter: a flask,
    * a scale or a tool that stands on the bench goes straight up or down until it stands on the counter under it, which
    * its whole footprint must be over (or a flask over a scale, onto its platform); a tool or hose's nozzle on a stand
-   * stays at the height it's held, no higher than its stand reaches, while its stand's base goes down onto the counter,
-   * which the whole base must be over (what it holds can reach out past the counter's edge). Either way, it mustn't
-   * overlap anything where it comes to rest (what's held passes through everything, so there's no way down to look
+   * stays at the height it's held, no higher than its stand reaches and no lower than the top of a counter it's held
+   * sunk into, while its stand's base goes down onto the counter, which the whole base must be over (what it holds can
+   * reach out past the counter's edge). Either way, it mustn't overlap anything where it comes to rest (what's held passes through everything, so there's no way down to look
    * at), nor its stand's base sit on anything but the counter. (Stands don't bump into each other: their rods can stand side by side.) A hose's
    * nozzle's stand goes where it's wanted (see nozzleWant) if it can, or else the first place it can of nozzleMounts.
    */
@@ -2343,11 +2361,14 @@ export class GameEngine {
     const onStands = (stands: Stand[]): Rest | string => {
       const tops = stands.map((st) => counterUnder(standBase(st, 0)));
       if (tops.some((t) => t === null)) return 'Its stand needs a counter under it';
-      const drop = Math.max(0, ...stands.map((st, i) => st.clampY - tops[i]! - STAND_MAX));
-      const to = { ...box, y: box.y - drop };
+      let dy = -Math.max(0, ...stands.map((st, i) => st.clampY - tops[i]! - STAND_MAX));
+      // held sunk into a counter, it comes up to stand on it
+      const sunk = LIFT - (box.y + dy - box.hy);
+      if (sunk > 0 && COUNTER_BOXES.some((c) => boxesOverlap({ ...box, y: box.y + dy }, c))) dy += sunk;
+      const to = { ...box, y: box.y + dy };
       if (blocked(to)) return 'No room';
       if (stands.some((st, i) => solid.some((o) => boxesOverlap(standBase(st, tops[i]!), o)))) return 'No room for its stand';
-      return { pose: { ...p, y: p.y - drop } };
+      return { pose: { ...p, y: p.y + dy } };
     };
     if (h.kind === 'hose') {
       // the nozzle itself is in the way, wherever its stand goes
