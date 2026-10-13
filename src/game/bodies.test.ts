@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FLASK_R, SCALE_ANCHOR, SCALE_SLOTS, STAND_BASE, aimValve, onGrid, toolAnchor, flaskBox, flaskLip, flaskMouth, flip, nozzleStand, onScale, scaleSpot, spoutNear, spoutAt, standBase,
+  FLASK_R, SCALE_ANCHOR, SCALE_SLOTS, STAND_BASE, aimValve, onGrid, toolAnchor, flaskBox, flaskLip, flaskMouth, flip, NOZZLE_REACH, nozzleStand, snapReach, onScale, scaleSpot, spoutNear, spoutAt, standBase,
   tankMouth, toolBox, toolStands, valveLocal, valveNear,
 } from './bodies';
 import { CAP } from './config';
@@ -280,6 +280,17 @@ describe('stands', () => {
     expect(nozzleStand(e, 0).z).toBeLessThan(300);
     expect(nozzleStand(e, Math.PI).z).toBeGreaterThan(300);
     expect(nozzleStand(e, Math.PI).x).toBeCloseTo(10);
+  });
+
+  it("hold a hose's nozzle as far behind it as its arm reaches, in steps, within its range", () => {
+    const e = { x: 10, y: 500, z: 300 };
+    expect(nozzleStand(e, 0).z).toBeCloseTo(300 - NOZZLE_REACH.min);
+    expect(nozzleStand(e, 0, 200).z).toBeCloseTo(100);
+    const { min, max, step } = NOZZLE_REACH;
+    expect(snapReach(0)).toBe(min);
+    expect(snapReach(1e6)).toBe(max);
+    expect(snapReach(min + step * 0.6)).toBe(min + step);
+    expect(snapReach(min + step * 0.4)).toBe(min);
   });
 });
 

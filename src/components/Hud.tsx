@@ -101,7 +101,8 @@ function TouchButton({
  * buttons standing in for the keys and the right button. Over the look stick, Grab (E) and the right button, which
  * is named for what it'll do and, while a valve turns, aims its lever as the finger drags; and Flip (F) when there's
  * something to flip. Over the move stick, Crouch (C), and while something's held, a pad to drag (across to turn it,
- * up and down to hold it further or nearer) and Put away (Backspace).
+ * up and down to hold it further or nearer, or for a hose's nozzle, to slide its stand out or in) and Put away
+ * (Backspace).
  */
 export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudState }) {
   if (!TOUCH || !hud.locked) return null;

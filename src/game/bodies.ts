@@ -322,12 +322,31 @@ export function toolStands(t: Tool, pose = t.pose): Stand[] {
   });
 }
 
-/** The stand holding up a hose's nozzle, with its tip at `e`, facing `yaw`: behind it, clamped round it. */
-export function nozzleStand(e: Vec3, yaw: number): Stand {
+/**
+ * How far behind a hose's nozzle its stand's rod can be, its clamp's arm slid in or out: from just far enough for its
+ * base to clear a flask under the nozzle, out to three cells, in steps of `step`.
+ */
+export const NOZZLE_REACH = { min: rodBack(2 * NOZZLE_R), max: 3 * CELL, step: CELL / 4 };
+
+/** A reach for a nozzle's stand (see NOZZLE_REACH): the nearest step to `r`, within its range. */
+export function snapReach(r: number): number {
+  const { min, max, step } = NOZZLE_REACH;
+  const k = Math.round((Math.min(max, Math.max(min, r)) - min) / step);
+  return Math.min(max, min + k * step);
+}
+
+/** The stand holding up a hose's nozzle, with its tip at `e`, facing `yaw`: `reach` behind it, clamped round it. */
+export function nozzleStand(e: Vec3, yaw: number, reach: number = NOZZLE_REACH.min): Stand {
   const y = e.y + NOZZLE_H / 2;
   const pose = { ...e, yaw };
-  const rod = toWorld(pose, { x: 0, y: 0, z: -rodBack(2 * NOZZLE_R) });
+  const rod = toWorld(pose, { x: 0, y: 0, z: -reach });
   return { x: rod.x, z: rod.z, clampY: y, to: { ...toWorld(pose, { x: 0, y: 0, z: -NOZZLE_R }), y }, yaw };
+}
+
+/** Where a nozzle's stand can be: which way the nozzle faces, with the stand behind it, and how far behind. */
+export interface NozzleMount {
+  turn: number;
+  reach: number;
 }
 
 /** A stand's base plate, standing at height `y` (the counter's top, or the floor's under it if left out). */
