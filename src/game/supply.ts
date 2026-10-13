@@ -9,7 +9,7 @@ export const SUPPLY = { window: 60, gap: 2 };
 
 /**
  * What the passengers asleep use, in molecules of the target per sim second: the intro's sum, a day's worth (passengers
- * × mL a day each) over a day's seconds. It's tiny: about 460 molecules a second, where a drop is about half a million.
+ * × mL a day each) over a day's seconds. It's tiny: about 340 molecules a second, where a drop is about half a million.
  */
 export const CONSUMPTION = ((VOYAGE.passengers * VOYAGE.mlPerPassengerDay) / 1000 / FLASK_L) * (CAP / 86_400);
 
