@@ -293,8 +293,8 @@ export const RECEPTACLE_CAP = 100 * CAP;
 export const REFERENCE_CAP = 210 * CAP;
 /** The target the reference starts with, in molecules: the hundred flasks left on board (see VOYAGE). */
 export const REFERENCE_START = 100 * CAP;
-/** How fast the reference's faucet lets it out, fully open, in atoms per sim second: a trickle. */
-export const REFERENCE_FLOW = 0.02 * MAX_FLOW;
+/** How fast the reference's faucet lets it out, fully open, in atoms per sim second: a fifth of a flask a second. */
+export const REFERENCE_FLOW = 0.2 * MAX_FLOW;
 /**
  * The station's cycle, in sim seconds: the receptacle flushes into the tester, the tester thinks, beeping and
  * blinking, then passes what it holds into the reference, or rejects it out its waste nozzle, each evenly over the
