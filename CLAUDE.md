@@ -61,6 +61,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     wall. While the pencil is in hand, the mouse moves `cursor` rather than the view, and both buttons go to
     `pencilDown`, which works where the cursor's ray meets the wall (`wallAt`).
   - `airlock.ts` is the airlock and cryopod where the player wakes: their size, collisions, and the `Wake` states.
+    `dream.ts` fast-forwards the lab while the player sleeps there; `supply.ts` judges the flow into the station.
     `src/intro/notice.ts` is the message projected inside the pod.
   - `porthole.ts` is the porthole's shape, for how much of the wall it takes up.
   - `surfaces.ts` paints the room's textures (walls, deck, ceiling, counters, cabinets) from noise, pure and DOM-free;
@@ -86,7 +87,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Volume isn't atoms.** Capacities and flows are in `volume()` units: molecules by default, or atoms when the
   "volume counts molecules" toggle is off. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
 - **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
-  chemistry, cooling, the composition analyzer's reading and hum, the cryostabilizer station's cycle, and the drip and stream sounds. All of it
+  chemistry, cooling, the composition analyzer's reading and hum, the cryostabilizer station's diverter, and the drip and stream sounds. All of it
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The one exception to the
   substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
@@ -95,7 +96,11 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   isn't in the world (the HUD, the guides' flashing). Everything in the world is on sim time, lights included, like
   the emergency beacon; going with the ambience (as the beacon goes with the alarms) doesn't make something an
   exception. Waking in the airlock (the pod's message flickering out, its front opening, the doors closing) is sim
-  time too.
+  time too, and so is going back to sleep (the front shutting, the fades to and from black and to white). Asleep, the
+  lab fast-forwards by running more sim time per frame (`dreamDt`), still in the same substeps, never by taking bigger
+  ones; and once it's steady, by jumping its slow vessels on by their measured rates (`Dream` in `dream.ts`), between
+  bursts of those substeps. Any sim-time state that a jump should move on (clocks, `Supply`) is moved in the engine's
+  substep loop, where `Dream.after` reports a jump.
   - Anything drawn per outlet must use totals over the whole frame. A single substep's output can be empty, for
     example when a wide-open valve drains its tank in the first substep.
 - **Landing fluid goes through `fill()`.** Anything that lands in a vessel (streams, drops, faucets, pours) must use
@@ -132,14 +137,15 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
 - **Unique tools** (`UNIQUE_TOOLS`: the composition analyzer, the spectroscope and the receptacle) aren't on
   the hotbar and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
-  whole cryostabilizer station (`STATION` in `tools.ts`): its tanks are the receptacle, the tester and the reference,
+  whole cryostabilizer station (`STATION` in `tools.ts`): its tanks are the funnel and the reference,
   in that order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved.
 - **Inline instruments** (`INLINE_TOOLS`: the composition analyzer, the spectroscope and the flow meter) are a tube draining straight through at a fixed rate past a cabinet
   (or the flow meter's little readout, `METER_BODY`) that reads what goes by, as an exponentially weighted average that fades the past smoothly (`INSTRUMENT_TAU`,
   `Tool.smooth`). A hose's nozzle let go of over the tube snaps onto its
   top (`docked` in `bodies.ts`, via the engine's `gridded`).
-- **The goal** is the target in the station's reference (`tanks[2]`, against `GOAL_TARGET`), not what's lying around
-  in vessels.
+- **The goal** is the target in the station's reference (`tanks[1]`, against `GOAL_TARGET`), not what's lying around
+  in vessels. It's reached by going back to sleep in the cryopod while the station's `Supply` keeps up, and waking at
+  Mu Ceti (see `stepWake` in the engine).
 - **Saves** stay at format v1. New fields are optional and the loaders tolerate their absence. Species are stored by
   name.
 

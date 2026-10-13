@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AIRLOCK, POD, airlockBoxes, outOfAirlock } from './airlock';
+import { AIRLOCK, POD, airlockBoxes, doorsOpen, inCryopod, inPod, outOfAirlock, type Wake } from './airlock';
 import { roomBoxes, walk, type Cylinder } from './physics';
 import { ROOM } from './space';
 
@@ -13,6 +13,13 @@ describe('airlock', () => {
     let p = at(POD.x, POD.z);
     for (let i = 0; i < 100; i++) p = walk(p, 0, -10, open());
     expect(outOfAirlock(p.z, R)).toBe(true);
+  });
+
+  it('lets the player walk back in from the lab and stand in the pod', () => {
+    let p = at(POD.x, ROOM.z1 - 100);
+    expect(inCryopod(p.x, p.z)).toBe(false);
+    for (let i = 0; i < 100; i++) p = walk(p, 0, 10, open());
+    expect(inCryopod(p.x, p.z)).toBe(true);
   });
 
   it("doesn't let them out any other way", () => {
@@ -32,5 +39,20 @@ describe('airlock', () => {
   it('starts the player clear of everything', () => {
     const p = at(POD.x, POD.z);
     expect(walk(p, 0, -1, open()).z).toBeCloseTo(POD.z - 1, 9);
+  });
+
+  it('opens its doors while the player is in the airlock or the pod, and in the lab only while the ship asks them back', () => {
+    expect(doorsOpen('closed', false, false)).toBe(false);
+    expect(doorsOpen('closed', true, false)).toBe(true);
+    // not shut on them
+    expect(doorsOpen('closed', false, true)).toBe(true);
+    for (const w of ['pod', 'flicker', 'opening', 'out', 'shutting', 'dozing', 'asleep', 'waking', 'arrived'] as Wake[])
+      expect(doorsOpen(w, false, false)).toBe(true);
+  });
+
+  it("holds the player still while they're in the pod, or falling asleep or waking in it", () => {
+    for (const w of ['shutting', 'dozing', 'asleep', 'waking', 'pod', 'flicker', 'opening', 'arrived'] as Wake[]) expect(inPod(w)).toBe(true);
+    expect(inPod('out')).toBe(false);
+    expect(inPod('closed')).toBe(false);
   });
 });

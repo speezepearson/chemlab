@@ -21,25 +21,42 @@ export const POD = {
 };
 
 /**
- * Sim seconds the message in the pod takes to flicker out, its front to slide up, and the doors to close: they run on
- * sim time, like everything else, so pausing stops them.
+ * Sim seconds the message in the pod takes to flicker out, its front to slide up (or down), the doors to open or close,
+ * the view to fade to black as the player falls asleep (and back as they wake), and to white after the pod opens at
+ * Mu Ceti: they run on sim time, like everything else, so pausing stops them.
  */
-export const WAKE_S = { flicker: 0.7, open: 1.6, close: 1.2 };
+export const WAKE_S = { flicker: 0.7, open: 1.6, close: 1.2, doze: 1.5, dawn: 2.5 };
 
 /**
- * Where the player is in waking up, the first time (and on a replay of the intro):
+ * Where the player is in waking up, the first time (and on a replay of the intro), in going back to sleep, and in
+ * waking again:
  * - pod: in the cryopod, with the message projected on the inside of its front; they can look around, but not move,
  *   and the lab waits.
  * - flicker: OK was pressed, and the message is flickering out.
  * - opening: the pod's front is sliding up.
  * - out: they can walk, and the doors stand open until they're out in the lab.
- * - closed: the doors have closed behind them, for good. This is how every lab starts but the first.
+ * - closed: out in the lab. The doors are shut, but for while the ship asks them back to the pod (see doorsOpen). This
+ *   is how every lab starts but the first.
+ * - shutting: they've got back in the pod, and its front is sliding down.
+ * - dozing: the view is fading to black.
+ * - asleep: the lab runs on as fast as it can, unseen, until the ship has enough cryostabilizer, or its supply stops;
+ *   then they wake.
+ * - waking: the black is lifting, on the message in the pod saying which; then it's `pod` again.
+ * - arrived: they woke at Mu Ceti, the pod has opened, and the view is fading to white, for good.
  */
-export type Wake = 'pod' | 'flicker' | 'opening' | 'out' | 'closed';
+export type Wake = 'pod' | 'flicker' | 'opening' | 'out' | 'closed' | 'shutting' | 'dozing' | 'asleep' | 'waking' | 'arrived';
 
-/** Whether the player is still shut in the pod. */
+/** Whether the player is in the pod, or otherwise can't move or do anything but look. */
 export function inPod(w: Wake): boolean {
-  return w === 'pod' || w === 'flicker' || w === 'opening';
+  return w !== 'out' && w !== 'closed';
+}
+
+/**
+ * Whether the airlock's doors should be open: while the player's in the airlock or the pod, and in the lab while the
+ * ship asks them back to the pod (`invited`).
+ */
+export function doorsOpen(w: Wake, invited: boolean, inAirlock: boolean): boolean {
+  return w !== 'closed' || invited || inAirlock;
 }
 
 const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number): Box => ({
@@ -78,6 +95,14 @@ export function airlockBoxes(): Box[] {
     // the pod's back, behind where the player stands in it
     box(POD.x - POD.r, POD.x + POD.r, 0, POD.top + POD.r, POD.z + 50, POD.z + POD.r + 8),
   ];
+}
+
+/** How near the pod's axis the player has to stand to be in it, in world units. */
+export const IN_POD = 30;
+
+/** Whether the player, standing at (x, z), is in the cryopod. */
+export function inCryopod(x: number, z: number): boolean {
+  return Math.hypot(x - POD.x, z - POD.z) < IN_POD;
 }
 
 /** Whether a player of radius r standing at z is all the way out of the doorway, into the lab. */

@@ -14,15 +14,20 @@ export type Block =
 const num = (x: number, digits = 0) => x.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
 /** The litres needed, present, and so still to be made, right-aligned together. */
-function litres(): [needed: string, present: string, short: string] {
-  const ls = [GOAL_L, VOYAGE.presentL, GOAL_L - VOYAGE.presentL].map((l) => `${num(l, 2)} L`);
+function litres(presentL: number): [needed: string, present: string, short: string] {
+  const ls = [GOAL_L, presentL, Math.max(0, GOAL_L - presentL)].map((l) => `${num(l, 2)} L`);
   const w = Math.max(...ls.map((l) => l.length)) + 2;
   const [a, b, c] = ls.map((l) => l.padStart(w));
   return [a, b, c];
 }
 
-export function notice(): Block[] {
-  const [needed, present, short] = litres();
+/**
+ * The notice that wakes the player: the first time, with the litres of cryostabilizer present (`presentL`) left on
+ * board; and again, the same with what's present now, when their supply stopped while they slept. At Mu Ceti, it's
+ * welcomeNotice instead.
+ */
+export function notice(presentL = VOYAGE.presentL): Block[] {
+  const [needed, present, short] = litres(presentL);
   return [
     { kind: 'brand', text: '✦ Celestia Starlines' },
     { kind: 'h', text: `Good morning, passenger ${PLAYER}!` },
@@ -58,6 +63,36 @@ export function notice(): Block[] {
       kind: 'p',
       text: 'Your cryo pod has been transported to R046 - Emergency Chemistry Lab. Please select OK to meet your teammates and begin your valuable contributions!',
     },
+    { kind: 'hr' },
+    { kind: 'p', text: 'Thank you for flying with Celestia Starlines! We look forward to flying with you again soon.' },
+    { kind: 'hr' },
+    {
+      kind: 'small',
+      text:
+        'Before you go, ask any of our friendly associates about the Celestia Starlines Rewards Platinum card, where you ' +
+        'can earn 70,000 bonus lightyears plus our exclusive Cosmic Companion Pass™ when you\'re approved and meet the ' +
+        'spending requirements. Apply on your way out today!',
+    },
+  ];
+}
+
+/** The notice that wakes the player at Mu Ceti, with the litres of cryostabilizer they added to the ship's (`madeL`). */
+export function welcomeNotice(madeL: number): Block[] {
+  return [
+    { kind: 'brand', text: '✦ Celestia Starlines' },
+    { kind: 'h', text: 'Welcome to Mu Ceti!' },
+    { kind: 'p', text: `Good morning, passenger ${PLAYER}! We have arrived at Mu Ceti, right on schedule. Thank you for your patience!` },
+    { kind: 'hr' },
+    {
+      kind: 'p',
+      text:
+        `All ${num(VOYAGE.passengers)} passengers in cryostasis were kept in excellent condition for the remainder of the ` +
+        'journey, thanks in part to the following volunteer contribution:',
+    },
+    { kind: 'pre', text: `Cryostabilizer contributed by passenger ${PLAYER}:\n  ${num(madeL, 2)} L` },
+    { kind: 'p', text: 'Celestia Starlines values your feedback! A short survey about your journey will be sent to you shortly.' },
+    { kind: 'hr' },
+    { kind: 'p', text: 'Please select OK to disembark and begin your new life!' },
     { kind: 'hr' },
     { kind: 'p', text: 'Thank you for flying with Celestia Starlines! We look forward to flying with you again soon.' },
     { kind: 'hr' },

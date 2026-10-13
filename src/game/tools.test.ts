@@ -8,9 +8,10 @@ import { FLASK_VOLUME } from './flaskShape';
 import { STATION_POSE } from './presets';
 import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
+import { SUPPLY } from './supply';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, BOND_KEYS, SPECTROSCOPE, bondCounts, spectroscopeAt, INSTRUMENT_TAU, TUBE_CAP,
-  RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  DIVERT_HOLD, RECEPTACLE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, SEPARATOR, STATION, STATION_FUNNEL, gaugeSegments, SEPARATOR_PERFECT, SORTER, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -248,91 +249,103 @@ describe('tank', () => {
 
 describe('cryostabilizer station', () => {
   /**
-   * A station whose receptacle holds `atoms` of the target and `impurity` atoms of R, pressed and run to the end of
-   * its cycle: what came out its waste nozzle, how long it took, and its phases in order.
+   * A station whose funnel holds `atoms` of the target and `impurity` atoms of R, run until it's drained: what came out
+   * its waste nozzle, and how long it took.
    */
   function run(atoms: number, impurity: number) {
     const r = new Tool('receptacle', 0);
-    const [rec, tester, ref] = r.tanks;
-    rec.setMolecules(TARGET, atoms / 3);
-    rec.setMolecules(R, impurity);
-    const before = rec.N;
-    expect(r.press()).toBe(true);
+    const [funnel, ref] = r.tanks;
+    funnel.setMolecules(TARGET, atoms / 3);
+    funnel.setMolecules(R, impurity);
+    const before = funnel.N;
     let wasted = 0;
     let t = 0;
-    const phases: string[] = [];
-    for (; r.cycle && t < 20; t += 0.02) {
-      if (phases[phases.length - 1] !== r.cycle.phase) phases.push(r.cycle.phase);
-      // the receptacle stays open through it all, and the tester and the reference are sealed
+    for (; funnel.N > 0 && t < 20; t += 0.02) {
+      // the funnel is open, and the reference sealed
       expect(r.isOpen(0)).toBe(true);
       expect(r.isOpen(1)).toBe(false);
-      expect(r.isOpen(2)).toBe(false);
       wasted += r.step(0.02)[0]?.N ?? 0;
-      if (r.cycle?.phase === 'think') expect(tester.N).toBe(before);
     }
-    return { r, rec, tester, ref, before, wasted, t, phases };
+    return { r, funnel, ref, before, wasted, t };
   }
 
-  it('is built into the wall, with a receptacle and a tester the same size, and a reference about three times the goal', () => {
+  it('is built into the wall, with a funnel as big as it is drawn, and a reference about three times the goal', () => {
     const r = new Tool('receptacle', 0);
-    expect(r.tanks.map((v) => v.cap)).toEqual([RECEPTACLE_CAP, RECEPTACLE_CAP, REFERENCE_CAP]);
+    expect(r.tanks.map((v) => v.cap)).toEqual([RECEPTACLE_CAP, REFERENCE_CAP]);
+    expect(RECEPTACLE_CAP / (spaceOf(STATION_FUNNEL) / (FLASK_VOLUME / CAP))).toBeCloseTo(1, 6);
     expect(r.shape.fixed).toBe(true);
     expect(r.shape.wall).toBe(true);
     expect(REFERENCE_START).toBeLessThan(GOAL_TARGET);
     expect(REFERENCE_CAP / GOAL_TARGET).toBeCloseTo(3, 1);
-    // even if all it's ever passed is only just pure enough, and the rest single atoms
+    // even if all that's ever gone into it is only just pure enough, and the rest single atoms
     const target = GOAL_TARGET * roomFor(TARGET);
     expect(target + (GOAL_TARGET * 3 * (1 / GOAL_PURITY - 1)) * roomFor(R)).toBeLessThan(REFERENCE_CAP);
   });
 
-  it(`passes what's more than ${100 * GOAL_PURITY}% target into the reference, by way of the tester`, () => {
-    const atoms = 3 * CAP;
+  it(`sends what's more than ${100 * GOAL_PURITY}% target into the reference, as fast as a funnel drains`, () => {
+    const atoms = 0.75 * RECEPTACLE_CAP;
     const impurity = Math.floor(atoms * (1 / GOAL_PURITY - 1)) - 1000;
-    const { r, rec, tester, ref, before, wasted, t, phases } = run(atoms, impurity);
-    expect(r.verdict).toBe('pass');
-    expect(phases).toEqual(['flush', 'think', 'pass']);
+    const { r, funnel, ref, before, wasted, t } = run(atoms, impurity);
     expect(ref.N).toBe(before);
     expect(ref.n[TARGET]).toBe(atoms / 3);
     expect(wasted).toBe(0);
-    expect(rec.N).toBe(0);
-    expect(tester.N).toBe(0);
-    expect(t).toBeCloseTo(RECEPTACLE_TIMES.flush + RECEPTACLE_TIMES.think + RECEPTACLE_TIMES.pass, 1);
+    expect(funnel.N).toBe(0);
+    // by molecules
+    expect(t).toBeCloseTo((atoms / 3 + impurity) / FUNNEL_RATE, 1);
+    expect(r.diverting).toBe('keep');
   });
 
-  it('rejects anything else out its waste nozzle', () => {
-    const atoms = 3 * CAP;
+  it('sends anything else out its waste nozzle', () => {
+    const atoms = 0.75 * RECEPTACLE_CAP;
     const impurity = Math.ceil(atoms * (1 / GOAL_PURITY - 1)) + 1000;
-    const { r, tester, ref, before, wasted, t, phases } = run(atoms, impurity);
-    expect(r.verdict).toBe('fail');
-    expect(phases).toEqual(['flush', 'think', 'reject']);
+    const { r, ref, before, wasted } = run(atoms, impurity);
     expect(wasted).toBe(before);
     expect(ref.N).toBe(0);
-    expect(tester.N).toBe(0);
-    expect(t).toBeCloseTo(RECEPTACLE_TIMES.flush + RECEPTACLE_TIMES.think + RECEPTACLE_TIMES.reject, 1);
+    expect(r.diverting).toBe('waste');
   });
 
-  it('flushes itself once the receptacle is full to the line, and not before', () => {
+  it('says which way it last sent the flow until DIVERT_HOLD after the last of it', () => {
     const r = new Tool('receptacle', 0);
-    const rec = r.tanks[0];
-    rec.setMolecules(TARGET, Math.floor(STATION.autoflush * rec.cap) - 1);
+    expect(r.diverting).toBe(null);
+    r.tanks[0].setMolecules(TARGET, 1e6);
     r.step(0.02);
-    expect(r.cycle).toBe(null);
-    rec.setMolecules(TARGET, Math.ceil(STATION.autoflush * rec.cap));
-    r.step(0.02);
-    expect(r.cycle?.phase).toBe('flush');
+    expect(r.diverting).toBe('keep');
+    for (let t = 0.02; t < DIVERT_HOLD - 0.01; t += 0.02) r.step(0.02);
+    expect(r.diverting).toBe('keep');
+    r.step(0.05);
+    expect(r.diverting).toBe(null);
   });
 
-  it('refuses an empty load, and ignores its button mid-cycle', () => {
+  it('records the target it takes into the reference, net of what its faucet lets out, for the ship to judge', () => {
+    const steady = new Tool('receptacle', 0);
+    for (let t = 0; t < SUPPLY.window + 1; t += 0.02) {
+      steady.tanks[0].setMolecules(TARGET, steady.tanks[0].n[TARGET] + 1e6);
+      steady.step(0.02);
+    }
+    expect(steady.supply!.keepingUp).toBe(true);
+    // the reference's own faucet poured back into the funnel adds nothing
+    const loop = new Tool('receptacle', 0, undefined, [1]);
+    loop.tanks[1].setMolecules(TARGET, REFERENCE_START);
+    for (let t = 0; t < SUPPLY.window + 1; t += 0.02) {
+      const tap = loop.step(0.02)[1];
+      if (tap) loop.tanks[0].setMolecules(TARGET, loop.tanks[0].n[TARGET] + tap.n[TARGET]);
+    }
+    expect(loop.supply!.run).toBeGreaterThan(SUPPLY.window);
+    expect(loop.supply!.keepingUp).toBe(false);
+  });
+
+  it("leaves what doesn't fit in the reference in the funnel", () => {
     const r = new Tool('receptacle', 0);
-    expect(r.press()).toBe(true);
-    expect(r.press()).toBe(false);
-    for (let t = 0; t < RECEPTACLE_TIMES.flush + RECEPTACLE_TIMES.think + 0.1; t += 0.02) r.step(0.02);
-    expect(r.verdict).toBe('fail');
+    const [funnel, ref] = r.tanks;
+    ref.setMolecules(TARGET, REFERENCE_CAP);
+    funnel.setMolecules(TARGET, 1e6);
+    expect(r.step(0.02)[0]).toBe(null);
+    expect(funnel.n[TARGET]).toBe(1e6);
   });
 
   it("lets the reference out its faucet, as far as its valve is open, and slower than a tank at most", () => {
     const r = new Tool('receptacle', 0, undefined, [1]);
-    const ref = r.tanks[2];
+    const ref = r.tanks[1];
     ref.setMolecules(TARGET, REFERENCE_START);
     expect(REFERENCE_FLOW).toBeLessThan(MAX_FLOW);
     expect(volume(r.step(0.5)[1]!) / (REFERENCE_FLOW * 0.5)).toBeCloseTo(1, 3);
@@ -368,12 +381,6 @@ describe('cryostabilizer station', () => {
     expect(block.y1).toBeGreaterThan(r.shape.valveY);
   });
 
-  it('beeps in a random pattern through its thinking, a few times a second', () => {
-    const beeps = beepPattern();
-    expect(beeps.length).toBeGreaterThan(5);
-    for (const b of beeps) expect(b.t).toBeLessThan(RECEPTACLE_TIMES.think);
-    expect(new Set(beeps.map((b) => b.lamp)).size).toBeGreaterThan(1);
-  });
 });
 
 describe('dispenser', () => {
