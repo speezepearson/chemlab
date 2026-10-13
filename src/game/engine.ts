@@ -2063,14 +2063,15 @@ export class GameEngine {
   /**
    * Guides for lining up what's held (see aims), shown only while something's held, since that's when things are
    * being lined up: gray from a held flask's lip to where it would pour; and green, as it will be once let go and set
-   * down on the grid, wherever fluid would land in a mouth then.
+   * down on the grid, wherever fluid would land in a mouth then. Each ends at the vessel that would take the fluid,
+   * which flashes green.
    */
   private guides(pl: ReturnType<GameEngine['placement']> | null): Frame['guides'] {
     const h = this.held;
     if (!h) return [];
     const guide = (a: Aim, look: GuideLook): Frame['guides'][number] => {
       const { x, y, z, hx, hz, yaw = 0 } = a.m;
-      return { from: a.from, toY: y, look, mouth: { x, y, z, hx, hz, yaw } };
+      return { from: a.from, toY: y, look, mouth: { x, y, z, hx, hz, yaw }, v: a.m.v };
     };
     const out = this.aims(h, this.open).filter((a) => a.held === 'lip').map((a) => guide(a, 'solid'));
     if (pl && 'rest' in pl) {

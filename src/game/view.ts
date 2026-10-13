@@ -62,9 +62,15 @@ export interface Frame {
   streams: readonly { from: Vec3; toY: number; fluid: Fluid; flow: number }[];
   /**
    * Streams for lining things up: gray where a held flask would pour, green for what will line up when what's held is
-   * let go; each with the mouth it lands in, whose rim is outlined to match.
+   * let go; each with the mouth it lands in, whose rim is outlined to match, and whose vessel, `v`, flashes green.
    */
-  guides: readonly { from: Vec3; toY: number; look: GuideLook; mouth: Vec3 & { hx: number; hz: number; yaw: number } }[];
+  guides: readonly {
+    from: Vec3;
+    toY: number;
+    look: GuideLook;
+    mouth: Vec3 & { hx: number; hz: number; yaw: number };
+    v: Vessel;
+  }[];
   /**
    * Where what's held would come to rest if let go, outlined where it'd stand (its footprint, or its stands' bases):
    * pale if it can be set down there, red if it can't.
@@ -350,6 +356,34 @@ function frustum(x: number, y0: number, y1: number, wTop: number, dTop: number, 
 function glassFrom(parent: THREE.Object3D, g: THREE.BufferGeometry): void {
   parent.add(new THREE.Mesh(g, glassMat));
   parent.add(new THREE.LineSegments(new THREE.EdgesGeometry(g, 30), edgeMat));
+}
+
+/**
+ * The faint green a vessel that a guide ends at flashes (see Frame.guides): added over its glass, pulsing FLASH.hz
+ * times a real second between FLASH.lo and FLASH.hi opacity.
+ */
+const flashMat = new THREE.MeshBasicMaterial({
+  color: 0x5cff9a, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+  toneMapped: false,
+});
+const FLASH = { hz: 1.5, lo: 0.05, hi: 0.22 };
+
+/**
+ * A copy of a glass mesh in flashMat, laid over it and hidden until its vessel is to flash; null for anything that
+ * isn't glass. It's never hit by the crosshair.
+ */
+function flashOver(o: THREE.Object3D): THREE.Mesh | null {
+  if (!(o instanceof THREE.Mesh)) return null;
+  const mats: THREE.Material[] = Array.isArray(o.material) ? o.material : [o.material];
+  if (!mats.includes(glassMat)) return null;
+  const m = new THREE.Mesh(o.geometry, Array.isArray(o.material) ? mats.map((x) => (x === glassMat ? flashMat : hidden)) : flashMat);
+  m.position.copy(o.position);
+  m.quaternion.copy(o.quaternion);
+  m.scale.copy(o.scale);
+  m.visible = false;
+  m.raycast = () => {};
+  o.parent!.add(m);
+  return m;
 }
 
 /** A box of material `mat` over x0..x1, y0..y1 (flat frame, y down), z0..z1, its edges rounded by `r` if given. */
@@ -725,6 +759,7 @@ class FlaskView {
   private tilt = new THREE.Group();
   private fluid: FluidMesh;
   private label: Label;
+  private flash: THREE.Mesh;
   readonly glow: Glow;
 
   constructor(
@@ -734,6 +769,7 @@ class FlaskView {
   ) {
     const glass = new THREE.Mesh(flaskGlassGeom, glassMat);
     this.tilt.add(glass, new THREE.LineSegments(new THREE.EdgesGeometry(flaskGlassGeom, 25), edgeMat));
+    this.flash = flashOver(glass)!;
     this.fluid = new FluidMesh([flaskFluidGeom], this.tilt);
     this.root.add(this.tilt);
     this.label = new Label(this.root, new THREE.Vector3(0, NOTE_Y, 0));
@@ -742,8 +778,10 @@ class FlaskView {
     pickables.set(glass, { kind: 'flask', f });
   }
 
-  update(): void {
+  /** Draw it as it is now, flashing if it's in `targets` (see Frame.guides). */
+  update(targets: ReadonlySet<Vessel>): void {
     const { f } = this;
+    this.flash.visible = targets.has(f);
     this.root.position.set(f.pose.x, f.pose.y, f.pose.z);
     this.root.rotation.y = f.pose.yaw;
     this.tilt.rotation.z = -f.tilt;
@@ -797,6 +835,8 @@ class ToolView {
    */
   private fluids: { fm: FluidMesh; level: (v: Vessel) => number; fit?: (v: Vessel) => void }[] = [];
   private levers = new Map<number, THREE.Group>();
+  /** Each tank's glass's flash overlays (see flashOver). */
+  private flashes: THREE.Mesh[][] = [];
   private dial?: THREE.Group;
   private lids: THREE.Mesh[] = [];
   private labels: Label[] = [];
@@ -884,6 +924,7 @@ class ToolView {
 
     // tanks, with their fluid (the station's are built in buildStation)
     if (!sh.wall) t.tanks.forEach((_, k) => {
+      const built = art.children.length;
       const r = tankRect(t, k);
       const o = openingOf(t, k);
       const d = D.tank;
@@ -950,6 +991,7 @@ class ToolView {
       this.lids.push(lid);
       this.labels.push(new Label(upright, v3(ux(tankX(sh.tanks[k])), tankNoteY(t, k))));
       this.glows.push(new Glow(scene));
+      this.flashFrom(art, built, k);
     });
     if (sh.label) {
       const s = textSprite(sh.label);
@@ -1008,6 +1050,14 @@ class ToolView {
       if (m instanceof THREE.Mesh && !pickables.has(m)) pick(m, 'body');
     });
     scene.add(this.root);
+  }
+
+  /** Lay flash overlays (see flashOver) over the glass among `parent`'s children from `from` on, as tank k's. */
+  private flashFrom(parent: THREE.Object3D, from: number, k: number): void {
+    for (const o of parent.children.slice(from)) {
+      const m = flashOver(o);
+      if (m) (this.flashes[k] ??= []).push(m);
+    }
   }
 
   /** Ten marks up the left wall of a tank with a cup, at each tenth of its capacity as its fluid is shown (see levelIn). */
@@ -1255,6 +1305,7 @@ class ToolView {
       const pane = new THREE.Mesh(new THREE.PlaneGeometry(paneW, H).translate(x, -H / 2, face - 0.5), glassMat);
       art.add(pane);
       pick(pane, 'tank', k);
+      this.flashFrom(art, art.children.length - 1, k);
       // no lids: the receptacle is open through its funnel, and the others are sealed
       const lid = new THREE.Mesh();
       lid.visible = false;
@@ -1279,7 +1330,9 @@ class ToolView {
     // the column
     const x0 = tankX(sh.tanks[0]);
     const pump = H + 14;
+    const funnel = art.children.length;
     glassFrom(art, frustum(x0, f.y, f.y + f.h, 2 * f.w, 2 * f.w, FUNNEL_TIP, FUNNEL_TIP, true));
+    this.flashFrom(art, funnel, 0);
     rod(art, glassMat, v3(x0, f.y + f.h, 0), v3(x0, pump, 0), FUNNEL_TIP / 2);
     rod(art, glassMat, v3(x0, pump, 0), v3(x0, pump, face), FUNNEL_TIP / 2);
     block(art, panelMat, x0 - 12, x0 + 12, pump - 10, pump + 10, face, face + 10);
@@ -1328,8 +1381,9 @@ class ToolView {
     this.screen = new Screen(art, sc.x0, sc.x1, sc.y0, sc.y1, face + 0.6, 8);
   }
 
-  update(hot: Pick | null, clock: number, energies: readonly number[]): void {
+  update(hot: Pick | null, clock: number, energies: readonly number[], targets: ReadonlySet<Vessel>): void {
     const { t } = this;
+    this.flashes.forEach((ms, k) => ms.forEach((m) => (m.visible = targets.has(t.tanks[k]))));
     this.root.position.set(t.pose.x, t.pose.y, t.pose.z);
     this.root.rotation.y = t.pose.yaw;
     this.body.updateMatrixWorld();
@@ -2691,7 +2745,10 @@ export class View {
     this.sync(this.tools, fr.tools, (t) => new ToolView(t, scene, pickables));
     this.sync(this.scales, fr.scales, (s) => new ScaleView(s, scene, pickables));
     this.sync(this.hoses, fr.hoses.map((x) => x.h), (h) => new HoseView(h, scene, pickables));
-    for (const v of this.flasks.values()) v.update();
+    // the vessels guides end at flash
+    const targets = new Set(fr.guides.map((g) => g.v));
+    flashMat.opacity = FLASH.lo + (FLASH.hi - FLASH.lo) * (0.5 - 0.5 * Math.cos(2 * Math.PI * FLASH.hz * this.clock));
+    for (const v of this.flasks.values()) v.update(targets);
     // a tool flipped since it was built is built again
     for (const [t, v] of this.tools)
       if (v.flipped !== t.flipped) {
@@ -2699,7 +2756,7 @@ export class View {
         for (const [o, p] of pickables) if (p.kind === 'tool' && p.t === t) pickables.delete(o);
         this.tools.set(t, new ToolView(t, scene, pickables));
       }
-    for (const v of this.tools.values()) v.update(fr.hot, fr.clock, fr.energies);
+    for (const v of this.tools.values()) v.update(fr.hot, fr.clock, fr.energies, targets);
     for (const v of this.scales.values()) v.update(fr.tarePress === v.sc, fr.hot);
     for (const { h, from, fluid } of fr.hoses) this.hoses.get(h)!.update(from, fluid);
     fr.faucets.forEach((fa, i) => {
