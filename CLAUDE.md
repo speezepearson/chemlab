@@ -89,7 +89,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
   notice; and the player themselves (walking, looking, carrying, tipping a flask), which is input, not the sim. Waking
-  in the airlock (the pod's message flickering out, its front opening, the doors closing) is sim time too.
+  in the airlock (the pod's message flickering out, its front opening, the doors closing) is sim time too, and so is
+  going back to sleep (the front shutting, the fades to and from black and to white). Asleep, the lab fast-forwards by
+  running more sim time per frame (`dreamDt`), still in the same substeps, never by taking bigger ones.
   - Anything drawn per outlet must use totals over the whole frame. A single substep's output can be empty, for
     example when a wide-open valve drains its tank in the first substep.
 - **Landing fluid goes through `fill()`.** Anything that lands in a vessel (streams, drops, faucets, pours) must use
@@ -132,7 +134,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   what goes by, as an exponentially weighted average that fades the past smoothly (`INSTRUMENT_TAU`, `Tool.smooth`). A hose's nozzle let go of over the tube snaps onto its
   top (`docked` in `bodies.ts`, via the engine's `gridded`).
 - **The goal** is the target in the station's reference (`tanks[1]`, against `GOAL_TARGET`), not what's lying around
-  in vessels.
+  in vessels. It's reached by going back to sleep in the cryopod while the station's `Supply` keeps up, and waking at
+  Mu Ceti (see `stepWake` in the engine).
 - **Saves** stay at format v1. New fields are optional and the loaders tolerate their absence. Species are stored by
   name.
 

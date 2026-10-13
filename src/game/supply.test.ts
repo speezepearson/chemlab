@@ -60,7 +60,8 @@ describe('supply', () => {
     run(s, 23.5, () => 1e6);
     expect(supplyText(s)).toBe('SUPPLY: STEADY 0:23 / 1:00');
     run(s, SUPPLY.window, () => 1e6);
-    expect(supplyText(s)).toBe('SUPPLY: SUSTAINED');
+    expect(supplyText(s)).toBe('SUPPLY SUSTAINED - RETURN TO CRYOPOD');
+    expect(supplyText(new Supply(), true)).toBe('RESERVOIR FULL - RETURN TO CRYOPOD');
     expect(supplyText(run(new Supply(), SUPPLY.window + 1, () => 1, () => 1))).toBe('SUPPLY: TOO SLOW');
   });
 });

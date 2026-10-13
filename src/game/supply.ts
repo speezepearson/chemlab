@@ -60,9 +60,13 @@ export class Supply {
   }
 }
 
-/** What the cryostabilizer station's status screen says about a supply. */
-export function supplyText(s: Supply): string {
-  if (s.keepingUp) return 'SUPPLY: SUSTAINED';
+/**
+ * What the cryostabilizer station's status screen says about a supply, and the reference, if it holds `enough` to reach
+ * Mu Ceti: either way, the ship asks the player back to the cryopod.
+ */
+export function supplyText(s: Supply, enough = false): string {
+  if (enough) return 'RESERVOIR FULL - RETURN TO CRYOPOD';
+  if (s.keepingUp) return 'SUPPLY SUSTAINED - RETURN TO CRYOPOD';
   if (!s.flowing) return 'SUPPLY: NONE';
   if (s.run >= SUPPLY.window) return 'SUPPLY: TOO SLOW';
   const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;

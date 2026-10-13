@@ -59,7 +59,6 @@ export function App() {
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [speed, setSpeed] = useState(1);
   const [god, setGod] = useState(storedGod);
-  const [won, setWon] = useState(false);
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [hud, setHud] = useState<HudState | null>(null);
   const [saved] = useState(storedSave);
@@ -111,7 +110,6 @@ export function App() {
 
   useEffect(() => {
     const e = new GameEngine(canvasRef.current!, stageRef.current!, network, {
-      onWin: () => setWon(true),
       onInspect: setInspection,
       onEdit: setEditing,
       onLabel: setLabeling,
@@ -146,10 +144,7 @@ export function App() {
     storeGod(god);
   }, [engine, god]);
 
-  const reset = () => {
-    engine?.reset();
-    setWon(false);
-  };
+  const reset = () => engine?.reset();
 
   const loadPreset = (id: string) => {
     const p = PRESETS.find((x) => x.id === id)!;
@@ -160,7 +155,6 @@ export function App() {
     }
     setPreset(p);
     engine?.load(p);
-    setWon(false);
   };
 
   const exportSave = async () => {
@@ -191,7 +185,6 @@ export function App() {
     engine.restore(s, p);
     storeSave(engine.snapshot());
     setChemVersion((v) => v + 1);
-    setWon(false);
   };
 
   return (
@@ -240,6 +233,11 @@ export function App() {
       <div className="main">
         <div id="stage" ref={stageRef}>
           <canvas ref={canvasRef} />
+          {hud?.fade && (
+            <div className={hud.fade.white ? 'fade white' : 'fade'} style={{ opacity: hud.fade.a }}>
+              {hud.dream?.map((line, i) => <p key={i}>{line}</p>)}
+            </div>
+          )}
           {hud && <Hud hud={hud} help={help} />}
           {engine && hud && <TouchControls engine={engine} hud={hud} />}
           {inspection && <InfoPanel info={inspection} />}
@@ -254,7 +252,6 @@ export function App() {
           {engine && labeling !== null && (
             <LabelEditor key={labeling} engine={engine} id={labeling} onClose={() => setLabeling(null)} />
           )}
-          {won && <div id="win">Enough cryostabilizer to reach Mu Ceti.</div>}
         </div>
       </div>
       {intro && <Intro skipStart={intro === 'replay'} resume={intro === 'resume'} onLogEnd={endLog} onDone={endIntro} />}
