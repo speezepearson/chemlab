@@ -1846,6 +1846,14 @@ export class GameEngine {
     f.pose = { ...f.pose, yaw: Math.atan2(p.x - f.pose.x, p.z - f.pose.z) };
   }
 
+  /**
+   * Whether spout j of tool t is a held tool's with no hose out: what leaves it goes straight down the drain, so
+   * nothing it's carried over catches it.
+   */
+  private loose(t: Tool, j: number): boolean {
+    return this.held?.kind === 'tool' && this.held.t === t && !this.hoseOn({ tool: t, spout: j });
+  }
+
   /** The thing the player holds, as the view knows it. */
   private heldObject(): object | null {
     const h = this.held;
@@ -1875,11 +1883,9 @@ export class GameEngine {
       this.pour = { from, into: mouthBelow(mouths, from) };
     }
 
-    // a held tool, or a hose's nozzle in hand, lets nothing out without the right button: the tool, or the tool or
-    // faucet the hose is pulled out of, stops
+    // a hose's nozzle in hand lets nothing out without the right button: the tool or faucet it's pulled out of stops
     let stillTool: Tool | null = null;
     let stillFaucet: number | null = null;
-    if (!this.rightHeld && h?.kind === 'tool' && h.t.shape.spouts.length) stillTool = h.t;
     if (!this.rightHeld && h?.kind === 'hose') {
       if ('tool' in h.h.on) stillTool = h.h.on.tool;
       else stillFaucet = h.h.on.faucet;
@@ -1904,14 +1910,16 @@ export class GameEngine {
       const step = simDt / sub;
       // where each spout's fluid comes out: the spout, or its hose's nozzle
       const spouts = this.tools.map((t) => t.shape.spouts.map((_, j) => this.outletAt(t, j)));
-      const targets = spouts.map((sps) => sps.map((sp) => mouthBelow(mouths, sp)));
+      // a held tool keeps running, but what leaves a spout of it with no hose out goes down the drain, not into
+      // whatever it's swung over (see loose)
+      const targets = this.tools.map((t, i) => spouts[i].map((sp, j) => (this.loose(t, j) ? null : mouthBelow(mouths, sp))));
       // a fast flow streams straight into what's below (overflowing it if it's full); a slow one gathers
       // in a drop, which falls on its own time
-      const pour = (drop: Vessel, out: Vessel | null, sp: Vec3, target: Mouth | null): boolean => {
+      const pour = (drop: Vessel, out: Vessel | null, sp: Vec3, target: Mouth | null, loose: boolean): boolean => {
         const down = drip(drop, out, step);
         if (down && down === out) {
           if (target) this.stream(target.v, out);
-        } else if (down) this.falling.push({ v: down, x: sp.x, y: sp.y, z: sp.z, vy: 0 });
+        } else if (down && !loose) this.falling.push({ v: down, x: sp.x, y: sp.y, z: sp.z, vy: 0 });
         return !!down && down === out;
       };
       // what leaves each outlet over the whole frame, for drawing: a single substep's can be nothing, as when a
@@ -1934,7 +1942,7 @@ export class GameEngine {
           if (t === stillTool) return;
           t.step(step).forEach((out, k) => {
             tally(toolTotals[j][k], out, false); // before pouring, which can gather it into a drop
-            tally(toolTotals[j][k], null, pour(t.drops[k], out, spouts[j][k], targets[j][k]));
+            tally(toolTotals[j][k], null, pour(t.drops[k], out, spouts[j][k], targets[j][k], this.loose(t, k)));
           });
         });
         // falling drops land in the first open top they pass, or go down the sink
@@ -2234,7 +2242,7 @@ export class GameEngine {
       t.out.forEach((out, k) => {
         if (!out || !t.streaming[k]) return;
         const sp = this.outletAt(t, k);
-        streams.push({ from: sp, toY: this.landsAt(sp, mouths), fluid: out, flow: t.flow[k] });
+        streams.push({ from: sp, toY: this.loose(t, k) ? groundAt(sp.x, sp.z) : this.landsAt(sp, mouths), fluid: out, flow: t.flow[k] });
       });
     for (const { at, v } of this.spills.values())
       if (v.N > TRACE) streams.push({ from: at, toY: this.landsAt(at, mouths), fluid: v, flow: volume(v) / (MAX_FLOW * this.spillTime) });
@@ -2467,7 +2475,8 @@ export class GameEngine {
     if (this.rightHeld) return false;
     const h = this.held;
     if (h?.kind === 'flask') return h.f.N > TRACE;
-    if (h?.kind === 'tool') return this.wouldFlow(h.t);
+    // a held tool runs anyway
+    if (h?.kind === 'tool') return false;
     // a faucet always runs
     if (h?.kind === 'hose') return 'tool' in h.h.on ? this.wouldFlow(h.h.on.tool) : true;
     return !this.pencil && !!this.valveAimed();
@@ -2499,7 +2508,7 @@ export class GameEngine {
       pencil: this.pencil,
       flip: !!(h?.kind === 'tool' ? h.t : !h && p?.kind === 'tool' ? p.t : null)?.shape.flippable,
       label: !inPod(this.wake) && !!this.targetNote(),
-      hand: this.pencil ? 'Erase' : h?.kind === 'flask' ? 'Pour' : h ? 'Flow' : 'Turn',
+      hand: this.pencil ? 'Erase' : h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : 'Turn',
       note: this.flash?.text ?? null,
       actions: this.actions(),
     };
