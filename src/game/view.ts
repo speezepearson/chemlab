@@ -193,6 +193,40 @@ const plateMat = new THREE.MeshStandardMaterial({ color: 0x6f7975, metalness: 0.
 const autoflushMat = new THREE.MeshStandardMaterial({ color: 0xd8443b, roughness: 0.5 });
 /** The rubber seam round the cryostabilizer station's block of the wall. */
 const rubberMat = new THREE.MeshStandardMaterial({ color: 0x1a1d1c, roughness: 0.95, metalness: 0 });
+/** How wide the hazard tape round the station's block is, and how far apart its stripes repeat, in world units. */
+const TAPE = { w: 10, period: 14 };
+
+/**
+ * Hazard tape: yellow and black diagonal stripes, as round the alarms' silence button, as a texture that tiles both
+ * ways, one stripe of each per TAPE.period across, so laid on with texture coordinates in world units over
+ * TAPE.period, its stripes run on unbroken round corners.
+ */
+const tapeTexture = (() => {
+  let t: THREE.CanvasTexture | null = null;
+  return () => {
+    if (t) return t;
+    const n = 64;
+    const c = document.createElement('canvas');
+    c.width = c.height = n;
+    const ctx = c.getContext('2d')!;
+    const img = ctx.createImageData(n, n);
+    for (let y = 0; y < n; y++)
+      for (let x = 0; x < n; x++) {
+        // one yellow and one black band per tile, along the diagonal
+        const yellow = (x + y) % n < n / 2;
+        const [r, g, b] = yellow ? [0xd9, 0xb4, 0x2a] : [0x1b, 0x1d, 0x1c];
+        img.data.set([r, g, b, 255], (y * n + x) * 4);
+      }
+    ctx.putImageData(img, 0, 0);
+    t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(1 / TAPE.period, 1 / TAPE.period);
+    t.anisotropy = 4;
+    return t;
+  };
+})();
+
 /** The station's gauge's segments: lit green for what's held, red for what's wanted (flashing), and dark. */
 const SEGMENT_COLORS = { held: 0x3cff6a, wanted: 0xff3a2e, off: 0x1d2a21 } as const;
 
@@ -1111,6 +1145,14 @@ class ToolView {
     const gasket = new THREE.Mesh(new THREE.ExtrudeGeometry(seam, { depth: 1.5, bevelEnabled: true, bevelThickness: 0.5, bevelSize: 1, bevelSegments: 2 }), rubberMat);
     gasket.position.z = face - 0.5;
     art.add(gasket);
+    // and hazard tape on the wall round it, just outside the seam
+    const band = rectPath(...rect(TAPE.w), new THREE.Shape());
+    band.holes.push(rectPath(...rect(0)));
+    // a shape's texture coordinates are its own x and y, in world units: the texture's repeat makes them stripes
+    const tape = new THREE.Mesh(new THREE.ShapeGeometry(band), new THREE.MeshStandardMaterial({ map: tapeTexture(), roughness: 0.55 }));
+    tape.position.z = face + 0.3;
+    tape.receiveShadow = true;
+    art.add(tape);
     sh.tanks.forEach((tk, k) => {
       const x = tankX(tk);
       // the column's back, its fluid, and the glass in front
