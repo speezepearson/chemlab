@@ -97,6 +97,14 @@ export function airlockBoxes(): Box[] {
   ];
 }
 
+/** How near the pod's axis the player has to stand to be in it, in world units. */
+export const IN_POD = 30;
+
+/** Whether the player, standing at (x, z), is in the cryopod. */
+export function inCryopod(x: number, z: number): boolean {
+  return Math.hypot(x - POD.x, z - POD.z) < IN_POD;
+}
+
 /** Whether a player of radius r standing at z is all the way out of the doorway, into the lab. */
 export function outOfAirlock(z: number, r: number): boolean {
   return z + r < ROOM.z1 - 10;

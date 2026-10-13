@@ -2,7 +2,7 @@ import { equilibrate } from '../chem/equilibrium';
 import { Lag, temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { notice, welcomeNotice, type Block } from '../intro/notice';
-import { POD, WAKE_S, airlockBoxes, doorsOpen, ease, inPod, outOfAirlock, type Wake } from './airlock';
+import { POD, WAKE_S, airlockBoxes, doorsOpen, ease, inCryopod, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import { beeper, type Beeper } from './beeper';
 import {
@@ -1270,7 +1270,7 @@ export class GameEngine {
     const p = this.target;
     if (!p) return;
     let h: Held;
-    if (p.kind === 'faucet' || p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake' || p.kind === 'pod') return;
+    if (p.kind === 'faucet' || p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake') return;
     if (p.kind === 'tool' && p.t.shape.fixed) {
       this.say('That stays where it is');
       return;
@@ -1609,10 +1609,6 @@ export class GameEngine {
       return;
     }
     if (inPod(this.wake)) return;
-    if (p?.kind === 'pod') {
-      this.getIn();
-      return;
-    }
     // with empty hands, a spout or faucet's hose is pulled out, or its nozzle taken hold of if it's out, and so is a
     // nozzle looked at
     const m = this.held ? null : this.mountAimed();
@@ -1668,7 +1664,7 @@ export class GameEngine {
       return t.tanks.length === 1 ? `t${t.id}.0` : `t${t.id}`;
     }
     if (p.kind === 'scale') return `s${this.scales.indexOf(p.sc)}`;
-    if (p.kind === 'hose' || p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake' || p.kind === 'pod') return null;
+    if (p.kind === 'hose' || p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake') return null;
     return `F${p.i}`;
   }
 
@@ -2065,6 +2061,8 @@ export class GameEngine {
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     this.move(dt);
+    // stepping into the cryopod, while the ship asks for it, gets back in
+    if (inCryopod(this.player.x, this.player.z)) this.getIn();
     if (this.held) this.follow(this.held);
     this.view.look(this.eye(), this.player.yaw, this.player.pitch);
     if (!this.turning) this.target = this.view.pick(REACH, this.heldObject());
@@ -2655,7 +2653,6 @@ export class GameEngine {
     }
     if (!this.pencil) {
       if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
-      else if (p?.kind === 'pod' && this.invited()) add(['LMB'], h ? 'get in the cryopod: hands full' : 'get back in the cryopod', !!h);
       else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
       else if (this.pressable()) add(['LMB'], 'press it');
       const m = h ? null : this.mountAimed();
@@ -2693,7 +2690,7 @@ export class GameEngine {
   private onButton(): boolean {
     const p = this.target;
     return (
-      (p?.kind === 'scale' && p.part === 'tare') || p?.kind === 'alarm' || p?.kind === 'blinds' || p?.kind === 'wake' || p?.kind === 'pod'
+      (p?.kind === 'scale' && p.part === 'tare') || p?.kind === 'alarm' || p?.kind === 'blinds' || p?.kind === 'wake'
     );
   }
 
@@ -2704,15 +2701,14 @@ export class GameEngine {
       (p?.kind === 'scale' && p.part === 'tare') ||
       p?.kind === 'alarm' ||
       p?.kind === 'blinds' ||
-      p?.kind === 'wake' ||
-      (p?.kind === 'pod' && !this.held && this.invited())
+      p?.kind === 'wake'
     );
   }
 
   /** Whether `p` can be picked up: anything but what's fixed in place. */
   private grabbable(p: Pick): boolean {
     return (
-      p.kind !== 'faucet' && p.kind !== 'alarm' && p.kind !== 'blinds' && p.kind !== 'wake' && p.kind !== 'pod' &&
+      p.kind !== 'faucet' && p.kind !== 'alarm' && p.kind !== 'blinds' && p.kind !== 'wake' &&
       !(p.kind === 'tool' && p.t.shape.fixed)
     );
   }
@@ -2758,8 +2754,9 @@ export class GameEngine {
   }
 
   /**
-   * Get back in the cryopod, from in front of it, with empty hands, while the ship asks for it (see invited): it shuts,
-   * the view fades to black, and the lab runs on as fast as it can until they wake (see stepWake).
+   * Get back in the cryopod, standing in it with empty hands, while the ship asks for it (see invited): it shuts, the
+   * view fades to black, and the lab runs on as fast as it can until they wake (see stepWake). With something in hand,
+   * a note says to put it down first.
    */
   private getIn(): void {
     if (this.wake !== 'closed' || !this.invited()) return;

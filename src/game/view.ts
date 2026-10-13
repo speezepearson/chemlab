@@ -38,9 +38,7 @@ export type Pick =
   /** The button by the porthole that shuts its blinds, or opens them. */
   | { kind: 'blinds' }
   /** The OK on the message inside the cryopod. */
-  | { kind: 'wake' }
-  /** The cryopod, from outside it. */
-  | { kind: 'pod' };
+  | { kind: 'wake' };
 
 /** A faucet where it is: its spout, where its pipe meets the wall, and what it pours. */
 export interface FaucetSpot {
@@ -2413,10 +2411,6 @@ class AirlockView {
     pod.add(this.ok);
     this.eye = eye;
     pickables.set(this.ok, { kind: 'wake' });
-    // from outside, the pod's open back, dome and plinth are the pod, to get back into
-    pod.traverse((m) => {
-      if (m instanceof THREE.Mesh && m !== this.message && m !== this.ok && !this.front.children.includes(m)) pickables.set(m, { kind: 'pod' });
-    });
     g.add(pod);
     scene.add(g);
   }
