@@ -5,7 +5,7 @@ import { POD, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from 
 import { hushAlarms } from './ambience';
 import { beeper, type Beeper } from './beeper';
 import {
-  FLASK_CENTER, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, flip, nozzleBox,
+  FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, flip, nozzleBox,
   nozzleMounts, nozzleStand, onBench, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
@@ -183,6 +183,12 @@ const HOTKEY_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'
 const POUR_ANG = Math.PI * 0.61;
 /** How long a flask takes to tip to pour, or stand back up, in real seconds. */
 const TIP_S = 0.3;
+/**
+ * A held flask poured into what the crosshair is on (see pourPose) goes with its lip over the mouth's middle, at
+ * least POUR_GAP above it, and as much higher as it has to, up to POUR_RISE, to clear everything.
+ */
+const POUR_GAP = 20;
+const POUR_RISE = 300;
 /** How far across, in world units, an outlet can miss a mouth by and still show a faint guide to it (see guides). */
 const GUIDE_NEAR = 40;
 /** How fast a falling drop speeds up, in world units per sim second squared: a 500-unit fall takes 0.7 s. */
@@ -264,6 +270,8 @@ export class GameEngine {
   private falling: { v: Vessel; x: number; y: number; z: number; vy: number }[] = [];
   /** The faucets pouring into something this frame: where from (the faucet, or its hose's nozzle), and into what. */
   private faucetFlows: { fa: FaucetSpot; from: Vec3; m: Mouth }[] = [];
+  /** Where the held flask is kept, over the mouth the right button was pressed on, while it's held (see pourPose). */
+  private pinned: Pose | null = null;
   /** Where the held flask poured this frame, if it did: its lip, and what it poured into (null: the sink). */
   private pour: { from: Vec3; into: Mouth | null } | null = null;
   /** Where what's held would come to rest if let go, as of the last frame drawn (see placement). */
@@ -766,6 +774,7 @@ export class GameEngine {
     if (h.kind === 'scale') this.scales.splice(this.scales.indexOf(h.sc), 1);
     if (h.kind === 'hose') this.hoses.splice(this.hoses.indexOf(h.h), 1);
     this.held = null;
+    this.pinned = null;
   }
 
   private say(text: string): void {
@@ -1264,6 +1273,7 @@ export class GameEngine {
     }
     if (h.kind === 'hose' && rest.hose) ({ turn: h.h.turn, reach: h.h.reach } = rest.hose);
     this.held = null;
+    this.pinned = null;
   }
 
   /** Flip the tool being held, or else the one looked at (see flip), if it's one that can be flipped. */
@@ -1349,11 +1359,46 @@ export class GameEngine {
   private rightDown(): void {
     if (inPod(this.wake)) return;
     this.rightHeld = true;
-    if (this.held) return;
+    const h = this.held;
+    if (h?.kind === 'flask') {
+      // on a flask or tank, the held flask goes over it to pour in
+      const m = this.mouthAimed();
+      this.pinned = m && this.pourPose(h, m);
+      if (this.pinned) {
+        this.placeHeld(h, this.pinned);
+        this.faceFlask(h.f);
+      }
+    }
+    if (h) return;
     const k = this.valveAimed();
     if (!k) return;
     this.turning = { ...k, aim: { x: this.viewW / 2, y: this.viewH / 2 } };
     this.aimTurning();
+  }
+
+  /** The open top of the vessel the crosshair is on, to pour a held flask into: a flask's, or a tool's tank's. */
+  private mouthAimed(): Mouth | null {
+    const p = this.target;
+    const v = p?.kind === 'flask' ? p.f : p?.kind === 'tool' && p.part === 'tank' ? p.t.tanks[p.k] : null;
+    return (v && this.open.find((m) => m.v === v)) ?? null;
+  }
+
+  /**
+   * Where the held flask would pour into mouth m from: facing the player (see faceFlask), with its lip, tipped all the
+   * way, over the mouth's middle, POUR_GAP above it, or higher if that's what it takes to bump into nothing; null if
+   * it can't within POUR_RISE, or what it would pour from there would land in something else.
+   */
+  private pourPose(h: Held & { kind: 'flask' }, m: Mouth): Pose | null {
+    const obstacles = this.obstacles(h);
+    const yaw = Math.atan2(this.player.x - m.x, this.player.z - m.z);
+    const lip = toWorld({ x: 0, y: 0, z: 0, yaw }, { x: FLASK_LIP * Math.cos(POUR_ANG), y: -FLASK_LIP * Math.sin(POUR_ANG), z: 0 });
+    const others = this.open.filter((o) => o.v !== h.f);
+    for (let up = POUR_GAP; up <= POUR_RISE; up += 10) {
+      const pose = { x: m.x - lip.x, y: m.y + up - lip.y, z: m.z - lip.z, yaw };
+      if (obstacles.some((o) => boxesOverlap(this.boxAt(h, pose), o))) continue;
+      return mouthBelow(others, { x: m.x, y: m.y + up, z: m.z }) === m ? pose : null;
+    }
+    return null;
   }
 
   /**
@@ -1725,10 +1770,11 @@ export class GameEngine {
         load = r.load;
       }
     }
+    if (h?.kind !== 'flask' || !this.rightHeld) this.pinned = null;
     if (!h || !load) return;
-    // what's held goes toward where it'd be in front of the eyes, and then turns there in a quarter turn, all at once,
+    // what's held goes toward where it'd be in front of the eyes (or a flask pouring into something, over it), and then turns there in a quarter turn, all at once,
     // if there's room; a flask's box doesn't turn (see flaskBox): it's turned to face the player after it's moved, below
-    const want = this.boxAt(h, this.gripPose(h));
+    const want = this.boxAt(h, this.pinned ?? this.gripPose(h));
     const turn = h.kind === 'flask' ? 0 : wrapAngle(want.yaw - load.yaw);
     let moved = moveBox(load, { ...want, yaw: load.yaw }, obstacles);
     if (Math.abs(turn) > 1e-9) {
@@ -2239,7 +2285,8 @@ export class GameEngine {
       const how = h.kind === 'hose' ? 'set the hose’s end down' : 'set it down';
       // the pencil has the mouse, so E sets down; and a button looked at takes the click
       if (this.pencil || !this.onButton()) add([this.pencil ? 'E' : 'LMB'], ok ? how : `${how}: not here`, !ok);
-      if (!this.pencil && this.rightWouldDo()) add(['RMB'], h.kind === 'flask' ? 'hold to pour' : 'hold to let it flow');
+      if (!this.pencil && this.rightWouldDo())
+        add(['RMB'], h.kind !== 'flask' ? 'hold to let it flow' : this.mouthAimed() ? 'hold to pour into it' : 'hold to pour');
       if (h.kind === 'hose') {
         add(['Shift', '←→'], 'swing its stand round');
         add(['Shift', '↑↓'], 'slide its stand out or in');
