@@ -83,9 +83,9 @@ export interface Frame {
   tarePress: Scale | null;
   /** The key or button under the crosshair, to light it. */
   hot: Pick | null;
-  /** Real seconds since the last frame, for the beacon. */
+  /** Real seconds since the last frame, for the guides' flash, which isn't part of the lab. */
   dt: number;
-  /** Sim seconds the lab has run, for what blinks on sim time (the station's gauge). */
+  /** Sim seconds the lab has run, for what blinks on sim time (the station's gauge, the beacon). */
   clock: number;
   /** Each bond's energy, in BOND_KEYS order, for the spectroscope's graph. */
   energies: readonly number[];
@@ -2773,8 +2773,8 @@ export class View {
     this.alarmButton.update(fr.alarmsOff);
     this.blindsButton.update(fr.blindsShut);
     this.airlock.update(fr.airlock);
-    // the beacon turns slowly; real time, like the alarms it goes with
-    const pulse = 0.5 + 0.5 * Math.sin(this.clock * 2.4);
+    // the beacon turns slowly, on sim time like everything else in the lab
+    const pulse = 0.5 + 0.5 * Math.sin(fr.clock * 2.4);
     const lit = 1 - fr.airlock.dark;
     for (const { light, base } of this.roomLights) light.intensity = base * lit;
     scene.environmentIntensity = lit;

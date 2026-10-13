@@ -88,8 +88,11 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   chemistry, cooling, the composition analyzer's reading and hum, the cryostabilizer station's cycle, and the drip and stream sounds. All of it
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
-  notice; and the player themselves (walking, looking, carrying, tipping a flask), which is input, not the sim. Waking
-  in the airlock (the pod's message flickering out, its front opening, the doors closing) is sim time too.
+  notice; the player themselves (walking, looking, carrying, tipping a flask), which is input, not the sim; and what
+  isn't in the world (the HUD, the guides' flashing). Everything in the world is on sim time, lights included, like
+  the emergency beacon; going with the ambience (as the beacon goes with the alarms) doesn't make something an
+  exception. Waking in the airlock (the pod's message flickering out, its front opening, the doors closing) is sim
+  time too.
   - Anything drawn per outlet must use totals over the whole frame. A single substep's output can be empty, for
     example when a wide-open valve drains its tank in the first substep.
 - **Landing fluid goes through `fill()`.** Anything that lands in a vessel (streams, drops, faucets, pours) must use
