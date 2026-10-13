@@ -974,7 +974,8 @@ class ToolView {
         }
       }
       const fm = new FluidMesh(geoms, art);
-      for (const m of fm.meshes) pick(m, 'tank', k);
+      // its glass and rim are the tank too, as much as its fluid, so an empty one can be looked at as one
+      for (const m of art.children.slice(built)) if (m instanceof THREE.Mesh) pick(m, 'tank', k);
       this.fluids.push({ fm, level });
       // a lid, while nothing may get in
       const lid = block(art, pipeMat, r.x0 - 4, r.x1 + 4, -5, 0, -d / 2 - 3, d / 2 + 3);
@@ -1319,6 +1320,8 @@ class ToolView {
     const pump = H + 14;
     const funnel = art.children.length;
     glassFrom(art, frustum(x0, f.y, f.y + f.h, 2 * f.w, 2 * f.w, FUNNEL_TIP, FUNNEL_TIP, true));
+    // the funnel is the receptacle's way in, so looking at it is looking at the receptacle
+    for (const m of art.children.slice(funnel)) if (m instanceof THREE.Mesh) pick(m, 'tank', 0);
     this.flashFrom(art, funnel, 0);
     rod(art, glassMat, v3(x0, f.y + f.h, 0), v3(x0, pump, 0), FUNNEL_TIP / 2);
     rod(art, glassMat, v3(x0, pump, 0), v3(x0, pump, face), FUNNEL_TIP / 2);
