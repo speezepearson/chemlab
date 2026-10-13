@@ -189,6 +189,8 @@ const TIP_S = 0.3;
  */
 const POUR_GAP = 20;
 const POUR_RISE = 300;
+/** How far above a mouth, at least, a held nozzle goes with the crosshair on it (see nozzleOver), up to POUR_RISE. */
+const NOZZLE_GAP = 15;
 /** How long, in real seconds, the spot what's held is wanted at must stay clear for it to jump there when stuck (see move). */
 const SNAP_S = 0.2;
 /** How far across, in world units, an outlet can miss a mouth by and still show a faint guide to it (see guides). */
@@ -1406,6 +1408,24 @@ export class GameEngine {
   }
 
   /**
+   * Where a held nozzle goes with the crosshair on an open top (see mouthAimed): over the mouth's middle, on the grid,
+   * NOZZLE_GAP above it or as much higher as it takes (up to POUR_RISE) for it and its stand to have room, so it can
+   * be set down there and what it lets out lands in the mouth. Null if there's no such place.
+   */
+  private nozzleOver(h: Held & { kind: 'hose' }): Pose | null {
+    const m = this.mouthAimed();
+    if (!m) return null;
+    const obstacles = this.obstacles(h);
+    const solid = this.obstacles(h, false);
+    for (let up = NOZZLE_GAP; up <= POUR_RISE; up += 10) {
+      const p = onGrid({ x: m.x, y: m.y + up, z: m.z, yaw: 0 });
+      const r = this.rest(h, p, obstacles, solid);
+      if (typeof r !== 'string') return mouthBelow(this.open, r.pose) === m ? p : null;
+    }
+    return null;
+  }
+
+  /**
    * The valve the crosshair is on, or within VALVE_REACH of on its tool's front face (see valveNear), if any. Where
    * valves crowd together, the nearest.
    */
@@ -1779,8 +1799,16 @@ export class GameEngine {
       this.snapFor = 0;
       return;
     }
-    // what's held goes toward where it'd be in front of the eyes (or a flask pouring into something, over it), and then turns there in a quarter turn, all at once,
-    // if there's room; a flask's box doesn't turn (see flaskBox): it's turned to face the player after it's moved, below
+    // a nozzle held with the crosshair on an open top goes straight over it, where it would be set down to pour in
+    const over = h.kind === 'hose' ? this.nozzleOver(h) : null;
+    if (over) {
+      this.placeHeld(h, over);
+      this.snapFor = 0;
+      return;
+    }
+    // what's held goes toward where it'd be in front of the eyes (or a flask pouring into something, over it), and
+    // then turns there in a quarter turn, all at once, if there's room; a flask's box doesn't turn (see flaskBox): it's
+    // turned to face the player after it's moved, below
     const want = this.boxAt(h, this.pinned ?? this.gripPose(h));
     const turn = h.kind === 'flask' ? 0 : wrapAngle(want.yaw - load.yaw);
     let moved = moveBox(load, { ...want, yaw: load.yaw }, obstacles);
