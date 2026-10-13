@@ -331,7 +331,7 @@ export const RECEPTACLE_CAP = Math.round(spaceOf(STATION_FUNNEL) / SPACE_PER_ATO
  * a third of the way up its gauge, and there's room for it even if everything that goes into it is only just pure
  * enough, and the rest of it single atoms.
  */
-export const REFERENCE_CAP = 390 * CAP;
+export const REFERENCE_CAP = 540 * CAP;
 /** The target the reference starts with, in molecules: the hundred flasks left on board (see VOYAGE). */
 export const REFERENCE_START = 100 * CAP;
 /** How fast the reference's faucet lets it out, fully open, in atoms per sim second: a fifth of a flask a second. */
