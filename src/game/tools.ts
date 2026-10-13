@@ -179,8 +179,8 @@ export function drip(drop: Vessel, out: Vessel | null, h: number, rand = Math.ra
 export const FUNNEL_CAP = CAP / 4;
 /**
  * How fast a splitter's or size sorter's funnel drains when full, in atoms per sim second, whatever a splitter's
- * valve is set to; it drains in proportion to how high its fluid stands (see Tool.level). The flow meter's drains at
- * this rate however full it is.
+ * valve is set to; it drains in proportion to how high its fluid stands (see Tool.level). An inline instrument's tube
+ * drains at this rate however full it is.
  */
 export const FUNNEL_RATE = 2 * MAX_FLOW;
 
@@ -352,10 +352,10 @@ export function beepPattern(rand = Math.random): Beep[] {
 
 /**
  * The inline instruments: each is a vertical glass tube, whose top a hose's nozzle snaps onto (see INLINE_DOCK), draining
- * straight through at FUNNEL_RATE however full it is, down to a spout at its foot, past a cabinet beside it that
- * reads what goes by.
+ * straight through at FUNNEL_RATE however full it is, down to a spout at its foot, past what reads what goes by: a
+ * cabinet beside it (see INSTRUMENT), or the flow meter's little readout (see METER_BODY).
  */
-export const INLINE_TOOLS: readonly ToolKind[] = ['analyzer', 'spectroscope'];
+export const INLINE_TOOLS: readonly ToolKind[] = ['analyzer', 'spectroscope', 'meter'];
 /** How much an inline instrument's tube holds, by volume: a twentieth of a flask, just a buffer. */
 export const TUBE_CAP = CAP / 20;
 /** How wide an inline instrument's tube is inside, in local units. */
@@ -375,8 +375,8 @@ export const INLINE_DOCK = 150;
  */
 export const INSTRUMENT_TAU = 0.5;
 /**
- * An inline instrument's cabinet, right of its tube, with its screen, and how high the pipe from the tube into it
- * runs, in local units.
+ * The composition analyzer's and spectroscope's cabinet, right of the tube, with its screen, and how high the pipe
+ * from the tube into it runs, in local units. The flow meter has none, just a little readout (see METER_BODY).
  */
 export const INSTRUMENT = {
   body: { x0: 14, x1: 186, y0: 4, y1: 96 },
@@ -437,18 +437,6 @@ export function heatBy(f: Fluid, wireT: number, h: number): void {
   f.Q += roundRandom((heatAt(wireT, f.N) - f.Q) * (1 - Math.exp(-HEATER.rate * h)));
 }
 
-/**
- * How the flow meter reads, editable from the Chemistry panel:
- * - window: how many sim seconds back its reading looks. It shows the average flow over just that long, so a steady
- *   drip reads as a steady trickle rather than flickering, and a change shows in full once that long has passed.
- */
-export const METER = { window: 0.5 };
-const DEFAULT_METER = { ...METER };
-
-export function restoreDefaultMeter(): void {
-  Object.assign(METER, DEFAULT_METER);
-}
-
 /** How many digits the meter's display has. */
 export const METER_DIGITS = 4;
 
@@ -476,7 +464,7 @@ export type ToolKind =
  * Tools there's only ever one of: not in the palette, and never put away. The receptacle is the whole cryostabilizer
  * station (see STATION), reference and tester included.
  */
-export const UNIQUE_TOOLS: readonly ToolKind[] = ['analyzer', 'spectroscope', 'meter', 'receptacle'];
+export const UNIQUE_TOOLS: readonly ToolKind[] = ['analyzer', 'spectroscope', 'receptacle'];
 
 /**
  * A tool's geometry in local units: multiply by the stage scale and offset by
@@ -652,16 +640,16 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: STATION.block.x0 - 6, x1: STATION.block.x1 + 6, y0: STATION.block.y0 - 6, y1: STATION.block.y1 + 6 },
   },
   meter: {
-    // a funnel draining straight through a cabinet with a display (see METER_BODY) and out a spout
-    tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
-    tankH: 30,
-    tankCap: FUNNEL_CAP,
-    funnel: true,
+    // a glass tube straight down to a spout, with a little readout (see METER_BODY) clipped round the pipe under it
+    tanks: [{ name: 'tube', x0: -TUBE_W / 2, x1: TUBE_W / 2 }],
+    tankH: TUBE_H,
+    tankCap: TUBE_CAP,
+    round: true,
     noValve: true,
     spouts: [0],
-    valveY: 30,
-    spoutY: 82,
-    box: { x0: -34, x1: 34, y0: -6, y1: 84 },
+    valveY: TUBE_H,
+    spoutY: TUBE_H + 32,
+    box: { x0: -15, x1: 15, y0: -6, y1: TUBE_H + 34 },
   },
   analyzer: {
     // a glass tube straight down to a spout, and a cabinet beside it with a screen (see ANALYZER), which takes its
@@ -743,8 +731,14 @@ export function spectroscopeAt(x: number, counts: readonly number[], energies: r
   return y;
 }
 
-/** The meter's cabinet, and its display, in local units. */
-export const METER_BODY = { x0: -31, x1: 31, y0: 36, y1: 64, display: { x0: -26, x1: 26, y0: 41, y1: 59 } };
+/**
+ * The flow meter's readout, clipped round the pipe just under its tube, reaching `hz` either side of it front to back,
+ * and the display on its front, in local units.
+ */
+export const METER_BODY = {
+  x0: -13, x1: 13, y0: TUBE_H + 6, y1: TUBE_H + 18, hz: 5,
+  display: { x0: -12, x1: 12, y0: TUBE_H + 7, y1: TUBE_H + 17 },
+};
 
 /** Horizontal center of a tank, which is also where its valve is. */
 export const tankX = (tk: { x0: number; x1: number }) => (tk.x0 + tk.x1) / 2;
@@ -847,10 +841,9 @@ export function separatorShares(): number[][] {
  *   receptacle into the tester (see press), which thinks for a moment, beeping; then, if what it holds is more than
  *   GOAL_PURITY target, it passes it into the reference, and otherwise rejects it out its waste nozzle, the first
  *   spout. The reference lets out a trickle through its faucet, the second spout, as far as its one valve is open.
- * - A **flow meter** has a funnel like the splitter's, with no valve, draining straight through to one spout, and
- *   shows what flows out, averaged over the last METER.window (see rate and meterText).
- * - A **composition analyzer** is an inline instrument (see INLINE_TOOLS): its tube drains straight through like
- *   the meter's funnel, and it draws off ANALYZER_SAMPLE of what passes, out its waste spout, reading that (see
+ * - A **flow meter** is an inline instrument (see INLINE_TOOLS): its tube drains straight through to one spout, and
+ *   it shows what flows out, averaged over the recent past (see INSTRUMENT_TAU, rate and meterText).
+ * - A **composition analyzer** is an inline instrument too, and it draws off ANALYZER_SAMPLE of what passes, out its waste spout, reading that (see
  *   composition) onto a screen, averaged over the recent past (see INSTRUMENT_TAU).
  * - A **spectroscope** is an inline instrument too, which lets everything through, counting the bonds that pass over
  *   the recent past (see INSTRUMENT_TAU and bondCounts) and showing them by energy as a graph (see spectroscopeAt).
@@ -885,13 +878,11 @@ export class Tool {
    * the recent past (see INSTRUMENT_TAU); all 0 once they're down to less than TRACE a sim second in all.
    */
   bonds: number[] = BOND_KEYS.map(() => 0);
-  /** A meter's reading: what's flowed out of it, by volume per sim second, averaged over the last METER.window. */
-  rate = 0;
   /**
-   * An instrument's recent steps, oldest first, back past its window (see record): how long each was and what it
-   * measured in it.
+   * A meter's reading: what's flowed out of it, by volume per sim second, in the recent past (see INSTRUMENT_TAU); 0
+   * once that's down to less than TRACE a sim second.
    */
-  private recent: { h: number; x: number[] }[] = [];
+  rate = 0;
   /** An inline instrument's exponentially weighted average of what it's measured, per sim second (see smooth). */
   private smoothed: number[] | null = null;
   /**
@@ -934,10 +925,10 @@ export class Tool {
     if (this.kind === 'receptacle') return this.receive(h);
     let packets = this.tanks.map((tank, k) => {
       const p = new Vessel(Infinity);
-      // a valve, or a funnel without one, lets out in proportion to how high the fluid stands; the meter's funnel, and
-      // an instrument's tube, drain at a fixed rate, so what they read is just what's arriving
+      // a valve, or a funnel without one, lets out in proportion to how high the fluid stands; an instrument's tube
+      // drains at a fixed rate, so what it reads is just what's arriving
       const rate =
-        this.kind === 'meter' || INLINE_TOOLS.includes(this.kind) ? FUNNEL_RATE
+        INLINE_TOOLS.includes(this.kind) ? FUNNEL_RATE
         : this.kind === 'splitter' || this.kind === 'sorter' ? FUNNEL_RATE * this.level(k)
         : this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW) * this.level(k);
       transfer(tank, p, rate * h);
@@ -950,7 +941,10 @@ export class Tool {
     if (this.kind === 'analyzer') packets = divide(packets[0], () => 1 - ANALYZER_SAMPLE);
     this.out = packets.map((p) => (p.N > 0 ? p : null));
     this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
-    if (this.kind === 'meter') this.rate = this.record(h, [volume(packets[0])], METER.window)[0];
+    if (this.kind === 'meter') {
+      const [v] = this.smooth(h, [volume(packets[0])]);
+      this.rate = v >= TRACE ? v : 0;
+    }
     if (this.kind === 'analyzer') {
       const [v, ...spec] = this.smooth(h, [volume(packets[1]), ...composition(packets[1], 1)]);
       this.reading = v >= TRACE ? spec.map((x) => x / v) : null;
@@ -972,22 +966,6 @@ export class Tool {
     const s = (this.smoothed ??= x.map(() => 0));
     x.forEach((v, i) => (s[i] = s[i] * keep + (v / h) * (1 - keep)));
     return s;
-  }
-
-  /**
-   * An instrument's reading after a step of h sim seconds in which it measured x: what it's measured over the last
-   * `window`, or just over (back to the start of the oldest step it reaches into), per sim second, entry by entry.
-   * Until that long has passed, the time before counts as measuring nothing.
-   */
-  private record(h: number, x: number[], window: number): number[] {
-    const r = this.recent;
-    r.push({ h, x });
-    let span = 0;
-    for (const s of r) span += s.h;
-    while (r.length > 1 && span - r[0].h >= window) span -= r.shift()!.h;
-    const sum = x.map(() => 0);
-    for (const s of r) s.x.forEach((v, i) => (sum[i] += v));
-    return sum.map((v) => v / Math.max(span, window));
   }
 
   /**

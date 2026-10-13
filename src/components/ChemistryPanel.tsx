@@ -6,7 +6,7 @@ import { VOLUME } from '../game/flask';
 import { CAP } from '../game/config';
 import { COOLING, restoreDefaultCooling } from '../game/cooling';
 import {
-  DRIP, HEATER, METER, SEPARATOR, SORTER, restoreDefaultDrip, restoreDefaultHeater, restoreDefaultMeter,
+  DRIP, HEATER, SEPARATOR, SORTER, restoreDefaultDrip, restoreDefaultHeater,
   restoreDefaultSeparator, restoreDefaultSorter, SEPARATOR_PERFECT, separatorShares, sorterShares,
 } from '../game/tools';
 import { DragNumber } from './DragNumber';
@@ -181,12 +181,6 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
                 <span> each size goes {(100 * sorterShares()[0][0]).toFixed(1)}% out its own spout</span>
               </td>
             </tr>
-            <tr className="group">
-              <td colSpan={4}>
-                <b>Flow meter</b> <span>its reading is the average flow over the last so many seconds</span>
-              </td>
-            </tr>
-            <NumberRow label="window, s" min={0.02} value={METER.window} onChange={(v) => edit(() => (METER.window = v))} />
           </tbody>
         </table>
         <p>
@@ -202,7 +196,6 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
                 restoreDefaultDrip();
                 restoreDefaultHeater();
                 restoreDefaultCooling();
-                restoreDefaultMeter();
                 restoreDefaultSeparator();
                 restoreDefaultSorter();
               })
