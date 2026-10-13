@@ -1524,11 +1524,11 @@ export class GameEngine {
     return placement(h.x, h.y, h.z);
   }
 
-  /** Where a tool's machinery sounds from: the middle of its cabinet, or the cryostabilizer station's panel. */
+  /** Where a tool's machinery sounds from: the middle of its cabinet, or the cryostabilizer station's lamps. */
   private machineAt(t: Tool): Vec3 {
     if (t.shape.wall) {
-      const p = STATION.panel;
-      return onTool(t, (p.x0 + p.x1) / 2, (p.y0 + p.y1) / 2, STATION.plate - STATION.out);
+      const { lamps, verdict } = STATION;
+      return onTool(t, lamps.x, (lamps.y0 + verdict.y) / 2, -STATION.out);
     }
     return onTool(t, 0, 60);
   }

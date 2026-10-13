@@ -270,8 +270,10 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
  *   pressed; a red line on the wall marks it.
  * - gauge: a stack of LCD segments just right of the reference, as tall as the panes, showing how far the reference is
  *   toward the goal (see gaugeSegments): x0..x1 across, and how many segments.
- * - panel: the panel's front, in the flat frame, how far it stands out from the plate, and its lamps, verdict lamp,
- *   button and screen.
+ * - button: the big round flush button, between the receptacle and the tester: its middle and radius.
+ * - lamps: the column of lamps that blink while the tester thinks, just right of the tester, top down, with the
+ *   verdict lamp under them.
+ * - screen: the readout of the litres in the reference, under its label.
  */
 const STATION_TOP = LIFT + 400;
 export const STATION = {
@@ -287,16 +289,13 @@ export const STATION = {
     y1: STATION_TOP - WALL_PANEL.h,
   },
   funnel: { y: 180, w: 30, h: 30 },
-  labelY: -22,
+  labelY: -31,
   autoflush: 0.9,
   gauge: { x0: 3 * CELL + 20, x1: 3 * CELL + 30, segments: 26 },
-  panel: {
-    x0: 2 * CELL - 62, x1: 2 * CELL + 62, y0: 70, y1: 150, depth: 8,
-    lamps: { x0: 2 * CELL - 44, dx: 11, y: 84, r: 3.2 },
-    verdict: { x: 2 * CELL + 36, y: 84, r: 5 },
-    button: { x0: 2 * CELL - 44, x1: 2 * CELL + 4, y0: 96, y1: 109 },
-    screen: { x0: 2 * CELL - 50, x1: 2 * CELL + 50, y0: 120, y1: 140 },
-  },
+  button: { x: CELL / 2, y: 120, r: 15 },
+  lamps: { x: CELL + 30, y0: 130, dy: 15, r: 3.6 },
+  verdict: { x: CELL + 30, y: 230, r: 5.5 },
+  screen: { x0: 3 * CELL - 50, x1: 3 * CELL + 50, y0: -19, y1: -4 },
 };
 
 /**

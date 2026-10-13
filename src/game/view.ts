@@ -1125,7 +1125,7 @@ class ToolView {
   private buildStation(scene: THREE.Object3D, pick: (m: THREE.Object3D, part: 'body' | 'tank' | 'button', k?: number) => void): void {
     const { t, art, upright } = this;
     const sh = t.shape;
-    const { paneW, paneH: H, out, plate, funnel: f, panel: p, autoflush, block: bk, gauge: g } = STATION;
+    const { paneW, paneH: H, out, plate, funnel: f, autoflush, block: bk, gauge: g, button: bt, lamps: lp, verdict: vd } = STATION;
     // the plate's face is flush with the wall, set into a hole in it (see buildRoom), and the columns are behind
     const face = -out;
     const wall = face - plate;
@@ -1200,28 +1200,39 @@ class ToolView {
     valve.scale.set(4.5, 8, 4.5);
     valve.position.copy(v3(sh.spouts[0], sh.valveY, 0));
     art.add(valve);
-    // the panel
-    const front = face + p.depth;
-    block(art, panelMat, p.x0, p.x1, p.y0, p.y1, face, front, 3);
-    for (let i = 0; i < RECEPTACLE_LAMPS; i++) {
+    // the lamps, each in a dark bezel, in a column right of the tester, and the verdict lamp under them
+    const lamp = (x: number, y: number, r: number) => {
+      const bezel = new THREE.Mesh(unitCylinder, darkMat);
+      bezel.rotation.x = Math.PI / 2;
+      bezel.scale.set(r + 1.5, 1.2, r + 1.5);
+      bezel.position.copy(v3(x, y, face + 0.6));
       const mat = new THREE.MeshStandardMaterial({ color: 0x5b665f });
       const m = new THREE.Mesh(unitSphere, mat);
-      m.scale.setScalar(p.lamps.r);
-      m.position.copy(v3(p.lamps.x0 + i * p.lamps.dx, p.lamps.y, front + 0.5));
-      art.add(m);
-      this.lamps.push(mat);
-    }
-    this.verdict = new THREE.MeshStandardMaterial({ color: 0x5b665f });
-    const v = new THREE.Mesh(unitSphere, this.verdict);
-    v.scale.setScalar(p.verdict.r);
-    v.position.copy(v3(p.verdict.x, p.verdict.y, front + 0.5));
-    art.add(v);
-    this.buttonZ = front;
-    this.button = block(art, keyMats.up, p.button.x0, p.button.x1, p.button.y0, p.button.y1, front, front + 4);
+      m.scale.setScalar(r);
+      m.position.copy(v3(x, y, face + 0.6));
+      art.add(bezel, m);
+      return mat;
+    };
+    for (let i = 0; i < RECEPTACLE_LAMPS; i++) this.lamps.push(lamp(lp.x, lp.y0 + i * lp.dy, lp.r));
+    this.verdict = lamp(vd.x, vd.y, vd.r);
+    // the flush button: big, round and red, in a dark collar, between the receptacle and the tester
+    const collar = new THREE.Mesh(unitCylinder, darkMat);
+    collar.rotation.x = Math.PI / 2;
+    collar.scale.set(bt.r + 4, 2, bt.r + 4);
+    collar.position.copy(v3(bt.x, bt.y, face + 1));
+    art.add(collar);
+    this.buttonZ = face + 1;
+    this.button = new THREE.Mesh(unitCylinder, keyMats.up);
+    this.button.rotation.x = Math.PI / 2;
+    this.button.scale.set(bt.r, 4, bt.r);
+    this.button.position.copy(v3(bt.x, bt.y, face + 3));
+    this.button.castShadow = true;
+    art.add(this.button);
     pick(this.button, 'button');
-    const sc = p.screen;
-    block(art, darkMat, sc.x0 - 1, sc.x1 + 1, sc.y0 - 1, sc.y1 + 1, front, front + 0.5);
-    this.screen = new Screen(art, sc.x0, sc.x1, sc.y0, sc.y1, front + 0.6, 8);
+    // the readout of the litres in the reference, under its label
+    const sc = STATION.screen;
+    block(art, darkMat, sc.x0 - 1.5, sc.x1 + 1.5, sc.y0 - 1.5, sc.y1 + 1.5, face, face + 0.5);
+    this.screen = new Screen(art, sc.x0, sc.x1, sc.y0, sc.y1, face + 0.6, 8);
   }
 
   update(hot: Pick | null, shake: number, clock: number): void {
@@ -1347,7 +1358,7 @@ class ToolView {
     const text = `${((t.tanks[2].n[TARGET] / CAP) * FLASK_L).toFixed(3)} L / ${GOAL_L.toFixed(3)} L`;
     if (s.key !== text) {
       s.key = text;
-      const sc = STATION.panel.screen;
+      const sc = STATION.screen;
       s.ctx.setTransform(s.ppu, 0, 0, s.ppu, -sc.x0 * s.ppu, -sc.y0 * s.ppu);
       s.ctx.fillStyle = '#040a06';
       s.ctx.fillRect(sc.x0, sc.y0, sc.x1 - sc.x0, sc.y1 - sc.y0);
