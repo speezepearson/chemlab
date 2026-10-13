@@ -4,7 +4,7 @@ import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { CELL, groundAt, toCardinal, toCell, toWorld, type Pose, type Vec3 } from './space';
 import {
-  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, SHAPES, STATION, TANK_H, tankDepth, tankX, overMouth, type Hose, type Mouth, type Tool,
+  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, TANK_H, tankDepth, tankX, overMouth, type Hose, type Mouth, type Tool,
   type ToolKind,
 } from './tools';
 
@@ -16,7 +16,7 @@ import {
  */
 
 /** How deep a tool's cabinet is front to back, for the tools that have one deeper than their tanks. */
-const CABINET_DEPTH: Partial<Record<ToolKind, number>> = { analyzer: 50, spectroscope: 50, meter: 40 };
+const CABINET_DEPTH: Partial<Record<ToolKind, number>> = { analyzer: 50, spectroscope: 50 };
 
 /**
  * How deep each tool is front to back, all told, and how deep its tanks are inside: as deep as they need to be to
@@ -104,9 +104,6 @@ export function tankMouth(t: Tool, k: number): Mouth {
   return { v: t.tanks[k], ...c, hx: (o.x1 - o.x0) / 2, hz: o.hz, yaw: t.pose.yaw, rim };
 }
 
-/** The tools whose bodies are a cabinet as wide as they are, under their tanks, rather than pipes and valves. */
-const CABINETS: readonly ToolKind[] = ['meter'];
-
 /**
  * Where, in a tool's flat frame, the player's note about tank k is written (its middle's height): above the tank's
  * opening and the tool's label, or the tank's own (the most lines of any of the tool's tanks', so they line up); on
@@ -121,10 +118,11 @@ export function tankNoteY(t: Tool, k: number): number {
 /**
  * A tool's solid parts, in its flat frame (x right, y down from its top center), each
  * reaching `hz` either side of `z` (its middle, if left out) front to back: its tanks (round, for a round tank), and
- * under them its cabinet, or else the pipes, valves and spouts there, across only as far as they reach. The
- * cryostabilizer station's are its funnel, the plate in the wall, and its spouts' pipes out from it.
- * An inline instrument's are its tube and the pipe down from it, the cabinet beside them, and any pipe on to a
- * spout past the cabinet; the tube's top is flush with its opening, for a nozzle to snap onto (see INLINE_DOCK).
+ * under them the pipes, valves and spouts there, across only as far as they reach. The cryostabilizer station's are
+ * its funnel, the plate in the wall, and its spouts' pipes out from it. An inline instrument's are its
+ * tube and the pipe down from it, and the cabinet beside them, and any pipe on to a spout past the cabinet, or the
+ * flow meter's readout round the pipe; the tube's top is flush with its opening, for a nozzle to snap onto (see
+ * INLINE_DOCK).
  */
 export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean }[] {
   const sh = t.shape;
@@ -145,10 +143,17 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
   if (INLINE_TOOLS.includes(t.kind)) {
     const c = INSTRUMENT.body;
     const r = D.tank / 2 + 2;
-    const past = sh.spouts.filter((x) => x > c.x1);
-    return [
+    const tube = [
       { x0: -r, x1: r, y0: 0, y1: bottom, hz: r, round: true },
       { x0: -6, x1: 6, y0: bottom, y1: b.y1, hz: 6 },
+    ];
+    if (t.kind === 'meter') {
+      const m = METER_BODY;
+      return [...tube, { x0: m.x0, x1: m.x1, y0: m.y0, y1: m.y1, hz: m.hz }];
+    }
+    const past = sh.spouts.filter((x) => x > c.x1);
+    return [
+      ...tube,
       { x0: c.x0, x1: c.x1, y0: c.y0, y1: c.y1, hz: D.body / 2 },
       ...past.map((x) => ({ x0: c.x1, x1: x + 6, y0: ANALYZER.wasteY - 6, y1: b.y1, hz: 6 })),
     ];
@@ -161,7 +166,6 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
   };
   if (sh.round) tanks.hz = (tanks.x1 - tanks.x0) / 2;
   if (bottom >= b.y1) return [tanks];
-  if (CABINETS.includes(t.kind)) return [tanks, { x0: b.x0, x1: b.x1, y0: bottom, y1: b.y1, hz: D.body / 2 }];
   const valves = sh.noValve ? [] : (sh.valves ?? sh.tanks.map((k) => ({ x: tankX(k), y: sh.valveY })));
   const xs = [...sh.spouts, ...valves.map((v) => v.x), ...sh.tanks.map(tankX)];
   if (t.kind === 'exchanger') xs.push(HELIX.x0, HELIX.x1);

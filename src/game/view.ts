@@ -934,11 +934,11 @@ class ToolView {
       pipes(art, [[tankX(sh.tanks[0]), TH], [tankX(sh.tanks[0]), y - r + 1]]);
       for (const x of sh.spouts) pipes(art, [[x, y + r - 1], [x, sh.spoutY - 4]]);
     } else if (INLINE_TOOLS.includes(t.kind)) {
-      // straight down from the tube to its spout, with a branch into the cabinet; and the analyzer's out of the
-      // cabinet's far side to its waste spout
+      // straight down from the tube to its spout, with a branch into the cabinet, if it has one; and the analyzer's
+      // out of the cabinet's far side to its waste spout
       const { body: b, inY } = INSTRUMENT;
       pipes(art, [[0, TH], [0, sh.spoutY - 4]]);
-      pipes(art, [[0, inY], [b.x0, inY]], 1.3);
+      if (t.kind !== 'meter') pipes(art, [[0, inY], [b.x0, inY]], 1.3);
       if (t.kind === 'analyzer') {
         const x = sh.spouts[1];
         pipes(art, [[b.x1, ANALYZER.wasteY], [x, ANALYZER.wasteY], [x, sh.spoutY - 4]]);
@@ -1037,11 +1037,11 @@ class ToolView {
     if (t.kind === 'exchanger') this.buildHelix();
     if (t.kind === 'sorter') this.buildChute();
     if (INLINE_TOOLS.includes(t.kind)) {
-      this.buildInstrument();
+      if (t.kind === 'meter') this.buildMeter();
+      else this.buildInstrument();
       this.buildThread(TH);
     }
     if (t.kind === 'heater') this.buildHeater();
-    if (t.kind === 'meter') this.buildMeter();
 
     // valves: a round core on the front face, and a lever that points where it was turned; or a dial
     if (!sh.noValve)
@@ -1256,13 +1256,15 @@ class ToolView {
     return dial;
   }
 
-  /** A flow meter's cabinet, with its reading (see meterText) on a seven-segment display like the scale's. */
+  /**
+   * A flow meter's readout: a slim box clipped round the pipe under its tube, nearly all display, with its reading (see
+   * meterText) in small seven-segment digits like the scale's.
+   */
   private buildMeter(): void {
-    const { display: d, ...b } = METER_BODY;
-    const z = TOOL_DEPTH.meter.body / 2;
-    block(this.art, panelMat, b.x0, b.x1, b.y0, b.y1, -z, z, 3);
-    block(this.art, darkMat, d.x0, d.x1, d.y0, d.y1, z, z + 0.5);
-    this.screen = new Screen(this.art, d.x0, d.x1, d.y0, d.y1, z + 0.6, 6);
+    const { display: d, hz, ...b } = METER_BODY;
+    block(this.art, panelMat, b.x0, b.x1, b.y0, b.y1, -hz, hz, 1.5);
+    block(this.art, darkMat, d.x0, d.x1, d.y0, d.y1, hz, hz + 0.3);
+    this.screen = new Screen(this.art, d.x0, d.x1, d.y0, d.y1, hz + 0.4, 16);
   }
 
   /**
@@ -1493,7 +1495,11 @@ class ToolView {
         s.ctx.setTransform(s.ppu, 0, 0, s.ppu, -d.x0 * s.ppu, -d.y0 * s.ppu);
         s.ctx.fillStyle = '#050603';
         s.ctx.fillRect(d.x0, d.y0, d.x1 - d.x0, d.y1 - d.y0);
-        drawSevenSeg(s.ctx, text, d.x1 - 2, d.y0 + 2.5, METER_DIGITS, 'yellowgreen', 'rgba(154, 205, 50, 0.08)', s.ppu);
+        // the digits at half the scale's size, to fit the little display
+        const k = 0.5;
+        s.ctx.setTransform(s.ppu * k, 0, 0, s.ppu * k, 0, 0);
+        const w = (d.x1 - d.x0) / k;
+        drawSevenSeg(s.ctx, text, w - 1, ((d.y1 - d.y0) / k - 13) / 2, METER_DIGITS, 'yellowgreen', 'rgba(154, 205, 50, 0.08)', s.ppu * k);
         s.tex.needsUpdate = true;
       }
     }

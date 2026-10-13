@@ -1,5 +1,5 @@
 import { equilibrate } from '../chem/equilibrium';
-import { temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
+import { Lag, temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { notice, welcomeNotice, type Block } from '../intro/notice';
 import { POD, WAKE_S, airlockBoxes, doorsOpen, ease, inPod, outOfAirlock, type Wake } from './airlock';
@@ -18,7 +18,7 @@ import { Flask, Vessel, fluidColor, roomFor, transfer, volume, volumeUnit, type 
 import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, moveBox, roomBoxes, segmentHitsBox, solids, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
-import { ANALYZER_AT, DEFAULT_PRESET, METER_AT, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
+import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
@@ -197,12 +197,12 @@ export interface PaperEdit {
 }
 
 /** Things that can be made from the hotbar, in its order. */
-export const ITEMS = ['flask', 'dispenser', 'pipette', 'exchanger', 'separator', 'splitter', 'sorter', 'heater', 'scale', 'tank'] as const;
+export const ITEMS = ['flask', 'dispenser', 'pipette', 'exchanger', 'separator', 'splitter', 'sorter', 'heater', 'scale', 'tank', 'meter'] as const;
 export type Item = (typeof ITEMS)[number];
-/** The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0. */
-export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'] as const;
+/** The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0 and -. */
+export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-'] as const;
 /** The same keys, as KeyboardEvent codes, so they work whatever the keyboard layout's shift state. */
-const HOTKEY_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0'];
+const HOTKEY_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus'];
 
 /** How tipped a flask held to pour is: past the horizontal, mouth down. */
 const POUR_ANG = Math.PI * 0.61;
@@ -232,6 +232,8 @@ const HOLD_NEAR = 40;
 /** How much further off than other things a flask is held to start with (see holdDist). */
 const FLASK_HOLD = 1.7;
 const HOLD_FAR = 520;
+/** How far from straight ahead, in radians, the middle of what's held can be, so it's always in view (see holdInPlace). */
+const HOLD_CONE = Math.PI / 6;
 /** Radians the view turns per pixel the mouse moves, and that something held turns with Shift. */
 const LOOK_SENS = 0.0022;
 const TURN_SENS = 0.008;
@@ -374,6 +376,8 @@ export class GameEngine {
   private inflow = new Map<Vessel, number>();
   /** Where each drop that landed in a vessel this frame landed, for its sound. */
   private landed: Vec3[] = [];
+  /** Each vessel's chemistry, put off while it's quiet (see ReactionNetwork.tick). */
+  private lags = new WeakMap<Vessel, Lag>();
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -725,7 +729,7 @@ export class GameEngine {
 
   /**
    * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a composition analyzer, a
-   * spectroscope, a flow meter and a cryostabilizer station: if there's none, one is added where it starts, the station's reference holding
+   * spectroscope and a cryostabilizer station: if there's none, one is added where it starts, the station's reference holding
    * what's left on board (see REFERENCE_FILL). The station is built into the wall, so it's always where it is.
    */
   private uniqueTools(): void {
@@ -741,7 +745,6 @@ export class GameEngine {
     };
     add('analyzer', spotPose(ANALYZER_AT));
     add('spectroscope', spotPose(SPECTROSCOPE_AT));
-    add('meter', spotPose(METER_AT));
     add('receptacle', STATION_POSE);
     this.station().pose = { ...STATION_POSE };
   }
@@ -1460,20 +1463,25 @@ export class GameEngine {
 
   /**
    * Take hold of a hose's nozzle, where it is: it's small, and the hose trails behind it, so it isn't brought near. Its
-   * stand stays the way it was from it, and as far, until turned or slid. A hose `fresh` out of its spout has nowhere to
-   * be put back to (see putBack), so Q rolls it back up.
+   * stand stays the way it was from it, and as far, until turned or slid. Q puts it back `from` where it was, by default
+   * where it is now; a hose fresh out of its spout has nowhere to be put back to (null), so Q rolls it back up.
    */
-  private holdHose(hose: Hose, fresh = false): void {
+  private holdHose(
+    hose: Hose,
+    from: Rest | null = { pose: { ...hose.outlet, yaw: 0 }, hose: { turn: hose.turn, reach: hose.reach } },
+  ): void {
     this.mark();
-    const from = fresh ? undefined : { pose: { ...hose.outlet, yaw: 0 }, hose: { turn: hose.turn, reach: hose.reach } };
-    const h: Held = { kind: 'hose', h: hose, reach: hose.reach, relYaw: wrapAngle(hose.turn - this.player.yaw), dist: 0, from };
+    const h: Held = {
+      kind: 'hose', h: hose, reach: hose.reach, relYaw: wrapAngle(hose.turn - this.player.yaw), dist: 0, from: from ?? undefined,
+    };
     this.holdInPlace(h);
     this.held = h;
   }
 
   /**
    * Hold what's picked up just where it is, as the player sees it: it doesn't move until they do (see Held.dir). It
-   * stays turned as it was from them, too (see Held.relYaw).
+   * stays turned as it was from them, too (see Held.relYaw). But its middle is never held more than HOLD_CONE from
+   * straight ahead: what's further off to a side (or behind) is brought round to that, so it's always in front of them.
    */
   private holdInPlace(h: Held): void {
     const c = this.boxAt(h, this.heldPose(h));
@@ -1482,7 +1490,12 @@ export class GameEngine {
     h.dist = Math.max(1, Math.hypot(v.x, v.y, v.z));
     const { right, up, ahead } = this.viewAxes();
     const dot = (a: Vec3, b: Vec3) => a.x * b.x + a.y * b.y + a.z * b.z;
-    h.dir = { x: dot(v, right) / h.dist, y: dot(v, up) / h.dist, z: dot(v, ahead) / h.dist };
+    const d = { x: dot(v, right) / h.dist, y: dot(v, up) / h.dist, z: dot(v, ahead) / h.dist };
+    const side = Math.hypot(d.x, d.y);
+    if (d.z < Math.cos(HOLD_CONE)) {
+      const k = side > 1e-6 ? Math.sin(HOLD_CONE) / side : 0;
+      h.dir = { x: d.x * k, y: d.y * k, z: side > 1e-6 ? Math.cos(HOLD_CONE) : 1 };
+    } else h.dir = d;
   }
 
   /** Which ways are right, up and ahead, as the player looks, in the room. */
@@ -1510,18 +1523,20 @@ export class GameEngine {
   }
 
   /**
-   * Pull out the hose of a spout or faucet, and hold its nozzle; or, if it's already out, take hold of its nozzle,
-   * wherever it is.
+   * Pull out the hose of a spout or faucet, and hold its nozzle where the spout is; or, if it's already out, bring its
+   * nozzle back there from wherever it is (out of sight, perhaps), and hold it there just the same, though Q puts it
+   * back where it was.
    */
   private pullHose(m: HoseMount): void {
     this.mark();
     const old = this.hoses.find((h) => sameMount(h.on, m));
-    if (old) return this.holdHose(old);
-    const hose = new Hose(m, this.mountAt(m), NOZZLE_REACH.min);
+    const hose = old ?? new Hose(m, this.mountAt(m), NOZZLE_REACH.min);
+    const from: Rest | null = old ? { pose: { ...old.outlet, yaw: 0 }, hose: { turn: old.turn, reach: old.reach } } : null;
+    hose.outlet = this.mountAt(m);
     // its stand starts out behind it, as the player faces
     hose.turn = toCardinal(this.player.yaw);
-    this.hoses.push(hose);
-    this.holdHose(hose, true);
+    if (!old) this.hoses.push(hose);
+    this.holdHose(hose, from);
   }
 
   /** Where the spout or faucet a hose runs from is. */
@@ -2273,7 +2288,9 @@ export class GameEngine {
           return !lands && d.y > groundAt(d.x, d.z);
         });
         for (const v of vessels) {
-          this.chem.step(v, step);
+          let lag = this.lags.get(v);
+          if (!lag) this.lags.set(v, (lag = new Lag()));
+          this.chem.tick(v, step, lag);
           // by molecules, breaking bonds swells a fluid, and whatever no longer fits spills
           this.overflow(v);
         }
@@ -2665,7 +2682,7 @@ export class GameEngine {
     } else {
       if (this.pencil && p && this.grabbable(p)) add(['E'], 'pick it up');
       if (!this.pencil && this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
-      add(['1–0'], 'make equipment in your hands');
+      add(['1–0, -'], 'make equipment in your hands');
     }
     if (!this.pencil) {
       if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
@@ -2895,7 +2912,7 @@ export class GameEngine {
   private wouldFlow(t: Tool): boolean {
     // the station's reference through its faucet, or its funnel out its waste nozzle
     if (t.kind === 'receptacle') return (t.valves[0] > 0 && t.tanks[1].N > TRACE) || t.tanks[0].N > TRACE;
-    const free = t.kind === 'splitter' || t.kind === 'sorter' || t.kind === 'heater' || t.kind === 'meter' || INLINE_TOOLS.includes(t.kind);
+    const free = t.kind === 'splitter' || t.kind === 'sorter' || t.kind === 'heater' || INLINE_TOOLS.includes(t.kind);
     const drains = (k: number) => free || t.valves[k] > 0;
     // a heater's tube runs whatever its valves say
     return (t.shape.spouts.length > 0 && t.tanks.some((v, k) => v.N > TRACE && drains(k))) || t.tube.some((v) => v.N > TRACE);

@@ -10,7 +10,7 @@ import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
 import { SUPPLY } from './supply';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, BOND_KEYS, SPECTROSCOPE, bondCounts, spectroscopeAt, INSTRUMENT_TAU, TUBE_CAP,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, BOND_KEYS, SPECTROSCOPE, bondCounts, spectroscopeAt, INSTRUMENT_TAU, TUBE_CAP,
   DIVERT_HOLD, RECEPTACLE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, SEPARATOR, STATION, STATION_FUNNEL, gaugeSegments, SEPARATOR_PERFECT, SORTER, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
@@ -183,16 +183,21 @@ describe('resistive heater', () => {
 });
 
 describe('flow meter', () => {
-  it('drains its funnel straight through at FUNNEL_RATE, with no valve', () => {
+  it('is an inline instrument, and there can be any number of them', () => {
+    expect(INLINE_TOOLS).toContain('meter');
+    expect(UNIQUE_TOOLS).not.toContain('meter');
+  });
+
+  it('drains its tube straight through at FUNNEL_RATE, with no valve', () => {
     const m = new Tool('meter', 0);
     expect(m.shape.noValve).toBe(true);
-    filled(m.tanks[0], R, FUNNEL_CAP, 2);
+    filled(m.tanks[0], R, TUBE_CAP, 2);
     const out = m.step(0.02)[0]!;
     expect(out.N / (FUNNEL_RATE * 0.02)).toBeCloseTo(1, 6);
     expect(temperature(out)).toBeCloseTo(2, 6);
   });
 
-  it('reads what flows through it, averaged over the last METER.window', () => {
+  it('reads what flows through it, fading the past smoothly over INSTRUMENT_TAU', () => {
     const m = new Tool('meter', 0);
     const feed = 0.25 * CAP; // per sim second
     const src = filled(new Vessel(Infinity), R, CAP, 1);
@@ -202,15 +207,17 @@ describe('flow meter', () => {
         m.step(0.02);
       }
     };
-    // the flow builds up in the funnel for the first few steps before it's draining at the feed rate, so leave a
-    // little slack: halfway through the window it reads about half
-    run(METER.window / 2, true);
-    expect(m.rate / feed).toBeCloseTo(0.5, 1);
-    run(2 * METER.window, true);
-    expect(m.rate / feed).toBeCloseTo(1, 2);
-    // and once the funnel's drained and the window's passed, nothing
-    run(METER.window, false);
-    run(METER.window, false);
+    // a step up shows at once, and comes in fully: about 1 − e^-1 of it after INSTRUMENT_TAU
+    run(0.02, true);
+    expect(m.rate).toBeGreaterThan(0);
+    run(INSTRUMENT_TAU - 0.02, true);
+    expect(m.rate / feed).toBeCloseTo(1 - Math.exp(-1), 1);
+    run(20 * INSTRUMENT_TAU, true);
+    expect(m.rate / feed).toBeCloseTo(1, 3);
+    // a step down fades, about e^-1 of it left after INSTRUMENT_TAU, and in the end it reads nothing
+    run(INSTRUMENT_TAU, false);
+    expect(m.rate / feed).toBeCloseTo(Math.exp(-1), 1);
+    run(40 * INSTRUMENT_TAU, false);
     expect(m.rate).toBe(0);
   });
 
