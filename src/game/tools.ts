@@ -260,7 +260,7 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
  * - paneW, paneH: each column's pane, across and tall; the column behind it is as tall.
  * - out: how far the funnel and spouts stand out from the wall.
  * - top: how high the columns' tops are, in the room.
- * - plate: how far the plate the panes are set in stands out from the wall.
+ * - plate: how deep the plate the panes are set in goes into the wall, its face flush with the wall.
  * - block: the plate's edges, in the flat frame: a swappable block of the wall, two of the wall's panels across and one
  *   high (see WALL_PANEL), lined up with them, with a rubber seam round it.
  * - funnel: the funnel's mouth, `y` down from the columns' tops (about level with the receptacle's bottom, within
@@ -268,7 +268,7 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
  * - labelY: the middle of the labels printed on the plate above the columns.
  * - autoflush: how full the receptacle is, by volume, when it flushes itself into the tester, as if its button were
  *   pressed; a red line on the wall marks it.
- * - gauge: a stack of LCD segments just right of the tester, as tall as the panes, showing how far the reference is
+ * - gauge: a stack of LCD segments just right of the reference, as tall as the panes, showing how far the reference is
  *   toward the goal (see gaugeSegments): x0..x1 across, and how many segments.
  * - panel: the panel's front, in the flat frame, how far it stands out from the plate, and its lamps, verdict lamp,
  *   button and screen.
@@ -289,13 +289,13 @@ export const STATION = {
   funnel: { y: 180, w: 30, h: 30 },
   labelY: -22,
   autoflush: 0.9,
-  gauge: { x0: CELL + 20, x1: CELL + 30, segments: 26 },
+  gauge: { x0: 3 * CELL + 20, x1: 3 * CELL + 30, segments: 26 },
   panel: {
-    x0: 2 * CELL - 54, x1: 2 * CELL + 74, y0: 70, y1: 150, depth: 8,
-    lamps: { x0: 2 * CELL - 34, dx: 11, y: 84, r: 3.2 },
-    verdict: { x: 2 * CELL + 46, y: 84, r: 5 },
-    button: { x0: 2 * CELL - 34, x1: 2 * CELL + 14, y0: 96, y1: 109 },
-    screen: { x0: 2 * CELL - 40, x1: 2 * CELL + 60, y0: 120, y1: 140 },
+    x0: 2 * CELL - 62, x1: 2 * CELL + 62, y0: 70, y1: 150, depth: 8,
+    lamps: { x0: 2 * CELL - 44, dx: 11, y: 84, r: 3.2 },
+    verdict: { x: 2 * CELL + 36, y: 84, r: 5 },
+    button: { x0: 2 * CELL - 44, x1: 2 * CELL + 4, y0: 96, y1: 109 },
+    screen: { x0: 2 * CELL - 50, x1: 2 * CELL + 50, y0: 120, y1: 140 },
   },
 };
 

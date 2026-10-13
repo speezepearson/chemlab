@@ -14,6 +14,7 @@ import { COUNTERS, LIFT, PAPER_Z, ROOM, groundAt, toWorld, type Vec3 } from './s
 import { PORT_FRAC, PORT_WALL, porthole, type Porthole } from './porthole';
 import { AIRLOCK, POD } from './airlock';
 import { notice } from '../intro/notice';
+import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
@@ -1083,30 +1084,33 @@ class ToolView {
    * name printed above; a glass funnel low in front of the receptacle, whose stem runs down and back into a pump on the
    * plate; a red line across the receptacle's pane where it flushes itself; a waste nozzle under the tester, whose
    * valve has no handle, since only the station works it; a faucet under the reference (its lever is built with the
-   * other valves); the gauge of LCD segments just right of the tester (see gaugeSegments); and between that and the
-   * reference a panel with a row of lamps that blink with the tester's thinking, a verdict lamp, the button, and a
+   * other valves); the gauge of LCD segments just right of the reference (see gaugeSegments); and between the tester
+   * and the reference a panel with a row of lamps that blink with the tester's thinking, a verdict lamp, the button, and a
    * green-on-black screen showing the litres of cryostabilizer in the reference of the litres needed.
    */
   private buildStation(scene: THREE.Object3D, pick: (m: THREE.Object3D, part: 'body' | 'tank' | 'button', k?: number) => void): void {
     const { t, art, upright } = this;
     const sh = t.shape;
     const { paneW, paneH: H, out, plate, funnel: f, panel: p, autoflush, block: bk, gauge: g } = STATION;
-    const wall = -out;
-    const face = wall + plate;
+    // the plate's face is flush with the wall, set into a hole in it (see buildRoom), and the columns are behind
+    const face = -out;
+    const wall = face - plate;
     // the plate: a block of the wall, lined up with its panels, with a slot for each pane
-    const shape = rectPath((bk.x0 + bk.x1) / 2, -(bk.y0 + bk.y1) / 2, bk.x1 - bk.x0, bk.y1 - bk.y0, new THREE.Shape());
+    const rect = (d: number) =>
+      [(bk.x0 + bk.x1) / 2, -(bk.y0 + bk.y1) / 2, bk.x1 - bk.x0 + 2 * d, bk.y1 - bk.y0 + 2 * d] as const;
+    const shape = rectPath(...rect(0), new THREE.Shape());
     for (const tk of sh.tanks) shape.holes.push(rectPath(tankX(tk), -H / 2, paneW, H));
     const pl = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: plate, bevelEnabled: false }), plateMat);
     pl.position.z = wall;
     pl.receiveShadow = true;
     art.add(pl);
-    // a rubber seam all round it, over the panels' seams, as if the block could be pulled and another put in its place
-    const s = 4;
-    for (const [x0, x1, y0, y1] of [
-      [bk.x0 - s, bk.x1 + s, bk.y0 - s, bk.y0 + s], [bk.x0 - s, bk.x1 + s, bk.y1 - s, bk.y1 + s],
-      [bk.x0 - s, bk.x0 + s, bk.y0 + s, bk.y1 - s], [bk.x1 - s, bk.x1 + s, bk.y0 + s, bk.y1 - s],
-    ])
-      block(art, rubberMat, x0, x1, y0, y1, wall, face + 2, 2).castShadow = false;
+    // one rubber seam all round it, over the edge of the hole, as if the block could be pulled and another put in its
+    // place
+    const seam = rectPath(...rect(4), new THREE.Shape());
+    seam.holes.push(rectPath(...rect(-4)));
+    const gasket = new THREE.Mesh(new THREE.ExtrudeGeometry(seam, { depth: 3, bevelEnabled: true, bevelThickness: 1, bevelSize: 1, bevelSegments: 2 }), rubberMat);
+    gasket.position.z = face - 1;
+    art.add(gasket);
     sh.tanks.forEach((tk, k) => {
       const x = tankX(tk);
       // the column's back, its fluid, and the glass in front
@@ -1128,7 +1132,7 @@ class ToolView {
     const mark = (x: number, share: number, mat: THREE.Material) =>
       (block(art, mat, x - paneW / 2 - 8, x + paneW / 2 + 8, H * (1 - share) - 0.7, H * (1 - share) + 0.7, face, face + 0.4).castShadow = false);
     mark(tankX(sh.tanks[0]), autoflush, autoflushMat);
-    // the gauge beside the tester: an LCD stack of segments, as tall as the panes, on a dark strip
+    // the gauge beside the reference: an LCD stack of segments, as tall as the panes, on a dark strip
     block(art, darkMat, g.x0 - 2, g.x1 + 2, -2, H + 2, face, face + 1);
     const seg = H / g.segments;
     for (let i = 0; i < g.segments; i++) {
@@ -1191,7 +1195,7 @@ class ToolView {
       this.labels[k].set(v.label);
       const r = tankRect(t, k);
       // the station's columns are behind panes in the wall
-      const c = onTool(t, tankX(t.shape.tanks[k]), (r.y0 + r.y1) / 2, t.shape.wall ? STATION.plate - STATION.out : 0);
+      const c = onTool(t, tankX(t.shape.tanks[k]), (r.y0 + r.y1) / 2, t.shape.wall ? -STATION.out : 0);
       this.glows[k].update(v, v.cap, new THREE.Vector3(c.x, c.y, c.z));
     });
     this.note.set(t.note);
@@ -1852,7 +1856,14 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
   front.rotation.y = Math.PI;
   scene.add(front);
   // the left wall, with the porthole through it, is built apart (see buildPort)
-  wall(Dp, ROOM.x1, cz, -Math.PI / 2);
+  // the right wall, with a hole for the cryostabilizer station's block (see ToolView.buildStation); turned to face in,
+  // its own x runs toward +z
+  const { block: bk, out } = STATION;
+  const [a, b] = [toWorld(STATION_POSE, { x: bk.x0, y: -bk.y1, z: -out }), toWorld(STATION_POSE, { x: bk.x1, y: -bk.y0, z: -out })];
+  const right = wallMesh(Dp, rectPath((a.z + b.z) / 2 - cz, (a.y + b.y) / 2 - H / 2, Math.abs(b.z - a.z), b.y - a.y));
+  right.position.set(ROOM.x1, H / 2, cz);
+  right.rotation.y = -Math.PI / 2;
+  scene.add(right);
   // ceiling light fixtures: a dark frame round a glowing diffuser behind louvers
   const frameMat = new THREE.MeshStandardMaterial({ color: 0x2c3231, metalness: 0.6, roughness: 0.45 });
   const diffuser = new THREE.MeshBasicMaterial({ map: diffuserTexture(), toneMapped: false });
