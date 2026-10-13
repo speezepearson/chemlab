@@ -70,7 +70,10 @@ export interface Hud {
   holding: boolean;
   /** Whether E would set down what's held: whether there's somewhere for it to rest (see placement). */
   drop: boolean;
-  /** Whether the left button would press the key or button the crosshair is on, or do something with a hose. */
+  /**
+   * Whether the left button would do something: press the key or button the crosshair is on, do something with a hose,
+   * or set down what's held or pick up what's looked at.
+   */
   press: boolean;
   /** Whether the right button would do something: turn the valve looked at, or let fluid out of what's held. */
   right: boolean;
@@ -1256,12 +1259,8 @@ export class GameEngine {
       return;
     }
     if (inPod(this.wake)) return;
-    // a hose's nozzle in hand is set down; with empty hands, a spout or faucet's hose is pulled out, or its nozzle
-    // taken hold of if it's out, and so is a nozzle looked at
-    if (this.held?.kind === 'hose') {
-      this.release();
-      return;
-    }
+    // with empty hands, a spout or faucet's hose is pulled out, or its nozzle taken hold of if it's out, and so is a
+    // nozzle looked at
     const m = this.held ? null : this.mountAimed();
     if (m) {
       this.pullHose(m);
@@ -1282,7 +1281,11 @@ export class GameEngine {
     if (p?.kind === 'scale' && p.part === 'tare') {
       p.sc.zero();
       this.tarePress = p.sc;
+      return;
     }
+    // anywhere else, what's held is set down, or with empty hands, what's looked at picked up
+    if (this.held) this.release();
+    else if (p && this.grabbable(p)) this.grabOrRelease();
   }
 
   /**
@@ -2205,8 +2208,8 @@ export class GameEngine {
     if (h) {
       const ok = !!this.placed && 'rest' in this.placed;
       const how = h.kind === 'hose' ? 'set the hose’s end down' : 'set it down';
-      add(['E'], ok ? how : `${how}: not here`, !ok);
-      if (h.kind === 'hose') add(['LMB'], ok ? how : `${how}: not here`, !ok);
+      // the pencil has the mouse, so E sets down; and a button looked at takes the click
+      if (this.pencil || !this.onButton()) add([this.pencil ? 'E' : 'LMB'], ok ? how : `${how}: not here`, !ok);
       if (!this.pencil && this.rightWouldDo()) add(['RMB'], h.kind === 'flask' ? 'hold to pour' : 'hold to let it flow');
       if (h.kind === 'hose') {
         add(['Shift', '←→'], 'swing its stand round');
@@ -2217,7 +2220,7 @@ export class GameEngine {
       if (h.kind === 'hose') add(['Backspace'], 'roll the hose back up');
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it away');
     } else {
-      if (p && this.grabbable(p)) add(['E'], 'pick it up');
+      if (this.pencil && p && this.grabbable(p)) add(['E'], 'pick it up');
       if (!this.pencil && this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
       if (p?.kind === 'tool' && p.t.shape.flippable) add(['F'], 'flip it');
       add(['1–0'], 'make equipment in your hands');
@@ -2229,6 +2232,7 @@ export class GameEngine {
       const m = h ? null : this.mountAimed();
       if (m) add(['LMB'], this.hoseOn(m) ? 'take hold of its hose' : 'pull out its hose');
       else if (!h && p?.kind === 'hose') add(['LMB'], 'take hold of it');
+      else if (!h && p && this.grabbable(p) && !this.onButton()) add(['LMB'], 'pick it up');
       const id = this.targetNote();
       if (id) add(['N'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
       add(['P'], 'pick up the pencil');
@@ -2244,12 +2248,23 @@ export class GameEngine {
   }
 
   /**
-   * Whether the left button would do something with a hose: set down the nozzle in hand, if it can be, or with empty
-   * hands, pull out the hose of the spout or faucet the crosshair is on, or take hold of it or the nozzle looked at.
+   * Whether the left button would do something (see leftDown): press the key or button the crosshair is on, or else set
+   * down what's held, if it can be, or with empty hands, pull out a hose or pick up what's looked at.
    */
-  private hoseClick(): boolean {
-    if (this.held?.kind === 'hose') return !!this.placed && 'rest' in this.placed;
-    return !this.held && (!!this.mountAimed() || this.target?.kind === 'hose');
+  private leftWouldDo(): boolean {
+    if (this.onButton()) return this.pressable();
+    if (this.held) return !!this.placed && 'rest' in this.placed;
+    const p = this.target;
+    return !!this.mountAimed() || (!!p && this.grabbable(p));
+  }
+
+  /** Whether the crosshair is on a key or button, which takes the left button's click even with something in hand. */
+  private onButton(): boolean {
+    const p = this.target;
+    return (
+      (p?.kind === 'tool' && p.part === 'button') || (p?.kind === 'scale' && p.part === 'tare') ||
+      p?.kind === 'alarm' || p?.kind === 'blinds' || p?.kind === 'wake'
+    );
   }
 
   /** Whether the left button would press the key or button the crosshair is on. */
@@ -2264,7 +2279,7 @@ export class GameEngine {
     );
   }
 
-  /** Whether E would pick up `p`: anything but what's fixed in place. */
+  /** Whether `p` can be picked up: anything but what's fixed in place. */
   private grabbable(p: Pick): boolean {
     return p.kind !== 'faucet' && p.kind !== 'alarm' && p.kind !== 'blinds' && p.kind !== 'wake' && !(p.kind === 'tool' && p.t.shape.fixed);
   }
@@ -2354,7 +2369,7 @@ export class GameEngine {
       inPod: inPod(this.wake),
       holding: !!this.held,
       drop: !!this.placed && 'rest' in this.placed,
-      press: this.pressable() || this.hoseClick(),
+      press: this.leftWouldDo(),
       right: this.rightWouldDo(),
       aim: this.pencil ? { ...this.cursor } : this.turning ? { ...this.turning.aim } : null,
       pencil: this.pencil,

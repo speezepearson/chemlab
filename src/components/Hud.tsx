@@ -169,7 +169,7 @@ function Actions({ actions }: { actions: readonly Action[] }) {
 }
 
 /**
- * The crosshair, with hints by it for what E, F and the mouse buttons would do; the aim while a valve turns; and, on a
+ * The crosshair, with hints by it for what F and the mouse buttons would do; the aim while a valve turns; and, on a
  * screen with a mouse and keys, everything else that can be done just now, in a corner, unless `/` has hidden it.
  */
 export function Hud({ hud, help }: { hud: HudState; help: boolean }) {
@@ -178,7 +178,6 @@ export function Hud({ hud, help }: { hud: HudState; help: boolean }) {
     <>
       <div className={hud.aim ? 'crosshair dim' : 'crosshair'} />
       <div className="hints">
-        {(hud.grab || hud.drop) && <kbd>E</kbd>}
         {hud.flip && <kbd>F</kbd>}
         {hud.press && <MouseHint side="left" />}
         {hud.right && <MouseHint side="right" />}
