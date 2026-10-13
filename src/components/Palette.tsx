@@ -78,8 +78,8 @@ const ICONS: Record<string, ReactNode> = {
 
 /**
  * The equipment that can be made, along the bottom of the view: a key along the number row makes one in the player's
- * hands, if there's room for it there. Clicking one does the same, when the mouse isn't captured. Last is the pencil,
- * for sticky notes.
+ * hands, if they're empty. Clicking one does the same, when the mouse isn't captured. Last is the pencil, for sticky
+ * notes.
  */
 export function Palette({ engine, pencil }: { engine: GameEngine; pencil: boolean }) {
   return (
