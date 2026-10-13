@@ -49,6 +49,16 @@ export class Supply {
     if (!r.length) this.net = 0;
   }
 
+  /**
+   * Skip J sim seconds over which the flow ran just as it has been (see Dream): its run goes on, and what it's added
+   * lately stays as recent as it was.
+   */
+  skip(J: number): void {
+    this.t += J;
+    this.run += J;
+    for (const e of this.recent) e.t += J;
+  }
+
   /** Whether the flow is running: the target has gone in within the last SUPPLY.gap. */
   get flowing(): boolean {
     return this.since <= SUPPLY.gap;
