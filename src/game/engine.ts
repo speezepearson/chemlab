@@ -5,9 +5,9 @@ import { POD, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from 
 import { hushAlarms } from './ambience';
 import { beeper, type Beeper } from './beeper';
 import {
-  FLASK_CENTER, NOZZLE_H, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, flip, nozzleBox, nozzleStand,
-  onBench, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, spoutAt, spoutNear, standBase, tankMouth, tankNoteY, toolAnchor,
-  toolBox, toolCenter, toolStands, valveNear, valveZ, type Stand,
+  FLASK_CENTER, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, flip, nozzleBox,
+  nozzleMounts, nozzleStand, onBench, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
+  tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
 import { CAP, FILL_RATE, GOAL_TARGET, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
@@ -91,7 +91,8 @@ export interface Hud {
 /**
  * Something the player can do just now: the keys or buttons that do it, pressed together, and what it does, in a few
  * words. Keys are named as on the keyboard; 'LMB' and 'RMB' are the mouse's left and right buttons, 'LMB2' a
- * double-click, 'Wheel' its wheel and '←→' moving it across. `off` if it can't be done here, though it could elsewhere.
+ * double-click, 'Wheel' its wheel, '←→' moving it across and '↑↓' up and down. `off` if it can't be done here, though
+ * it could elsewhere.
  */
 export interface Action {
   keys: string[];
@@ -133,6 +134,8 @@ interface Aim {
 interface Rest {
   pose: Pose;
   scale?: { sc: Scale; dx: number };
+  /** For a hose's nozzle, where its stand goes (see nozzleMounts). */
+  hose?: NozzleMount;
 }
 
 /** What the player is holding. A hose is held by its nozzle. */
@@ -140,7 +143,8 @@ type Held = (
   | { kind: 'flask'; f: Flask }
   | { kind: 'tool'; t: Tool }
   | { kind: 'scale'; sc: Scale }
-  | { kind: 'hose'; h: Hose }
+  /** A hose by its nozzle, with how far behind it its stand is wanted, as the clamp's arm is slid (see snapReach). */
+  | { kind: 'hose'; h: Hose; reach: number }
 ) & {
   /** How far it's turned from facing the player, and how far in front of their eyes it's held. */
   relYaw: number;
@@ -190,6 +194,8 @@ const HOLD_FAR = 520;
 /** Radians the view turns per pixel the mouse moves, and that something held turns with Shift. */
 const LOOK_SENS = 0.0022;
 const TURN_SENS = 0.008;
+/** How far a held nozzle's stand slides out per pixel the mouse moves up with Shift. */
+const REACH_SENS = 0.5;
 /** How fast the look stick turns the view when pushed all the way, in radians per real second: across, and up or down. */
 const STICK_TURN = 2.4;
 const STICK_TILT = 1.6;
@@ -456,7 +462,7 @@ export class GameEngine {
     this.uniqueTools();
     this.hoses = (preset.hoses ?? []).map(({ from, to }) => {
       const m = tankMouth(this.tools[to.tool], to.tank ?? 0);
-      return new Hose({ tool: this.tools[from.tool], spout: from.spout }, { x: m.x, y: m.y + (to.up ?? 24), z: m.z });
+      return new Hose({ tool: this.tools[from.tool], spout: from.spout }, { x: m.x, y: m.y + (to.up ?? 24), z: m.z }, NOZZLE_REACH.min);
     });
     this.restAll();
     this.afterLoad();
@@ -493,7 +499,7 @@ export class GameEngine {
         ...(sc.note ? { note: sc.note } : {}),
       })),
       hoses: this.hoses.map((h) => ({
-        outlet: { ...toFrac(h.outlet), z: h.outlet.z, yaw: h.turn },
+        outlet: { ...toFrac(h.outlet), z: h.outlet.z, yaw: h.turn, reach: h.reach },
         on: 'tool' in h.on ? { tool: h.on.tool.id, spout: h.on.spout } : { faucet: h.on.faucet },
       })),
       // where they started on the old flat bench, so the save still loads there, with their notes
@@ -562,7 +568,7 @@ export class GameEngine {
         : null;
       if (!mount || this.hoses.some((h) => sameMount(h.on, mount))) continue;
       const o = sh.outlet;
-      const h = new Hose(mount, this.inRoom({ ...fromFrac(o), z: num(o.z, Z_HOME) }));
+      const h = new Hose(mount, this.inRoom({ ...fromFrac(o), z: num(o.z, Z_HOME) }), snapReach(num(o.reach, NOZZLE_REACH.min)));
       h.turn = num(o.yaw, 0);
       this.hoses.push(h);
     }
@@ -686,7 +692,7 @@ export class GameEngine {
       h.turn = toCardinal(h.turn);
       const g = onGrid({ ...h.outlet, yaw: 0 });
       h.outlet = { x: g.x, y: g.y, z: g.z };
-      for (let i = 0; i < 2 && counterUnder(standBase(nozzleStand(h.outlet, h.turn), 0)) === null; i++)
+      for (let i = 0; i < 2 && counterUnder(standBase(nozzleStand(h.outlet, h.turn, h.reach), 0)) === null; i++)
         h.outlet = toWorld({ ...h.outlet, yaw: h.turn }, { x: 0, y: 0, z: CELL });
     }
   }
@@ -853,7 +859,7 @@ export class GameEngine {
     for (const hose of this.hoses)
       if (!(h?.kind === 'hose' && h.h === hose)) {
         out.push(nozzleBox(hose));
-        if (bases) out.push(standBase(nozzleStand(hose.outlet, hose.turn)));
+        if (bases) out.push(standBase(nozzleStand(hose.outlet, hose.turn, hose.reach)));
       }
     if (bases) for (const t of this.tools) if (!(h?.kind === 'tool' && h.t === t)) for (const st of toolStands(t)) out.push(standBase(st));
     return out;
@@ -938,13 +944,22 @@ export class GameEngine {
     if (this.turning) this.look(dx, dy, false);
   }
 
-  /** Shift and the mouse, and the wheel: a drag across turns what's held, and up holds it further, down nearer. */
+  /**
+   * The touch screen's stand-in for Shift and the mouse, and the wheel: a drag across turns what's held, and up holds it
+   * further, down nearer; but for a hose's nozzle, up slides its stand out and down in (see slideReach).
+   */
   turnHeld(dx: number, dy: number): void {
     const h = this.held;
     if (!h) return;
     // a flask is round, so turning it does nothing (see faceFlask)
     if (h.kind !== 'flask') h.relYaw = wrapAngle(h.relYaw - dx * TURN_SENS);
-    h.dist = this.clampDist(h, h.dist * Math.exp(-dy * 0.004));
+    if (h.kind === 'hose') this.slideReach(h, dy);
+    else h.dist = this.clampDist(h, h.dist * Math.exp(-dy * 0.004));
+  }
+
+  /** The mouse or a finger moved `dy` pixels down: slide a held nozzle's stand in, or up, out, within NOZZLE_REACH. */
+  private slideReach(h: Held & { kind: 'hose' }, dy: number): void {
+    h.reach = Math.min(NOZZLE_REACH.max, Math.max(NOZZLE_REACH.min, h.reach - dy * REACH_SENS));
   }
 
   private bindInput(): void {
@@ -1088,6 +1103,7 @@ export class GameEngine {
     }
     if (shift && this.held) {
       if (this.held.kind !== 'flask') this.held.relYaw = wrapAngle(this.held.relYaw - dx * TURN_SENS);
+      if (this.held.kind === 'hose') this.slideReach(this.held, dy);
       return;
     }
     const p = this.player;
@@ -1140,9 +1156,12 @@ export class GameEngine {
     this.held = h;
   }
 
-  /** Take hold of a hose's nozzle, where it is: it's small, and the hose trails behind it, so it isn't brought near. */
+  /**
+   * Take hold of a hose's nozzle, where it is: it's small, and the hose trails behind it, so it isn't brought near. Its
+   * stand stays the way it was from it, and as far, until turned or slid.
+   */
   private holdHose(hose: Hose): void {
-    const h: Held = { kind: 'hose', h: hose, relYaw: 0, dist: 0 };
+    const h: Held = { kind: 'hose', h: hose, reach: hose.reach, relYaw: wrapAngle(hose.turn - this.player.yaw), dist: 0 };
     h.dist = this.clampDist(h, dist3(this.eye(), hose.outlet));
     this.held = h;
   }
@@ -1169,7 +1188,9 @@ export class GameEngine {
   private pullHose(m: HoseMount): void {
     const old = this.hoses.find((h) => sameMount(h.on, m));
     if (old) return this.holdHose(old);
-    const hose = new Hose(m, this.mountAt(m));
+    const hose = new Hose(m, this.mountAt(m), NOZZLE_REACH.min);
+    // its stand starts out behind it, as the player faces
+    hose.turn = toCardinal(this.player.yaw);
     this.hoses.push(hose);
     this.holdHose(hose);
   }
@@ -1214,7 +1235,7 @@ export class GameEngine {
         this.settle();
       }
     }
-    if (h.kind === 'hose') h.h.turn = toCardinal(this.player.yaw);
+    if (h.kind === 'hose' && pl.rest.hose) ({ turn: h.h.turn, reach: h.h.reach } = pl.rest.hose);
     this.held = null;
   }
 
@@ -1953,7 +1974,8 @@ export class GameEngine {
    * whole footprint must be over (or a flask over a scale, onto its platform); a tool or hose's nozzle on a stand stays at
    * the height it's held, no higher than its stand reaches, while its stand's base goes down onto the counter, which
    * the whole base must be over (what it holds can reach out past the counter's edge). Either way, it mustn't bump into anything on the way down, nor its stand's base sit
-   * on anything but the counter. (Stands don't bump into each other: their rods can stand side by side.)
+   * on anything but the counter. (Stands don't bump into each other: their rods can stand side by side.) A hose's
+   * nozzle's stand goes where it's wanted (see nozzleWant) if it can, or else the first place it can of nozzleMounts.
    */
   private rest(h: Held, p: Pose, obstacles: readonly Box[], solid: readonly Box[]): Rest | string {
     const now = this.heldBox(h);
@@ -1967,8 +1989,7 @@ export class GameEngine {
       return { ...to, y: (y0 + y1) / 2, hy: (y1 - y0) / 2, parts: undefined };
     };
     const box = this.boxAt(h, p);
-    const stands = this.standsAt(h, p);
-    if (stands.length) {
+    const onStands = (stands: Stand[]): Rest | string => {
       const tops = stands.map((st) => counterUnder(standBase(st, 0)));
       if (tops.some((t) => t === null)) return 'Its stand needs a counter under it';
       const drop = Math.max(0, ...stands.map((st, i) => st.clampY - tops[i]! - STAND_MAX));
@@ -1976,7 +1997,21 @@ export class GameEngine {
       if (blocked(span(to, box))) return 'No room';
       if (stands.some((st, i) => solid.some((o) => boxesOverlap(standBase(st, tops[i]!), o)))) return 'No room for its stand';
       return { pose: { ...p, y: p.y - drop } };
+    };
+    if (h.kind === 'hose') {
+      // the nozzle itself is in the way, wherever its stand goes
+      const at = onStands([]);
+      if (typeof at === 'string') return at;
+      let why: string | null = null;
+      for (const m of nozzleMounts(this.nozzleWant(h))) {
+        const r = onStands([nozzleStand(p, m.turn, m.reach)]);
+        if (typeof r !== 'string') return { ...r, hose: m };
+        why ??= r;
+      }
+      return why!;
     }
+    const stands = this.standsAt(h, p);
+    if (stands.length) return onStands(stands);
     if (h.kind === 'flask')
       for (const sc of this.scales) {
         const dx = scaleSpot(sc, p, Infinity);
@@ -1993,11 +2028,24 @@ export class GameEngine {
     return { pose: { ...p, y: p.y - dy } };
   }
 
-  /** The stands that would hold up what's held, at pose p: none for what stands on the bench. */
-  private standsAt(h: Held, p: Pose): Stand[] {
+  /**
+   * The stands that would hold up what's held, at pose p: none for what stands on the bench, and for a hose's nozzle,
+   * where its stand would go if it were set down there (see rest), or where it's wanted if it can't be.
+   */
+  private standsAt(h: Held, p: Pose, rest?: Rest): Stand[] {
     if (h.kind === 'tool') return toolStands(h.t, p);
-    // a hose's nozzle held faces the way along the grid nearest the player's, so its stand is behind it
-    return h.kind === 'hose' ? [nozzleStand(p, toCardinal(this.player.yaw))] : [];
+    if (h.kind !== 'hose') return [];
+    const m = rest?.hose ?? this.nozzleWant(h);
+    return [nozzleStand(p, m.turn, m.reach)];
+  }
+
+  /**
+   * Where a held nozzle's stand is wanted: turned with the player like anything held (in quarter turns, so the nozzle
+   * faces the way along the grid nearest how it's turned from them, with the stand behind it), as far behind as its
+   * clamp's arm is slid.
+   */
+  private nozzleWant(h: Held & { kind: 'hose' }): NozzleMount {
+    return { turn: toCardinal(this.player.yaw + h.relYaw), reach: snapReach(h.reach) };
   }
 
   /** Every stand in the lab, with what it holds up. */
@@ -2005,10 +2053,13 @@ export class GameEngine {
     const out: { s: Stand; of: Pick }[] = [];
     for (const t of this.tools) for (const s of toolStands(t)) out.push({ s, of: { kind: 'tool', t, part: 'body', k: 0 } });
     const held = this.held;
+    const pl = this.placed;
     for (const h of this.hoses) {
-      // one held faces the player (see standsAt)
-      const inHand = held?.kind === 'hose' && held.h === h;
-      out.push({ s: nozzleStand(h.outlet, inHand ? toCardinal(this.player.yaw) : h.turn), of: { kind: 'hose', h } });
+      // one held stands where it would be set down (see standsAt)
+      const s =
+        held?.kind === 'hose' && held.h === h ? this.standsAt(held, this.heldPose(held), pl && 'rest' in pl ? pl.rest : undefined)[0]
+        : nozzleStand(h.outlet, h.turn, h.reach);
+      out.push({ s, of: { kind: 'hose', h } });
     }
     return out;
   }
@@ -2048,7 +2099,7 @@ export class GameEngine {
     if (!h || !pl) return [];
     const ok = 'rest' in pl;
     const p = ok ? pl.rest.pose : this.heldPose(h);
-    const stands = this.standsAt(h, p);
+    const stands = this.standsAt(h, p, ok ? pl.rest : undefined);
     if (stands.length)
       return stands.map((st) => {
         const b = standBase(st, ok ? (counterUnder(standBase(st, 0)) ?? groundAt(st.x, st.z)) : groundAt(st.x, st.z));
@@ -2164,7 +2215,10 @@ export class GameEngine {
       add(['E'], ok ? how : `${how}: not here`, !ok);
       if (h.kind === 'hose') add(['LMB'], ok ? how : `${how}: not here`, !ok);
       if (!this.pencil && this.rightWouldDo()) add(['RMB'], h.kind === 'flask' ? 'hold to pour' : 'hold to let it flow');
-      if (h.kind !== 'flask' && h.kind !== 'hose') add(['Shift', '←→'], 'turn it');
+      if (h.kind === 'hose') {
+        add(['Shift', '←→'], 'swing its stand round');
+        add(['Shift', '↑↓'], 'slide its stand out or in');
+      } else if (h.kind !== 'flask') add(['Shift', '←→'], 'turn it');
       add(['Wheel'], 'hold it nearer or further');
       if (h.kind === 'tool' && h.t.shape.flippable) add(['F'], 'flip it');
       if (h.kind === 'hose') add(['Backspace'], 'roll the hose back up');

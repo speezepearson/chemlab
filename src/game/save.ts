@@ -91,10 +91,10 @@ export interface SavedScale extends SavedDepth {
  */
 export interface SavedHose {
   /**
-   * Its nozzle as fractions of the home area (see HOME_W), and how far out from the back wall and which way it faces
-   * (see Hose.turn), each optional.
+   * Its nozzle as fractions of the home area (see HOME_W), and how far out from the back wall, which way it faces
+   * (see Hose.turn) and how far behind it its stand is (see Hose.reach), each optional.
    */
-  outlet: { x: number; y: number; z?: number; yaw?: number };
+  outlet: { x: number; y: number; z?: number; yaw?: number; reach?: number };
   /** The spout (a tool by its id, and a spout) or faucet it's on; an older save's hose with neither is dropped. */
   on?: { tool?: number; spout?: number; faucet?: number; hose?: number };
   inlet?: { x: number; y: number; z?: number; yaw?: number };

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FLASK_R, SCALE_ANCHOR, SCALE_SLOTS, STAND_BASE, aimValve, onGrid, toolAnchor, flaskBox, flaskLip, flaskMouth, flip, nozzleStand, onScale, scaleSpot, spoutNear, spoutAt, standBase,
-  tankMouth, toolBox, toolStands, valveLocal, valveNear,
+  FLASK_R, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_BASE, aimValve, onGrid, toolAnchor, flaskBox, flaskLip, flaskMouth, flip,
+  nozzleMounts, nozzleStand, onScale, scaleSpot, snapReach, spoutNear, spoutAt, standBase, tankMouth, toolBox, toolStands, valveLocal,
+  valveNear,
 } from './bodies';
 import { CAP } from './config';
 import { Flask } from './flask';
@@ -280,6 +281,40 @@ describe('stands', () => {
     expect(nozzleStand(e, 0).z).toBeLessThan(300);
     expect(nozzleStand(e, Math.PI).z).toBeGreaterThan(300);
     expect(nozzleStand(e, Math.PI).x).toBeCloseTo(10);
+  });
+
+  it("hold a hose's nozzle as far behind it as its arm reaches, in steps, within its range", () => {
+    const e = { x: 10, y: 500, z: 300 };
+    expect(nozzleStand(e, 0).z).toBeCloseTo(300 - NOZZLE_REACH.min);
+    expect(nozzleStand(e, 0, 200).z).toBeCloseTo(100);
+    const { min, max, step } = NOZZLE_REACH;
+    expect(snapReach(0)).toBe(min);
+    expect(snapReach(1e6)).toBe(max);
+    expect(snapReach(min + step * 0.6)).toBe(min + step);
+    expect(snapReach(min + step * 0.4)).toBe(min);
+  });
+
+  it("try a nozzle's stand where it's wanted first, then further along the same way, then round it", () => {
+    const want = { turn: 0, reach: NOZZLE_REACH.min + 2 * NOZZLE_REACH.step };
+    const ms = nozzleMounts(want);
+    expect(ms[0]).toEqual(want);
+    const same = ms.filter((m) => m.turn === 0);
+    expect(ms.slice(0, same.length)).toEqual(same);
+    expect(same.map((m) => m.reach)).toContain(NOZZLE_REACH.min);
+    expect(same.map((m) => m.reach)).toContain(NOZZLE_REACH.max);
+    // the opposite way comes last
+    expect(Math.abs(ms[ms.length - 1].turn)).toBeCloseTo(Math.PI);
+    expect(new Set(ms.map((m) => `${m.turn.toFixed(3)} ${m.reach}`)).size).toBe(ms.length);
+  });
+
+  it("find somewhere for a nozzle's stand clear of the spectrometer when its nozzle is over the cup", () => {
+    const spec = new Tool('spectrometer', 0, at(500, LIFT + 106, 150));
+    const cup = tankMouth(spec, 0);
+    const e = { x: cup.x, y: cup.y + 40, z: cup.z };
+    const clear = (m: { turn: number; reach: number }) => !boxesOverlap(standBase(nozzleStand(e, m.turn, m.reach), LIFT), toolBox(spec));
+    expect(clear({ turn: 0, reach: NOZZLE_REACH.min })).toBe(false);
+    const m = nozzleMounts({ turn: 0, reach: NOZZLE_REACH.min }).find(clear);
+    expect(m?.turn).toBe(0);
   });
 });
 

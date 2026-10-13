@@ -823,7 +823,7 @@ describe('hose', () => {
     expect(sameMount({ tool: t, spout: 2 }, { tool: u, spout: 2 })).toBe(false);
     expect(sameMount({ faucet: 3 }, { faucet: 3 })).toBe(true);
     expect(sameMount({ faucet: 0 }, { tool: t, spout: 0 })).toBe(false);
-    expect(new Hose({ faucet: 3 }, { x: 1, y: 2, z: 3 }).outlet).toEqual({ x: 1, y: 2, z: 3 });
+    expect(new Hose({ faucet: 3 }, { x: 1, y: 2, z: 3 }, 50).outlet).toEqual({ x: 1, y: 2, z: 3 });
   });
 });
 

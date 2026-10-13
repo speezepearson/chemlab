@@ -1213,5 +1213,7 @@ export class Hose {
     readonly on: HoseMount,
     /** Its nozzle's tip, in the room. */
     public outlet: Vec3,
+    /** How far behind the nozzle its stand's rod is (see NOZZLE_REACH in bodies.ts). */
+    public reach: number,
   ) {}
 }
