@@ -74,6 +74,17 @@ export class ReactionNetwork {
   private dU = new Float64Array(0);
   private flux = new Float64Array(0);
   private cons = new Float64Array(NS);
+  /** Reactions are stored by first reactant: those of species s are first[s] to first[s + 1] − 1. */
+  private first = new Int32Array(NS + 1);
+  /** The distinct barriers, and each reaction's as an index into them. */
+  private barList = new Float64Array(0);
+  private barOf = new Int32Array(0);
+  /** Per distinct barrier, its Boltzmann factor exp(−bar / T) in the step `seen` says it was worked out in. */
+  private boltz = new Float64Array(0);
+  private seen = new Int32Array(0);
+  private stamp = 0;
+  /** The reactions a step found able to happen, in order. */
+  private active = new Int32Array(0);
 
   constructor(readonly params: ChemParams) {
     this.rebuild();
@@ -162,6 +173,8 @@ export class ReactionNetwork {
   }
 
   private store(rx: Reaction[]): void {
+    // by first reactant, so a step can visit just those of the species present, still in order
+    rx.sort((a, b) => a.ra - b.ra);
     const nr = rx.length;
     if (nr !== this.count) {
       this.count = nr;
@@ -173,8 +186,16 @@ export class ReactionNetwork {
       this.bar = new Float64Array(nr);
       this.dU = new Float64Array(nr);
       this.flux = new Float64Array(nr);
+      this.barOf = new Int32Array(nr);
+      this.active = new Int32Array(nr);
     }
+    this.first.fill(nr);
+    const bars = new Map<number, number>();
+    for (let i = nr - 1; i >= 0; i--) this.first[rx[i].ra] = i;
+    for (let s = NS - 1; s >= 0; s--) this.first[s] = Math.min(this.first[s], this.first[s + 1]);
     rx.forEach((r, i) => {
+      if (!bars.has(r.bar)) bars.set(r.bar, bars.size);
+      this.barOf[i] = bars.get(r.bar)!;
       this.ra[i] = r.ra;
       this.rb[i] = r.rb;
       this.p1[i] = r.p1;
@@ -183,6 +204,10 @@ export class ReactionNetwork {
       this.bar[i] = r.bar;
       this.dU[i] = r.dU;
     });
+    this.boltz = new Float64Array(bars.size);
+    this.seen = new Int32Array(bars.size);
+    this.stamp = 0;
+    this.barList = Float64Array.from(bars.keys());
   }
 
   /**
@@ -277,32 +302,42 @@ export class ReactionNetwork {
     const N = f.N;
     if (N <= 0) return;
     const { n } = f;
-    const { ra, rb, p1, p2, k, bar, dU, flux, cons, count } = this;
+    const { ra, rb, p1, p2, k, barOf, barList, boltz, seen, dU, flux, cons, first, active } = this;
     const invT = 1 / Math.max(temperature(f), 0.05);
+    const stamp = ++this.stamp;
 
-    for (let i = 0; i < count; i++) {
-      const a = n[ra[i]];
-      if (a <= 0) { flux[i] = 0; continue; }
-      const b = rb[i];
-      let ev: number;
-      if (b >= 0) {
-        const nb = n[b];
-        if (nb <= 0) { flux[i] = 0; continue; }
-        ev = (a * nb) / N;
-      } else ev = a;
-      flux[i] = ev * k[i] * Math.exp(-bar[i] * invT) * dt;
+    // only reactions whose reactants are all present can happen; each barrier's exp is worked out once
+    let na = 0;
+    for (let s = 0; s < NS; s++) {
+      const a = n[s];
+      if (a <= 0) continue;
+      for (let i = first[s]; i < first[s + 1]; i++) {
+        if (!k[i]) continue;
+        const b = rb[i];
+        let ev = a;
+        if (b >= 0) {
+          const nb = n[b];
+          if (nb <= 0) continue;
+          ev = (a * nb) / N;
+        }
+        const j = barOf[i];
+        if (seen[j] !== stamp) {
+          seen[j] = stamp;
+          boltz[j] = Math.exp(-barList[j] * invT);
+        }
+        flux[i] = ev * k[i] * boltz[j] * dt;
+        active[na++] = i;
+      }
     }
 
     cons.fill(0);
-    for (let i = 0; i < count; i++) {
-      const v = flux[i];
-      if (!v) continue;
-      cons[ra[i]] += v;
-      if (rb[i] >= 0) cons[rb[i]] += v;
+    for (let m = 0; m < na; m++) {
+      const i = active[m];
+      cons[ra[i]] += flux[i];
+      if (rb[i] >= 0) cons[rb[i]] += flux[i];
     }
-    for (let i = 0; i < count; i++) {
-      const v = flux[i];
-      if (!v) continue;
+    for (let m = 0; m < na; m++) {
+      const i = active[m];
       let sc = 1;
       const ca = cons[ra[i]];
       if (ca > n[ra[i]]) sc = Math.min(sc, n[ra[i]] / ca);
@@ -310,12 +345,12 @@ export class ReactionNetwork {
         const cb = cons[rb[i]];
         if (cb > n[rb[i]]) sc = Math.min(sc, n[rb[i]] / cb);
       }
-      flux[i] = v * sc;
+      flux[i] *= sc;
     }
 
     let heat = 0;
-    for (let i = 0; i < count; i++) {
-      if (!flux[i]) continue;
+    for (let m = 0; m < na; m++) {
+      const i = active[m];
       // whole events, never more than the reactants left after the reactions before this one
       const a = ra[i];
       const b = rb[i];
