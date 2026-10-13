@@ -3,11 +3,11 @@ import { temperature } from '../chem/reactions';
 import { NS, TARGET } from '../chem/species';
 import { CAP, N_FLASKS } from './config';
 import { Flask, roomFor } from './flask';
-import { REFERENCE_CAP, SHAPES, TANK_CAP, Tool } from './tools';
+import { REFERENCE_START, SHAPES, TANK_CAP, Tool } from './tools';
 import { onGrid, toolAnchor, toolBox } from './bodies';
 import { boxesOverlap } from './physics';
 import { fromFrac } from './space';
-import { DEFAULT_PRESET, PRESETS, applyFill, fillAtoms, type FlaskFill } from './presets';
+import { DEFAULT_PRESET, PRESETS, REFERENCE_FILL, applyFill, fillAtoms, type FlaskFill } from './presets';
 
 /** How much room a fill takes, by volume. */
 const fillVolume = (fill: FlaskFill) => fill.contents.reduce((t, c) => t + c.molecules * roomFor(c.species), 0);
@@ -58,13 +58,12 @@ describe('presets', () => {
     });
   }
 
-  it('starts the default game with the cryostabilizer reference holding the target, and no supply flask', () => {
-    const spec = DEFAULT_PRESET.tools!.find((t) => t.kind === 'reference')!;
-    const ref = new Tool('reference', 0);
-    applyFill(ref.tanks[0], spec.tanks![0]);
-    // full: a hundred flasks of triangles
-    expect(ref.tanks[0].n[TARGET]).toBe(REFERENCE_CAP);
-    expect(ref.tanks[0].N).toBe(3 * REFERENCE_CAP);
+  it("fills the cryostabilizer reference with what's left on board, and starts the default game with no supply flask", () => {
+    const ref = new Tool('receptacle', 0).tanks[2];
+    applyFill(ref, REFERENCE_FILL);
+    // a hundred flasks of triangles
+    expect(ref.n[TARGET]).toBe(REFERENCE_START);
+    expect(ref.N).toBe(3 * REFERENCE_START);
     expect(DEFAULT_PRESET.flasks.filter(Boolean)).toHaveLength(0);
   });
 

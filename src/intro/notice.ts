@@ -15,7 +15,7 @@ const num = (x: number, digits = 0) => x.toLocaleString('en-US', { minimumFracti
 
 /** The litres needed, present, and so still to be made, right-aligned together. */
 function litres(): [needed: string, present: string, short: string] {
-  const ls = [GOAL_L, VOYAGE.presentL, GOAL_L - VOYAGE.presentL].map((l) => `${num(l, 3)} L`);
+  const ls = [GOAL_L, VOYAGE.presentL, GOAL_L - VOYAGE.presentL].map((l) => `${num(l, 2)} L`);
   const w = Math.max(...ls.map((l) => l.length)) + 2;
   const [a, b, c] = ls.map((l) => l.padStart(w));
   return [a, b, c];
