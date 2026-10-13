@@ -1422,13 +1422,17 @@ export class GameEngine {
 
   /**
    * Take hold of a hose's nozzle, where it is: it's small, and the hose trails behind it, so it isn't brought near. Its
-   * stand stays the way it was from it, and as far, until turned or slid. A hose `fresh` out of its spout has nowhere to
-   * be put back to (see putBack), so Q rolls it back up.
+   * stand stays the way it was from it, and as far, until turned or slid. Q puts it back `from` where it was, by default
+   * where it is now; a hose fresh out of its spout has nowhere to be put back to (null), so Q rolls it back up.
    */
-  private holdHose(hose: Hose, fresh = false): void {
+  private holdHose(
+    hose: Hose,
+    from: Rest | null = { pose: { ...hose.outlet, yaw: 0 }, hose: { turn: hose.turn, reach: hose.reach } },
+  ): void {
     this.mark();
-    const from = fresh ? undefined : { pose: { ...hose.outlet, yaw: 0 }, hose: { turn: hose.turn, reach: hose.reach } };
-    const h: Held = { kind: 'hose', h: hose, reach: hose.reach, relYaw: wrapAngle(hose.turn - this.player.yaw), dist: 0, from };
+    const h: Held = {
+      kind: 'hose', h: hose, reach: hose.reach, relYaw: wrapAngle(hose.turn - this.player.yaw), dist: 0, from: from ?? undefined,
+    };
     this.holdInPlace(h);
     this.held = h;
   }
@@ -1472,18 +1476,20 @@ export class GameEngine {
   }
 
   /**
-   * Pull out the hose of a spout or faucet, and hold its nozzle; or, if it's already out, take hold of its nozzle,
-   * wherever it is.
+   * Pull out the hose of a spout or faucet, and hold its nozzle where the spout is; or, if it's already out, bring its
+   * nozzle back there from wherever it is (out of sight, perhaps), and hold it there just the same, though Q puts it
+   * back where it was.
    */
   private pullHose(m: HoseMount): void {
     this.mark();
     const old = this.hoses.find((h) => sameMount(h.on, m));
-    if (old) return this.holdHose(old);
-    const hose = new Hose(m, this.mountAt(m), NOZZLE_REACH.min);
+    const hose = old ?? new Hose(m, this.mountAt(m), NOZZLE_REACH.min);
+    const from: Rest | null = old ? { pose: { ...old.outlet, yaw: 0 }, hose: { turn: old.turn, reach: old.reach } } : null;
+    hose.outlet = this.mountAt(m);
     // its stand starts out behind it, as the player faces
     hose.turn = toCardinal(this.player.yaw);
-    this.hoses.push(hose);
-    this.holdHose(hose, true);
+    if (!old) this.hoses.push(hose);
+    this.holdHose(hose, from);
   }
 
   /** Where the spout or faucet a hose runs from is. */
