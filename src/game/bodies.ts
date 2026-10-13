@@ -3,7 +3,7 @@ import { FLASK_H } from './flaskShape';
 import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { CELL, groundAt, toCardinal, toCell, toWorld, type Pose, type Vec3 } from './space';
-import { HELIX, SHAPES, TANK_H, tankDepth, tankX, type Hose, type Mouth, type Tool, type ToolKind } from './tools';
+import { HELIX, SHAPES, STATION, TANK_H, tankDepth, tankX, type Hose, type Mouth, type Tool, type ToolKind } from './tools';
 
 /**
  * Where the parts of everything in the lab are, in the room. Tools, flasks and scales are drawn in their own
@@ -17,10 +17,13 @@ const CABINET_DEPTH: Partial<Record<ToolKind, number>> = { spectrometer: 84, met
 
 /**
  * How deep each tool is front to back, all told, and how deep its tanks are inside: as deep as they need to be to
- * hold what they hold (see tankDepth), and the tool a little deeper, or as deep as its cabinet or its tank's cup.
+ * hold what they hold (see tankDepth), and the tool a little deeper, or as deep as its cabinet or its tank's cup. The
+ * cryostabilizer station's columns are inside the wall, whatever they hold; it reaches from the wall as far out again
+ * in front of its funnel and spouts.
  */
 export const TOOL_DEPTH = Object.fromEntries(
   (Object.keys(SHAPES) as ToolKind[]).map((kind) => {
+    if (SHAPES[kind].wall) return [kind, { tank: STATION.plate - 3, body: 2 * STATION.out }];
     const tank = tankDepth(kind);
     const cup = SHAPES[kind].cup;
     return [kind, { tank, body: Math.max(CABINET_DEPTH[kind] ?? 0, tank + 4, cup ? 2 * cup.w + 2 : 0) }];
@@ -59,7 +62,7 @@ export function spoutAt(t: Tool, j: number): Vec3 {
 /**
  * How far in front of the tool's middle its valves sit: on its front face, or for a round tank, on the pipe under it.
  */
-export const valveZ = (t: Tool) => (t.shape.round ? 8 : TOOL_DEPTH[t.kind].body / 2 + 3);
+export const valveZ = (t: Tool) => (t.shape.wall ? 7 : t.shape.round ? 8 : TOOL_DEPTH[t.kind].body / 2 + 3);
 
 /** A valve's center, in the tool's flat frame as it stands (so mirrored if it's flipped): as its shape places it, or under tank k. */
 export function valveLocal(t: Tool, k: number): { x: number; y: number } {
@@ -73,9 +76,17 @@ export function tankRect(t: Tool, k: number): { x0: number; x1: number; y0: numb
   return { x0: tk.x0, x1: tk.x1, y0: 0, y1: t.shape.tankH ?? TANK_H };
 }
 
-/** Where fluid goes into a tank, in the tool's flat frame: its open top, or the mouth of the little funnel on top if it has one. */
+/**
+ * Where fluid goes into a tank, in the tool's flat frame: its open top, or the mouth of the little funnel on top if it
+ * has one, or the cryostabilizer station's funnel in front of the column (see STATION).
+ */
 export function openingOf(t: Tool, k: number): { x0: number; x1: number; y: number; hz: number } {
   const r = tankRect(t, k);
+  if (t.shape.wall) {
+    const { w, y } = STATION.funnel;
+    const cx = tankX(t.shape.tanks[k]);
+    return { x0: cx - w, x1: cx + w, y, hz: w };
+  }
   const cup = t.shape.cup;
   if (!cup) return { x0: r.x0, x1: r.x1, y: r.y0, hz: TOOL_DEPTH[t.kind].tank / 2 };
   const cx = (r.x0 + r.x1) / 2;
@@ -92,16 +103,40 @@ export function tankMouth(t: Tool, k: number): Mouth {
 }
 
 /** The tools whose bodies are a cabinet as wide as they are, under their tanks, rather than pipes and valves. */
-const CABINETS: readonly ToolKind[] = ['spectrometer', 'meter', 'receptacle'];
+const CABINETS: readonly ToolKind[] = ['spectrometer', 'meter'];
+
+/**
+ * Where, in a tool's flat frame, the player's note about tank k is written (its middle's height): above the tank's
+ * opening and the tool's label, or the tank's own (the most lines of any of the tool's tanks', so they line up); on
+ * the cryostabilizer station, just above its block.
+ */
+export function tankNoteY(t: Tool, k: number): number {
+  const lines = Math.max(t.shape.label?.length ?? 0, ...t.shape.tanks.map((tk) => tk.label?.length ?? 0));
+  if (t.shape.wall) return STATION.block.y0 - 14;
+  return openingOf(t, k).y - (lines ? 11 * lines + 10 : 9);
+}
 
 /**
  * A tool's solid parts, in its flat frame (x right, y down from its top center) as it would stand unflipped, each
- * reaching `hz` either side of its middle front to back: its tanks (round, for a round tank), and under them its
- * cabinet, or else the pipes, valves and spouts there, across only as far as they reach.
+ * reaching `hz` either side of `z` (its middle, if left out) front to back: its tanks (round, for a round tank), and
+ * under them its cabinet, or else the pipes, valves and spouts there, across only as far as they reach. The
+ * cryostabilizer station's are its funnel, the plate in the wall with its button, and its spouts' pipes out from it.
  */
-export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: number; hz: number; round?: boolean }[] {
+export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean }[] {
   const sh = t.shape;
   const b = sh.box;
+  if (sh.wall) {
+    const { funnel: f, out, plate, button: bt } = STATION;
+    const H = sh.tankH ?? TANK_H;
+    // the plate is flush with the wall, its rubber seam a little proud of it
+    const face = -out;
+    return [
+      { x0: -f.w - 2, x1: f.w + 2, y0: f.y - 2, y1: H + 26, hz: f.w + 1 },
+      { x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, hz: plate / 2 + 1.5, z: face - plate / 2 + 1.5 },
+      { x0: bt.x - bt.r - 3, x1: bt.x + bt.r + 3, y0: bt.y - bt.r - 3, y1: bt.y + bt.r + 3, hz: 3, z: face + 3 },
+      ...sh.spouts.map((x) => ({ x0: x - 8, x1: x + 8, y0: H + 10, y1: sh.spoutY, hz: (out + 8) / 2, z: (8 - out) / 2 })),
+    ];
+  }
   const D = TOOL_DEPTH[t.kind];
   const bottom = (sh.tankH ?? TANK_H) + (sh.sump?.h ?? 0);
   const x0s = sh.tanks.map((k) => (sh.cup ? tankX(k) - sh.cup.w : k.x0));
@@ -128,7 +163,7 @@ export function toolBox(t: Tool): Box {
   const b = t.shape.box;
   const c = { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 };
   const parts: Part[] = toolParts(t).map((p) => ({
-    x: lx(t, (p.x0 + p.x1) / 2 - c.x), y: -((p.y0 + p.y1) / 2 - c.y), z: 0,
+    x: lx(t, (p.x0 + p.x1) / 2 - c.x), y: -((p.y0 + p.y1) / 2 - c.y), z: p.z ?? 0,
     hx: (p.x1 - p.x0) / 2, hy: (p.y1 - p.y0) / 2, hz: p.hz, round: p.round,
   }));
   const hz = Math.max(TOOL_DEPTH[t.kind].body / 2, ...parts.map((p) => p.hz));
@@ -308,9 +343,9 @@ const rodBack = (body: number) => Math.max(body / 2, FLASK_R) + STAND_CLEAR + ST
 /** Whether a tool stands straight on a counter, rather than being held up on a stand. */
 export const onBench = (t: Tool) => !!t.shape.bench;
 
-/** The stands holding up a tool, unless it stands on the bench: clamped near its top, behind it. */
+/** The stands holding up a tool, unless it stands on the bench or is built into a wall: clamped near its top, behind it. */
 export function toolStands(t: Tool, pose = t.pose): Stand[] {
-  if (onBench(t)) return [];
+  if (onBench(t) || t.shape.wall) return [];
   const at = (x: number, y: number, z: number) => toWorld(pose, { x: lx(t, x), y: -y, z });
   const b = t.shape.box;
   const body = TOOL_DEPTH[t.kind].body;

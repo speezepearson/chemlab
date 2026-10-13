@@ -40,6 +40,13 @@ export const toCell = (v: number) => (Math.floor(v / CELL) + 0.5) * CELL;
 /** The nearest of the four ways along the grid: a yaw of a whole number of quarter turns. */
 export const toCardinal = (yaw: number) => wrapAngle(Math.round(yaw / (Math.PI / 2)) * (Math.PI / 2));
 
+/**
+ * The panels the walls are lined with (see the walls' texture in surfaces.ts): this wide, and a third of the room high,
+ * their seams at whole multiples of each along every wall from its left end as it faces into the room, and up from
+ * the floor.
+ */
+export const WALL_PANEL = { w: 220, h: ROOM.y1 / 3 };
+
 /** Height of every counter: the sink counters along the walls, and the islands. */
 export const LIFT = 420;
 /** How far the back wall's counter comes out from it: two grid cells. */

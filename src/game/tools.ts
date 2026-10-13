@@ -1,11 +1,11 @@
 import { GROUP_PRIMARY, type Atom } from '../chem/atoms';
 import { THERMO } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
-import { NS, SPECIES, TARGET } from '../chem/species';
+import { NS, SPECIES } from '../chem/species';
 import { CAP } from './config';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
-import { CELL, ORIGIN, type Pose, type Vec3 } from './space';
+import { CELL, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
 
 /** Capacity of each tank on a tool, in atoms. */
 export const TANK_CAP = 4 * CAP;
@@ -203,8 +203,6 @@ export function sorterShares(): number[][] {
   return [0, 1, 2].map((own) => [0, 1, 2].map((j) => (j === own ? 1 / 3 + (2 / 3) * k : (1 - k) / 3)));
 }
 
-/** How much the cryostabilizer reference holds, by volume: a hundred flasks. */
-export const REFERENCE_CAP = 100 * CAP;
 /** How much the big tank holds, by volume: a hundred flasks. */
 export const BIG_TANK_CAP = 100 * CAP;
 /** The big tank's inside: an upright cylinder this wide, over a round sump this wide and deep. */
@@ -215,12 +213,6 @@ export const BIG_TANK_H =
   (BIG_TANK_CAP * SPACE_PER_ATOM -
     spaceOf([{ h: BIG_TANK_SUMP.h, w0: SUMP_TIP, d0: SUMP_TIP, w1: BIG_TANK_SUMP.w, d1: BIG_TANK_SUMP.w, round: true }])) /
   ((Math.PI / 4) * BIG_TANK_W ** 2);
-/** The cryostabilizer reference's inside width and height, in local units: big enough to hold a hundred flasks. */
-const REF_W = 170;
-const REF_H = 220;
-/** The receptacle's vessel's inside width and height, in local units: big enough to hold 210 flasks. */
-const REC_W = 240;
-const REC_H = 240;
 
 /** How much a pipette holds, by volume: a tenth of a flask. */
 export const PIPETTE_CAP = CAP / 10;
@@ -259,15 +251,81 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
 }
 
 /**
- * How much the receptacle holds, by volume: a little over twice the cryostabilizer reference, so the reference
- * alone can't fill it, and one good load of it is enough to win (see GOAL_VOLUME).
+ * The cryostabilizer station, built into the right wall (see STATION_POSE in presets.ts): three tall columns in the
+ * wall, the receptacle, the tester and the reference, each seen through a narrow glass pane, with a glass funnel low
+ * in front of the receptacle, whatever lands in which is pumped straight up into it; a waste nozzle under the tester
+ * and a faucet under the reference; and a panel of lamps, a button and a screen between the tester and the
+ * reference. In its own flat frame, x runs along the wall and y down from the columns' tops; z = 0 is over the middle
+ * of the counter's row of cells nearest the wall, where the funnel and spouts are, and the wall is `out` behind it.
+ * - paneW, paneH: each column's pane, across and tall; the column behind it is as tall.
+ * - out: how far the funnel and spouts stand out from the wall.
+ * - top: how high the columns' tops are, in the room.
+ * - plate: how deep the plate the panes are set in goes into the wall, its face flush with the wall.
+ * - block: the plate's edges, in the flat frame: a swappable block of the wall, two of the wall's panels across and one
+ *   high (see WALL_PANEL), lined up with them, with a rubber seam round it.
+ * - funnel: the funnel's mouth, `y` down from the columns' tops (about level with the receptacle's bottom, within
+ *   easy reach), reaching w either side of its middle; it narrows to its stem h below that.
+ * - labelY: the middle of the labels printed on the plate above the columns.
+ * - autoflush: how full the receptacle is, by volume, when it flushes itself into the tester, as if its button were
+ *   pressed; a red line on the wall marks it.
+ * - gauge: a stack of LCD segments just right of the reference, as tall as the panes, showing how far the reference is
+ *   toward the goal (see gaugeSegments): x0..x1 across, and how many segments.
+ * - button: the big round flush button, between the receptacle and the tester: its middle and radius.
+ * - lamps: the column of lamps that blink while the tester thinks, just right of the tester, top down, with the
+ *   verdict lamp under them.
+ * - screen: the readout of the litres in the reference, under its label.
  */
-export const RECEPTACLE_CAP = 210 * CAP;
+const STATION_TOP = LIFT + 400;
+export const STATION = {
+  paneW: 24,
+  paneH: 260,
+  top: STATION_TOP,
+  out: CELL / 2,
+  plate: 12,
+  block: {
+    x0: -CELL / 2,
+    x1: -CELL / 2 + 2 * WALL_PANEL.w,
+    y0: STATION_TOP - 2 * WALL_PANEL.h,
+    y1: STATION_TOP - WALL_PANEL.h,
+  },
+  funnel: { y: 180, w: 30, h: 30 },
+  labelY: -31,
+  autoflush: 0.9,
+  gauge: { x0: 3 * CELL + 20, x1: 3 * CELL + 30, segments: 26 },
+  button: { x: CELL / 2, y: 120, r: 15 },
+  lamps: { x: CELL + 30, y0: 130, dy: 15, r: 3.6 },
+  verdict: { x: CELL + 30, y: 230, r: 5.5 },
+  screen: { x0: 3 * CELL - 50, x1: 3 * CELL + 50, y0: -19, y1: -4 },
+};
+
 /**
- * A receptacle's cycle, in sim seconds: it thinks, beeping and blinking, then flushes what it took down its hose, or
- * pours out what it refused through its reject valve, evenly over the time given.
+ * What each of the station's gauge's segments shows, bottom up, with the reference holding `held` of `cap` and the
+ * goal at `goal` (all in molecules): lit green if it's wholly below what's held, flashing red if any of it is below
+ * the goal, and dark otherwise.
  */
-export const RECEPTACLE_TIMES = { think: 1.6, flush: 1.5, reject: 2.5 };
+export function gaugeSegments(held: number, goal: number, cap: number, n = STATION.gauge.segments): ('held' | 'wanted' | 'off')[] {
+  return Array.from({ length: n }, (_, i) =>
+    ((i + 1) / n) * cap <= held ? 'held' : (i / n) * cap < goal ? 'wanted' : 'off',
+  );
+}
+/** How much the receptacle holds, by volume, and so the tester it flushes into: a hundred flasks. */
+export const RECEPTACLE_CAP = 100 * CAP;
+/**
+ * How much the cryostabilizer reference holds, by volume: about three times the goal (see GOAL_TARGET), so the goal is
+ * a third of the way up its gauge, and there's room for it even if everything the tester passes into it is only just
+ * pure enough, and the rest of it single atoms.
+ */
+export const REFERENCE_CAP = 540 * CAP;
+/** The target the reference starts with, in molecules: the hundred flasks left on board (see VOYAGE). */
+export const REFERENCE_START = 100 * CAP;
+/** How fast the reference's faucet lets it out, fully open, in atoms per sim second: a fifth of a flask a second. */
+export const REFERENCE_FLOW = 0.2 * MAX_FLOW;
+/**
+ * The station's cycle, in sim seconds: the receptacle flushes into the tester, the tester thinks, beeping and
+ * blinking, then passes what it holds into the reference, or rejects it out its waste nozzle, each evenly over the
+ * time given.
+ */
+export const RECEPTACLE_TIMES = { flush: 1.5, think: 1.6, pass: 1.5, reject: 2.5 };
 /** How many lamps blink on a receptacle while it thinks. */
 export const RECEPTACLE_LAMPS = 6;
 /** The pitches a receptacle beeps at while it thinks, in Hz: a pentatonic scale, high up. */
@@ -392,11 +450,14 @@ export function meterText(rate: number): string {
 export const SEXTANT_ATOMS: readonly Atom[] = ['G', 'C', 'B', 'M', 'R', 'Y'];
 
 export type ToolKind =
-  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'heater' | 'spectrometer' | 'reference'
-  | 'meter' | 'tank' | 'receptacle';
+  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'heater' | 'spectrometer' | 'meter'
+  | 'tank' | 'receptacle';
 
-/** Tools there's only ever one of: not in the palette, and never put away. */
-export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectrometer', 'reference', 'meter', 'receptacle'];
+/**
+ * Tools there's only ever one of: not in the palette, and never put away. The receptacle is the whole cryostabilizer
+ * station (see STATION), reference and tester included.
+ */
+export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectrometer', 'meter', 'receptacle'];
 
 /**
  * A tool's geometry in local units: multiply by the stage scale and offset by
@@ -405,7 +466,11 @@ export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectrometer', 'reference', '
  * set), and drains through its own valve, straight below its center.
  */
 export interface ToolShape {
-  tanks: { name: string; x0: number; x1: number }[];
+  /**
+   * Each tank: its name, its walls, and if they differ from the shape's, its capacity, whether it's sealed on top, and
+   * the text shown above it.
+   */
+  tanks: { name: string; x0: number; x1: number; cap?: number; sealed?: boolean; label?: string[] }[];
   /** Depth of the tanks, if not TANK_H. */
   tankH?: number;
   /** Capacity of each tank, in atoms, if not TANK_CAP. */
@@ -441,6 +506,8 @@ export interface ToolShape {
   bench?: boolean;
   /** Whether it stays where it is: it can't be picked up and carried. */
   fixed?: boolean;
+  /** Whether it's built into a wall, with no stand: only the cryostabilizer station (see STATION). */
+  wall?: boolean;
   /** Whether the tanks are sealed on top, so nothing can be poured or fall into them. */
   sealed?: boolean;
   /** Spout flow with a valve fully open and the tank full, in atoms per sim second, if not MAX_FLOW. */
@@ -541,20 +608,6 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: 92,
     box: { x0: -228, x1: 216, y0: -6, y1: 94 },
   },
-  reference: {
-    // a hundred flasks' worth, sealed, draining a trickle through its valve
-    tanks: [{ name: 'reference', x0: -REF_W / 2, x1: REF_W / 2 }],
-    tankH: REF_H,
-    tankCap: REFERENCE_CAP,
-    sump: { w: 12, h: 7 },
-    sealed: true,
-    maxFlow: 0.02 * MAX_FLOW,
-    label: ['cryostabilizer', 'reference'],
-    spouts: [0],
-    valveY: REF_H + 14,
-    spoutY: REF_H + 30,
-    box: { x0: -REF_W / 2 - 4, x1: REF_W / 2 + 4, y0: -26, y1: REF_H + 32 },
-  },
   tank: {
     // a hundred flasks' worth, drawn as big as a hundred flasks, with ten faint graduations across it
     tanks: [{ name: 'tank', x0: -BIG_TANK_W / 2, x1: BIG_TANK_W / 2 }],
@@ -568,18 +621,26 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -BIG_TANK_W / 2 - 4, x1: BIG_TANK_W / 2 + 4, y0: -6, y1: BIG_TANK_H + 46 },
   },
   receptacle: {
-    // a big vessel on a cabinet of lamps with a button (see RECEPTACLE_BODY), a hose running from the cabinet's
-    // foot straight down off the bench, and a reject valve beside it over the one spout
-    tanks: [{ name: 'receptacle', x0: -REC_W / 2, x1: REC_W / 2 }],
-    tankH: REC_H,
-    tankCap: RECEPTACLE_CAP,
-    noValve: true,
+    // the cryostabilizer station: columns in the wall, behind panes (see STATION), a funnel into the receptacle, a
+    // waste nozzle under the tester and a faucet under the reference, a grid cell apart (see CELL)
+    tanks: [
+      { name: 'buffer', x0: -STATION.paneW / 2, x1: STATION.paneW / 2, cap: RECEPTACLE_CAP, label: ['buffer'] },
+      { name: 'tester', x0: CELL - STATION.paneW / 2, x1: CELL + STATION.paneW / 2, cap: RECEPTACLE_CAP, sealed: true, label: ['tester'] },
+      {
+        name: 'ship reservoir', x0: 3 * CELL - STATION.paneW / 2, x1: 3 * CELL + STATION.paneW / 2, cap: REFERENCE_CAP, sealed: true,
+        label: ['ship reservoir'],
+      },
+    ],
+    tankH: STATION.paneH,
+    // the reference's faucet's; the tester's waste valve has no handle, since only the station works it
+    valves: [{ x: 3 * CELL, y: STATION.paneH + 24 }],
+    maxFlow: REFERENCE_FLOW,
     fixed: true,
-    label: ['cryostabilizer', 'receptacle'],
-    spouts: [CELL],
-    valveY: REC_H + 78,
-    spoutY: REC_H + 92,
-    box: { x0: -REC_W / 2 - 4, x1: REC_W / 2 + 4, y0: -26, y1: REC_H + 94 },
+    wall: true,
+    spouts: [CELL, 3 * CELL],
+    valveY: STATION.paneH + 24,
+    spoutY: STATION.paneH + 44,
+    box: { x0: STATION.block.x0 - 6, x1: STATION.block.x1 + 6, y0: STATION.block.y0 - 6, y1: STATION.block.y1 + 6 },
   },
   meter: {
     // a funnel draining straight through a cabinet with a display (see METER_BODY) and out a spout
@@ -622,19 +683,6 @@ export const SPECTROMETER = {
   button: { x0: 28, x1: 62, y0: 84, y1: 98 },
 };
 
-/**
- * The receptacle's cabinet, in local units: a row of lamps that blink while it thinks, a verdict lamp, its button,
- * and a screen showing how much it's taken of what's needed; and where its hose leaves the cabinet's foot.
- */
-export const RECEPTACLE_BODY = {
-  x0: -REC_W / 2, x1: REC_W / 2, y0: REC_H + 4, y1: REC_H + 66,
-  screen: { x0: -48, x1: 48, y0: REC_H + 45, y1: REC_H + 61 },
-  lamps: { x0: -44, dx: 11, y: REC_H + 16, r: 3.2 },
-  verdict: { x: 34, y: REC_H + 16, r: 5 },
-  button: { x0: -44, x1: 4, y0: REC_H + 26, y1: REC_H + 39 },
-  hoseX: -16,
-};
-
 /** The meter's cabinet, and its display, in local units. */
 export const METER_BODY = { x0: -31, x1: 31, y0: 36, y1: 64, display: { x0: -26, x1: 26, y0: 41, y1: 59 } };
 
@@ -659,9 +707,8 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   heater: 'Resistive heater',
   meter: 'Flow meter',
   tank: 'Tank',
-  receptacle: 'Receptacle',
+  receptacle: 'Cryostabilizer',
   spectrometer: 'Mass spectrometer',
-  reference: 'Cryostabilizer reference',
 };
 
 /**
@@ -732,13 +779,13 @@ export function separatorShares(): number[][] {
  *   it to the other end in HEATER.transit and out a spout there, heating it all the way (see heatBy) with a
  *   wire whose temperature its dial sets (see wireTemperature). Three taps along the tube, each a valve over
  *   a spout, let fluid out sooner, less heated.
- * - A **cryostabilizer reference** is a sealed hundred flasks' worth of the target with a valve that lets out at most
- *   0.02 flask/s.
  * - A **tank** is a dispenser holding a hundred flasks, drawn as big as a hundred flasks, with ten faint
  *   graduations across it.
- * - A **receptacle** is where cryostabilizer goes: a vessel of RECEPTACLE_CAP, which stays put, with a button. Pressing it (see
- *   press) lids the vessel and thinks for a moment, beeping; then, if what's inside is more than GOAL_PURITY target,
- *   it flushes it down its hose, counting toward the goal, and otherwise pours it out its one spout.
+ * - A **receptacle** is the cryostabilizer station, built into the wall (see STATION): a receptacle, a tester and the
+ *   cryostabilizer reference. Pressing its button, or filling the receptacle to STATION.autoflush, flushes the
+ *   receptacle into the tester (see press), which thinks for a moment, beeping; then, if what it holds is more than
+ *   GOAL_PURITY target, it passes it into the reference, and otherwise rejects it out its waste nozzle, the first
+ *   spout. The reference lets out a trickle through its faucet, the second spout, as far as its one valve is open.
  * - A **flow meter** has a funnel like the splitter's, with no valve, draining straight through to one spout, and
  *   shows what flows out, averaged over the last METER.window (see rate and meterText).
  * - A **mass spectrometer** has a small sample cup and no spouts. Running it (see scan) reads the sample's
@@ -777,14 +824,12 @@ export class Tool {
    * has one: on a tool with one tank, its tank's label (Vessel.label) does the job.
    */
   note = '';
-  /** A receptacle's cycle, from pressing its button until it opens again (see press); null while it's open. */
-  cycle: { phase: 'think' | 'flush' | 'reject'; age: number } | null = null;
+  /** A receptacle's cycle, from pressing its button until its tester is empty again (see press); null between. */
+  cycle: { phase: 'flush' | 'think' | 'pass' | 'reject'; age: number } | null = null;
   /** The beeps of a receptacle's thinking (see beepPattern), for its lamps and its sound. */
   beeps: Beep[] = [];
   /** A receptacle's last verdict, shown on its lamp until it's pressed again; null before it's first pressed. */
   verdict: 'pass' | 'fail' | null = null;
-  /** The target a receptacle has flushed down its hose, by volume, not yet counted toward the goal (see the engine). */
-  flushed = 0;
   /**
    * Whether it's flipped left to right, if its shape is flippable: everything about it is mirrored (its local x
    * negated) except its valves' levers and any writing, which read the same either way.
@@ -799,7 +844,7 @@ export class Tool {
     public pose: Pose = { ...ORIGIN },
     valves: readonly number[] = [],
   ) {
-    this.tanks = SHAPES[kind].tanks.map(() => new Vessel(SHAPES[kind].tankCap ?? TANK_CAP));
+    this.tanks = SHAPES[kind].tanks.map((tk) => new Vessel(tk.cap ?? SHAPES[kind].tankCap ?? TANK_CAP));
     this.tube = Array.from({ length: kind === 'heater' ? HEATER_CELLS : 0 }, () => new Vessel(Infinity));
     const nValves = SHAPES[kind].valves?.length ?? this.tanks.length;
     this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' ? 0.5 : 0));
@@ -906,56 +951,72 @@ export class Tool {
     return this.scanAge < SCAN_LIGHTS[SCAN_LIGHTS.length - 1];
   }
 
-  /**
-   * Whether the tanks are lidded, so nothing can be poured or fall in: always if sealed, a spectrometer's while it
-   * runs, and a receptacle's through its cycle.
-   */
+  /** Whether the tanks are lidded, so nothing can be poured or fall in: always if sealed, and a spectrometer's while it runs. */
   get lidded(): boolean {
-    return !!this.shape.sealed || (this.kind === 'spectrometer' && this.scanning) || !!this.cycle;
+    return !!this.shape.sealed || (this.kind === 'spectrometer' && this.scanning);
+  }
+
+  /** Whether tank k is open on top, to pour into: not if the tool's lidded, or the tank's sealed. */
+  isOpen(k: number): boolean {
+    return !this.lidded && !this.shape.tanks[k].sealed;
   }
 
   /**
-   * Press a receptacle's button: lid it and start it thinking (see receive), with a new pattern of beeps. Does
-   * nothing, returning false, while a cycle is under way.
+   * Press a receptacle's button: start it flushing into its tester (see receive), with a new pattern of beeps for
+   * the tester's thinking. Does nothing, returning false, while a cycle is under way.
    */
   press(): boolean {
     if (this.kind !== 'receptacle' || this.cycle) return false;
-    this.cycle = { phase: 'think', age: 0 };
+    this.cycle = { phase: 'flush', age: 0 };
     this.beeps = beepPattern();
     this.verdict = null;
     return true;
   }
 
   /**
-   * A receptacle's step. Open, it just holds what's poured in. Thinking, it waits out RECEPTACLE_TIMES.think, then
-   * judges what it holds: more than GOAL_PURITY target, and it flushes it down its hose (counting the target in
-   * flushed), else it pours it out its spout, each evenly over its time in RECEPTACLE_TIMES. Then it opens again.
+   * A receptacle's step. Its reference's faucet lets out as far as its valve is open, at REFERENCE_FLOW. With no
+   * cycle under way, a receptacle full to STATION.autoflush starts one, as if its button were pressed. Through a
+   * cycle, the receptacle flushes into the tester; the tester thinks for RECEPTACLE_TIMES.think, then judges what it
+   * holds: more than GOAL_PURITY target, and it passes it into the reference, else it rejects it out its waste
+   * nozzle, each evenly over its time in RECEPTACLE_TIMES.
    */
   private receive(h: number): (Vessel | null)[] {
-    const tank = this.tanks[0];
+    const [rec, tester, ref] = this.tanks;
+    const out: (Vessel | null)[] = [null, null];
+    const tap = new Vessel(Infinity);
+    transfer(ref, tap, this.valves[0] * REFERENCE_FLOW * h);
+    if (tap.N > 0) out[1] = tap;
+    if (!this.cycle && volume(rec) >= STATION.autoflush * rec.cap) this.press();
     const c = this.cycle;
-    this.out = [null];
-    this.flow = [0];
-    if (!c) return this.out;
-    c.age += h;
-    if (c.phase === 'think') {
-      if (c.age >= RECEPTACLE_TIMES.think) {
-        this.verdict = sustenance(tank) > 0 ? 'pass' : 'fail';
-        this.cycle = { phase: this.verdict === 'pass' ? 'flush' : 'reject', age: 0 };
+    if (c) {
+      c.age += h;
+      // evenly, so it's empty just as the time's up
+      const evenly = (from: Vessel, to: Vessel) => {
+        const left = RECEPTACLE_TIMES[c.phase] - (c.age - h);
+        transfer(from, to, left <= h ? volume(from) : (volume(from) * h) / left);
+      };
+      const done = c.age >= RECEPTACLE_TIMES[c.phase];
+      if (c.phase === 'flush') {
+        evenly(rec, tester);
+        if (done) this.cycle = { phase: 'think', age: 0 };
+      } else if (c.phase === 'think') {
+        if (done) {
+          this.verdict = sustenance(tester) > 0 ? 'pass' : 'fail';
+          this.cycle = { phase: this.verdict === 'pass' ? 'pass' : 'reject', age: 0 };
+        }
+      } else {
+        if (c.phase === 'pass') evenly(tester, ref);
+        else {
+          const p = new Vessel(Infinity);
+          evenly(tester, p);
+          if (p.N > 0) out[0] = p;
+        }
+        if (done) this.cycle = null;
       }
-      return this.out;
     }
-    // evenly, so it's empty just as the time's up
-    const left = RECEPTACLE_TIMES[c.phase] - (c.age - h);
-    const p = new Vessel(Infinity);
-    transfer(tank, p, left <= h ? volume(tank) : (volume(tank) * h) / left);
-    if (c.phase === 'flush') this.flushed += p.n[TARGET] * roomFor(TARGET);
-    else if (p.N > 0) {
-      this.out = [p];
-      this.flow = [volume(p) / (MAX_FLOW * h)];
-    }
-    if (c.age >= RECEPTACLE_TIMES[c.phase]) this.cycle = null;
-    return this.out;
+    this.out = out;
+    this.flow = out.map((p) => (p ? volume(p) / (MAX_FLOW * h) : 0));
+    return out;
   }
 
   /**
