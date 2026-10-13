@@ -2,7 +2,7 @@ import { ATOMS, BIT_PAIRS, GROUP, GROUP_PRIMARY, pairKey, type Atom } from '../c
 import { THERMO } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
-import { CAP } from './config';
+import { CAP, TRACE } from './config';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
 import { CELL, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
@@ -367,8 +367,13 @@ export const TUBE_H = (TUBE_CAP * SPACE_PER_ATOM) / ((Math.PI / 4) * TUBE_W ** 2
  * top.
  */
 export const INLINE_DOCK = 150;
-/** How many sim seconds back an inline instrument's reading looks: it reads what passed through it over just that long. */
-export const INSTRUMENT_WINDOW = 1;
+/**
+ * How quickly an inline instrument's reading follows what passes through it, in sim seconds: it reads an exponentially
+ * weighted average of the flow, each moment counting e^(−age / INSTRUMENT_TAU) as much as the newest, so a change
+ * starts to show at once and fades in, and out, smoothly, rather than appearing and vanishing a fixed time later. (On
+ * average it lags as much as a flat window twice as long would.)
+ */
+export const INSTRUMENT_TAU = 0.5;
 /**
  * An inline instrument's cabinet, right of its tube, with its screen, and how high the pipe from the tube into it
  * runs, in local units.
@@ -846,9 +851,9 @@ export function separatorShares(): number[][] {
  *   shows what flows out, averaged over the last METER.window (see rate and meterText).
  * - A **composition analyzer** is an inline instrument (see INLINE_TOOLS): its tube drains straight through like
  *   the meter's funnel, and it draws off ANALYZER_SAMPLE of what passes, out its waste spout, reading that (see
- *   composition) onto a screen, averaged over the last INSTRUMENT_WINDOW.
+ *   composition) onto a screen, averaged over the recent past (see INSTRUMENT_TAU).
  * - A **spectroscope** is an inline instrument too, which lets everything through, counting the bonds that pass over
- *   the last INSTRUMENT_WINDOW (see bondCounts) and showing them by energy as a graph (see spectroscopeAt).
+ *   the recent past (see INSTRUMENT_TAU and bondCounts) and showing them by energy as a graph (see spectroscopeAt).
  *
  * Tools run on sim time, so a slow drip into a reacting flask gives the same
  * result at any sim speed.
@@ -871,13 +876,13 @@ export class Tool {
   /** Per spout, the flow on the last step, in flasks per second. */
   flow: number[];
   /**
-   * An analyzer's reading (see composition), shown on its screen: what it drew off over the last INSTRUMENT_WINDOW, as
-   * shares of its volume; null if nothing passed through it in that time.
+   * An analyzer's reading (see composition), shown on its screen: what it drew off in the recent past (see
+   * INSTRUMENT_TAU), as shares of its volume; null once that's down to less than TRACE a sim second.
    */
   reading: number[] | null = null;
   /**
-   * A spectroscope's reading: how many of each bond (in BOND_KEYS order) have passed through it per sim second, over
-   * the last INSTRUMENT_WINDOW.
+   * A spectroscope's reading: how many of each bond (in BOND_KEYS order) have passed through it per sim second, in
+   * the recent past (see INSTRUMENT_TAU); all 0 once they're down to less than TRACE a sim second in all.
    */
   bonds: number[] = BOND_KEYS.map(() => 0);
   /** A meter's reading: what's flowed out of it, by volume per sim second, averaged over the last METER.window. */
@@ -887,6 +892,8 @@ export class Tool {
    * measured in it.
    */
   private recent: { h: number; x: number[] }[] = [];
+  /** An inline instrument's exponentially weighted average of what it's measured, per sim second (see smooth). */
+  private smoothed: number[] | null = null;
   /**
    * The player's note about the whole tool, written above it; empty for none. Only a tool with more than one tank
    * has one: on a tool with one tank, its tank's label (Vessel.label) does the job.
@@ -945,11 +952,26 @@ export class Tool {
     this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
     if (this.kind === 'meter') this.rate = this.record(h, [volume(packets[0])], METER.window)[0];
     if (this.kind === 'analyzer') {
-      const [v, ...spec] = this.record(h, [volume(packets[1]), ...composition(packets[1], 1)], INSTRUMENT_WINDOW);
-      this.reading = v > 0 ? spec.map((x) => x / v) : null;
+      const [v, ...spec] = this.smooth(h, [volume(packets[1]), ...composition(packets[1], 1)]);
+      this.reading = v >= TRACE ? spec.map((x) => x / v) : null;
     }
-    if (this.kind === 'spectroscope') this.bonds = this.record(h, bondCounts(packets[0]), INSTRUMENT_WINDOW);
+    if (this.kind === 'spectroscope') {
+      const bonds = this.smooth(h, bondCounts(packets[0]));
+      this.bonds = bonds.reduce((a, b) => a + b, 0) >= TRACE ? [...bonds] : bonds.map(() => 0);
+    }
     return this.out;
+  }
+
+  /**
+   * An inline instrument's reading after a step of h sim seconds in which it measured x: the exponentially weighted
+   * average (see INSTRUMENT_TAU) of what it's measured, per sim second, entry by entry. It's exact for whatever passed
+   * evenly through each step, so it comes out the same at any sim speed. It starts from nothing measured.
+   */
+  private smooth(h: number, x: number[]): number[] {
+    const keep = Math.exp(-h / INSTRUMENT_TAU);
+    const s = (this.smoothed ??= x.map(() => 0));
+    x.forEach((v, i) => (s[i] = s[i] * keep + (v / h) * (1 - keep)));
+    return s;
   }
 
   /**

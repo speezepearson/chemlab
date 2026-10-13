@@ -129,7 +129,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   whole cryostabilizer station (`STATION` in `tools.ts`): its tanks are the receptacle, the tester and the reference,
   in that order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved.
 - **Inline instruments** (`INLINE_TOOLS`: the composition analyzer and the spectroscope) are a tube draining straight through at a fixed rate past a cabinet that reads
-  what goes by, over the last `INSTRUMENT_WINDOW` (`Tool.record`). A hose's nozzle let go of over the tube snaps onto its
+  what goes by, as an exponentially weighted average that fades the past smoothly (`INSTRUMENT_TAU`, `Tool.smooth`). A hose's nozzle let go of over the tube snaps onto its
   top (`docked` in `bodies.ts`, via the engine's `gridded`).
 - **The goal** is the target in the station's reference (`tanks[2]`, against `GOAL_TARGET`), not what's lying around
   in vessels.
