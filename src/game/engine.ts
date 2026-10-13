@@ -199,7 +199,7 @@ export const TOUCH = typeof matchMedia === 'function' && matchMedia('(pointer: c
 const DOUBLE_MS = 380;
 /**
  * Where the faucets are: along the right wall over its counter, this high, a grid cell apart, each spout over the
- * middle of a cell of the counter's row nearest the wall (see CELL).
+ * middle of a cell of the counter's one row (see CELL, SINK_D).
  */
 const FAUCET_Y = LIFT + 300;
 const FAUCET_Z0 = 3.5 * CELL;
