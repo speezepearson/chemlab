@@ -14,6 +14,7 @@ import { cool, exposure, taper } from './cooling';
 import { FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
 import { Flask, Vessel, fluidColor, roomFor, transfer, volume, volumeUnit, type Point } from './flask';
+import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, moveBox, roomBoxes, segmentHitsBox, solids, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
 import { DEFAULT_PRESET, METER_AT, REFERENCE_FILL, SPECTROMETER_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
@@ -236,6 +237,8 @@ const REACH_SENS = 0.5;
 /** How fast the look stick turns the view when pushed all the way, in radians per real second: across, and up or down. */
 const STICK_TURN = 2.4;
 const STICK_TILT = 1.6;
+/** The key held for undo and redo: Command on a Mac, Control elsewhere. */
+const MOD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl';
 /** Whether the screen is mainly touched, rather than pointed at with a mouse: then the on-screen sticks walk and look. */
 export const TOUCH = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 /**
@@ -333,6 +336,8 @@ export class GameEngine {
     | { kind: 'resize'; paper: Paper }
     | { kind: 'erase' }
     | null = null;
+  /** Undo and redo, of the lab's arrangement (see history.ts). */
+  private history = new History();
   private inspected: Vessel | null = null;
   private lastInspect = 0;
   private lastHud = '';
@@ -433,8 +438,8 @@ export class GameEngine {
    * (`F5`), by index. Things are replaced on reset and load, so look this up each time.
    */
   note(id: string): { text: string; set(text: string): void } | null {
-    const label = (o: { label: string } | undefined) => o && { text: o.label, set: (s: string) => void (o.label = s) };
-    const note = (o: { note: string } | undefined) => o && { text: o.note, set: (s: string) => void (o.note = s) };
+    const label = (o: { label: string } | undefined) => o && { text: o.label, set: (s: string) => this.change(() => (o.label = s)) };
+    const note = (o: { note: string } | undefined) => o && { text: o.note, set: (s: string) => this.change(() => (o.note = s)) };
     const tank = /^t(\d+)\.(\d+)$/.exec(id);
     if (tank) return label(this.tools.find((t) => t.id === +tank[1])?.tanks[+tank[2]]) ?? null;
     const m = /^([fFst])(\d+)$/.exec(id);
@@ -510,6 +515,60 @@ export class GameEngine {
     this.beepers.clear();
     this.falling = [];
     this.held = this.turning = this.tarePress = null;
+    this.history.clear();
+  }
+
+  /* ---------------- undo ---------------- */
+
+  /** How the lab is arranged just now (see history.ts). */
+  private arranged(): Arrangement {
+    const { flasks, tools, scales, hoses, faucets, alarmsOff, blindsShut } = this;
+    return arrangement({ flasks, tools, scales, hoses, faucets }, { alarmsOff, blindsShut });
+  }
+
+  /** An action that changes the arrangement is starting (see History.mark). */
+  private mark(): void {
+    this.history.mark(this.arranged());
+  }
+
+  /** The action under way is done (see History.commit). */
+  private commit(): void {
+    this.history.commit(this.arranged());
+  }
+
+  /** Change the arrangement at once, as one step to undo. */
+  private change(fn: () => void): void {
+    this.mark();
+    fn();
+    this.commit();
+  }
+
+  /**
+   * Ctrl+Z: undo the last change to the lab's arrangement (see history.ts), or with something in hand, put it back
+   * (see putBack), as a carry isn't done until it's set down. Ctrl+Shift+Z or Ctrl+Y: redo.
+   */
+  undo(redo = false): void {
+    if (inPod(this.wake)) return;
+    if (this.held) {
+      if (!redo) this.putBack();
+      return;
+    }
+    const now = this.arranged();
+    const a = redo ? this.history.redo(now) : this.history.undo(now);
+    if (!a) return;
+    const { flasks, tools, scales, hoses, faucets } = this;
+    arrange({ flasks, tools, scales, hoses, faucets }, a);
+    this.setAlarmsOff(a.alarmsOff);
+    this.blindsShut = a.blindsShut;
+    this.turning = null;
+    this.open = this.mouths();
+  }
+
+  /** A valve being turned is let go of: that's a step to undo, if it moved. */
+  private endTurn(): void {
+    if (!this.turning) return;
+    this.turning = null;
+    this.commit();
   }
 
   /** Everything in the lab, plus the chemistry parameters, for saving. */
@@ -770,6 +829,7 @@ export class GameEngine {
       this.say('No room');
       return false;
     }
+    this.mark();
     if (held.kind === 'flask') this.flasks.push(held.f);
     if (held.kind === 'scale') this.scales.push(held.sc);
     if (held.kind === 'tool') {
@@ -801,6 +861,7 @@ export class GameEngine {
     if (h.kind === 'hose') this.hoses.splice(this.hoses.indexOf(h.h), 1);
     this.held = null;
     this.pinned = null;
+    this.commit();
   }
 
   private say(text: string): void {
@@ -972,7 +1033,7 @@ export class GameEngine {
   hand(down: boolean): void {
     if (!down) {
       this.rightHeld = false;
-      this.turning = null;
+      this.endTurn();
     } else if (this.pencil) this.rightHeld = true;
     else if (this.locked) this.rightDown();
   }
@@ -1011,7 +1072,7 @@ export class GameEngine {
       if (!this.locked) {
         this.keys.clear();
         this.rightHeld = false;
-        this.turning = null;
+        this.endTurn();
         this.tarePress = null;
       }
     };
@@ -1072,7 +1133,7 @@ export class GameEngine {
       if (e.button === 0) this.tarePress = null;
       if (e.button === 2) {
         this.rightHeld = false;
-        this.turning = null;
+        this.endTurn();
       }
     });
     on(c, 'contextmenu', (e) => e.preventDefault());
@@ -1086,7 +1147,14 @@ export class GameEngine {
       this.held.dist = this.clampDist(this.held, this.held.dist * Math.exp(-px * 0.0012));
     });
     on(window, 'keydown', (e) => {
-      if (typingIn(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (typingIn(e.target)) return;
+      // the usual keys for undo and redo, captured or not
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.code === 'KeyZ' || e.code === 'KeyY')) {
+        e.preventDefault();
+        this.undo(e.code === 'KeyY' || e.shiftKey);
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       // Enter is OK on the message inside the cryopod, as it was on the notice it replaced
       if (e.code === 'Enter' && this.wake === 'pod') this.pressOk();
       if (!this.locked) return;
@@ -1185,6 +1253,8 @@ export class GameEngine {
       this.say('That stays where it is');
       return;
     }
+    // picking something up starts a step to undo, done once it's set down (see setDown)
+    this.mark();
     if (p.kind === 'flask') {
       const sc = this.scales.find((s) => s.load.some((l) => l.f === p.f));
       const scale = sc && { sc, dx: sc.load.find((l) => l.f === p.f)!.dx };
@@ -1227,6 +1297,7 @@ export class GameEngine {
       const r = this.standFor(hose, t);
       if (typeof r === 'string') {
         this.hoses = this.hoses.filter((x) => !made.includes(x));
+        this.commit(); // nothing came of it
         return 'No room for a hose’s stand';
       }
       hose.outlet = { x: r.pose.x, y: r.pose.y, z: r.pose.z };
@@ -1363,6 +1434,7 @@ export class GameEngine {
    * be put back to (see putBack), so Q rolls it back up.
    */
   private holdHose(hose: Hose, fresh = false): void {
+    this.mark();
     const from = fresh ? undefined : { pose: { ...hose.outlet, yaw: 0 }, hose: { turn: hose.turn, reach: hose.reach } };
     const h: Held = { kind: 'hose', h: hose, reach: hose.reach, relYaw: wrapAngle(hose.turn - this.player.yaw), dist: 0, from };
     h.dist = this.clampDist(h, dist3(this.eye(), hose.outlet));
@@ -1389,6 +1461,7 @@ export class GameEngine {
    * wherever it is.
    */
   private pullHose(m: HoseMount): void {
+    this.mark();
     const old = this.hoses.find((h) => sameMount(h.on, m));
     if (old) return this.holdHose(old);
     const hose = new Hose(m, this.mountAt(m), NOZZLE_REACH.min);
@@ -1471,13 +1544,16 @@ export class GameEngine {
     });
     this.held = null;
     this.pinned = null;
+    this.commit();
   }
 
   /** Flip the tool being held, or else the one looked at (see flip), if it's one that can be flipped. */
   private flipTarget(): void {
     if (inPod(this.wake)) return;
     const t = this.held?.kind === 'tool' ? this.held.t : this.target?.kind === 'tool' ? this.target.t : null;
-    if (t) flip(t);
+    // flipping what's held is part of carrying it, a step once it's set down
+    if (t && this.held) flip(t);
+    else if (t) this.change(() => flip(t));
   }
 
   private leftDown(): void {
@@ -1506,15 +1582,15 @@ export class GameEngine {
       return;
     }
     if (p?.kind === 'alarm') {
-      this.setAlarmsOff(!this.alarmsOff);
+      this.change(() => this.setAlarmsOff(!this.alarmsOff));
       return;
     }
     if (p?.kind === 'blinds') {
-      this.blindsShut = !this.blindsShut;
+      this.change(() => (this.blindsShut = !this.blindsShut));
       return;
     }
     if (p?.kind === 'scale' && p.part === 'tare') {
-      p.sc.zero();
+      this.change(() => p.sc.zero());
       this.tarePress = p.sc;
       return;
     }
@@ -1569,6 +1645,7 @@ export class GameEngine {
     if (h) return;
     const k = this.valveAimed();
     if (!k) return;
+    this.mark();
     this.turning = { ...k, aim: { x: this.viewW / 2, y: this.viewH / 2 } };
     this.aimTurning();
   }
@@ -1653,7 +1730,7 @@ export class GameEngine {
     if (on === this.pencil || (on && inPod(this.wake))) return;
     this.pencil = on;
     this.paperDrag = null;
-    this.turning = null;
+    this.endTurn();
     this.cursor = { x: this.viewW / 2, y: this.viewH / 2 };
     if (!on) this.cb.onPaperText(null);
     this.cb.onPencil(on);
@@ -2571,6 +2648,8 @@ export class GameEngine {
       if (id) add(['N'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
       add(['P'], 'pick up the pencil');
     }
+    if (!h && this.history.canUndo) add([MOD, 'Z'], 'undo');
+    if (!h && this.history.canRedo) add([MOD, 'Shift', 'Z'], 'redo');
     add(['Esc'], 'let go of the mouse');
     add(['/'], 'hide this list');
     return out;
@@ -2630,7 +2709,7 @@ export class GameEngine {
     if (this.held && !(this.held.kind === 'tool' && UNIQUE_TOOLS.includes(this.held.t.kind))) this.putAway();
     this.held = null;
     this.setPencil(false);
-    this.turning = null;
+    this.endTurn();
     this.rightHeld = false;
     Object.assign(this.player, { x: POD.x, z: POD.z, yaw: 0, pitch: -0.12 });
     this.wake = 'pod';

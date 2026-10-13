@@ -65,6 +65,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `surfaces.ts` paints the room's textures (walls, deck, ceiling, counters, cabinets) from noise, pure and DOM-free;
     `surfaceWorker.ts` runs it off the main thread, and `textures.ts` turns the results into materials, plain until
     their maps arrive, and gives geometry texture coordinates in world units (`boxUV`, `planeUV`).
+  - `history.ts` is undo and redo of the lab's arrangement (never fluids). An action that changes the arrangement calls
+    the engine's `mark()` as it starts and `commit()` as it ends (or `change()` around it, if it's instant); a carry is
+    marked at pick-up and committed at set-down.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
     `volumes.ts`); `rumble.ts` is the spectrometer, `beeper.ts` the cryostabilizer station, `ambience.ts` the ship, `water.ts` drips and streams.
