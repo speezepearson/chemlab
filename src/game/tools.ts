@@ -437,18 +437,6 @@ export function heatBy(f: Fluid, wireT: number, h: number): void {
   f.Q += roundRandom((heatAt(wireT, f.N) - f.Q) * (1 - Math.exp(-HEATER.rate * h)));
 }
 
-/**
- * How the flow meter reads, editable from the Chemistry panel:
- * - window: how many sim seconds back its reading looks. It shows the average flow over just that long, so a steady
- *   drip reads as a steady trickle rather than flickering, and a change shows in full once that long has passed.
- */
-export const METER = { window: 0.5 };
-const DEFAULT_METER = { ...METER };
-
-export function restoreDefaultMeter(): void {
-  Object.assign(METER, DEFAULT_METER);
-}
-
 /** How many digits the meter's display has. */
 export const METER_DIGITS = 4;
 
@@ -854,7 +842,7 @@ export function separatorShares(): number[][] {
  *   GOAL_PURITY target, it passes it into the reference, and otherwise rejects it out its waste nozzle, the first
  *   spout. The reference lets out a trickle through its faucet, the second spout, as far as its one valve is open.
  * - A **flow meter** is an inline instrument (see INLINE_TOOLS): its tube drains straight through to one spout, and
- *   it shows what flows out, averaged over the last METER.window (see rate and meterText).
+ *   it shows what flows out, averaged over the recent past (see INSTRUMENT_TAU, rate and meterText).
  * - A **composition analyzer** is an inline instrument too, and it draws off ANALYZER_SAMPLE of what passes, out its waste spout, reading that (see
  *   composition) onto a screen, averaged over the recent past (see INSTRUMENT_TAU).
  * - A **spectroscope** is an inline instrument too, which lets everything through, counting the bonds that pass over
@@ -890,13 +878,11 @@ export class Tool {
    * the recent past (see INSTRUMENT_TAU); all 0 once they're down to less than TRACE a sim second in all.
    */
   bonds: number[] = BOND_KEYS.map(() => 0);
-  /** A meter's reading: what's flowed out of it, by volume per sim second, averaged over the last METER.window. */
-  rate = 0;
   /**
-   * An instrument's recent steps, oldest first, back past its window (see record): how long each was and what it
-   * measured in it.
+   * A meter's reading: what's flowed out of it, by volume per sim second, in the recent past (see INSTRUMENT_TAU); 0
+   * once that's down to less than TRACE a sim second.
    */
-  private recent: { h: number; x: number[] }[] = [];
+  rate = 0;
   /** An inline instrument's exponentially weighted average of what it's measured, per sim second (see smooth). */
   private smoothed: number[] | null = null;
   /**
@@ -955,7 +941,10 @@ export class Tool {
     if (this.kind === 'analyzer') packets = divide(packets[0], () => 1 - ANALYZER_SAMPLE);
     this.out = packets.map((p) => (p.N > 0 ? p : null));
     this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
-    if (this.kind === 'meter') this.rate = this.record(h, [volume(packets[0])], METER.window)[0];
+    if (this.kind === 'meter') {
+      const [v] = this.smooth(h, [volume(packets[0])]);
+      this.rate = v >= TRACE ? v : 0;
+    }
     if (this.kind === 'analyzer') {
       const [v, ...spec] = this.smooth(h, [volume(packets[1]), ...composition(packets[1], 1)]);
       this.reading = v >= TRACE ? spec.map((x) => x / v) : null;
@@ -977,22 +966,6 @@ export class Tool {
     const s = (this.smoothed ??= x.map(() => 0));
     x.forEach((v, i) => (s[i] = s[i] * keep + (v / h) * (1 - keep)));
     return s;
-  }
-
-  /**
-   * An instrument's reading after a step of h sim seconds in which it measured x: what it's measured over the last
-   * `window`, or just over (back to the start of the oldest step it reaches into), per sim second, entry by entry.
-   * Until that long has passed, the time before counts as measuring nothing.
-   */
-  private record(h: number, x: number[], window: number): number[] {
-    const r = this.recent;
-    r.push({ h, x });
-    let span = 0;
-    for (const s of r) span += s.h;
-    while (r.length > 1 && span - r[0].h >= window) span -= r.shift()!.h;
-    const sum = x.map(() => 0);
-    for (const s of r) s.x.forEach((v, i) => (sum[i] += v));
-    return sum.map((v) => v / Math.max(span, window));
   }
 
   /**
