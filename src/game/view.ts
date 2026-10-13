@@ -2324,6 +2324,13 @@ class AirlockView {
     const lintel = new THREE.Mesh(new THREE.PlaneGeometry(door.w, wall).rotateX(Math.PI / 2), jambMat);
     lintel.position.set(x, door.h, z1 + wall / 2);
     g.add(lintel);
+    // and its sill, the deck through the wall's thickness, between the lab's floor and the chamber's, so nothing shows
+    // through under the doors
+    const sill = new THREE.Mesh(planeUV(new THREE.PlaneGeometry(door.w, wall), 'deck', -door.w / 2, -wall / 2), surfaceMat('deck', { metalness: 0.55 }));
+    sill.rotation.x = -Math.PI / 2;
+    sill.position.set(x, 0, z1 + wall / 2);
+    sill.receiveShadow = true;
+    g.add(sill);
     // the doors, each half the doorway, sliding apart into the wall
     const doorMat = new THREE.MeshPhysicalMaterial({ color: 0xa3ada9, roughness: 0.45, metalness: 0.35, clearcoat: 0.3 });
     for (const side of [-1, 1]) {
