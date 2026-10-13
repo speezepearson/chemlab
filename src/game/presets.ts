@@ -44,9 +44,6 @@ export const STATION_POSE: Pose = { x: ROOM.x1 - CELL / 2, y: STATION.top, z: 11
 /** What the cryostabilizer reference starts with: the hundred flasks of the target left on board (see VOYAGE). */
 export const REFERENCE_FILL: FlaskFill = { contents: [{ species: TARGET, molecules: REFERENCE_START }], T: T_ROOM };
 
-/** Where the one and only flow meter starts, the same way: there's always exactly one of it too. */
-export const METER_AT: Spot = { at: [0.85, 0.55] };
-
 /** A tool on the bench at the start. */
 export interface ToolSpec extends Spot {
   kind: ToolKind;

@@ -44,7 +44,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - `src/chem/`: the chemistry.
   - `species.ts` defines the 50 species.
   - `params.ts` holds the bond parameters.
-  - `reactions.ts` is Arrhenius kinetics on whole molecules.
+  - `reactions.ts` is Arrhenius kinetics on whole molecules. The engine steps vessels through `tick`, never `step`.
   - `equilibrium.ts` is the exact full-equilibrium solver, for the presets' and the route's settled mixes. Faucets
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
 - `src/game/`: everything else in the game.
@@ -86,7 +86,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   "volume counts molecules" toggle is off. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
 - **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
   chemistry, cooling, the composition analyzer's reading and hum, the cryostabilizer station's cycle, and the drip and stream sounds. All of it
-  runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The exceptions, at the
+  runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The one exception to the
+  substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
+  caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
   notice; and the player themselves (walking, looking, carrying, tipping a flask), which is input, not the sim. Waking
   in the airlock (the pod's message flickering out, its front opening, the doors closing) is sim time too.
@@ -121,15 +123,16 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially.
   - `ITEMS` and `HOTKEYS` in `engine.ts` (the hotbar's order and keys) and `ICONS` in `Palette.tsx`, unless the tool is
-    unique. Only `-` is left on the number row.
+    unique. The number row is full.
   - Tests and the README.
   - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
-- **Unique tools** (`UNIQUE_TOOLS`: the composition analyzer, the spectroscope, the flow meter and the receptacle) aren't on
+- **Unique tools** (`UNIQUE_TOOLS`: the composition analyzer, the spectroscope and the receptacle) aren't on
   the hotbar and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
   whole cryostabilizer station (`STATION` in `tools.ts`): its tanks are the receptacle, the tester and the reference,
   in that order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved.
-- **Inline instruments** (`INLINE_TOOLS`: the composition analyzer and the spectroscope) are a tube draining straight through at a fixed rate past a cabinet that reads
-  what goes by, as an exponentially weighted average that fades the past smoothly (`INSTRUMENT_TAU`, `Tool.smooth`). A hose's nozzle let go of over the tube snaps onto its
+- **Inline instruments** (`INLINE_TOOLS`: the composition analyzer, the spectroscope and the flow meter) are a tube draining straight through at a fixed rate past a cabinet
+  (or the flow meter's little readout, `METER_BODY`) that reads what goes by, as an exponentially weighted average that fades the past smoothly (`INSTRUMENT_TAU`,
+  `Tool.smooth`). A hose's nozzle let go of over the tube snaps onto its
   top (`docked` in `bodies.ts`, via the engine's `gridded`).
 - **The goal** is the target in the station's reference (`tanks[2]`, against `GOAL_TARGET`), not what's lying around
   in vessels.

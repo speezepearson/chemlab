@@ -74,6 +74,15 @@ const ICONS: Record<string, ReactNode> = {
       <circle className="valve" cx="20" cy="33" r="2.5" />
     </>
   ),
+  meter: (
+    <>
+      <path className="pipe" d="M20 18 V37" />
+      <rect className="glass" x="17" y="3" width="6" height="15" rx="1.5" />
+      <rect className="valve" x="11" y="20" width="18" height="9" rx="1.5" />
+      <rect className="lcd" x="12.5" y="21.5" width="15" height="6" rx="0.8" style={{ fill: '#050603' }} />
+      <path className="digits" d="M14.5 24.5 H25.5" style={{ stroke: 'yellowgreen' }} />
+    </>
+  ),
 };
 
 /**
