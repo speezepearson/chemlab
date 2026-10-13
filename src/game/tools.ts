@@ -1,11 +1,12 @@
 import { ATOMS, BIT_PAIRS, GROUP, GROUP_PRIMARY, pairKey, type Atom } from '../chem/atoms';
 import { THERMO } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
-import { NS, SPECIES } from '../chem/species';
+import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP, TRACE } from './config';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
 import { CELL, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
+import { Supply } from './supply';
 
 /** Capacity of each tank on a tool, in atoms. */
 export const TANK_CAP = 4 * CAP;
@@ -274,6 +275,7 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
  *   The diverter is a disc `r` across at the fork, and every line is `w` wide.
  * - lamp: the lamp that lights green while the flow goes into the reference.
  * - screen: the readout of the litres in the reference, under its label.
+ * - status: the readout of how the supply stands (see supplyText), along the top left of the plate.
  */
 const STATION_TOP = LIFT + 400;
 const STATION_PANE_H = 260;
@@ -304,6 +306,7 @@ export const STATION = {
   },
   lamp: { x: FORK.x + 62, y: FORK.y, r: 9 },
   screen: { x0: 3 * CELL - 50, x1: 3 * CELL + 50, y0: -19, y1: -4 },
+  status: { x0: -30, x1: 2 * CELL + 20, y0: -19, y1: -4 },
 };
 
 /** The inside of the station's funnel, bottom up (see Piece): from its stem's tip up to its mouth. */
@@ -890,6 +893,8 @@ export class Tool {
   private diverted: 'keep' | 'waste' | null = null;
   /** Sim seconds since anything last came through a receptacle's diverter. */
   private sinceDiverted = Infinity;
+  /** A receptacle's flow of the target into its reference, for the ship to judge (see Supply); null on other tools. */
+  readonly supply: Supply | null;
 
   constructor(
     readonly kind: ToolKind,
@@ -907,6 +912,7 @@ export class Tool {
     this.flow = this.shape.spouts.map(() => 0);
     this.drops = this.shape.spouts.map(() => new Vessel(Infinity));
     this.streaming = this.shape.spouts.map(() => false);
+    this.supply = kind === 'receptacle' ? new Supply() : null;
   }
 
   get shape(): ToolShape {
@@ -1034,7 +1040,8 @@ export class Tool {
    * A receptacle's step. Its reference's faucet lets out as far as its valve is open, at REFERENCE_FLOW. Its funnel
    * drains into the wall at FUNNEL_RATE however full it is, so it only fills (and spills) if more arrives than that,
    * past the diverter, which judges what's in the funnel: more than GOAL_PURITY target, and it goes into the
-   * reference, as far as there's room, and otherwise out the waste nozzle.
+   * reference, as far as there's room, and otherwise out the waste nozzle. It records the target going into the
+   * reference, and out its faucet, in its supply.
    */
   private receive(h: number): (Vessel | null)[] {
     const [funnel, ref] = this.tanks;
@@ -1042,6 +1049,7 @@ export class Tool {
     const tap = new Vessel(Infinity);
     transfer(ref, tap, this.valves[0] * REFERENCE_FLOW * h);
     if (tap.N > 0) out[1] = tap;
+    const held = ref.n[TARGET];
     this.sinceDiverted += h;
     if (funnel.N > 0) {
       const keep = sustenance(funnel) > 0;
@@ -1052,6 +1060,7 @@ export class Tool {
       }
       if (waste.N > 0) out[0] = waste;
     }
+    this.supply!.record(h, ref.n[TARGET] - held, tap.n[TARGET]);
     this.out = out;
     this.flow = out.map((p) => (p ? volume(p) / (MAX_FLOW * h) : 0));
     return out;

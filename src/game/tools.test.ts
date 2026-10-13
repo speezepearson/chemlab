@@ -8,6 +8,7 @@ import { FLASK_VOLUME } from './flaskShape';
 import { STATION_POSE } from './presets';
 import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
+import { SUPPLY } from './supply';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, BOND_KEYS, SPECTROSCOPE, bondCounts, spectroscopeAt, INSTRUMENT_TAU, TUBE_CAP,
   DIVERT_HOLD, RECEPTACLE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, SEPARATOR, STATION, STATION_FUNNEL, gaugeSegments, SEPARATOR_PERFECT, SORTER, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
@@ -306,6 +307,24 @@ describe('cryostabilizer station', () => {
     expect(r.diverting).toBe('keep');
     r.step(0.05);
     expect(r.diverting).toBe(null);
+  });
+
+  it('records the target it takes into the reference, net of what its faucet lets out, for the ship to judge', () => {
+    const steady = new Tool('receptacle', 0);
+    for (let t = 0; t < SUPPLY.window + 1; t += 0.02) {
+      steady.tanks[0].setMolecules(TARGET, steady.tanks[0].n[TARGET] + 1e6);
+      steady.step(0.02);
+    }
+    expect(steady.supply!.keepingUp).toBe(true);
+    // the reference's own faucet poured back into the funnel adds nothing
+    const loop = new Tool('receptacle', 0, undefined, [1]);
+    loop.tanks[1].setMolecules(TARGET, REFERENCE_START);
+    for (let t = 0; t < SUPPLY.window + 1; t += 0.02) {
+      const tap = loop.step(0.02)[1];
+      if (tap) loop.tanks[0].setMolecules(TARGET, loop.tanks[0].n[TARGET] + tap.n[TARGET]);
+    }
+    expect(loop.supply!.run).toBeGreaterThan(SUPPLY.window);
+    expect(loop.supply!.keepingUp).toBe(false);
   });
 
   it("leaves what doesn't fit in the reference in the funnel", () => {

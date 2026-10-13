@@ -7,6 +7,7 @@ import {
 } from './bodies';
 import { TARGET } from '../chem/species';
 import { CAP, FLASK_L, GOAL_L, GOAL_TARGET, TRACE } from './config';
+import { supplyText } from './supply';
 import { Vessel, fluidAlpha, fluidRGB, glowColor, volume, type Flask } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, type Scale } from './scale';
@@ -824,6 +825,28 @@ function wireColor(d: number): number[] {
 
 const setRGB = (c: THREE.Color, rgb: readonly number[]) => c.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
 
+/** A rectangle in a flat frame. */
+type Rect = { x0: number; x1: number; y0: number; y1: number };
+
+/** One line of green-on-black text, centered on a screen covering `sc`, redrawn only when it changes. */
+function phosphor(s: Screen, sc: Rect, text: string): void {
+  if (s.key === text) return;
+  s.key = text;
+  s.ctx.setTransform(s.ppu, 0, 0, s.ppu, -sc.x0 * s.ppu, -sc.y0 * s.ppu);
+  s.ctx.fillStyle = '#040a06';
+  s.ctx.fillRect(sc.x0, sc.y0, sc.x1 - sc.x0, sc.y1 - sc.y0);
+  s.ctx.fillStyle = s.ctx.shadowColor = `rgba(${PHOSPHOR}, 0.9)`;
+  s.ctx.shadowBlur = 2 * s.ppu;
+  s.ctx.font = '8.5px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace';
+  s.ctx.textAlign = 'center';
+  s.ctx.textBaseline = 'middle';
+  s.ctx.fillText(text, (sc.x0 + sc.x1) / 2, (sc.y0 + sc.y1) / 2 + 0.5);
+  s.ctx.shadowBlur = 0;
+  s.ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+  for (let y = sc.y0; y < sc.y1; y += 1.5) s.ctx.fillRect(sc.x0, y, sc.x1 - sc.x0, 0.6);
+  s.tex.needsUpdate = true;
+}
+
 /**
  * A tool, built from its flat outline with depth, in `art`. Every mesh of it can be hit, glass included, but not the
  * empty space around it.
@@ -857,6 +880,8 @@ class ToolView {
   /** The cryostabilizer station's diagram of its fork, by the way each line goes (see STATION.fork), and its lamp. */
   private fork?: Record<'in' | 'keep' | 'waste', THREE.MeshStandardMaterial>;
   private lamp?: THREE.MeshStandardMaterial;
+  /** The cryostabilizer station's readout of how the supply stands. */
+  private status?: Screen;
   /** The cryostabilizer station's gauge's segments, bottom up. */
   private segments: THREE.MeshStandardMaterial[] = [];
 
@@ -1368,10 +1393,13 @@ class ToolView {
       rod(art, pipeMat, v3(x, H + 10, face), v3(x, H + 10, 0), 2.5);
       pipes(art, [[x, H + 10], [x, sh.spoutY - 4]], 2.5);
     }
-    // the readout of the litres in the reference, under its label
-    const sc = STATION.screen;
-    block(art, darkMat, sc.x0 - 1.5, sc.x1 + 1.5, sc.y0 - 1.5, sc.y1 + 1.5, face, face + 0.5);
-    this.screen = new Screen(art, sc.x0, sc.x1, sc.y0, sc.y1, face + 0.6, 8);
+    // the readouts: the litres in the reference, under its label, and how the supply stands
+    const screen = (sc: Rect) => {
+      block(art, darkMat, sc.x0 - 1.5, sc.x1 + 1.5, sc.y0 - 1.5, sc.y1 + 1.5, face, face + 0.5);
+      return new Screen(art, sc.x0, sc.x1, sc.y0, sc.y1, face + 0.6, 8);
+    };
+    this.screen = screen(STATION.screen);
+    this.status = screen(STATION.status);
   }
 
   update(clock: number, energies: readonly number[], targets: ReadonlySet<Vessel>): void {
@@ -1493,26 +1521,9 @@ class ToolView {
     lit(this.fork!.waste, way === 'waste', FORK_WASTE);
     this.lamp!.color.set(way === 'keep' ? FORK_KEEP : LAMP_OFF);
     this.lamp!.emissive.set(way === 'keep' ? FORK_KEEP : 0x000000);
-    // the screen: the cryostabilizer in the reference / what's needed, in litres
-    const s = this.screen!;
-    const text = `${((t.tanks[1].n[TARGET] / CAP) * FLASK_L).toFixed(2)} L / ${GOAL_L.toFixed(2)} L`;
-    if (s.key !== text) {
-      s.key = text;
-      const sc = STATION.screen;
-      s.ctx.setTransform(s.ppu, 0, 0, s.ppu, -sc.x0 * s.ppu, -sc.y0 * s.ppu);
-      s.ctx.fillStyle = '#040a06';
-      s.ctx.fillRect(sc.x0, sc.y0, sc.x1 - sc.x0, sc.y1 - sc.y0);
-      s.ctx.fillStyle = s.ctx.shadowColor = `rgba(${PHOSPHOR}, 0.9)`;
-      s.ctx.shadowBlur = 2 * s.ppu;
-      s.ctx.font = '8.5px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace';
-      s.ctx.textAlign = 'center';
-      s.ctx.textBaseline = 'middle';
-      s.ctx.fillText(text, (sc.x0 + sc.x1) / 2, (sc.y0 + sc.y1) / 2 + 0.5);
-      s.ctx.shadowBlur = 0;
-      s.ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-      for (let y = sc.y0; y < sc.y1; y += 1.5) s.ctx.fillRect(sc.x0, y, sc.x1 - sc.x0, 0.6);
-      s.tex.needsUpdate = true;
-    }
+    // the screens: the cryostabilizer in the reference / what's needed, in litres; and how the supply stands
+    phosphor(this.screen!, STATION.screen, `${((t.tanks[1].n[TARGET] / CAP) * FLASK_L).toFixed(2)} L / ${GOAL_L.toFixed(2)} L`);
+    phosphor(this.status!, STATION.status, supplyText(t.supply!));
   }
 
   dispose(): void {
@@ -1521,6 +1532,7 @@ class ToolView {
     for (const { fm } of this.fluids) fm.dispose();
     for (const g of this.glows) g.dispose();
     this.screen?.tex.dispose();
+    this.status?.tex.dispose();
   }
 }
 
