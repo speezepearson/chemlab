@@ -140,6 +140,21 @@ interface Rest {
   scale?: { sc: Scale; dx: number };
   /** For a hose's nozzle, where its stand goes (see nozzleMounts). */
   hose?: NozzleMount;
+  /** Where each hose following what's held would come to rest with it, in Held.follow's order (see followRests). */
+  follow?: Rest[];
+}
+
+/**
+ * A hose whose nozzle pours into something being carried, and so goes along with it (see gather): the vessel it pours
+ * into, where its tip is and which way it faces, in the frame of what's carried (see carryFrame); and where it was
+ * before, to put it back, or null if it was pulled out for this.
+ */
+interface Follower {
+  hose: Hose;
+  into: Vessel;
+  off: Vec3;
+  turn: number;
+  was: { outlet: Vec3; turn: number; reach: number } | null;
 }
 
 /** What the player is holding. A hose is held by its nozzle. */
@@ -160,6 +175,8 @@ type Held = (
   from?: Rest & { flipped?: boolean };
   /** The hoses pulled out of a tool's spouts as it was picked up (see keepPouring), for Q to roll back up. */
   made?: Hose[];
+  /** The hoses pouring into what's carried, which go along with it (see gather). */
+  follow?: Follower[];
 };
 
 /**
@@ -774,6 +791,7 @@ export class GameEngine {
       this.say("Can't put that away");
       return;
     }
+    this.unfollow(h);
     if (h.kind === 'flask') this.flasks.splice(this.flasks.indexOf(h.f), 1);
     if (h.kind === 'tool') {
       this.tools.splice(this.tools.indexOf(h.t), 1);
@@ -864,10 +882,10 @@ export class GameEngine {
   /**
    * The walls, counters, and everything in the room but what's held (and what rides on it), including the bases of
    * the stands holding up everything else (unless `bases` is false). A held tool's own hoses' nozzles don't get in its
-   * way, since one left at its spout (see keepPouring) is rolled back up if it's set down there again (see setDown);
-   * and the tool `away`, about to be picked up, isn't there either.
+   * way, since one left at its spout (see keepPouring) is rolled back up if it's set down there again (see setDown),
+   * nor do the hoses following it (see gather). Nor are the tool `away`, about to be picked up, and the hoses `skip`.
    */
-  private obstacles(h: Held | null, bases = true, away: Tool | null = null): Box[] {
+  private obstacles(h: Held | null, bases = true, away: Tool | null = null, skip: ReadonlySet<Hose> = new Set()): Box[] {
     // while the airlock's doors are open, its doorway and chamber take the front wall's place
     const room = this.wake === 'closed' ? roomBoxes(ROOM) : [...roomBoxes(ROOM, false), ...airlockBoxes()];
     const counters = COUNTERS.map((c) => ({
@@ -879,8 +897,9 @@ export class GameEngine {
     const gone = (t: Tool) => (h?.kind === 'tool' && h.t === t) || t === away;
     for (const t of this.tools) if (!gone(t)) out.push(toolBox(t));
     for (const sc of this.scales) if (!(h?.kind === 'scale' && h.sc === sc)) out.push(scaleBox(sc));
+    const following = new Set(h?.follow?.map((f) => f.hose));
     for (const hose of this.hoses)
-      if (!(h?.kind === 'hose' && h.h === hose)) {
+      if (!(h?.kind === 'hose' && h.h === hose) && !following.has(hose) && !skip.has(hose)) {
         if (!(h?.kind === 'tool' && 'tool' in hose.on && hose.on.tool === h.t)) out.push(nozzleBox(hose));
         if (bases) out.push(standBase(nozzleStand(hose.outlet, hose.turn, hose.reach)));
       }
@@ -1185,6 +1204,7 @@ export class GameEngine {
       return;
     }
     h.relYaw = h.kind === 'flask' ? 0 : wrapAngle(this.heldPose(h).yaw - this.player.yaw);
+    h.follow = this.gather(h);
     // it comes to the player's hands, as far as it can
     h.dist = this.clampDist(h, this.holdDist(h));
     this.held = h;
@@ -1215,6 +1235,116 @@ export class GameEngine {
       this.hoses.push(hose);
     }
     return made;
+  }
+
+  /**
+   * Whatever pours into what's about to be carried keeps pouring into it: each faucet, nozzle, or spout letting
+   * something out (see flowing), whose stream lands in it (a flask, a tool's open tanks, or the flasks on a scale), has
+   * its hose, pulled out if it isn't, go along with it (see follow) until it's set down, when they're set down over it
+   * too (see followRests). An idle spout that happens to be over it is left be.
+   */
+  private gather(h: Held): Follower[] {
+    const vs = new Set<Vessel>(h.kind === 'flask' ? [h.f] : h.kind === 'tool' ? h.t.tanks : h.kind === 'scale' ? h.sc.load.map((l) => l.f) : []);
+    const frame = this.carryFrame(h, this.heldPose(h));
+    const out: Follower[] = [];
+    const add = (m: HoseMount, at: Vec3) => {
+      const mouth = mouthBelow(this.open, at);
+      if (!mouth || !vs.has(mouth.v)) return;
+      let hose = this.hoseOn(m);
+      if (!hose && 'tool' in m && !this.flowing(m.tool, m.spout)) return;
+      const was = hose ? { outlet: { ...hose.outlet }, turn: hose.turn, reach: hose.reach } : null;
+      if (!hose) {
+        hose = new Hose(m, at, NOZZLE_REACH.min);
+        hose.turn = toCardinal(this.player.yaw);
+        this.hoses.push(hose);
+      }
+      out.push({ hose, into: mouth.v, off: toLocal(frame, hose.outlet), turn: wrapAngle(hose.turn - frame.yaw), was });
+    };
+    this.faucets.forEach((_, i) => add({ faucet: i }, this.faucetOutlet(i)));
+    for (const t of this.tools)
+      t.shape.spouts.forEach((_, j) => {
+        // a carried tool's own spouts go with it anyway
+        if (!(h.kind === 'tool' && h.t === t && !this.hoseOn({ tool: t, spout: j }))) add({ tool: t, spout: j }, this.outletAt(t, j));
+      });
+    return out;
+  }
+
+  /** Whether spout j of tool t is letting something out: streaming, or gathering a drop. */
+  private flowing(t: Tool, j: number): boolean {
+    return !!t.out[j] || t.drops[j].N > 0;
+  }
+
+  /** The frame the hoses following what's held (see gather) go along in, with it at pose p: a flask's doesn't turn. */
+  private carryFrame(h: Held, p: Pose): Pose {
+    return h.kind === 'flask' ? { ...p, yaw: 0 } : p;
+  }
+
+  /** Bring the hoses following what's held (see gather) along with it, where it now is. */
+  private follow(h: Held): void {
+    const frame = this.carryFrame(h, this.heldPose(h));
+    for (const f of h.follow ?? []) {
+      f.hose.outlet = toWorld(frame, f.off);
+      f.hose.turn = wrapAngle(f.turn + frame.yaw);
+    }
+  }
+
+  /**
+   * Where the hoses following what's held (see gather) would come to rest if it were set down at rest r: each over the
+   * same spot of it, on the grid, on a stand where there's room (see rest), still pouring into it; as high over it as
+   * it was if there's room, or else as low as there is, from NOZZLE_GAP over the mouth up to POUR_RISE. Or why not.
+   */
+  private followRests(h: Held, r: Rest): Rest[] | string {
+    const fs = h.follow ?? [];
+    const at = this.heldPose(h);
+    const tilt = h.kind === 'flask' ? h.f.tilt : 0;
+    const saved = fs.map((f) => ({ outlet: f.hose.outlet, turn: f.hose.turn, reach: f.hose.reach }));
+    // put it there, upright, for a moment, to see; and each hose there in turn, for the next to go round
+    if (h.kind === 'flask') h.f.tilt = 0;
+    this.placeHeld(h, r.pose);
+    const mouths = this.mouths();
+    const frame = this.carryFrame(h, r.pose);
+    const unplaced = new Set(fs.map((f) => f.hose));
+    const out: Rest[] = [];
+    let why: string | null = null;
+    for (const f of fs) {
+      unplaced.delete(f.hose);
+      f.hose.turn = wrapAngle(f.turn + frame.yaw);
+      const fh: Held = { kind: 'hose', h: f.hose, reach: f.hose.reach, relYaw: wrapAngle(f.hose.turn - this.player.yaw), dist: 0 };
+      const tip = onGrid({ ...toWorld(frame, f.off), yaw: 0 });
+      const mouthY = mouths.find((m) => m.v === f.into)?.y ?? tip.y;
+      const ys = [tip.y];
+      for (let up = NOZZLE_GAP; up <= POUR_RISE; up += 10) ys.push(mouthY + up);
+      const obstacles = this.obstacles(fh, true, null, unplaced);
+      const solid = this.obstacles(fh, false, null, unplaced);
+      let res: Rest | null = null;
+      for (const y of ys) {
+        const r1 = this.rest(fh, { ...tip, y }, obstacles, solid, null);
+        if (typeof r1 !== 'string' && mouthBelow(mouths, r1.pose)?.v === f.into) {
+          res = r1;
+          break;
+        }
+      }
+      if (!res) {
+        why = 'No room for a hose following it';
+        break;
+      }
+      out.push(res);
+      f.hose.outlet = { x: res.pose.x, y: res.pose.y, z: res.pose.z };
+      ({ turn: f.hose.turn, reach: f.hose.reach } = res.hose!);
+    }
+    fs.forEach((f, i) => Object.assign(f.hose, saved[i]));
+    this.placeHeld(h, at);
+    if (h.kind === 'flask') h.f.tilt = tilt;
+    return why ?? out;
+  }
+
+  /** Put the hoses following what's held back where they were before, rolling up any pulled out for it (see gather). */
+  private unfollow(h: Held): void {
+    for (const f of h.follow ?? []) {
+      if (f.was) Object.assign(f.hose, { outlet: f.was.outlet, turn: f.was.turn, reach: f.was.reach });
+      else this.hoses.splice(this.hoses.indexOf(f.hose), 1);
+    }
+    h.follow = [];
   }
 
   /**
@@ -1314,6 +1444,7 @@ export class GameEngine {
     if (!h.from) return this.putAway();
     if (h.kind === 'tool' && h.t.flipped !== !!h.from.flipped) flip(h.t);
     this.hoses = this.hoses.filter((x) => !h.made?.includes(x));
+    this.unfollow(h);
     this.setDown(h, h.from);
   }
 
@@ -1332,6 +1463,12 @@ export class GameEngine {
       }
     }
     if (h.kind === 'hose' && rest.hose) ({ turn: h.h.turn, reach: h.h.reach } = rest.hose);
+    h.follow?.forEach((f, i) => {
+      const fr = rest.follow?.[i];
+      if (!fr) return;
+      f.hose.outlet = { x: fr.pose.x, y: fr.pose.y, z: fr.pose.z };
+      ({ turn: f.hose.turn, reach: f.hose.reach } = fr.hose!);
+    });
     this.held = null;
     this.pinned = null;
   }
@@ -1807,6 +1944,7 @@ export class GameEngine {
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     this.move(dt);
+    if (this.held) this.follow(this.held);
     this.view.look(this.eye(), this.player.yaw, this.player.pitch);
     if (!this.turning) this.target = this.view.pick(REACH, this.heldObject());
     this.simulate(dt);
@@ -2144,7 +2282,10 @@ export class GameEngine {
     const obstacles = this.obstacles(h);
     const solid = this.obstacles(h, false);
     const r = this.rest(h, this.gridded(h, p), obstacles, solid);
-    return typeof r === 'string' ? { why: r } : { rest: r };
+    if (typeof r === 'string') return { why: r };
+    if (!h.follow?.length) return { rest: r };
+    const follow = this.followRests(h, r);
+    return typeof follow === 'string' ? { why: follow } : { rest: { ...r, follow } };
   }
 
   /**
@@ -2156,10 +2297,9 @@ export class GameEngine {
    * on anything but the counter. (Stands don't bump into each other: their rods can stand side by side.) A hose's
    * nozzle's stand goes where it's wanted (see nozzleWant) if it can, or else the first place it can of nozzleMounts.
    */
-  private rest(h: Held, p: Pose, obstacles: readonly Box[], solid: readonly Box[]): Rest | string {
-    const now = this.heldBox(h);
-    // what's in the way of a box, besides whatever what's held is already stuck in
-    const blocked = (b: Box) => obstacles.some((o) => boxesOverlap(b, o) && !boxesOverlap(now, o));
+  private rest(h: Held, p: Pose, obstacles: readonly Box[], solid: readonly Box[], now: Box | null = this.heldBox(h)): Rest | string {
+    // what's in the way of a box, besides whatever what's held is already stuck in (`now`)
+    const blocked = (b: Box) => obstacles.some((o) => boxesOverlap(b, o) && !(now && boxesOverlap(now, o)));
     // box `to`, stretched up to the height of box `from`: what it passes through, going straight down
     const span = (to: Box, from: Box): Box => {
       const y0 = Math.min(to.y - to.hy, from.y - from.hy);
@@ -2233,12 +2373,18 @@ export class GameEngine {
     for (const t of this.tools) for (const s of toolStands(t)) out.push({ s, of: { kind: 'tool', t, part: 'body', k: 0 } });
     const held = this.held;
     const pl = this.placed;
+    const follow = held?.follow ?? [];
     for (const h of this.hoses) {
-      // one held stands where it would be set down (see standsAt)
-      const s =
-        held?.kind === 'hose' && held.h === h ? this.standsAt(held, this.heldPose(held), pl && 'rest' in pl ? pl.rest : undefined)[0]
-        : nozzleStand(h.outlet, h.turn, h.reach);
-      out.push({ s, of: { kind: 'hose', h } });
+      // one held stands where it would be set down (see standsAt), and so does one following what's held (see gather),
+      // if it can be, or else it has none for now
+      const k = follow.findIndex((f) => f.hose === h);
+      let s: Stand | undefined;
+      if (k >= 0) {
+        const r = pl && 'rest' in pl ? pl.rest.follow?.[k] : undefined;
+        if (r) s = nozzleStand(r.pose, r.hose!.turn, r.hose!.reach);
+      } else if (held?.kind === 'hose' && held.h === h) s = this.standsAt(held, this.heldPose(held), pl && 'rest' in pl ? pl.rest : undefined)[0];
+      else s = nozzleStand(h.outlet, h.turn, h.reach);
+      if (s) out.push({ s, of: { kind: 'hose', h } });
     }
     return out;
   }
@@ -2278,15 +2424,17 @@ export class GameEngine {
     if (!h || !pl) return [];
     const ok = 'rest' in pl;
     const p = ok ? pl.rest.pose : this.heldPose(h);
+    const base = (st: Stand) => {
+      const b = standBase(st, ok ? (counterUnder(standBase(st, 0)) ?? groundAt(st.x, st.z)) : groundAt(st.x, st.z));
+      return { x: b.x, y: b.y - b.hy, z: b.z, hx: b.hx, hz: b.hz, yaw: b.yaw, ok };
+    };
+    // the stands of the hoses following it (see gather), where they'd go
+    const follow = ok ? (pl.rest.follow ?? []).map((r) => base(nozzleStand(r.pose, r.hose!.turn, r.hose!.reach))) : [];
     const stands = this.standsAt(h, p, ok ? pl.rest : undefined);
-    if (stands.length)
-      return stands.map((st) => {
-        const b = standBase(st, ok ? (counterUnder(standBase(st, 0)) ?? groundAt(st.x, st.z)) : groundAt(st.x, st.z));
-        return { x: b.x, y: b.y - b.hy, z: b.z, hx: b.hx, hz: b.hz, yaw: b.yaw, ok };
-      });
+    if (stands.length) return [...stands.map(base), ...follow];
     const b = this.boxAt(h, p);
     const y = ok ? b.y - b.hy : groundAt(b.x, b.z);
-    return [{ x: b.x, y, z: b.z, hx: b.hx, hz: b.hz, yaw: b.yaw, ok }];
+    return [{ x: b.x, y, z: b.z, hx: b.hx, hz: b.hz, yaw: b.yaw, ok }, ...follow];
   }
 
   private render(dt: number): void {
