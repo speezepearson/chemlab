@@ -64,7 +64,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `porthole.ts` is the porthole's shape, for how much of the wall it takes up.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
-    `volumes.ts`); `rumble.ts` is the spectrometer, `beeper.ts` the receptacle, `ambience.ts` the ship, `water.ts` drips and streams.
+    `volumes.ts`); `rumble.ts` is the spectrometer, `beeper.ts` the cryostabilizer station, `ambience.ts` the ship, `water.ts` drips and streams.
     New sounds play into a channel's `bus()`, never straight to the destination, so the sliders reach them. A sound
     in the lab goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),
     so it fades and pans with where it is relative to the player's head.
@@ -79,7 +79,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Volume isn't atoms.** Capacities and flows are in `volume()` units: molecules by default, or atoms when the
   "volume counts molecules" toggle is off. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
 - **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
-  chemistry, cooling, the spectrometer's run and sound, the receptacle's cycle, and the drip and stream sounds. All of it
+  chemistry, cooling, the spectrometer's run and sound, the cryostabilizer station's cycle, and the drip and stream sounds. All of it
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
   notice; and the player themselves (walking, looking, carrying, tipping a flask), which is input, not the sim. Waking
@@ -121,12 +121,13 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `ITEMS` and `HOTKEYS` in `engine.ts` (the hotbar's order and keys) and `ICONS` in `Palette.tsx`, unless the tool is
     unique. Only `-` is left on the number row.
   - Tests and the README.
-  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `flippable`, `fixed`, `sealed`, `maxFlow`, `label`, `bench`.
-- **Unique tools** (`UNIQUE_TOOLS`: the spectrometer, the cryostabilizer reference, the flow meter and the receptacle)
-  aren't on the hotbar and can't be put away. `uniqueTools()` keeps at most one of each and always adds a
-  spectrometer, a meter and a receptacle. The receptacle is also `fixed`: it can't be carried at all.
-- **The goal** is what the receptacle flushes (`Tool.flushed`, gathered into the engine's `delivered`, which is
-  saved), not what's lying around in vessels.
+  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `flippable`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`, `bench`; and per tank, `cap`, `sealed` and `label`.
+- **Unique tools** (`UNIQUE_TOOLS`: the spectrometer, the flow meter and the receptacle) aren't on the hotbar and can't
+  be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
+  whole cryostabilizer station (`STATION` in `tools.ts`): its tanks are the receptacle, the tester and the reference,
+  in that order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved.
+- **The goal** is the target in the station's reference (`tanks[2]`, against `GOAL_TARGET`), not what's lying around
+  in vessels.
 - **Saves** stay at format v1. New fields are optional and the loaders tolerate their absence. Species are stored by
   name.
 

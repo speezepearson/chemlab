@@ -7,17 +7,16 @@ export const N_FLASKS = 8;
  * and what's left on board, which is the cryostabilizer reference's hundred flasks.
  */
 export const VOYAGE = { passengers: 32_210, days: 4_456, mlPerPassengerDay: 0.000035, presentL: 2.811 };
-/** Litres in a flask (by volume): what the reference's hundred flasks make the 2.811 L that's left. */
+/** Litres in a flask (a billion molecules): what the reference's hundred flasks make the 2.811 L that's left. */
 export const FLASK_L = VOYAGE.presentL / 100;
 /** The cryostabilizer needed to reach Mu Ceti, in litres: the intro's sum, about 5.023 L. */
 export const GOAL_L = (VOYAGE.passengers * VOYAGE.mlPerPassengerDay * VOYAGE.days) / 1000;
 /**
- * The target to win, by volume (see VOLUME), delivered through the receptacle: GOAL_L, about 179 flasks. A single
- * good load does it: a full receptacle more than 95% target holds at least 181 flasks of it, even when what's
- * left over is all single atoms.
+ * The target to win, in molecules: GOAL_L, about 179 flasks of it, in the cryostabilizer reference, which starts with
+ * a hundred (see REFERENCE_START).
  */
-export const GOAL_VOLUME = (GOAL_L / FLASK_L) * CAP;
-/** The receptacle takes only fluid more than this pure in the target (by atoms). */
+export const GOAL_TARGET = (GOAL_L / FLASK_L) * CAP;
+/** The station's tester passes only fluid more than this pure in the target (by atoms) into the reference. */
 export const GOAL_PURITY = 0.95;
 /** Amounts of fluid below this many atoms count as nothing: too little to see or pour. */
 export const TRACE = CAP * 1e-6;

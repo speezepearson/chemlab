@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import { temperature, type Fluid } from '../chem/reactions';
 import { LOOK, coronaAlpha, coronaRadius, glowFalloff, haloAlpha, haloRadius } from './appearance';
 import {
-  NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, lx, onTool, openingOf, tankRect, valveLocal, valveZ, type Stand,
+  NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, lx, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
 } from './bodies';
-import { CAP, FLASK_L, GOAL_L, TRACE } from './config';
+import { TARGET } from '../chem/species';
+import { CAP, FLASK_L, GOAL_L, GOAL_TARGET, TRACE } from './config';
 import { Vessel, fluidAlpha, fluidRGB, glowColor, volume, type Flask } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, type Scale } from './scale';
@@ -14,8 +15,8 @@ import { AIRLOCK, POD } from './airlock';
 import { notice } from '../intro/notice';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
-  HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, RECEPTACLE_BODY, RECEPTACLE_LAMPS,
-  FUNNEL_TIP, SCAN_LIGHTS, SORTER_CHUTE, SPECTROMETER, SUMP_TIP, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
+  HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, RECEPTACLE_LAMPS, REFERENCE_CAP,
+  FUNNEL_TIP, SCAN_LIGHTS, SORTER_CHUTE, SPECTROMETER, STATION, SUMP_TIP, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
 
@@ -78,8 +79,6 @@ export interface Frame {
   shake: ReadonlyMap<Tool, number>;
   /** Real seconds since the last frame, for the beacon. */
   dt: number;
-  /** The target the receptacle has taken so far, by volume, for its screen. */
-  delivered: number;
   /** Whether the alarms are silenced, which the button under the beacon shows. */
   alarmsOff: boolean;
   /** Whether the porthole's blinds are shut, leaving it solid black. */
@@ -171,6 +170,10 @@ const keyMats = {
 const hidden = new THREE.MeshBasicMaterial({ visible: false });
 const faintMat = new THREE.MeshBasicMaterial({ color: 0xd6ecf2, transparent: true, opacity: 0.3, depthWrite: false });
 const rodMat = new THREE.MeshStandardMaterial({ color: 0xb4bcb9, metalness: 0.75, roughness: 0.3 });
+/** The steel plate the cryostabilizer station's panes are set in, and the lines marked on it. */
+const plateMat = new THREE.MeshStandardMaterial({ color: 0x6f7975, metalness: 0.5, roughness: 0.45 });
+const autoflushMat = new THREE.MeshStandardMaterial({ color: 0xd8443b, roughness: 0.5 });
+const goalMat = new THREE.MeshStandardMaterial({ color: 0x7fd4ad, roughness: 0.5 });
 
 /** Points in a flat frame (x right, y down), placed at depth z, as a vector in an object's own frame (y up). */
 const v3 = (x: number, y: number, z = 0) => new THREE.Vector3(x, -y, z);
@@ -656,7 +659,8 @@ class ToolView {
   private wire?: THREE.MeshStandardMaterial;
   private lamps: THREE.MeshStandardMaterial[] = [];
   private verdict?: THREE.MeshStandardMaterial;
-  private hose?: { outer: THREE.Mesh; core: THREE.Mesh; mat: THREE.MeshBasicMaterial };
+  /** How far forward the button's face is when it's out, in local units. */
+  private buttonZ = 0;
 
   constructor(
     readonly t: Tool,
@@ -677,7 +681,8 @@ class ToolView {
     // drain pipes and spouts, from the bottom of the tanks (and their sumps)
     const TH = sh.tankH ?? TANK_H;
     const floor = TH + (sh.sump?.h ?? 0);
-    if (t.kind === 'exchanger')
+    if (sh.wall) this.buildStation(scene, pick);
+    else if (t.kind === 'exchanger')
       sh.tanks.forEach((tk, k) => {
         pipes(art, [[tankX(tk), floor], [tankX(tk), HELIX.y - HELIX.r]]);
         pipes(art, [[sh.spouts[k], HELIX.y + HELIX.r], [sh.spouts[k], sh.spoutY - 4]]);
@@ -709,12 +714,11 @@ class ToolView {
       pipes(art, [[tankX(sh.tanks[0]), TH], [tankX(sh.tanks[0]), y - r + 1]]);
       for (const x of sh.spouts) pipes(art, [[x, y + r - 1], [x, sh.spoutY - 4]]);
     } else if (t.kind === 'spectrometer') pipes(art, [[0, TH], [0, SPECTROMETER.body.y0]]);
-    else if (t.kind === 'receptacle') pipes(art, [[sh.spouts[0], TH], [sh.spouts[0], sh.spoutY - 4]]);
     else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);
     sh.spouts.forEach((x, k) => pick(block(art, pipeMat, x - 4, x + 4, sh.spoutY - 6, sh.spoutY, -4, 4), 'spout', k));
 
-    // tanks, with their fluid
-    t.tanks.forEach((_, k) => {
+    // tanks, with their fluid (the station's are built in buildStation)
+    if (!sh.wall) t.tanks.forEach((_, k) => {
       const r = tankRect(t, k);
       const o = openingOf(t, k);
       const d = D.tank;
@@ -779,8 +783,7 @@ class ToolView {
       const lid = block(art, pipeMat, r.x0 - 4, r.x1 + 4, -5, 0, -d / 2 - 3, d / 2 + 3);
       lid.visible = false;
       this.lids.push(lid);
-      const lines = sh.label?.length ?? 0;
-      this.labels.push(new Label(upright, v3(ux(tankX(sh.tanks[k])), o.y - (lines ? 11 * lines + 10 : 9))));
+      this.labels.push(new Label(upright, v3(ux(tankX(sh.tanks[k])), tankNoteY(t, k))));
       this.glows.push(new Glow(scene));
     });
     if (sh.label) {
@@ -788,7 +791,7 @@ class ToolView {
       s.position.copy(v3(ux(0), -21 + (11 * (sh.label.length - 1)) / 2 - 4));
       upright.add(s);
     }
-    if (t.tanks.length > 1)
+    if (t.tanks.length > 1 && !sh.wall)
       sh.tanks.forEach((tk) => {
         const s = textSprite([tk.name], '#e6ece8');
         s.scale.multiplyScalar(0.9);
@@ -804,7 +807,6 @@ class ToolView {
     if (t.kind === 'spectrometer') this.buildSpectrometer(pick);
     if (t.kind === 'heater') this.buildHeater();
     if (t.kind === 'meter') this.buildMeter();
-    if (t.kind === 'receptacle') this.buildReceptacle(pick);
 
     // valves: a round core on the front face, and a lever that points where it was turned; or a dial
     if (!sh.noValve)
@@ -1018,45 +1020,98 @@ class ToolView {
   }
 
   /**
-   * A receptacle's cabinet: a row of lamps that blink with its thinking, a verdict lamp, its button, a green-on-black
-   * screen showing the litres it's taken so far of the litres needed, a hose from its foot down to the floor, and the
-   * reject valve under the vessel, which has no handle: it opens itself to pour out what the receptacle refused.
+   * The cryostabilizer station (see STATION): a steel plate on the wall with a narrow glass pane for each column, the
+   * column's fluid behind it filling it from the bottom as the column fills; a glass funnel over the receptacle, whose
+   * stem runs back into the wall and down into its column; a red line across the receptacle's pane where it flushes
+   * itself, and a pale green one across the reference's where it holds enough; a waste nozzle under the tester, whose
+   * valve has no handle, since only the station works it; a faucet under the reference (its lever is built with the
+   * other valves); and between them a panel with a row of lamps that blink with the tester's thinking, a verdict lamp,
+   * the button, and a green-on-black screen showing the litres of cryostabilizer in the reference of the litres
+   * needed. Each column is labeled above.
    */
-  private buildReceptacle(pick: (m: THREE.Object3D, part: 'body' | 'button') => void): void {
-    const { lamps, verdict, button, screen: s, ...b } = RECEPTACLE_BODY;
-    const z = TOOL_DEPTH.receptacle.body / 2;
-    block(this.art, panelMat, b.x0, b.x1, b.y0, b.y1, -z, z);
+  private buildStation(scene: THREE.Object3D, pick: (m: THREE.Object3D, part: 'body' | 'tank' | 'button', k?: number) => void): void {
+    const { t, art, upright } = this;
+    const sh = t.shape;
+    const { paneW, paneH: H, out, plate, funnel: f, panel: p, autoflush } = STATION;
+    const wall = -out;
+    const face = wall + plate;
+    const b = sh.box;
+    // the plate, with a slot for each pane
+    const shape = rectPath((b.x0 + b.x1) / 2, -H / 2, b.x1 - b.x0, H + 40, new THREE.Shape());
+    for (const tk of sh.tanks) shape.holes.push(rectPath(tankX(tk), -H / 2, paneW, H));
+    const pl = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: plate, bevelEnabled: false }), plateMat);
+    pl.position.z = wall;
+    pl.receiveShadow = true;
+    art.add(pl);
+    sh.tanks.forEach((tk, k) => {
+      const x = tankX(tk);
+      // the column's back, its fluid, and the glass in front
+      block(art, darkMat, x - paneW / 2, x + paneW / 2, 0, H, wall, wall + 0.5);
+      const fm = new FluidMesh([new THREE.BoxGeometry(paneW - 1, H, plate - 3).translate(x, -H / 2, wall + 0.5 + (plate - 3) / 2)], art);
+      for (const m of fm.meshes) pick(m, 'tank', k);
+      this.fluids.push({ fm, level: (v) => onTool(t, 0, H * (1 - Math.min(1, volume(v) / v.cap))).y });
+      const pane = new THREE.Mesh(new THREE.PlaneGeometry(paneW, H).translate(x, -H / 2, face - 0.5), glassMat);
+      art.add(pane);
+      pick(pane, 'tank', k);
+      // no lids: the receptacle is open through its funnel, and the others are sealed
+      const lid = new THREE.Mesh();
+      lid.visible = false;
+      this.lids.push(lid);
+      if (tk.label) {
+        const s = textSprite(tk.label);
+        s.position.copy(v3(x, STATION.labelY - 5.5 * tk.label.length, face + 4));
+        upright.add(s);
+      }
+      this.labels.push(new Label(upright, v3(x, tankNoteY(t, k))));
+      this.glows.push(new Glow(scene));
+    });
+    const mark = (x: number, share: number, mat: THREE.Material) =>
+      (block(art, mat, x - paneW / 2 - 8, x + paneW / 2 + 8, H * (1 - share) - 0.7, H * (1 - share) + 0.7, face, face + 0.4).castShadow = false);
+    mark(tankX(sh.tanks[0]), autoflush, autoflushMat);
+    mark(tankX(sh.tanks[2]), GOAL_TARGET / REFERENCE_CAP, goalMat);
+    // the funnel, over the cell in front of the wall, and its stem down and back into a pump on the plate, which
+    // pumps whatever lands in it up into the receptacle's column
+    const x0 = tankX(sh.tanks[0]);
+    const pump = H - 12;
+    glassFrom(art, frustum(x0, f.y, f.y + f.h, 2 * f.w, 2 * f.w, FUNNEL_TIP, FUNNEL_TIP, true));
+    rod(art, glassMat, v3(x0, f.y + f.h, 0), v3(x0, pump, 0), FUNNEL_TIP / 2);
+    rod(art, glassMat, v3(x0, pump, 0), v3(x0, pump, face), FUNNEL_TIP / 2);
+    block(art, panelMat, x0 - 12, x0 + 12, pump - 10, pump + 10, face, face + 10);
+    // the tester's waste nozzle and the reference's faucet: out from under their columns, and down
+    for (const x of sh.spouts) {
+      rod(art, pipeMat, v3(x, H + 10, face), v3(x, H + 10, 0), 2.5);
+      pipes(art, [[x, H + 10], [x, sh.spoutY - 4]], 2.5);
+    }
+    const valve = new THREE.Mesh(unitCylinder, panelMat);
+    valve.rotation.x = Math.PI / 2;
+    valve.scale.set(4.5, 8, 4.5);
+    valve.position.copy(v3(sh.spouts[0], sh.valveY, 0));
+    art.add(valve);
+    // the panel
+    const front = face + p.depth;
+    block(art, panelMat, p.x0, p.x1, p.y0, p.y1, face, front);
     for (let i = 0; i < RECEPTACLE_LAMPS; i++) {
       const mat = new THREE.MeshStandardMaterial({ color: 0x5b665f });
       const m = new THREE.Mesh(unitSphere, mat);
-      m.scale.setScalar(lamps.r);
-      m.position.copy(v3(lamps.x0 + i * lamps.dx, lamps.y, z + 0.5));
-      this.art.add(m);
+      m.scale.setScalar(p.lamps.r);
+      m.position.copy(v3(p.lamps.x0 + i * p.lamps.dx, p.lamps.y, front + 0.5));
+      art.add(m);
       this.lamps.push(mat);
     }
     this.verdict = new THREE.MeshStandardMaterial({ color: 0x5b665f });
     const v = new THREE.Mesh(unitSphere, this.verdict);
-    v.scale.setScalar(verdict.r);
-    v.position.copy(v3(verdict.x, verdict.y, z + 0.5));
-    this.art.add(v);
-    this.button = block(this.art, keyMats.up, button.x0, button.x1, button.y0, button.y1, z, z + 4);
+    v.scale.setScalar(p.verdict.r);
+    v.position.copy(v3(p.verdict.x, p.verdict.y, front + 0.5));
+    art.add(v);
+    this.buttonZ = front;
+    this.button = block(art, keyMats.up, p.button.x0, p.button.x1, p.button.y0, p.button.y1, front, front + 4);
     pick(this.button, 'button');
-    block(this.art, darkMat, s.x0 - 1, s.x1 + 1, s.y0 - 1, s.y1 + 1, z, z + 0.5);
-    this.screen = new Screen(this.art, s.x0, s.x1, s.y0, s.y1, z + 0.6, 8);
-    const sp = this.t.shape;
-    const valve = new THREE.Mesh(unitCylinder, panelMat);
-    valve.rotation.x = Math.PI / 2;
-    valve.scale.set(4.5, 6, 4.5);
-    valve.position.copy(v3(sp.spouts[0], sp.valveY, z - 2));
-    this.art.add(valve);
-    const mat = new THREE.MeshBasicMaterial();
-    const outer = new THREE.Mesh(unitCylinder, pipeMat);
-    const core = new THREE.Mesh(unitCylinder, mat);
-    this.art.add(outer, core);
-    this.hose = { outer, core, mat };
+    const sc = p.screen;
+    block(art, darkMat, sc.x0 - 1, sc.x1 + 1, sc.y0 - 1, sc.y1 + 1, front, front + 0.5);
+    this.screen = new Screen(art, sc.x0, sc.x1, sc.y0, sc.y1, front + 0.6, 8);
   }
 
-  update(hot: Pick | null, shake: number, delivered: number): void {
+  update(hot: Pick | null, shake: number): void {
     const { t } = this;
     this.root.position.set(t.pose.x, t.pose.y, t.pose.z);
     this.root.rotation.y = t.pose.yaw;
@@ -1068,7 +1123,8 @@ class ToolView {
       this.lids[k].visible = t.lidded;
       this.labels[k].set(v.label);
       const r = tankRect(t, k);
-      const c = onTool(t, tankX(t.shape.tanks[k]), (r.y0 + r.y1) / 2);
+      // the station's columns are behind panes in the wall
+      const c = onTool(t, tankX(t.shape.tanks[k]), (r.y0 + r.y1) / 2, t.shape.wall ? STATION.plate - STATION.out : 0);
       this.glows[k].update(v, v.cap, new THREE.Vector3(c.x, c.y, c.z));
     });
     this.note.set(t.note);
@@ -1137,7 +1193,7 @@ class ToolView {
         s.tex.needsUpdate = true;
       }
     }
-    if (t.kind === 'receptacle') this.updateReceptacle(delivered);
+    if (t.kind === 'receptacle') this.updateStation();
     if (this.lamp) {
       const on = t.scanning && Math.floor(t.scanAge * 3) % 2 === 0;
       const m = this.lamp.material as THREE.MeshStandardMaterial;
@@ -1146,14 +1202,14 @@ class ToolView {
     }
     if (this.button) {
       const busy = t.kind === 'receptacle' ? !!t.cycle : t.scanning;
-      const z = TOOL_DEPTH[t.kind].body / 2;
+      const z = this.buttonZ || TOOL_DEPTH[t.kind].body / 2;
       const isHot = hot?.kind === 'tool' && hot.t === t && hot.part === 'button';
       this.button.material = busy ? keyMats.down : isHot ? keyMats.hot : keyMats.up;
       this.button.position.z = z + (busy ? 0.6 : 2);
     }
   }
 
-  private updateReceptacle(delivered: number): void {
+  private updateStation(): void {
     const { t } = this;
     const c = t.cycle;
     // a lamp is lit for a moment after each beep that lights it
@@ -1165,12 +1221,12 @@ class ToolView {
     const v = t.verdict === 'pass' ? 0x5cff7a : t.verdict === 'fail' ? 0xff4a3d : null;
     this.verdict!.color.set(v ?? 0x5b665f);
     this.verdict!.emissive.set(v ?? 0x000000);
-    // the screen: accepted / required, in litres
+    // the screen: the cryostabilizer in the reference / what's needed, in litres
     const s = this.screen!;
-    const text = `${((delivered / CAP) * FLASK_L).toFixed(3)} L / ${GOAL_L.toFixed(3)} L`;
+    const text = `${((t.tanks[2].n[TARGET] / CAP) * FLASK_L).toFixed(3)} L / ${GOAL_L.toFixed(3)} L`;
     if (s.key !== text) {
       s.key = text;
-      const sc = RECEPTACLE_BODY.screen;
+      const sc = STATION.panel.screen;
       s.ctx.setTransform(s.ppu, 0, 0, s.ppu, -sc.x0 * s.ppu, -sc.y0 * s.ppu);
       s.ctx.fillStyle = '#040a06';
       s.ctx.fillRect(sc.x0, sc.y0, sc.x1 - sc.x0, sc.y1 - sc.y0);
@@ -1185,19 +1241,6 @@ class ToolView {
       for (let y = sc.y0; y < sc.y1; y += 1.5) s.ctx.fillRect(sc.x0, y, sc.x1 - sc.x0, 0.6);
       s.tex.needsUpdate = true;
     }
-    // the hose, from the cabinet's foot straight down to the floor or counter, showing a flush going down it
-    const x = RECEPTACLE_BODY.hoseX;
-    const top = RECEPTACLE_BODY.y1;
-    const foot = onTool(t, x, top);
-    const down = Math.max(top + 1, top + foot.y - groundAt(foot.x, foot.z));
-    const { outer, core, mat } = this.hose!;
-    for (const [m, r] of [[outer, 4.5], [core, 2.6]] as const) {
-      m.position.copy(v3(x, (top + down) / 2));
-      m.scale.set(r, down - top, r);
-    }
-    const flushing = c?.phase === 'flush' && t.tanks[0].N > TRACE;
-    core.visible = flushing;
-    if (flushing) setRGB(mat.color, fluidRGB(t.tanks[0])!);
   }
 
   dispose(): void {
@@ -2357,7 +2400,7 @@ export class View {
         for (const [o, p] of pickables) if (p.kind === 'tool' && p.t === t) pickables.delete(o);
         this.tools.set(t, new ToolView(t, scene, pickables));
       }
-    for (const v of this.tools.values()) v.update(fr.hot, fr.shake.get(v.t) ?? 0, fr.delivered);
+    for (const v of this.tools.values()) v.update(fr.hot, fr.shake.get(v.t) ?? 0);
     for (const v of this.scales.values()) v.update(fr.tarePress === v.sc, fr.hot);
     for (const { h, from, fluid } of fr.hoses) this.hoses.get(h)!.update(from, fluid);
     fr.faucets.forEach((fa, i) => {

@@ -4,8 +4,8 @@ import { T_ROOM, defaultChemParams } from '../chem/params';
 import { SPECIES, TARGET, singleOf, speciesEnergies } from '../chem/species';
 import { CAP, HOME_W } from './config';
 import type { Vessel } from './flask';
-import { CELL } from './space';
-import { REFERENCE_CAP, type ToolKind } from './tools';
+import { CELL, LIFT, ROOM, type Pose } from './space';
+import { REFERENCE_START, type ToolKind } from './tools';
 
 /** Starting contents of one shelf slot. */
 export interface FlaskFill {
@@ -32,10 +32,14 @@ export interface Spot {
 export const SPECTROMETER_AT: Spot = { at: [1.15, 0.3] };
 
 /**
- * Where the one and only receptacle stands, the same way: there's always exactly one of it too. It's too big for the
- * back counter, so it's on the first island, facing the back wall, high enough for a flask under its reject spout.
+ * Where the cryostabilizer station is (see STATION in tools.ts): built into the right wall, past the faucets, facing
+ * into the room, its funnel and spouts over the middles of the cells of the counter's row nearest the wall, and its
+ * spouts high enough for a flask under them. Every lab has it, always here.
  */
-export const RECEPTACLE_AT: Spot = { at: [-0.25, 0.306], z: 750, yaw: Math.PI };
+export const STATION_POSE: Pose = { x: ROOM.x1 - CELL / 2, y: LIFT + 400, z: 11.5 * CELL, yaw: -Math.PI / 2 };
+
+/** What the cryostabilizer reference starts with: the hundred flasks of the target left on board (see VOYAGE). */
+export const REFERENCE_FILL: FlaskFill = { contents: [{ species: TARGET, molecules: REFERENCE_START }], T: T_ROOM };
 
 /** Where the one and only flow meter starts, the same way: there's always exactly one of it too. */
 export const METER_AT: Spot = { at: [0.85, 0.55] };
@@ -146,11 +150,6 @@ export const PRESETS: readonly Preset[] = [
     name: 'Stranded',
     flasks: [],
     tools: [
-      // on the first island, facing the back wall, high enough for a flask under it
-      {
-        kind: 'reference', at: [0.15, 0.442], z: 750, yaw: Math.PI,
-        tanks: [{ contents: [{ species: TARGET, molecules: REFERENCE_CAP }], T: T_ROOM }],
-      },
       { kind: 'separator', at: [0.25, 0.3] },
       { kind: 'dispenser', at: [0.55, 0.3] },
       // its tanks half a grid cell either side of its middle
