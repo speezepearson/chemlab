@@ -6,11 +6,11 @@ const STEPS = 100;
 
 /**
  * A volume slider for each kind of sound, and one for everything, and a button to put them back. Outside god mode
- * there's no spectrometer slider, since its name says what the machine is.
+ * there's no analyzer slider, since its name says what the machine does.
  */
 export function SoundPanel({ god }: { god: boolean }) {
   const [, rerender] = useReducer((x: number) => x + 1, 0);
-  const shown = CHANNELS.filter((ch) => god || ch !== 'spectrometer');
+  const shown = CHANNELS.filter((ch) => god || ch !== 'analyzer');
   return (
     <details>
       <summary>Sound</summary>

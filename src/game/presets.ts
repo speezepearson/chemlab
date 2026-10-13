@@ -26,10 +26,10 @@ export interface Spot {
 }
 
 /**
- * Where the one and only mass spectrometer starts, unless a preset places it itself: there's always exactly one. It
- * stands on the back counter.
+ * Where the one and only composition analyzer starts, unless a preset places it itself: there's always exactly one. It
+ * stands over the back counter, its spouts high enough for a flask under them.
  */
-export const SPECTROMETER_AT: Spot = { at: [1.15, 0.3] };
+export const ANALYZER_AT: Spot = { at: [1.15, 0.5] };
 
 /**
  * Where the cryostabilizer station is (see STATION in tools.ts): built into the right wall, past the faucets, facing

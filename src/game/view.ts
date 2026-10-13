@@ -18,8 +18,8 @@ import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
-  HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, RECEPTACLE_LAMPS, REFERENCE_CAP,
-  FUNNEL_TIP, SCAN_LIGHTS, SORTER_CHUTE, SPECTROMETER, STATION, SUMP_TIP, gaugeSegments, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
+  ANALYZER, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, RECEPTACLE_LAMPS, REFERENCE_CAP,
+  FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, SUMP_TIP, gaugeSegments, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
 
@@ -78,8 +78,6 @@ export interface Frame {
   tarePress: Scale | null;
   /** The key or button under the crosshair, to light it. */
   hot: Pick | null;
-  /** How far each running spectrometer shakes, in world units. */
-  shake: ReadonlyMap<Tool, number>;
   /** Real seconds since the last frame, for the beacon. */
   dt: number;
   /** Sim seconds the lab has run, for what blinks on sim time (the station's gauge). */
@@ -482,17 +480,16 @@ class Screen {
 }
 
 /**
- * A mass spectrometer's screen: a hexagon per molecule size (1, 2, 3 atoms), each cut into sextants by color (see
- * SEXTANT_ATOMS) that glow as bright as their share of the last sample, lighting up one hexagon at a time as a
- * run goes on. No words, no lines between the sextants: reading it is part of the game.
+ * A composition analyzer's screen: a hexagon per molecule size (1, 2, 3 atoms), each cut into sextants by color (see
+ * SEXTANT_ATOMS) that glow as bright as their share of what it's reading, and dark while it has nothing to read. No
+ * words, no lines between the sextants: reading it is part of the game.
  */
-function drawSpectrum(sc: Screen, t: Tool): void {
-  const lit = SCAN_LIGHTS.filter((at) => t.scanAge >= at).length;
-  const key = `${lit}|${t.reading?.map((x) => x.toFixed(3)).join(',') ?? ''}`;
+function drawAnalysis(sc: Screen, t: Tool): void {
+  const key = t.reading?.map((x) => x.toFixed(2)).join(',') ?? '';
   if (key === sc.key) return;
   sc.key = key;
   const { ctx, ppu } = sc;
-  const { screen: s, hexes } = SPECTROMETER;
+  const { screen: s, hexes } = ANALYZER;
   const green = (a: number) => `rgba(${PHOSPHOR}, ${a})`;
   ctx.setTransform(ppu, 0, 0, ppu, -s.x0 * ppu, -s.y0 * ppu);
   ctx.fillStyle = '#040a06';
@@ -504,7 +501,7 @@ function drawSpectrum(sc: Screen, t: Tool): void {
       const a = ((-120 + 60 * j) * Math.PI) / 180;
       return [cx + r * Math.cos(a), cy + r * Math.sin(a)] as const;
     };
-    if (t.reading && t.scanAge >= SCAN_LIGHTS[w])
+    if (t.reading)
       for (let j = 0; j < 6; j++) {
         const b = Math.min(1, t.reading[w * 6 + j]);
         if (b <= 0) continue;
@@ -729,7 +726,7 @@ class ToolView {
   readonly root = new THREE.Group();
   /** Whether the tool was flipped when this was built: it's rebuilt when that changes. */
   readonly flipped: boolean;
-  /** Everything but the root's placement, which shakes while a spectrometer runs. */
+  /** Everything but the root's placement. */
   private body = new THREE.Group();
   private art = new THREE.Group();
   private upright = new THREE.Group();
@@ -745,8 +742,9 @@ class ToolView {
   private note: Label;
   private glows: Glow[] = [];
   private button?: THREE.Mesh;
-  private lamp?: THREE.Mesh;
   private screen?: Screen;
+  /** What's running down an inline instrument's tube, shown as a thin thread of its color. */
+  private thread?: { m: THREE.Mesh; mat: THREE.MeshBasicMaterial };
   private helix?: { geom: THREE.TubeGeometry; colors: THREE.BufferAttribute; k: number }[];
   private films: THREE.Mesh[] = [];
   private filmMats: THREE.MeshBasicMaterial[] = [];
@@ -810,8 +808,15 @@ class ToolView {
       const { y, r } = HEATER_TUBE;
       pipes(art, [[tankX(sh.tanks[0]), TH], [tankX(sh.tanks[0]), y - r + 1]]);
       for (const x of sh.spouts) pipes(art, [[x, y + r - 1], [x, sh.spoutY - 4]]);
-    } else if (t.kind === 'spectrometer') pipes(art, [[0, TH], [0, SPECTROMETER.body.y0]]);
-    else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);
+    } else if (t.kind === 'analyzer') {
+      // straight down from the tube to its spout, with a branch into the cabinet, and out of the cabinet's far side to
+      // the waste spout
+      const { body: b, inY, wasteY } = ANALYZER;
+      pipes(art, [[0, TH], [0, sh.spoutY - 4]]);
+      pipes(art, [[0, inY], [b.x0, inY]], 1.3);
+      const x = sh.spouts[1];
+      pipes(art, [[b.x1, wasteY], [x, wasteY], [x, sh.spoutY - 4]]);
+    } else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);
     sh.spouts.forEach((x, k) => pick(block(art, pipeMat, x - 4, x + 4, sh.spoutY - 6, sh.spoutY, -4, 4), 'spout', k));
 
     // tanks, with their fluid (the station's are built in buildStation)
@@ -901,7 +906,8 @@ class ToolView {
 
     if (t.kind === 'exchanger') this.buildHelix();
     if (t.kind === 'sorter') this.buildChute();
-    if (t.kind === 'spectrometer') this.buildSpectrometer(pick);
+    if (t.kind === 'analyzer') this.buildAnalyzer();
+    if (INLINE_TOOLS.includes(t.kind)) this.buildThread(TH);
     if (t.kind === 'heater') this.buildHeater();
     if (t.kind === 'meter') this.buildMeter();
 
@@ -1034,19 +1040,26 @@ class ToolView {
     }
   }
 
-  /** A sample cup on a cabinet with an old green-on-black screen, a lamp and a red push button, and no words anywhere. */
-  private buildSpectrometer(pick: (m: THREE.Object3D, part: 'body' | 'button') => void): void {
-    const { body: b, screen: s, button } = SPECTROMETER;
-    const D = TOOL_DEPTH.spectrometer.body;
+  /**
+   * A composition analyzer's cabinet, beside its tube, with an old green-on-black screen and no words anywhere. The
+   * screen is kept upright, so its hexagons read the same way flipped or not.
+   */
+  private buildAnalyzer(): void {
+    const { body: b, screen: s } = ANALYZER;
+    const D = TOOL_DEPTH.analyzer.body;
     block(this.art, panelMat, b.x0, b.x1, b.y0, b.y1, -D / 2, D / 2, 3);
     block(this.art, darkMat, s.x0 - 1.5, s.x1 + 1.5, s.y0 - 1.5, s.y1 + 1.5, D / 2, D / 2 + 0.6);
-    this.screen = new Screen(this.art, s.x0, s.x1, s.y0, s.y1, D / 2 + 0.7, 5);
-    this.lamp = new THREE.Mesh(unitSphere, new THREE.MeshStandardMaterial({ color: 0x5b665f }));
-    this.lamp.scale.setScalar(3);
-    this.lamp.position.copy(v3(s.x0 + 6, (button.y0 + button.y1) / 2, D / 2 + 1));
-    this.art.add(this.lamp);
-    this.button = block(this.art, keyMats.up, button.x0, button.x1, button.y0, button.y1, D / 2, D / 2 + 4);
-    pick(this.button, 'button');
+    const [x0, x1] = [lx(this.t, s.x0), lx(this.t, s.x1)].sort((a, b) => a - b);
+    this.screen = new Screen(this.upright, x0, x1, s.y0, s.y1, D / 2 + 0.7, 5);
+  }
+
+  /** A thin thread down the middle of an inline instrument's tube, `h` tall, in the color of what's running through it. */
+  private buildThread(h: number): void {
+    const mat = new THREE.MeshBasicMaterial();
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, h, 8).translate(0, -h / 2, 0), mat);
+    m.visible = false;
+    this.art.add(m);
+    this.thread = { m, mat };
   }
 
   /**
@@ -1250,11 +1263,10 @@ class ToolView {
     this.screen = new Screen(art, sc.x0, sc.x1, sc.y0, sc.y1, face + 0.6, 8);
   }
 
-  update(hot: Pick | null, shake: number, clock: number): void {
+  update(hot: Pick | null, clock: number): void {
     const { t } = this;
     this.root.position.set(t.pose.x, t.pose.y, t.pose.z);
     this.root.rotation.y = t.pose.yaw;
-    this.body.position.set(shake * (2 * Math.random() - 1), shake * (2 * Math.random() - 1), 0);
     this.body.updateMatrixWorld();
     t.tanks.forEach((v, k) => {
       const { fm, level, fit } = this.fluids[k];
@@ -1319,7 +1331,14 @@ class ToolView {
       setRGB(this.wire!.color, rgb);
       setRGB(this.wire!.emissive, rgb).multiplyScalar(Math.min(1, 1.3 * dial));
     }
-    if (t.kind === 'spectrometer' && this.screen) drawSpectrum(this.screen, t);
+    if (t.kind === 'analyzer' && this.screen) drawAnalysis(this.screen, t);
+    if (this.thread) {
+      const through = new Vessel(Infinity);
+      for (const v of t.out) if (v) through.addFrom(v, volume(v));
+      const rgb = through.N > 0 ? fluidRGB(through) : null;
+      this.thread.m.visible = !!rgb;
+      if (rgb) setRGB(this.thread.mat.color, rgb);
+    }
     if (t.kind === 'meter' && this.screen) {
       const s = this.screen;
       const text = meterText(t.rate);
@@ -1334,14 +1353,8 @@ class ToolView {
       }
     }
     if (t.kind === 'receptacle') this.updateStation(clock);
-    if (this.lamp) {
-      const on = t.scanning && Math.floor(t.scanAge * 3) % 2 === 0;
-      const m = this.lamp.material as THREE.MeshStandardMaterial;
-      m.color.set(on ? 0xffb43a : 0x5b665f);
-      m.emissive.set(on ? 0xffa020 : 0x000000);
-    }
     if (this.button) {
-      const busy = t.kind === 'receptacle' ? !!t.cycle : t.scanning;
+      const busy = !!t.cycle;
       const z = this.buttonZ || TOOL_DEPTH[t.kind].body / 2;
       const isHot = hot?.kind === 'tool' && hot.t === t && hot.part === 'button';
       this.button.material = busy ? keyMats.down : isHot ? keyMats.hot : keyMats.up;
@@ -2620,7 +2633,7 @@ export class View {
         for (const [o, p] of pickables) if (p.kind === 'tool' && p.t === t) pickables.delete(o);
         this.tools.set(t, new ToolView(t, scene, pickables));
       }
-    for (const v of this.tools.values()) v.update(fr.hot, fr.shake.get(v.t) ?? 0, fr.clock);
+    for (const v of this.tools.values()) v.update(fr.hot, fr.clock);
     for (const v of this.scales.values()) v.update(fr.tarePress === v.sc, fr.hot);
     for (const { h, from, fluid } of fr.hoses) this.hoses.get(h)!.update(from, fluid);
     fr.faucets.forEach((fa, i) => {

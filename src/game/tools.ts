@@ -350,25 +350,29 @@ export function beepPattern(rand = Math.random): Beep[] {
   return out;
 }
 
-/** How much a spectrometer's sample cup holds, by volume: a hundredth of a flask, 10M, about seven drops. */
-export const SAMPLE_CAP = CAP / 100;
-/** Sim seconds into a spectrometer run at which each of its three hexagons lights up; the run ends with the last. */
-export const SCAN_LIGHTS = [1, 3, 7] as const;
 /**
- * A spectrometer run's phases: each lasts until its hexagon lights (see SCAN_LIGHTS), rumbling and shaking at
- * its own level, from 0 to 1, a step up from the last.
+ * The inline instruments: each is a vertical glass tube, whose top a hose's nozzle snaps onto (see INLINE_DOCK), draining
+ * straight through at FUNNEL_RATE however full it is, down to a spout at its foot, past a cabinet beside it that
+ * reads what goes by.
  */
-export const SCAN_PHASES = [
-  { end: SCAN_LIGHTS[0], level: 0.3 },
-  { end: SCAN_LIGHTS[1], level: 0.6 },
-  { end: SCAN_LIGHTS[2], level: 1 },
-] as const;
-
-/** How hard a spectrometer `age` seconds into its run rumbles and shakes (see SCAN_PHASES): 0 outside a run. */
-export function scanLevel(age: number): number {
-  if (age < 0) return 0;
-  return SCAN_PHASES.find((ph) => age < ph.end)?.level ?? 0;
-}
+export const INLINE_TOOLS: readonly ToolKind[] = ['analyzer'];
+/** How much an inline instrument's tube holds, by volume: a twentieth of a flask, just a buffer. */
+export const TUBE_CAP = CAP / 20;
+/** How wide an inline instrument's tube is inside, in local units. */
+export const TUBE_W = 10;
+/** How tall an inline instrument's tube is inside, in local units: enough to hold TUBE_CAP (see SPACE_PER_ATOM). */
+export const TUBE_H = (TUBE_CAP * SPACE_PER_ATOM) / ((Math.PI / 4) * TUBE_W ** 2);
+/**
+ * How far above an inline instrument's tube, in world units, a hose's nozzle let go of over it snaps down onto its
+ * top.
+ */
+export const INLINE_DOCK = 150;
+/** How many sim seconds back an inline instrument's reading looks: it reads what passed through it over just that long. */
+export const INSTRUMENT_WINDOW = 1;
+/** How loud the composition analyzer hums while it has something to read, from 0 to 1 (see rumble.ts). */
+export const ANALYZER_HUM = 0.3;
+/** The share of what passes through the composition analyzer that it draws off into its cabinet, to read, and out its waste spout. */
+export const ANALYZER_SAMPLE = 0.01;
 
 /** How many stretches the heater's tube is cut into, each holding what passes through it as one mixed packet. */
 export const HEATER_CELLS = 24;
@@ -446,18 +450,18 @@ export function meterText(rate: number): string {
   return '9'.repeat(METER_DIGITS);
 }
 
-/** The order of a spectrometer hexagon's sextants, clockwise from the top. */
+/** The order of an analyzer hexagon's sextants, clockwise from the top. */
 export const SEXTANT_ATOMS: readonly Atom[] = ['G', 'C', 'B', 'M', 'R', 'Y'];
 
 export type ToolKind =
-  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'heater' | 'spectrometer' | 'meter'
+  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'heater' | 'analyzer' | 'meter'
   | 'tank' | 'receptacle';
 
 /**
  * Tools there's only ever one of: not in the palette, and never put away. The receptacle is the whole cryostabilizer
  * station (see STATION), reference and tester included.
  */
-export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectrometer', 'meter', 'receptacle'];
+export const UNIQUE_TOOLS: readonly ToolKind[] = ['analyzer', 'meter', 'receptacle'];
 
 /**
  * A tool's geometry in local units: multiply by the stage scale and offset by
@@ -502,8 +506,6 @@ export interface ToolShape {
   flippable?: boolean;
   /** Whether its tanks are upright cylinders, as wide front to back as across, rather than boxes; a sump too. */
   round?: boolean;
-  /** Whether it stands straight on a counter, like a cabinet, rather than being held up over it on a clamp stand. */
-  bench?: boolean;
   /** Whether it stays where it is: it can't be picked up and carried. */
   fixed?: boolean;
   /** Whether it's built into a wall, with no stand: only the cryostabilizer station (see STATION). */
@@ -654,18 +656,19 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: 82,
     box: { x0: -34, x1: 34, y0: -6, y1: 84 },
   },
-  spectrometer: {
-    // a sample cup on a cabinet with a screen and a run button (see SPECTROMETER)
-    tanks: [{ name: 'sample', x0: -7, x1: 7 }],
-    tankH: 8,
-    tankCap: SAMPLE_CAP,
-    funnel: true,
+  analyzer: {
+    // a glass tube straight down to a spout, and a cabinet beside it with a screen (see ANALYZER), which takes its
+    // sample from the tube's foot and lets it out a waste spout on its far side, two grid cells along
+    tanks: [{ name: 'tube', x0: -TUBE_W / 2, x1: TUBE_W / 2 }],
+    tankH: TUBE_H,
+    tankCap: TUBE_CAP,
+    round: true,
     noValve: true,
-    bench: true,
-    spouts: [],
-    valveY: 20,
-    spoutY: 20,
-    box: { x0: -72, x1: 72, y0: -6, y1: 106 },
+    flippable: true,
+    spouts: [0, 2 * CELL],
+    valveY: TUBE_H,
+    spoutY: 116,
+    box: { x0: -10, x1: 2 * CELL + 6, y0: -6, y1: 118 },
   },
 };
 
@@ -675,12 +678,16 @@ export const SORTER_CHUTE = { x0: -112, x1: 200, y0: 44, y1: 68 };
 export const chuteY = (x: number) =>
   SORTER_CHUTE.y0 + ((x - SORTER_CHUTE.x0) / (SORTER_CHUTE.x1 - SORTER_CHUTE.x0)) * (SORTER_CHUTE.y1 - SORTER_CHUTE.y0);
 
-/** The spectrometer's cabinet, screen, hexagons (centers and radius) and run button, in local units. */
-export const SPECTROMETER = {
-  body: { x0: -70, x1: 70, y0: 26, y1: 104 },
-  screen: { x0: -62, x1: 62, y0: 32, y1: 80 },
-  hexes: { xs: [-40, 0, 40], y: 56, r: 17 },
-  button: { x0: 28, x1: 62, y0: 84, y1: 98 },
+/**
+ * The composition analyzer's cabinet, right of its tube, with its screen and hexagons (centers and radius), and how
+ * high the pipe from the tube's foot into it, and the one out of it to its waste spout, run, in local units.
+ */
+export const ANALYZER = {
+  body: { x0: 14, x1: 186, y0: 4, y1: 96 },
+  screen: { x0: 24, x1: 176, y0: 14, y1: 86 },
+  hexes: { xs: [50, 100, 150], y: 50, r: 21 },
+  inY: 70,
+  wasteY: 84,
 };
 
 /** The meter's cabinet, and its display, in local units. */
@@ -708,7 +715,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   meter: 'Flow meter',
   tank: 'Tank',
   receptacle: 'Cryostabilizer',
-  spectrometer: 'Mass spectrometer',
+  analyzer: 'Composition analyzer',
 };
 
 /**
@@ -788,8 +795,9 @@ export function separatorShares(): number[][] {
  *   spout. The reference lets out a trickle through its faucet, the second spout, as far as its one valve is open.
  * - A **flow meter** has a funnel like the splitter's, with no valve, draining straight through to one spout, and
  *   shows what flows out, averaged over the last METER.window (see rate and meterText).
- * - A **mass spectrometer** has a small sample cup and no spouts. Running it (see scan) reads the sample's
- *   spectrum onto a screen, then lids the cup and drains the sample away into the cabinet over the run.
+ * - A **composition analyzer** is an inline instrument (see INLINE_TOOLS): its tube drains straight through like
+ *   the meter's funnel, and it draws off ANALYZER_SAMPLE of what passes, out its waste spout, reading that (see
+ *   spectrum) onto a screen, averaged over the last INSTRUMENT_WINDOW.
  *
  * Tools run on sim time, so a slow drip into a reacting flask gives the same
  * result at any sim speed.
@@ -811,14 +819,18 @@ export class Tool {
   streaming: boolean[];
   /** Per spout, the flow on the last step, in flasks per second. */
   flow: number[];
-  /** A spectrometer's last reading (see spectrum), shown on its screen; null until it's first run. */
+  /**
+   * An analyzer's reading (see spectrum), shown on its screen: what it drew off over the last INSTRUMENT_WINDOW, as
+   * shares of its volume; null if nothing passed through it in that time.
+   */
   reading: number[] | null = null;
-  /** Sim seconds since the spectrometer was last run (see SCAN_LIGHTS); Infinity if it isn't running. */
-  scanAge = Infinity;
   /** A meter's reading: what's flowed out of it, by volume per sim second, averaged over the last METER.window. */
   rate = 0;
-  /** A meter's recent steps, oldest first: how long each was and what flowed out in it, back past METER.window. */
-  private recent: { h: number; v: number }[] = [];
+  /**
+   * An instrument's recent steps, oldest first, back past its window (see record): how long each was and what it
+   * measured in it.
+   */
+  private recent: { h: number; x: number[] }[] = [];
   /**
    * The player's note about the whole tool, written above it; empty for none. Only a tool with more than one tank
    * has one: on a tool with one tank, its tank's label (Vessel.label) does the job.
@@ -860,24 +872,14 @@ export class Tool {
 
   /** Run for `h` sim seconds. Returns, per spout, the fluid that left it, or null if none did. */
   step(h: number): (Vessel | null)[] {
-    if (this.kind === 'spectrometer') {
-      if (this.scanning) {
-        // drained evenly, so the cup is empty just as the run ends
-        const cup = this.tanks[0];
-        const left = SCAN_LIGHTS[SCAN_LIGHTS.length - 1] - this.scanAge;
-        transfer(cup, null, left <= h ? volume(cup) : (volume(cup) * h) / left);
-        this.scanAge += h;
-      }
-      return (this.out = []);
-    }
     if (this.kind === 'heater') return this.heat(h);
     if (this.kind === 'receptacle') return this.receive(h);
     let packets = this.tanks.map((tank, k) => {
       const p = new Vessel(Infinity);
-      // a valve, or a funnel without one, lets out in proportion to how high the fluid stands; the meter's funnel
-      // drains at a fixed rate, so what it reads is just what's arriving
+      // a valve, or a funnel without one, lets out in proportion to how high the fluid stands; the meter's funnel, and
+      // an instrument's tube, drain at a fixed rate, so what they read is just what's arriving
       const rate =
-        this.kind === 'meter' ? FUNNEL_RATE
+        this.kind === 'meter' || INLINE_TOOLS.includes(this.kind) ? FUNNEL_RATE
         : this.kind === 'splitter' || this.kind === 'sorter' ? FUNNEL_RATE * this.level(k)
         : this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW) * this.level(k);
       transfer(tank, p, rate * h);
@@ -887,26 +889,31 @@ export class Tool {
     if (this.kind === 'separator') packets = separate(packets[0]);
     if (this.kind === 'splitter') packets = divide(packets[0], () => 1 - this.valves[0]);
     if (this.kind === 'sorter') packets = sieve(packets[0]);
+    if (this.kind === 'analyzer') packets = divide(packets[0], () => 1 - ANALYZER_SAMPLE);
     this.out = packets.map((p) => (p.N > 0 ? p : null));
     this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
-    if (this.kind === 'meter') this.measure(h, volume(packets[0]));
+    if (this.kind === 'meter') this.rate = this.record(h, [volume(packets[0])], METER.window)[0];
+    if (this.kind === 'analyzer') {
+      const [v, ...spec] = this.record(h, [volume(packets[1]), ...spectrum(packets[1], 1)], INSTRUMENT_WINDOW);
+      this.reading = v > 0 ? spec.map((x) => x / v) : null;
+    }
     return this.out;
   }
 
   /**
-   * A meter's reading after a step of h sim seconds that let out v: what's flowed in the last METER.window, or
-   * just over (back to the start of the oldest step it reaches into), per sim second. Until that long has passed,
-   * the time before counts as nothing flowing.
+   * An instrument's reading after a step of h sim seconds in which it measured x: what it's measured over the last
+   * `window`, or just over (back to the start of the oldest step it reaches into), per sim second, entry by entry.
+   * Until that long has passed, the time before counts as measuring nothing.
    */
-  private measure(h: number, v: number): void {
+  private record(h: number, x: number[], window: number): number[] {
     const r = this.recent;
-    r.push({ h, v });
+    r.push({ h, x });
     let span = 0;
     for (const s of r) span += s.h;
-    while (r.length > 1 && span - r[0].h >= METER.window) span -= r.shift()!.h;
-    let sum = 0;
-    for (const s of r) sum += s.v;
-    this.rate = sum / Math.max(span, METER.window);
+    while (r.length > 1 && span - r[0].h >= window) span -= r.shift()!.h;
+    const sum = x.map(() => 0);
+    for (const s of r) s.x.forEach((v, i) => (sum[i] += v));
+    return sum.map((v) => v / Math.max(span, window));
   }
 
   /**
@@ -946,14 +953,9 @@ export class Tool {
     return share;
   }
 
-  /** Whether a spectrometer run is under way, with hexagons still to light. */
-  get scanning(): boolean {
-    return this.scanAge < SCAN_LIGHTS[SCAN_LIGHTS.length - 1];
-  }
-
-  /** Whether the tanks are lidded, so nothing can be poured or fall in: always if sealed, and a spectrometer's while it runs. */
+  /** Whether the tanks are lidded, so nothing can be poured or fall in: if they're sealed. */
   get lidded(): boolean {
-    return !!this.shape.sealed || (this.kind === 'spectrometer' && this.scanning);
+    return !!this.shape.sealed;
   }
 
   /** Whether tank k is open on top, to pour into: not if the tool's lidded, or the tank's sealed. */
@@ -1018,25 +1020,13 @@ export class Tool {
     this.flow = out.map((p) => (p ? volume(p) / (MAX_FLOW * h) : 0));
     return out;
   }
-
-  /**
-   * Run a spectrometer: read its sample's spectrum and start the hexagons lighting up (see SCAN_LIGHTS), while
-   * step lids the cup and drains the sample away. Does nothing, returning false, while a run is under way.
-   */
-  scan(): boolean {
-    if (this.kind !== 'spectrometer' || this.scanning) return false;
-    const cup = this.tanks[0];
-    this.reading = spectrum(cup, cup.cap);
-    this.scanAge = 0;
-    return true;
-  }
 }
 
 /**
- * What a spectrometer shows for a sample in a cup holding `cap`: for each molecule size w (1–3 atoms) and
- * atom color c, in SEXTANT_ATOMS order, at index (w − 1)·6 + c, the share of the cup that molecules of size
- * w with a c atom in them fill (by volume, see VOLUME). So a full cup of R lights 1R fully, and of R–G both
- * 2R and 2G fully; a half-full cup reads half as bright.
+ * What an analyzer shows for a sample, against `cap`: for each molecule size w (1–3 atoms) and atom color c, in
+ * SEXTANT_ATOMS order, at index (w − 1)·6 + c, how much of `cap` molecules of size w with a c atom in them make up
+ * (by volume, see VOLUME). So against the sample's own volume, R lights 1R fully, and R–G both 2R and 2G fully; and
+ * half R, half G lights 1R and 1G half as bright.
  */
 export function spectrum(f: Fluid, cap: number): number[] {
   const out = new Array<number>(18).fill(0);

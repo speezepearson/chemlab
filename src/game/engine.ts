@@ -6,7 +6,7 @@ import { hushAlarms } from './ambience';
 import { beeper, type Beeper } from './beeper';
 import {
   FLASK_CENTER, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, flip, nozzleBox,
-  nozzleMounts, nozzleStand, onBench, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
+  docked, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
 import { CAP, FILL_RATE, GOAL_TARGET, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
@@ -16,7 +16,7 @@ import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
 import { Flask, Vessel, fluidColor, roomFor, transfer, volume, volumeUnit, type Point } from './flask';
 import { boxesOverlap, moveBox, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
-import { DEFAULT_PRESET, METER_AT, REFERENCE_FILL, SPECTROMETER_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
+import { ANALYZER_AT, DEFAULT_PRESET, METER_AT, REFERENCE_FILL, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
@@ -25,9 +25,9 @@ import {
   type Pose, type Vec3,
 } from './space';
 import {
-  HEATER, HEATER_CELLS, HEATER_TUBE, Hose, MAX_FLOW, RECEPTACLE_TIMES, SCAN_LIGHTS, SHAPES, STATION, SUMP_TIP, TANK_H, TOOL_NAMES,
-  Tool, UNIQUE_TOOLS, aimAt, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, scanLevel, sumpFillHeight, tankX, type Mouth,
-  type ToolKind,
+  ANALYZER, ANALYZER_HUM, HEATER, HEATER_CELLS, HEATER_TUBE, Hose, INLINE_TOOLS, MAX_FLOW, RECEPTACLE_TIMES, SHAPES, STATION, SUMP_TIP, TANK_H,
+  TOOL_NAMES, Tool, UNIQUE_TOOLS, aimAt, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, tankX,
+  type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
 import {
@@ -491,7 +491,6 @@ export class GameEngine {
         ...(t.tube.length ? { tube: t.tube.map(saveVessel) } : {}),
         ...(t.flipped ? { flipped: true } : {}),
         ...(t.note ? { note: t.note } : {}),
-        ...(t.reading ? { reading: [...t.reading] } : {}),
       })),
       scales: this.scales.map((sc) => ({
         ...this.frac(sc.pose), ...depth(sc.pose), tare: sc.tare,
@@ -540,7 +539,6 @@ export class GameEngine {
         t.tube.forEach((v, k) => st.tube?.[k] && loadVessel(v, st.tube[k]));
         t.flipped = !!st.flipped && !!t.shape.flippable;
         if (typeof st.note === 'string') t.note = st.note;
-        if (Array.isArray(st.reading) && st.reading.length === 18) t.reading = st.reading.map((x) => Math.max(0, Number(x) || 0));
         return t;
       });
     this.nextToolId = Math.max(-1, ...this.tools.map((t) => t.id)) + 1;
@@ -603,7 +601,7 @@ export class GameEngine {
   }
 
   /**
-   * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a mass spectrometer, a flow
+   * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a composition analyzer, a flow
    * meter and a cryostabilizer station: if there's none, one is added where it starts, the station's reference holding
    * what's left on board (see REFERENCE_FILL). The station is built into the wall, so it's always where it is.
    */
@@ -618,7 +616,7 @@ export class GameEngine {
       if (kind === 'receptacle') applyFill(t.tanks[2], REFERENCE_FILL);
       this.tools.push(t);
     };
-    add('spectrometer', spotPose(SPECTROMETER_AT));
+    add('analyzer', spotPose(ANALYZER_AT));
     add('meter', spotPose(METER_AT));
     add('receptacle', STATION_POSE);
     this.station().pose = { ...STATION_POSE };
@@ -647,8 +645,7 @@ export class GameEngine {
   }
 
   /**
-   * Set everything that stands on the bench (flasks, scales, and tools like the spectrometer) down on the counter
-   * under it, if there is one, and stand each flask on a scale where the scale now is. Presets and older saves leave
+   * Set everything that stands on the bench (flasks and scales) down on the counter under it, if there is one, and stand each flask on a scale where the scale now is. Presets and older saves leave
    * things in the air, where arms from the ceiling used to hold them.
    */
   private restAll(): void {
@@ -661,7 +658,6 @@ export class GameEngine {
     };
     for (const f of this.flasks) if (!riders.has(f)) down(flaskBox(f), (dy) => (f.pose = { ...f.pose, y: f.pose.y - dy }));
     for (const sc of this.scales) down(scaleBox(sc), (dy) => (sc.pose = { ...sc.pose, y: sc.pose.y - dy }));
-    for (const t of this.tools) if (onBench(t)) down(toolBox(t), (dy) => (t.pose = { ...t.pose, y: t.pose.y - dy }));
     this.settle();
   }
 
@@ -1249,10 +1245,8 @@ export class GameEngine {
   private leftDown(): void {
     const p = this.target;
     if (p?.kind === 'tool' && p.part === 'button') {
-      const t = p.t;
       // the station's sounds start with its cycle, in simulate, since it can start one itself
-      if (t.kind === 'receptacle') t.press();
-      else if (t.scan()) this.rumbles.set(t, rumble(this.hear(this.machineAt(t))));
+      p.t.press();
       return;
     }
     if (p?.kind === 'wake') {
@@ -1551,6 +1545,10 @@ export class GameEngine {
       const { lamps, verdict } = STATION;
       return onTool(t, lamps.x, (lamps.y0 + verdict.y) / 2, -STATION.out);
     }
+    if (t.kind === 'analyzer') {
+      const b = ANALYZER.body;
+      return onTool(t, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
+    }
     return onTool(t, 0, 60);
   }
 
@@ -1777,7 +1775,6 @@ export class GameEngine {
       if (m && simDt > 0 && i !== stillFaucet) this.faucetFlows.push({ fa, from, m });
     });
 
-    const scanFrom = this.tools.map((t) => t.scanAge);
     const cycleFrom = this.tools.map((t) => t.cycle && { ...t.cycle });
     const vessels = this.vessels();
     // how exposed each one's fluid is to the room, from how it stands now; it hardly changes in a frame
@@ -1850,20 +1847,20 @@ export class GameEngine {
     }
     this.spillTime = simDt;
 
-    // spectrometer runs go by sim time too (Tool.step ages them): a step louder each phase, a chime as each
-    // ends, silent while paused
-    this.tools.forEach((t, j) => {
-      const r = this.rumbles.get(t);
-      if (!r) return;
-      r.place(this.hear(this.machineAt(t)));
-      for (const at of SCAN_LIGHTS) if (scanFrom[j] < at && t.scanAge >= at) r.chime();
-      r.level(simDt > 0 ? scanLevel(t.scanAge) : 0);
-    });
-    for (const [t, r] of this.rumbles)
-      if (!this.tools.includes(t) || !t.scanning) {
+    // an analyzer hums quietly while it has something to read, on sim time, so silent while paused
+    for (const t of this.tools) {
+      if (t.kind !== 'analyzer' || !t.reading || this.rumbles.has(t)) continue;
+      this.rumbles.set(t, rumble(this.hear(this.machineAt(t))));
+    }
+    for (const [t, r] of this.rumbles) {
+      if (!this.tools.includes(t) || !t.reading) {
         r.stop(); // done, put away, or the lab was replaced
         this.rumbles.delete(t);
+        continue;
       }
+      r.place(this.hear(this.machineAt(t)));
+      r.level(simDt > 0 ? ANALYZER_HUM : 0);
+    }
 
     // the station's cycles go by sim time too, whether its button or a full receptacle started them: a blip for each
     // beep of its thinking that came round this frame, its verdict as the thinking ends, and the rush of a flush into
@@ -1953,6 +1950,7 @@ export class GameEngine {
   private gridded(h: Held, p: Pose): Pose {
     if (h.kind === 'tool') return onGrid(p, toolAnchor(h.t));
     if (h.kind === 'scale') return onGrid(p, SCALE_ANCHOR);
+    if (h.kind === 'hose') return docked(onGrid(p), this.tools);
     return onGrid(p);
   }
 
@@ -2128,8 +2126,6 @@ export class GameEngine {
     const drops: Frame['drops'][number][] = [];
     for (const t of this.tools) t.drops.forEach((v, k) => drops.push({ at: this.outletAt(t, k), v, hanging: true }));
     for (const d of this.falling) drops.push({ at: d, v: d.v, hanging: false });
-    const shake = new Map<Tool, number>();
-    if (this.speed > 0) for (const t of this.tools) if (t.scanning) shake.set(t, scanLevel(t.scanAge) * 2.5);
     const pl = (this.placed = h ? this.placement(h) : null);
     // each hose from its spout or faucet to its nozzle, with what's running through it
     const hoses = this.hoses.map((hose) => {
@@ -2141,7 +2137,7 @@ export class GameEngine {
       eye: this.eye(), yaw: this.player.yaw, pitch: this.player.pitch,
       flasks: this.flasks, tools: this.tools, scales: this.scales, hoses, faucets: this.faucets,
       streams, drops,
-      tarePress: this.tarePress, hot: this.target, shake, dt, clock: this.clock, alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
+      tarePress: this.tarePress, hot: this.target, dt, clock: this.clock, alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
       airlock: this.airlockLook(),
       papers: this.paperFrame(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(),
@@ -2264,7 +2260,7 @@ export class GameEngine {
   private pressable(): boolean {
     const p = this.target;
     return (
-      (p?.kind === 'tool' && p.part === 'button' && !(p.t.kind === 'receptacle' ? p.t.cycle : p.t.scanning)) ||
+      (p?.kind === 'tool' && p.part === 'button' && !p.t.cycle) ||
       (p?.kind === 'scale' && p.part === 'tare') ||
       p?.kind === 'alarm' ||
       p?.kind === 'blinds' ||
@@ -2346,7 +2342,7 @@ export class GameEngine {
   private wouldFlow(t: Tool): boolean {
     // the station's reference through its faucet, or the tester out its waste nozzle
     if (t.kind === 'receptacle') return (t.valves[0] > 0 && t.tanks[2].N > TRACE) || !!t.cycle;
-    const free = t.kind === 'splitter' || t.kind === 'sorter' || t.kind === 'heater' || t.kind === 'meter';
+    const free = t.kind === 'splitter' || t.kind === 'sorter' || t.kind === 'heater' || t.kind === 'meter' || INLINE_TOOLS.includes(t.kind);
     const drains = (k: number) => free || t.valves[k] > 0;
     // a heater's tube runs whatever its valves say
     return (t.shape.spouts.length > 0 && t.tanks.some((v, k) => v.N > TRACE && drains(k))) || t.tube.some((v) => v.N > TRACE);
