@@ -1,5 +1,5 @@
 import {
-  ATOMS, ATOM_RGB, BIT_PAIRS, GROUP, bitOf, pairKey, popcount3,
+  ATOMS, ATOM_RGB, ATOM_WEIGHT, BIT_PAIRS, GROUP, bitOf, pairKey, popcount3,
   type Atom, type Group,
 } from './atoms';
 import type { ChemParams } from './params';
@@ -13,6 +13,8 @@ export interface Species {
   /** Bond bitmask, see BIT_PAIRS. */
   mask: number;
   size: number;
+  /** The sum of its atoms' weights (see ATOM_WEIGHT). */
+  weight: number;
   key: string;
   name: string;
   color: string;
@@ -62,6 +64,7 @@ function enumerate(): Species[] {
             atoms,
             mask,
             size,
+            weight: list.reduce((w, a) => w + ATOM_WEIGHT[a], 0),
             key: keyOf(atoms, mask),
             name: nameOf(atoms, mask),
             color: `rgb(${col.map(Math.round).join(',')})`,

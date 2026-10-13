@@ -1,14 +1,18 @@
+import { NS, SPECIES } from '../chem/species';
 import { CAP } from './config';
 import type { Flask } from './flask';
 import { ORIGIN, type Pose } from './space';
 
-/** Fluid weighs 1 µg per atom, so a billion atoms (a full flask) weighs 1 kg. */
-export const GRAMS_PER_ATOM = 1000 / CAP;
+/**
+ * Fluid weighs 1 µg per unit of its atoms' weight (see ATOM_WEIGHT), so a billion atoms of weight 1 (a full flask of
+ * M) weigh 1 kg, and of R, 6 kg.
+ */
+export const GRAMS_PER_WEIGHT = 1000 / CAP;
 /** Nominal weight of an empty flask; each one is off by up to ±GLASS_ERROR. */
 export const GLASS_GRAMS = 100;
 export const GLASS_ERROR = 6;
-/** The heaviest load a scale can read. */
-export const SCALE_MAX = 5000;
+/** The heaviest load a scale can read: more than two full flasks of the heaviest molecule. */
+export const SCALE_MAX = 30000;
 
 /**
  * The empty weight of the flask in shelf slot i. Deterministic, so the same
@@ -24,8 +28,11 @@ export function glassGrams(i: number): number {
   return GLASS_GRAMS + GLASS_ERROR * (2 * u - 1);
 }
 
+/** What a flask and the fluid in it weigh, in grams. */
 export function flaskGrams(f: Flask): number {
-  return f.glass + f.N * GRAMS_PER_ATOM;
+  let w = 0;
+  for (let s = 0; s < NS; s++) if (f.n[s]) w += f.n[s] * SPECIES[s].weight;
+  return f.glass + w * GRAMS_PER_WEIGHT;
 }
 
 /** Scale geometry in local units, origin at the top center of the platform, y down as on the old flat bench. */

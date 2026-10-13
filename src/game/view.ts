@@ -18,8 +18,8 @@ import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
-  HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, RECEPTACLE_LAMPS, REFERENCE_CAP,
-  FUNNEL_TIP, SCAN_LIGHTS, SORTER_CHUTE, SPECTROMETER, STATION, SUMP_TIP, gaugeSegments, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
+  ANALYZER, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, RECEPTACLE_LAMPS, REFERENCE_CAP,
+  FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, SUMP_TIP, gaugeSegments, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
 
@@ -61,11 +61,16 @@ export interface Frame {
   faucets: readonly FaucetSpot[];
   streams: readonly { from: Vec3; toY: number; fluid: Fluid; flow: number }[];
   /**
-   * Streams for lining things up: solid gray where fluid would land in a mouth, faint gray where it would just miss
-   * one, green for what will snap together when what's held is let go; each with that mouth, whose rim is outlined to
-   * match.
+   * Streams for lining things up: gray where a held flask would pour, green for what will line up when what's held is
+   * let go; each with the mouth it lands in, whose rim is outlined to match, and whose vessel, `v`, flashes green.
    */
-  guides: readonly { from: Vec3; toY: number; look: GuideLook; mouth: Vec3 & { hx: number; hz: number; yaw: number } }[];
+  guides: readonly {
+    from: Vec3;
+    toY: number;
+    look: GuideLook;
+    mouth: Vec3 & { hx: number; hz: number; yaw: number };
+    v: Vessel;
+  }[];
   /**
    * Where what's held would come to rest if let go, outlined where it'd stand (its footprint, or its stands' bases):
    * pale if it can be set down there, red if it can't.
@@ -78,12 +83,12 @@ export interface Frame {
   tarePress: Scale | null;
   /** The key or button under the crosshair, to light it. */
   hot: Pick | null;
-  /** How far each running spectrometer shakes, in world units. */
-  shake: ReadonlyMap<Tool, number>;
   /** Real seconds since the last frame, for the beacon. */
   dt: number;
   /** Sim seconds the lab has run, for what blinks on sim time (the station's gauge). */
   clock: number;
+  /** Each bond's energy, in BOND_KEYS order, for the spectroscope's graph. */
+  energies: readonly number[];
   /** Whether the alarms are silenced, which the button under the beacon shows. */
   alarmsOff: boolean;
   /** Whether the porthole's blinds are shut, leaving it solid black. */
@@ -102,20 +107,19 @@ export interface Frame {
   };
 }
 
-export type GuideLook = 'faint' | 'solid' | 'snap';
+export type GuideLook = 'solid' | 'snap';
 /**
  * How each look of guide is drawn: the color and opacity of its stream, and of its rim; and the same for the outline
  * of where what's held will stand, `place`, or can't, `bad` (see Frame.footprints), which have no stream.
  */
 const GUIDE_LOOKS: Record<GuideLook | 'place' | 'bad', { color: number; stream: number; edge: number; rim: number }> = {
-  faint: { color: 0xb4bcb8, stream: 0.18, edge: 0xdfe6e2, rim: 0.4 },
   solid: { color: 0xb4bcb8, stream: 0.6, edge: 0xdfe6e2, rim: 0.85 },
   snap: { color: 0x7fd4ad, stream: 0.8, edge: 0x7fd4ad, rim: 0.95 },
   place: { color: 0, stream: 0, edge: 0xe8eeea, rim: 0.75 },
   bad: { color: 0, stream: 0, edge: 0xe0604c, rim: 0.85 },
 };
 /** Which look wins where guides of several looks end at the same mouth. */
-const LOOK_RANK: Record<GuideLook | 'place' | 'bad', number> = { faint: 0, solid: 1, snap: 2, place: 3, bad: 3 };
+const LOOK_RANK: Record<GuideLook | 'place' | 'bad', number> = { solid: 1, snap: 2, place: 3, bad: 3 };
 
 /** Width of a stream flowing one flask per second; it goes as the square root of the flow. */
 const STREAM_WIDTH = 4.5;
@@ -354,6 +358,34 @@ function glassFrom(parent: THREE.Object3D, g: THREE.BufferGeometry): void {
   parent.add(new THREE.LineSegments(new THREE.EdgesGeometry(g, 30), edgeMat));
 }
 
+/**
+ * The faint green a vessel that a guide ends at flashes (see Frame.guides): added over its glass, pulsing FLASH.hz
+ * times a real second between FLASH.lo and FLASH.hi opacity.
+ */
+const flashMat = new THREE.MeshBasicMaterial({
+  color: 0x5cff9a, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+  toneMapped: false,
+});
+const FLASH = { hz: 1.5, lo: 0.05, hi: 0.22 };
+
+/**
+ * A copy of a glass mesh in flashMat, laid over it and hidden until its vessel is to flash; null for anything that
+ * isn't glass. It's never hit by the crosshair.
+ */
+function flashOver(o: THREE.Object3D): THREE.Mesh | null {
+  if (!(o instanceof THREE.Mesh)) return null;
+  const mats: THREE.Material[] = Array.isArray(o.material) ? o.material : [o.material];
+  if (!mats.includes(glassMat)) return null;
+  const m = new THREE.Mesh(o.geometry, Array.isArray(o.material) ? mats.map((x) => (x === glassMat ? flashMat : hidden)) : flashMat);
+  m.position.copy(o.position);
+  m.quaternion.copy(o.quaternion);
+  m.scale.copy(o.scale);
+  m.visible = false;
+  m.raycast = () => {};
+  o.parent!.add(m);
+  return m;
+}
+
 /** A box of material `mat` over x0..x1, y0..y1 (flat frame, y down), z0..z1, its edges rounded by `r` if given. */
 function block(parent: THREE.Object3D, mat: THREE.Material, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, r = 0): THREE.Mesh {
   const [w, h, d] = [x1 - x0, y1 - y0, z1 - z0];
@@ -482,17 +514,17 @@ class Screen {
 }
 
 /**
- * A mass spectrometer's screen: a hexagon per molecule size (1, 2, 3 atoms), each cut into sextants by color (see
- * SEXTANT_ATOMS) that glow as bright as their share of the last sample, lighting up one hexagon at a time as a
- * run goes on. No words, no lines between the sextants: reading it is part of the game.
+ * A composition analyzer's screen: a hexagon per molecule size (1, 2, 3 atoms), each cut into sextants by color (see
+ * SEXTANT_ATOMS) that glow as bright as their share of what it's reading, and dark while it has nothing to read. No
+ * words, no lines between the sextants: reading it is part of the game.
  */
-function drawSpectrum(sc: Screen, t: Tool): void {
-  const lit = SCAN_LIGHTS.filter((at) => t.scanAge >= at).length;
-  const key = `${lit}|${t.reading?.map((x) => x.toFixed(3)).join(',') ?? ''}`;
+function drawAnalysis(sc: Screen, t: Tool): void {
+  const key = t.reading?.map((x) => x.toFixed(2)).join(',') ?? '';
   if (key === sc.key) return;
   sc.key = key;
   const { ctx, ppu } = sc;
-  const { screen: s, hexes } = SPECTROMETER;
+  const { screen: s } = INSTRUMENT;
+  const { hexes } = ANALYZER;
   const green = (a: number) => `rgba(${PHOSPHOR}, ${a})`;
   ctx.setTransform(ppu, 0, 0, ppu, -s.x0 * ppu, -s.y0 * ppu);
   ctx.fillStyle = '#040a06';
@@ -504,7 +536,7 @@ function drawSpectrum(sc: Screen, t: Tool): void {
       const a = ((-120 + 60 * j) * Math.PI) / 180;
       return [cx + r * Math.cos(a), cy + r * Math.sin(a)] as const;
     };
-    if (t.reading && t.scanAge >= SCAN_LIGHTS[w])
+    if (t.reading)
       for (let j = 0; j < 6; j++) {
         const b = Math.min(1, t.reading[w * 6 + j]);
         if (b <= 0) continue;
@@ -526,6 +558,66 @@ function drawSpectrum(sc: Screen, t: Tool): void {
     ctx.closePath();
     ctx.stroke();
   });
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+  for (let y = s.y0; y < s.y1; y += 1.5) ctx.fillRect(s.x0, y, s.x1 - s.x0, 0.6);
+  sc.tex.needsUpdate = true;
+}
+
+/**
+ * A spectroscope's screen: a graph of the bonds that passed through it over the last sim second, by energy (see
+ * spectroscopeAt), lnE across with its whole numbers marked, and f up, scaled to the tallest peak, with no numbers.
+ */
+function drawSpectroscope(sc: Screen, t: Tool, energies: readonly number[]): void {
+  const key = `${t.bonds.map((c) => c.toPrecision(3)).join(',')}|${energies.join(',')}`;
+  if (key === sc.key) return;
+  sc.key = key;
+  const { ctx, ppu } = sc;
+  const s = INSTRUMENT.screen;
+  const green = (a: number) => `rgba(${PHOSPHOR}, ${a})`;
+  ctx.setTransform(ppu, 0, 0, ppu, -s.x0 * ppu, -s.y0 * ppu);
+  ctx.fillStyle = '#040a06';
+  ctx.fillRect(s.x0, s.y0, s.x1 - s.x0, s.y1 - s.y0);
+  // the plot, inside a margin for the labels
+  const p = { x0: s.x0 + 10, x1: s.x1 - 5, y0: s.y0 + 6, y1: s.y1 - 13 };
+  const { lnE0, lnE1 } = SPECTROSCOPE;
+  const X = (l: number) => p.x0 + ((l - lnE0) / (lnE1 - lnE0)) * (p.x1 - p.x0);
+  const n = Math.round((p.x1 - p.x0) * ppu);
+  const ys = Array.from({ length: n + 1 }, (_, i) => spectroscopeAt(lnE0 + (i / n) * (lnE1 - lnE0), t.bonds, energies));
+  const top = Math.max(...ys);
+  const Y = (v: number) => p.y1 - (top > 0 ? (0.9 * v) / top : 0) * (p.y1 - p.y0);
+  ctx.strokeStyle = ctx.fillStyle = ctx.shadowColor = green(0.75);
+  ctx.shadowBlur = 1.5 * ppu;
+  ctx.lineWidth = 0.6;
+  ctx.beginPath();
+  ctx.moveTo(p.x0, p.y0);
+  ctx.lineTo(p.x0, p.y1);
+  ctx.lineTo(p.x1, p.y1);
+  ctx.stroke();
+  ctx.font = '5px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (let l = Math.ceil(lnE0); l <= lnE1; l++) {
+    ctx.beginPath();
+    ctx.moveTo(X(l), p.y1);
+    ctx.lineTo(X(l), p.y1 + 1.5);
+    ctx.stroke();
+    ctx.fillText(String(l), X(l), p.y1 + 2.5);
+  }
+  ctx.textAlign = 'right';
+  ctx.fillText('lnE', p.x1, p.y1 + 2.5);
+  ctx.textAlign = 'center';
+  ctx.fillText('f', (s.x0 + p.x0) / 2, p.y0);
+  // the curve, glowing, over a faint fill
+  ctx.beginPath();
+  ctx.moveTo(p.x0, p.y1);
+  ys.forEach((v, i) => ctx.lineTo(p.x0 + i / ppu, Y(v)));
+  ctx.lineTo(p.x1, p.y1);
+  ctx.fillStyle = green(0.12);
+  ctx.fill();
+  ctx.strokeStyle = ctx.shadowColor = green(0.95);
+  ctx.lineWidth = 0.5;
+  ctx.stroke();
   ctx.shadowBlur = 0;
   ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
   for (let y = s.y0; y < s.y1; y += 1.5) ctx.fillRect(s.x0, y, s.x1 - s.x0, 0.6);
@@ -667,6 +759,7 @@ class FlaskView {
   private tilt = new THREE.Group();
   private fluid: FluidMesh;
   private label: Label;
+  private flash: THREE.Mesh;
   readonly glow: Glow;
 
   constructor(
@@ -676,6 +769,7 @@ class FlaskView {
   ) {
     const glass = new THREE.Mesh(flaskGlassGeom, glassMat);
     this.tilt.add(glass, new THREE.LineSegments(new THREE.EdgesGeometry(flaskGlassGeom, 25), edgeMat));
+    this.flash = flashOver(glass)!;
     this.fluid = new FluidMesh([flaskFluidGeom], this.tilt);
     this.root.add(this.tilt);
     this.label = new Label(this.root, new THREE.Vector3(0, NOTE_Y, 0));
@@ -684,8 +778,10 @@ class FlaskView {
     pickables.set(glass, { kind: 'flask', f });
   }
 
-  update(): void {
+  /** Draw it as it is now, flashing if it's in `targets` (see Frame.guides). */
+  update(targets: ReadonlySet<Vessel>): void {
     const { f } = this;
+    this.flash.visible = targets.has(f);
     this.root.position.set(f.pose.x, f.pose.y, f.pose.z);
     this.root.rotation.y = f.pose.yaw;
     this.tilt.rotation.z = -f.tilt;
@@ -729,7 +825,7 @@ class ToolView {
   readonly root = new THREE.Group();
   /** Whether the tool was flipped when this was built: it's rebuilt when that changes. */
   readonly flipped: boolean;
-  /** Everything but the root's placement, which shakes while a spectrometer runs. */
+  /** Everything but the root's placement. */
   private body = new THREE.Group();
   private art = new THREE.Group();
   private upright = new THREE.Group();
@@ -739,14 +835,17 @@ class ToolView {
    */
   private fluids: { fm: FluidMesh; level: (v: Vessel) => number; fit?: (v: Vessel) => void }[] = [];
   private levers = new Map<number, THREE.Group>();
+  /** Each tank's glass's flash overlays (see flashOver). */
+  private flashes: THREE.Mesh[][] = [];
   private dial?: THREE.Group;
   private lids: THREE.Mesh[] = [];
   private labels: Label[] = [];
   private note: Label;
   private glows: Glow[] = [];
   private button?: THREE.Mesh;
-  private lamp?: THREE.Mesh;
   private screen?: Screen;
+  /** What's running down an inline instrument's tube, shown as a thin thread of its color. */
+  private thread?: { m: THREE.Mesh; mat: THREE.MeshBasicMaterial };
   private helix?: { geom: THREE.TubeGeometry; colors: THREE.BufferAttribute; k: number }[];
   private films: THREE.Mesh[] = [];
   private filmMats: THREE.MeshBasicMaterial[] = [];
@@ -810,12 +909,22 @@ class ToolView {
       const { y, r } = HEATER_TUBE;
       pipes(art, [[tankX(sh.tanks[0]), TH], [tankX(sh.tanks[0]), y - r + 1]]);
       for (const x of sh.spouts) pipes(art, [[x, y + r - 1], [x, sh.spoutY - 4]]);
-    } else if (t.kind === 'spectrometer') pipes(art, [[0, TH], [0, SPECTROMETER.body.y0]]);
-    else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);
+    } else if (INLINE_TOOLS.includes(t.kind)) {
+      // straight down from the tube to its spout, with a branch into the cabinet; and the analyzer's out of the
+      // cabinet's far side to its waste spout
+      const { body: b, inY } = INSTRUMENT;
+      pipes(art, [[0, TH], [0, sh.spoutY - 4]]);
+      pipes(art, [[0, inY], [b.x0, inY]], 1.3);
+      if (t.kind === 'analyzer') {
+        const x = sh.spouts[1];
+        pipes(art, [[b.x1, ANALYZER.wasteY], [x, ANALYZER.wasteY], [x, sh.spoutY - 4]]);
+      }
+    } else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);
     sh.spouts.forEach((x, k) => pick(block(art, pipeMat, x - 4, x + 4, sh.spoutY - 6, sh.spoutY, -4, 4), 'spout', k));
 
     // tanks, with their fluid (the station's are built in buildStation)
     if (!sh.wall) t.tanks.forEach((_, k) => {
+      const built = art.children.length;
       const r = tankRect(t, k);
       const o = openingOf(t, k);
       const d = D.tank;
@@ -882,6 +991,7 @@ class ToolView {
       this.lids.push(lid);
       this.labels.push(new Label(upright, v3(ux(tankX(sh.tanks[k])), tankNoteY(t, k))));
       this.glows.push(new Glow(scene));
+      this.flashFrom(art, built, k);
     });
     if (sh.label) {
       const s = textSprite(sh.label);
@@ -901,7 +1011,10 @@ class ToolView {
 
     if (t.kind === 'exchanger') this.buildHelix();
     if (t.kind === 'sorter') this.buildChute();
-    if (t.kind === 'spectrometer') this.buildSpectrometer(pick);
+    if (INLINE_TOOLS.includes(t.kind)) {
+      this.buildInstrument();
+      this.buildThread(TH);
+    }
     if (t.kind === 'heater') this.buildHeater();
     if (t.kind === 'meter') this.buildMeter();
 
@@ -937,6 +1050,14 @@ class ToolView {
       if (m instanceof THREE.Mesh && !pickables.has(m)) pick(m, 'body');
     });
     scene.add(this.root);
+  }
+
+  /** Lay flash overlays (see flashOver) over the glass among `parent`'s children from `from` on, as tank k's. */
+  private flashFrom(parent: THREE.Object3D, from: number, k: number): void {
+    for (const o of parent.children.slice(from)) {
+      const m = flashOver(o);
+      if (m) (this.flashes[k] ??= []).push(m);
+    }
   }
 
   /** Ten marks up the left wall of a tank with a cup, at each tenth of its capacity as its fluid is shown (see levelIn). */
@@ -1034,19 +1155,26 @@ class ToolView {
     }
   }
 
-  /** A sample cup on a cabinet with an old green-on-black screen, a lamp and a red push button, and no words anywhere. */
-  private buildSpectrometer(pick: (m: THREE.Object3D, part: 'body' | 'button') => void): void {
-    const { body: b, screen: s, button } = SPECTROMETER;
-    const D = TOOL_DEPTH.spectrometer.body;
+  /**
+   * An inline instrument's cabinet, beside its tube, with an old green-on-black screen. The screen is kept upright, so
+   * it reads the same way flipped or not.
+   */
+  private buildInstrument(): void {
+    const { body: b, screen: s } = INSTRUMENT;
+    const D = TOOL_DEPTH[this.t.kind].body;
     block(this.art, panelMat, b.x0, b.x1, b.y0, b.y1, -D / 2, D / 2, 3);
     block(this.art, darkMat, s.x0 - 1.5, s.x1 + 1.5, s.y0 - 1.5, s.y1 + 1.5, D / 2, D / 2 + 0.6);
-    this.screen = new Screen(this.art, s.x0, s.x1, s.y0, s.y1, D / 2 + 0.7, 5);
-    this.lamp = new THREE.Mesh(unitSphere, new THREE.MeshStandardMaterial({ color: 0x5b665f }));
-    this.lamp.scale.setScalar(3);
-    this.lamp.position.copy(v3(s.x0 + 6, (button.y0 + button.y1) / 2, D / 2 + 1));
-    this.art.add(this.lamp);
-    this.button = block(this.art, keyMats.up, button.x0, button.x1, button.y0, button.y1, D / 2, D / 2 + 4);
-    pick(this.button, 'button');
+    const [x0, x1] = [lx(this.t, s.x0), lx(this.t, s.x1)].sort((a, b) => a - b);
+    this.screen = new Screen(this.upright, x0, x1, s.y0, s.y1, D / 2 + 0.7, 5);
+  }
+
+  /** A thin thread down the middle of an inline instrument's tube, `h` tall, in the color of what's running through it. */
+  private buildThread(h: number): void {
+    const mat = new THREE.MeshBasicMaterial();
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, h, 8).translate(0, -h / 2, 0), mat);
+    m.visible = false;
+    this.art.add(m);
+    this.thread = { m, mat };
   }
 
   /**
@@ -1177,6 +1305,7 @@ class ToolView {
       const pane = new THREE.Mesh(new THREE.PlaneGeometry(paneW, H).translate(x, -H / 2, face - 0.5), glassMat);
       art.add(pane);
       pick(pane, 'tank', k);
+      this.flashFrom(art, art.children.length - 1, k);
       // no lids: the receptacle is open through its funnel, and the others are sealed
       const lid = new THREE.Mesh();
       lid.visible = false;
@@ -1201,7 +1330,9 @@ class ToolView {
     // the column
     const x0 = tankX(sh.tanks[0]);
     const pump = H + 14;
+    const funnel = art.children.length;
     glassFrom(art, frustum(x0, f.y, f.y + f.h, 2 * f.w, 2 * f.w, FUNNEL_TIP, FUNNEL_TIP, true));
+    this.flashFrom(art, funnel, 0);
     rod(art, glassMat, v3(x0, f.y + f.h, 0), v3(x0, pump, 0), FUNNEL_TIP / 2);
     rod(art, glassMat, v3(x0, pump, 0), v3(x0, pump, face), FUNNEL_TIP / 2);
     block(art, panelMat, x0 - 12, x0 + 12, pump - 10, pump + 10, face, face + 10);
@@ -1250,11 +1381,11 @@ class ToolView {
     this.screen = new Screen(art, sc.x0, sc.x1, sc.y0, sc.y1, face + 0.6, 8);
   }
 
-  update(hot: Pick | null, shake: number, clock: number): void {
+  update(hot: Pick | null, clock: number, energies: readonly number[], targets: ReadonlySet<Vessel>): void {
     const { t } = this;
+    this.flashes.forEach((ms, k) => ms.forEach((m) => (m.visible = targets.has(t.tanks[k]))));
     this.root.position.set(t.pose.x, t.pose.y, t.pose.z);
     this.root.rotation.y = t.pose.yaw;
-    this.body.position.set(shake * (2 * Math.random() - 1), shake * (2 * Math.random() - 1), 0);
     this.body.updateMatrixWorld();
     t.tanks.forEach((v, k) => {
       const { fm, level, fit } = this.fluids[k];
@@ -1319,7 +1450,15 @@ class ToolView {
       setRGB(this.wire!.color, rgb);
       setRGB(this.wire!.emissive, rgb).multiplyScalar(Math.min(1, 1.3 * dial));
     }
-    if (t.kind === 'spectrometer' && this.screen) drawSpectrum(this.screen, t);
+    if (t.kind === 'analyzer' && this.screen) drawAnalysis(this.screen, t);
+    if (t.kind === 'spectroscope' && this.screen) drawSpectroscope(this.screen, t, energies);
+    if (this.thread) {
+      const through = new Vessel(Infinity);
+      for (const v of t.out) if (v) through.addFrom(v, volume(v));
+      const rgb = through.N > 0 ? fluidRGB(through) : null;
+      this.thread.m.visible = !!rgb;
+      if (rgb) setRGB(this.thread.mat.color, rgb);
+    }
     if (t.kind === 'meter' && this.screen) {
       const s = this.screen;
       const text = meterText(t.rate);
@@ -1334,14 +1473,8 @@ class ToolView {
       }
     }
     if (t.kind === 'receptacle') this.updateStation(clock);
-    if (this.lamp) {
-      const on = t.scanning && Math.floor(t.scanAge * 3) % 2 === 0;
-      const m = this.lamp.material as THREE.MeshStandardMaterial;
-      m.color.set(on ? 0xffb43a : 0x5b665f);
-      m.emissive.set(on ? 0xffa020 : 0x000000);
-    }
     if (this.button) {
-      const busy = t.kind === 'receptacle' ? !!t.cycle : t.scanning;
+      const busy = !!t.cycle;
       const z = this.buttonZ || TOOL_DEPTH[t.kind].body / 2;
       const isHot = hot?.kind === 'tool' && hot.t === t && hot.part === 'button';
       this.button.material = busy ? keyMats.down : isHot ? keyMats.hot : keyMats.up;
@@ -2612,7 +2745,10 @@ export class View {
     this.sync(this.tools, fr.tools, (t) => new ToolView(t, scene, pickables));
     this.sync(this.scales, fr.scales, (s) => new ScaleView(s, scene, pickables));
     this.sync(this.hoses, fr.hoses.map((x) => x.h), (h) => new HoseView(h, scene, pickables));
-    for (const v of this.flasks.values()) v.update();
+    // the vessels guides end at flash
+    const targets = new Set(fr.guides.map((g) => g.v));
+    flashMat.opacity = FLASH.lo + (FLASH.hi - FLASH.lo) * (0.5 - 0.5 * Math.cos(2 * Math.PI * FLASH.hz * this.clock));
+    for (const v of this.flasks.values()) v.update(targets);
     // a tool flipped since it was built is built again
     for (const [t, v] of this.tools)
       if (v.flipped !== t.flipped) {
@@ -2620,7 +2756,7 @@ export class View {
         for (const [o, p] of pickables) if (p.kind === 'tool' && p.t === t) pickables.delete(o);
         this.tools.set(t, new ToolView(t, scene, pickables));
       }
-    for (const v of this.tools.values()) v.update(fr.hot, fr.shake.get(v.t) ?? 0, fr.clock);
+    for (const v of this.tools.values()) v.update(fr.hot, fr.clock, fr.energies, targets);
     for (const v of this.scales.values()) v.update(fr.tarePress === v.sc, fr.hot);
     for (const { h, from, fluid } of fr.hoses) this.hoses.get(h)!.update(from, fluid);
     fr.faucets.forEach((fa, i) => {
@@ -2728,9 +2864,8 @@ export class View {
       mat.color.setHex(look.color);
       mat.opacity = look.stream;
       const len = Math.max(0.1, g.from.y - g.toY);
-      const r = g.look === 'faint' ? GUIDE_R * 0.75 : GUIDE_R;
       m.position.set(g.from.x, g.from.y - len / 2, g.from.z);
-      m.scale.set(r, len, r);
+      m.scale.set(GUIDE_R, len, GUIDE_R);
       // dashes counted from the top, where it's from, so they stay put as its length changes
       const reps = len / (GUIDE_DASH.on + GUIDE_DASH.off);
       mat.alphaMap!.repeat.set(1, reps);
