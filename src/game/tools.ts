@@ -695,9 +695,10 @@ export const ANALYZER = {
 
 /**
  * The spectroscope's graph (see spectroscopeAt): its x axis runs from lnE0 to lnE1, and each bond's line is a Gaussian
- * `width` wide (its standard deviation), in lnE.
+ * `width` wide (its standard deviation), in lnE. Its y axis is fixed: a bond passing at `full` a sim second peaks at
+ * the top of the screen, so a trace of something shows as a small peak, not a full one.
  */
-export const SPECTROSCOPE = { lnE0: -0.5, lnE1: 3.5, width: 0.02 };
+export const SPECTROSCOPE = { lnE0: -0.5, lnE1: 3.5, width: 0.02, full: 30_000 };
 
 /** Every bond there can be, by its key (see pairKey): the twelve pairs of atoms from different groups. */
 export const BOND_KEYS: readonly string[] = [
@@ -717,16 +718,17 @@ export function bondCounts(f: Fluid): number[] {
 }
 
 /**
- * The height of the spectroscope's graph at x = lnE: each bond's count, `counts` (in BOND_KEYS order), spread as a
- * Gaussian SPECTROSCOPE.width wide about the log of the size of its energy, `energies` (so an uphill bond shows at its
- * size too), peaking at its count, all added up. A bond with no energy shows nowhere.
+ * The height of the spectroscope's graph at x = lnE, as a share of the screen's (the view clips it at 1): each bond's
+ * count, `counts` (in BOND_KEYS order, per sim second), spread as a Gaussian SPECTROSCOPE.width wide about the log of
+ * the size of its energy, `energies` (so an uphill bond shows at its size too), peaking at its count over
+ * SPECTROSCOPE.full, all added up. A bond with no energy shows nowhere.
  */
 export function spectroscopeAt(x: number, counts: readonly number[], energies: readonly number[]): number {
-  const w = SPECTROSCOPE.width;
+  const { width: w, full } = SPECTROSCOPE;
   let y = 0;
   counts.forEach((c, i) => {
     const e = Math.abs(energies[i]);
-    if (c > 0 && e > 0) y += c * Math.exp(-((x - Math.log(e)) ** 2) / (2 * w * w));
+    if (c > 0 && e > 0) y += (c / full) * Math.exp(-((x - Math.log(e)) ** 2) / (2 * w * w));
   });
   return y;
 }

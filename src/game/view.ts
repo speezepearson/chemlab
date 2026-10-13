@@ -567,7 +567,7 @@ function drawAnalysis(sc: Screen, t: Tool): void {
 /**
  * A spectroscope's screen: a graph of the bonds passing through it lately, by energy (see spectroscopeAt): E across on
  * a log scale, with ticks as on log paper (at 1 to 9 times each power of ten, the powers of ten longer and numbered),
- * and f up, scaled to the tallest peak, with no numbers.
+ * and f up, on a fixed scale (see SPECTROSCOPE.full), clipped at the top, with no numbers.
  */
 function drawSpectroscope(sc: Screen, t: Tool, energies: readonly number[]): void {
   const key = `${t.bonds.map((c) => c.toPrecision(3)).join(',')}|${energies.join(',')}`;
@@ -585,8 +585,7 @@ function drawSpectroscope(sc: Screen, t: Tool, energies: readonly number[]): voi
   const X = (l: number) => p.x0 + ((l - lnE0) / (lnE1 - lnE0)) * (p.x1 - p.x0);
   const n = Math.round((p.x1 - p.x0) * ppu);
   const ys = Array.from({ length: n + 1 }, (_, i) => spectroscopeAt(lnE0 + (i / n) * (lnE1 - lnE0), t.bonds, energies));
-  const top = Math.max(...ys);
-  const Y = (v: number) => p.y1 - (top > 0 ? (0.9 * v) / top : 0) * (p.y1 - p.y0);
+  const Y = (v: number) => p.y1 - Math.min(1, v) * (p.y1 - p.y0);
   ctx.strokeStyle = ctx.fillStyle = ctx.shadowColor = green(0.75);
   ctx.shadowBlur = 1.5 * ppu;
   ctx.lineWidth = 0.6;

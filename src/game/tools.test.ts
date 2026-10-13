@@ -645,18 +645,18 @@ describe('spectroscope', () => {
     expect(c.reduce((a, b) => a + b, 0)).toBe(25);
   });
 
-  it("draws each bond as a Gaussian peak as tall as its count, at the log of its energy's size", () => {
+  it("draws each bond as a Gaussian peak as tall as its count over the full scale, at the log of its energy's size", () => {
+    const { width: w, full } = SPECTROSCOPE;
     const energies = BOND_KEYS.map((_, i) => (i === 0 ? 8 : i === 1 ? -3 : 0));
-    const counts = BOND_KEYS.map((_, i) => (i === 0 ? 100 : i === 1 ? 40 : i === 2 ? 1e6 : 0));
-    expect(spectroscopeAt(Math.log(8), counts, energies)).toBeCloseTo(100, 6);
-    expect(spectroscopeAt(Math.log(3), counts, energies)).toBeCloseTo(40, 6);
-    const w = SPECTROSCOPE.width;
-    expect(spectroscopeAt(Math.log(8) + w, counts, energies)).toBeCloseTo(100 * Math.exp(-0.5), 6);
+    const counts = BOND_KEYS.map((_, i) => (i === 0 ? full : i === 1 ? full / 3 : i === 2 ? 1e6 * full : 0));
+    expect(spectroscopeAt(Math.log(8), counts, energies)).toBeCloseTo(1, 6);
+    expect(spectroscopeAt(Math.log(3), counts, energies)).toBeCloseTo(1 / 3, 6);
+    expect(spectroscopeAt(Math.log(8) + w, counts, energies)).toBeCloseTo(Math.exp(-0.5), 6);
     // far from both, nothing; and the bond with no energy shows nowhere
     expect(spectroscopeAt(Math.log(5), counts, energies)).toBeLessThan(1e-6);
     // two bonds at one energy add up
     const same = BOND_KEYS.map(() => 2);
-    expect(spectroscopeAt(Math.log(2), BOND_KEYS.map(() => 1), same)).toBeCloseTo(BOND_KEYS.length, 6);
+    expect(spectroscopeAt(Math.log(2), BOND_KEYS.map(() => full / 100), same)).toBeCloseTo(BOND_KEYS.length / 100, 6);
   });
 
   it('lets everything through, reading the bonds passing lately, per sim second, rising and falling smoothly', () => {
