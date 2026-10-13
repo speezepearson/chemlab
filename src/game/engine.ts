@@ -158,6 +158,8 @@ type Held = (
    * none for what was made in hand, or a hose just pulled out.
    */
   from?: Rest & { flipped?: boolean };
+  /** The hoses pulled out of a tool's spouts as it was picked up (see keepPouring), for Q to roll back up. */
+  made?: Hose[];
 };
 
 /**
@@ -861,9 +863,11 @@ export class GameEngine {
 
   /**
    * The walls, counters, and everything in the room but what's held (and what rides on it), including the bases of
-   * the stands holding up everything else (unless `bases` is false).
+   * the stands holding up everything else (unless `bases` is false). A held tool's own hoses' nozzles don't get in its
+   * way, since one left at its spout (see keepPouring) is rolled back up if it's set down there again (see setDown);
+   * and the tool `away`, about to be picked up, isn't there either.
    */
-  private obstacles(h: Held | null, bases = true): Box[] {
+  private obstacles(h: Held | null, bases = true, away: Tool | null = null): Box[] {
     // while the airlock's doors are open, its doorway and chamber take the front wall's place
     const room = this.wake === 'closed' ? roomBoxes(ROOM) : [...roomBoxes(ROOM, false), ...airlockBoxes()];
     const counters = COUNTERS.map((c) => ({
@@ -872,14 +876,15 @@ export class GameEngine {
     const riders = h?.kind === 'scale' ? new Set(h.sc.load.map((l) => l.f)) : new Set<Flask>();
     const out: Box[] = [...room, ...counters];
     for (const f of this.flasks) if (!(h?.kind === 'flask' && h.f === f) && !riders.has(f)) out.push(flaskBox(f));
-    for (const t of this.tools) if (!(h?.kind === 'tool' && h.t === t)) out.push(toolBox(t));
+    const gone = (t: Tool) => (h?.kind === 'tool' && h.t === t) || t === away;
+    for (const t of this.tools) if (!gone(t)) out.push(toolBox(t));
     for (const sc of this.scales) if (!(h?.kind === 'scale' && h.sc === sc)) out.push(scaleBox(sc));
     for (const hose of this.hoses)
       if (!(h?.kind === 'hose' && h.h === hose)) {
-        out.push(nozzleBox(hose));
+        if (!(h?.kind === 'tool' && 'tool' in hose.on && hose.on.tool === h.t)) out.push(nozzleBox(hose));
         if (bases) out.push(standBase(nozzleStand(hose.outlet, hose.turn, hose.reach)));
       }
-    if (bases) for (const t of this.tools) if (!(h?.kind === 'tool' && h.t === t)) for (const st of toolStands(t)) out.push(standBase(st));
+    if (bases) for (const t of this.tools) if (!gone(t)) for (const st of toolStands(t)) out.push(standBase(st));
     return out;
   }
 
@@ -1166,7 +1171,14 @@ export class GameEngine {
       const scale = sc && { sc, dx: sc.load.find((l) => l.f === p.f)!.dx };
       for (const s of this.scales) s.remove(p.f);
       h = { kind: 'flask', f: p.f, relYaw: 0, dist: 0, from: { pose: { ...p.f.pose }, ...(scale ? { scale } : {}) } };
-    } else if (p.kind === 'tool') h = { kind: 'tool', t: p.t, relYaw: 0, dist: 0, from: { pose: { ...p.t.pose }, flipped: p.t.flipped } };
+    } else if (p.kind === 'tool') {
+      const made = this.keepPouring(p.t);
+      if (typeof made === 'string') {
+        this.say(made);
+        return;
+      }
+      h = { kind: 'tool', t: p.t, relYaw: 0, dist: 0, from: { pose: { ...p.t.pose }, flipped: p.t.flipped }, made };
+    }
     else if (p.kind === 'scale') h = { kind: 'scale', sc: p.sc, relYaw: 0, dist: 0, from: { pose: { ...p.sc.pose } } };
     else {
       this.holdHose(p.h);
@@ -1176,6 +1188,43 @@ export class GameEngine {
     // it comes to the player's hands, as far as it can
     h.dist = this.clampDist(h, this.holdDist(h));
     this.held = h;
+  }
+
+  /**
+   * Keep a tool about to be picked up pouring into whatever it pours into: each of its spouts with no hose out, over an
+   * open top (but its own), gets its hose pulled out, the nozzle left just where the spout is, on a stand wherever
+   * there's room for one (see standFor). Returns those hoses, or if one has no room for its stand, why it can't be.
+   */
+  private keepPouring(t: Tool): Hose[] | string {
+    const made: Hose[] = [];
+    for (let j = 0; j < t.shape.spouts.length; j++) {
+      if (this.hoseOn({ tool: t, spout: j })) continue;
+      const sp = spoutAt(t, j);
+      const m = mouthBelow(this.open, sp);
+      if (!m || t.tanks.includes(m.v)) continue;
+      const hose = new Hose({ tool: t, spout: j }, sp, NOZZLE_REACH.min);
+      hose.turn = toCardinal(this.player.yaw);
+      const r = this.standFor(hose, t);
+      if (typeof r === 'string') {
+        this.hoses = this.hoses.filter((x) => !made.includes(x));
+        return 'No room for a hose’s stand';
+      }
+      hose.outlet = { x: r.pose.x, y: r.pose.y, z: r.pose.z };
+      ({ turn: hose.turn, reach: hose.reach } = r.hose!);
+      made.push(hose);
+      this.hoses.push(hose);
+    }
+    return made;
+  }
+
+  /**
+   * Where a hose's nozzle, left where it is, would rest (see rest), with its stand where it's turned to go if there's
+   * room, or else the first place there is; or why it can't. The tool `away` is about to be picked up, so it's no
+   * obstacle.
+   */
+  private standFor(hose: Hose, away: Tool | null = null): Rest | string {
+    const h: Held = { kind: 'hose', h: hose, reach: hose.reach, relYaw: wrapAngle(hose.turn - this.player.yaw), dist: 0 };
+    return this.rest(h, { ...hose.outlet, yaw: 0 }, this.obstacles(h, true, away), this.obstacles(h, false, away));
   }
 
   /**
@@ -1264,12 +1313,17 @@ export class GameEngine {
     if (!h || inPod(this.wake)) return;
     if (!h.from) return this.putAway();
     if (h.kind === 'tool' && h.t.flipped !== !!h.from.flipped) flip(h.t);
+    this.hoses = this.hoses.filter((x) => !h.made?.includes(x));
     this.setDown(h, h.from);
   }
 
   /** Let go of what's held, at rest (see rest): standing on a scale, for a flask, and for a nozzle, with its stand there. */
   private setDown(h: Held, rest: Rest): void {
     this.placeHeld(h, rest.pose);
+    // a tool's hose whose nozzle is right where its spout now is, as one left there when it was picked up and it's
+    // put back, is rolled back up
+    if (h.kind === 'tool')
+      this.hoses = this.hoses.filter((x) => !('tool' in x.on && x.on.tool === h.t && dist3(x.outlet, spoutAt(h.t, x.on.spout)) < 1));
     if (h.kind === 'flask') {
       h.f.tilt = 0;
       if (rest.scale) {
