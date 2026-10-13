@@ -2,7 +2,7 @@ import { ATOMS, BIT_PAIRS, GROUP, GROUP_PRIMARY, pairKey, type Atom } from '../c
 import { THERMO } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
-import { CAP, TRACE } from './config';
+import { CAP, PRESENT_FLASKS, TRACE } from './config';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
 import { CELL, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
@@ -332,8 +332,8 @@ export const RECEPTACLE_CAP = Math.round(spaceOf(STATION_FUNNEL) / SPACE_PER_ATO
  * enough, and the rest of it single atoms.
  */
 export const REFERENCE_CAP = 540 * CAP;
-/** The target the reference starts with, in molecules: the hundred flasks left on board (see VOYAGE). */
-export const REFERENCE_START = 100 * CAP;
+/** The target the reference starts with, in molecules: what's left on board (see PRESENT_FLASKS and VOYAGE). */
+export const REFERENCE_START = PRESENT_FLASKS * CAP;
 /** How fast the reference's faucet lets it out, fully open, in atoms per sim second: a fifth of a flask a second. */
 export const REFERENCE_FLOW = 0.2 * MAX_FLOW;
 /**
