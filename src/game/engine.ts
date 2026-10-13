@@ -26,7 +26,7 @@ import {
   type Pose, type Vec3,
 } from './space';
 import {
-  ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, Hose, INLINE_TOOLS, MAX_FLOW, RECEPTACLE_TIMES, SHAPES, STATION, SUMP_TIP, TANK_H,
+  ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, SUMP_TIP, TANK_H,
   TOOL_NAMES, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, tankX,
   type Mouth, type ToolKind,
 } from './tools';
@@ -320,8 +320,10 @@ export class GameEngine {
   /** Sim seconds the lab has run, for what blinks on sim time. */
   private clock = 0;
   private wakeT = Infinity;
-  /** The cryostabilizer station's sounds, through its cycle (see Tool.press). */
-  private beepers = new Map<Tool, Beeper>();
+  /** The cryostabilizer station's sounds, as its diverter turns (see Tool.diverting); null until it first does. */
+  private beeper: Beeper | null = null;
+  /** Which way the station's diverter was sending the flow at the end of the last frame (see Tool.diverting). */
+  private diverting: Tool['diverting'] = null;
   /** The player's sticky notes, on the back wall, the one on top last (see paper.ts). They're notes, not lab, so Reset keeps them. */
   papers: Paper[] = [];
   /** Whether the pencil is in hand: then the mouse moves a pointer (see `cursor`) that draws on sticky notes. */
@@ -511,8 +513,9 @@ export class GameEngine {
 
   private afterLoad(): void {
     this.won = false;
-    for (const b of this.beepers.values()) b.stop();
-    this.beepers.clear();
+    this.beeper?.stop();
+    this.beeper = null;
+    this.diverting = null;
     this.falling = [];
     this.held = this.turning = this.tarePress = null;
     this.history.clear();
@@ -706,7 +709,7 @@ export class GameEngine {
     const add = (kind: ToolKind, at: Pose) => {
       if (this.tools.some((t) => t.kind === kind)) return;
       const t = new Tool(kind, this.nextToolId++, at);
-      if (kind === 'receptacle') applyFill(t.tanks[2], REFERENCE_FILL);
+      if (kind === 'receptacle') applyFill(t.tanks[1], REFERENCE_FILL);
       this.tools.push(t);
     };
     add('analyzer', spotPose(ANALYZER_AT));
@@ -722,15 +725,22 @@ export class GameEngine {
   }
 
   /**
-   * A save from before the cryostabilizer station had a tester and the reference (when the receptacle stood on an
-   * island and flushed what it took away, counting it as delivered, and the reference was a tool of its own) gets the
-   * station's reference filled with what its reference held, or what it started with if it had none, plus what it had
-   * delivered.
+   * A save from before the cryostabilizer station was a funnel and the reference: when it had a receptacle and a tester
+   * too, ahead of the reference, its reference keeps what the old one held, and what was waiting in the receptacle and
+   * the tester is gone. From before that, when the receptacle stood on an island and flushed what it took away,
+   * counting it as delivered, and the reference was a tool of its own, the reference is filled with what that held,
+   * or what it started with if there was none, plus what had been delivered.
    */
   private oldStation(s: SaveState): void {
     const saved = s.tools.find((st) => st.kind === 'receptacle');
-    if (saved && (saved.tanks?.length ?? 0) >= SHAPES.receptacle.tanks.length) return;
-    const ref = this.station().tanks[2];
+    const n = saved?.tanks?.length ?? 0;
+    if (n === SHAPES.receptacle.tanks.length) return;
+    const [funnel, ref] = this.station().tanks;
+    loadVessel(funnel, { n: {}, Q: 0 });
+    if (n === 3) {
+      loadVessel(ref, saved!.tanks[2]);
+      return;
+    }
     const old = s.tools.find((st) => (st.kind as string) === 'reference')?.tanks?.[0];
     if (old) loadVessel(ref, old);
     else applyFill(ref, REFERENCE_FILL);
@@ -1563,11 +1573,6 @@ export class GameEngine {
 
   private leftDown(): void {
     const p = this.target;
-    if (p?.kind === 'tool' && p.part === 'button') {
-      // the station's sounds start with its cycle, in simulate, since it can start one itself
-      p.t.press();
-      return;
-    }
     if (p?.kind === 'wake') {
       this.pressOk();
       return;
@@ -1911,12 +1916,9 @@ export class GameEngine {
     return placement(h.x, h.y, h.z);
   }
 
-  /** Where a tool's machinery sounds from: the middle of its cabinet, or the cryostabilizer station's lamps. */
+  /** Where a tool's machinery sounds from: the middle of its cabinet, or the cryostabilizer station's lamp. */
   private machineAt(t: Tool): Vec3 {
-    if (t.shape.wall) {
-      const { lamps, verdict } = STATION;
-      return onTool(t, lamps.x, (lamps.y0 + verdict.y) / 2, -STATION.out);
-    }
+    if (t.shape.wall) return onTool(t, STATION.lamp.x, STATION.lamp.y, -STATION.out);
     if (t.kind === 'analyzer') {
       const b = INSTRUMENT.body;
       return onTool(t, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
@@ -2176,7 +2178,6 @@ export class GameEngine {
       if (m && simDt > 0 && i !== stillFaucet) this.faucetFlows.push({ fa, from, m });
     });
 
-    const cycleFrom = this.tools.map((t) => t.cycle && { ...t.cycle });
     const vessels = this.vessels();
     // how exposed each one's fluid is to the room, from how it stands now; it hardly changes in a frame
     const exposures = simDt > 0 ? this.exposures() : [];
@@ -2265,33 +2266,16 @@ export class GameEngine {
       r.level(simDt > 0 ? ANALYZER_HUM : 0);
     }
 
-    // the station's cycles go by sim time too, whether its button or a full receptacle started them: a blip for each
-    // beep of its thinking that came round this frame, its verdict as the thinking ends, and the rush of a flush into
-    // the tester or the reference, silent while paused
-    this.tools.forEach((t, j) => {
-      const from = cycleFrom[j];
-      const c = t.cycle;
-      // a cycle under way with no sounds yet: one its button started between frames (before cycleFrom saw it), or one
-      // it started itself as it filled
-      if (c && !this.beepers.has(t)) this.beepers.set(t, beeper(this.hear(this.machineAt(t))));
-      const b = this.beepers.get(t);
-      if (!b) return;
-      b.place(this.hear(this.machineAt(t)));
-      // how far through the thinking it was at the start of the frame, and is now
-      const thought = (cy: Tool['cycle']) => (!cy || cy.phase === 'flush' ? -1 : cy.phase === 'think' ? cy.age : Infinity);
-      const [a, z] = [from ? thought(from) : -1, c ? thought(c) : Infinity];
-      if (a < Infinity && z > a) {
-        for (const beep of t.beeps) if (beep.t > a && beep.t <= z) b.beep(beep.freq);
-        if (z === Infinity) b.verdict(t.verdict === 'pass');
-      }
-      const rush = c?.phase === 'flush' || c?.phase === 'pass';
-      b.flush(simDt > 0 && c && rush ? 1 - (0.6 * c.age) / RECEPTACLE_TIMES[c.phase] : 0);
-    });
-    for (const [t, b] of this.beepers)
-      if (!this.tools.includes(t) || !t.cycle) {
-        b.stop(); // done, or the lab was replaced
-        this.beepers.delete(t);
-      }
+    // the station chimes as its diverter turns the flow into the reference, and buzzes as it turns it to waste, on sim
+    // time like the diverter itself
+    const st = this.station();
+    const way = st.diverting;
+    if (way && way !== this.diverting) {
+      this.beeper ??= beeper(this.hear(this.machineAt(st)));
+      this.beeper.divert(way === 'keep');
+    }
+    this.diverting = way;
+    this.beeper?.place(this.hear(this.machineAt(st)));
 
     // fluid's sounds, each heard from where it lands: a stream from the mouth it runs into
     const streams = new Map<Vessel, { flow: number; full: number; at: Placement }>();
@@ -2302,7 +2286,7 @@ export class GameEngine {
     this.water.update(dt, this.landed.map((p) => this.hear(p)), streams);
 
     // goal: enough of the target in the cryostabilizer reference
-    if (this.station().tanks[2].n[TARGET] >= GOAL_TARGET && !this.won) {
+    if (this.station().tanks[1].n[TARGET] >= GOAL_TARGET && !this.won) {
       this.won = true;
       this.cb.onWin();
     }
@@ -2680,8 +2664,7 @@ export class GameEngine {
   private onButton(): boolean {
     const p = this.target;
     return (
-      (p?.kind === 'tool' && p.part === 'button') || (p?.kind === 'scale' && p.part === 'tare') ||
-      p?.kind === 'alarm' || p?.kind === 'blinds' || p?.kind === 'wake'
+      (p?.kind === 'scale' && p.part === 'tare') || p?.kind === 'alarm' || p?.kind === 'blinds' || p?.kind === 'wake'
     );
   }
 
@@ -2689,7 +2672,6 @@ export class GameEngine {
   private pressable(): boolean {
     const p = this.target;
     return (
-      (p?.kind === 'tool' && p.part === 'button' && !p.t.cycle) ||
       (p?.kind === 'scale' && p.part === 'tare') ||
       p?.kind === 'alarm' ||
       p?.kind === 'blinds' ||
@@ -2770,8 +2752,8 @@ export class GameEngine {
 
   /** Whether fluid would leave a tool's spouts if it ran. */
   private wouldFlow(t: Tool): boolean {
-    // the station's reference through its faucet, or the tester out its waste nozzle
-    if (t.kind === 'receptacle') return (t.valves[0] > 0 && t.tanks[2].N > TRACE) || !!t.cycle;
+    // the station's reference through its faucet, or its funnel out its waste nozzle
+    if (t.kind === 'receptacle') return (t.valves[0] > 0 && t.tanks[1].N > TRACE) || t.tanks[0].N > TRACE;
     const free = t.kind === 'splitter' || t.kind === 'sorter' || t.kind === 'heater' || t.kind === 'meter' || INLINE_TOOLS.includes(t.kind);
     const drains = (k: number) => free || t.valves[k] > 0;
     // a heater's tube runs whatever its valves say

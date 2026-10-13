@@ -16,7 +16,7 @@ export const GOAL_L = (VOYAGE.passengers * VOYAGE.mlPerPassengerDay * VOYAGE.day
  * a hundred (see REFERENCE_START).
  */
 export const GOAL_TARGET = (GOAL_L / FLASK_L) * CAP;
-/** The station's tester passes only fluid more than this pure in the target (by atoms) into the reference. */
+/** The station's diverter sends only fluid more than this pure in the target (by atoms) into the reference. */
 export const GOAL_PURITY = 0.95;
 /** Amounts of fluid below this many atoms count as nothing: too little to see or pour. */
 export const TRACE = CAP * 1e-6;

@@ -80,7 +80,7 @@ export function tankRect(t: Tool, k: number): { x0: number; x1: number; y0: numb
 
 /**
  * Where fluid goes into a tank, in the tool's flat frame: its open top, or the mouth of the little funnel on top if it
- * has one, or the cryostabilizer station's funnel in front of the column (see STATION).
+ * has one, or the cryostabilizer station's funnel (see STATION).
  */
 export function openingOf(t: Tool, k: number): { x0: number; x1: number; y: number; hz: number } {
   const r = tankRect(t, k);
@@ -122,7 +122,7 @@ export function tankNoteY(t: Tool, k: number): number {
  * A tool's solid parts, in its flat frame (x right, y down from its top center), each
  * reaching `hz` either side of `z` (its middle, if left out) front to back: its tanks (round, for a round tank), and
  * under them its cabinet, or else the pipes, valves and spouts there, across only as far as they reach. The
- * cryostabilizer station's are its funnel, the plate in the wall with its button, and its spouts' pipes out from it.
+ * cryostabilizer station's are its funnel, the plate in the wall, and its spouts' pipes out from it.
  * An inline instrument's are its tube and the pipe down from it, the cabinet beside them, and any pipe on to a
  * spout past the cabinet; the tube's top is flush with its opening, for a nozzle to snap onto (see INLINE_DOCK).
  */
@@ -130,14 +130,13 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
   const sh = t.shape;
   const b = sh.box;
   if (sh.wall) {
-    const { funnel: f, out, plate, button: bt } = STATION;
+    const { funnel: f, out, plate } = STATION;
     const H = sh.tankH ?? TANK_H;
     // the plate is flush with the wall, its rubber seam a little proud of it
     const face = -out;
     return [
       { x0: -f.w - 2, x1: f.w + 2, y0: f.y - 2, y1: H + 26, hz: f.w + 1 },
       { x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, hz: plate / 2 + 1.5, z: face - plate / 2 + 1.5 },
-      { x0: bt.x - bt.r - 3, x1: bt.x + bt.r + 3, y0: bt.y - bt.r - 3, y1: bt.y + bt.r + 3, hz: 3, z: face + 3 },
       ...sh.spouts.map((x) => ({ x0: x - 8, x1: x + 8, y0: H + 10, y1: sh.spoutY, hz: (out + 8) / 2, z: (8 - out) / 2 })),
     ];
   }
