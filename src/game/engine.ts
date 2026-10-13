@@ -166,9 +166,14 @@ type Held = (
   /** A hose by its nozzle, with how far behind it its stand is wanted, as the clamp's arm is slid (see snapReach). */
   | { kind: 'hose'; h: Hose; reach: number }
 ) & {
-  /** How far it's turned from facing the player, and how far in front of their eyes it's held. */
+  /**
+   * How far it's turned from facing the player, and how far from their eyes it's held, along `dir`: which way it is
+   * from them as they look (x right, y up, z ahead), so it stays where it was picked up, as seen; straight ahead if
+   * left out, as for something made in hand.
+   */
   relYaw: number;
   dist: number;
+  dir?: Vec3;
   /**
    * Where it was picked up from, and for a tool, whether it was flipped then, for Q to put it back (see putBack);
    * none for what was made in hand, or a hose just pulled out.
@@ -909,12 +914,16 @@ export class GameEngine {
   }
 
   /**
-   * Where what's held would be, in front of the eyes: facing the nearest way along the grid to how it's turned from
-   * the player, so it turns in quarter turns.
+   * Where what's held would be, where it's held from the eyes (see Held.dir): facing the nearest way along the grid to
+   * how it's turned from the player, so it turns in quarter turns.
    */
   private gripPose(h: Held): Pose {
     const eye = this.eye();
-    const d = this.lookDir();
+    const { right, up, ahead } = this.viewAxes();
+    const k = h.dir ?? { x: 0, y: 0, z: 1 };
+    const d = {
+      x: right.x * k.x + up.x * k.y + ahead.x * k.z, y: right.y * k.x + up.y * k.y + ahead.y * k.z, z: right.z * k.x + up.z * k.y + ahead.z * k.z,
+    };
     const yaw = h.kind === 'hose' ? 0 : toCardinal(this.player.yaw + h.relYaw);
     const off = toWorld({ x: 0, y: 0, z: 0, yaw }, this.anchor(h));
     return { x: eye.x + d.x * h.dist - off.x, y: eye.y + d.y * h.dist - off.y, z: eye.z + d.z * h.dist - off.z, yaw };
@@ -1275,8 +1284,7 @@ export class GameEngine {
     }
     h.relYaw = h.kind === 'flask' ? 0 : wrapAngle(this.heldPose(h).yaw - this.player.yaw);
     h.follow = this.gather(h);
-    // it comes to the player's hands, as far as it can
-    h.dist = this.clampDist(h, this.holdDist(h));
+    this.holdInPlace(h);
     this.held = h;
   }
 
@@ -1437,8 +1445,31 @@ export class GameEngine {
     this.mark();
     const from = fresh ? undefined : { pose: { ...hose.outlet, yaw: 0 }, hose: { turn: hose.turn, reach: hose.reach } };
     const h: Held = { kind: 'hose', h: hose, reach: hose.reach, relYaw: wrapAngle(hose.turn - this.player.yaw), dist: 0, from };
-    h.dist = this.clampDist(h, dist3(this.eye(), hose.outlet));
+    this.holdInPlace(h);
     this.held = h;
+  }
+
+  /**
+   * Hold what's picked up just where it is, as the player sees it: it doesn't move until they do (see Held.dir). It
+   * stays turned as it was from them, too (see Held.relYaw).
+   */
+  private holdInPlace(h: Held): void {
+    const c = this.boxAt(h, this.heldPose(h));
+    const e = this.eye();
+    const v = { x: c.x - e.x, y: c.y - e.y, z: c.z - e.z };
+    h.dist = Math.max(1, Math.hypot(v.x, v.y, v.z));
+    const { right, up, ahead } = this.viewAxes();
+    const dot = (a: Vec3, b: Vec3) => a.x * b.x + a.y * b.y + a.z * b.z;
+    h.dir = { x: dot(v, right) / h.dist, y: dot(v, up) / h.dist, z: dot(v, ahead) / h.dist };
+  }
+
+  /** Which ways are right, up and ahead, as the player looks, in the room. */
+  private viewAxes(): { right: Vec3; up: Vec3; ahead: Vec3 } {
+    const { yaw, pitch } = this.player;
+    const ahead = this.lookDir();
+    const right = { x: Math.cos(yaw), y: 0, z: -Math.sin(yaw) };
+    const up = { x: Math.sin(yaw) * Math.sin(pitch), y: Math.cos(pitch), z: Math.cos(yaw) * Math.sin(pitch) };
+    return { right, up, ahead };
   }
 
   /**
