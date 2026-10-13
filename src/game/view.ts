@@ -1182,10 +1182,11 @@ class ToolView {
       block(art, mat, g.x0, g.x1, H - (i + 1) * seg + 1, H - i * seg - 1, face + 1, face + 1.4).castShadow = false;
       this.segments.push(mat);
     }
-    // the funnel, over the cell in front of the wall, and its stem down and back into a pump on the plate, which
-    // pumps whatever lands in it up into the receptacle's column
+    // the funnel, over the cell in front of the wall, and its stem down and back into a pump on the plate just below
+    // the receptacle's pane (so as not to hide what's at the bottom of it), which pumps whatever lands in it up into
+    // the column
     const x0 = tankX(sh.tanks[0]);
-    const pump = H - 12;
+    const pump = H + 14;
     glassFrom(art, frustum(x0, f.y, f.y + f.h, 2 * f.w, 2 * f.w, FUNNEL_TIP, FUNNEL_TIP, true));
     rod(art, glassMat, v3(x0, f.y + f.h, 0), v3(x0, pump, 0), FUNNEL_TIP / 2);
     rod(art, glassMat, v3(x0, pump, 0), v3(x0, pump, face), FUNNEL_TIP / 2);

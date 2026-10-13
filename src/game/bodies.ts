@@ -131,7 +131,7 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
     // the plate is flush with the wall, its rubber seam a little proud of it
     const face = -out;
     return [
-      { x0: -f.w - 2, x1: f.w + 2, y0: f.y - 2, y1: H - 6, hz: f.w + 1 },
+      { x0: -f.w - 2, x1: f.w + 2, y0: f.y - 2, y1: H + 26, hz: f.w + 1 },
       { x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, hz: plate / 2 + 1.5, z: face - plate / 2 + 1.5 },
       { x0: bt.x - bt.r - 3, x1: bt.x + bt.r + 3, y0: bt.y - bt.r - 3, y1: bt.y + bt.r + 3, hz: 3, z: face + 3 },
       ...sh.spouts.map((x) => ({ x0: x - 8, x1: x + 8, y0: H + 10, y1: sh.spoutY, hz: (out + 8) / 2, z: (8 - out) / 2 })),
