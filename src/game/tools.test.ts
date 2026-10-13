@@ -9,7 +9,7 @@ import { STATION_POSE } from './presets';
 import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, BOND_KEYS, SPECTROSCOPE, bondCounts, spectroscopeAt, INSTRUMENT_WINDOW, TUBE_CAP,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, BOND_KEYS, SPECTROSCOPE, bondCounts, spectroscopeAt, INSTRUMENT_TAU, TUBE_CAP,
   RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
@@ -592,7 +592,7 @@ describe('composition analyzer', () => {
     expect(temperature(waste!)).toBeCloseTo(3, 2);
   });
 
-  it("reads what it drew off over the last INSTRUMENT_WINDOW, as shares of it, and goes dark once that's passed", () => {
+  it("reads what it drew off lately, as shares of it, fading out smoothly once nothing passes, then dark", () => {
     const a = new Tool('analyzer', 0);
     expect(a.reading).toBeNull();
     const src = new Vessel(Infinity);
@@ -604,15 +604,16 @@ describe('composition analyzer', () => {
         a.step(0.02);
       }
     };
-    run(2 * INSTRUMENT_WINDOW, true);
+    run(4 * INSTRUMENT_TAU, true);
     // by volume, half R and half R–G
     expect(a.reading![at(1, 'R')]).toBeCloseTo(0.5, 1);
     expect(a.reading![at(2, 'R')]).toBeCloseTo(0.5, 1);
     expect(a.reading![at(2, 'G')]).toBeCloseTo(0.5, 1);
     expect(a.reading![at(3, 'R')]).toBe(0);
-    run(INSTRUMENT_WINDOW / 2, false);
-    expect(a.reading).not.toBeNull();
-    run(INSTRUMENT_WINDOW, false);
+    // as it fades it still reads the same mix
+    run(2 * INSTRUMENT_TAU, false);
+    expect(a.reading![at(1, 'R')]).toBeCloseTo(0.5, 1);
+    run(30 * INSTRUMENT_TAU, false);
     expect(a.reading).toBeNull();
   });
 });
@@ -651,7 +652,7 @@ describe('spectroscope', () => {
     expect(spectroscopeAt(Math.log(2), BOND_KEYS.map(() => 1), same)).toBeCloseTo(BOND_KEYS.length, 6);
   });
 
-  it('lets everything through, reading the bonds that passed over the last INSTRUMENT_WINDOW, per sim second', () => {
+  it('lets everything through, reading the bonds passing lately, per sim second, rising and falling smoothly', () => {
     const sc = new Tool('spectroscope', 0);
     expect(sc.shape.spouts).toHaveLength(1);
     const src = new Vessel(Infinity);
@@ -664,11 +665,19 @@ describe('spectroscope', () => {
         through += sc.step(0.02)[0]?.n[TARGET] ?? 0;
       }
     };
-    run(2 * INSTRUMENT_WINDOW, true);
-    expect(through / (2 * INSTRUMENT_WINDOW * feed)).toBeCloseTo(1, 2);
+    // a step up shows at once, but only in part
+    run(0.1, true);
+    expect(sc.bonds[bond('RG')]).toBeGreaterThan(0);
+    expect(sc.bonds[bond('RG')]).toBeLessThan(0.5 * feed);
+    run(20 * INSTRUMENT_TAU, true);
+    expect(through / ((0.1 + 20 * INSTRUMENT_TAU) * feed)).toBeCloseTo(1, 2);
     for (const k of ['RG', 'RB', 'GB']) expect(sc.bonds[bond(k)] / feed).toBeCloseTo(1, 2);
     expect(sc.bonds[bond('CM')]).toBe(0);
-    run(2 * INSTRUMENT_WINDOW, false);
+    // and a step down fades: about e^-1 of it is left after INSTRUMENT_TAU
+    run(INSTRUMENT_TAU, false);
+    expect(sc.bonds[bond('RG')] / feed).toBeGreaterThan(0.25);
+    expect(sc.bonds[bond('RG')] / feed).toBeLessThan(0.45);
+    run(40 * INSTRUMENT_TAU, false);
     expect(sc.bonds.every((c) => c === 0)).toBe(true);
   });
 });

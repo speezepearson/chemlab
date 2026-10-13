@@ -50,7 +50,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - `src/game/`: everything else in the game.
   - `engine.ts` owns the lab: what's in it, the player, input, carrying, the pencil and the sim loop.
   - `view.ts` draws it all with Three.js, and raycasts for what the crosshair is on.
-  - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room, and flips tools.
+  - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room.
   - `physics.ts` is the collisions: yawed boxes, the player's cylinder, `moveBox` and `walk`.
   - `space.ts` is the room, poses, and the mapping from the old flat bench to its back wall.
   - `tools.ts` holds tool shapes (flat outlines, y down) and per-step logic, plus drips and the instruments' readings (the spectroscope's graph is `spectroscopeAt`).
@@ -65,6 +65,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `surfaces.ts` paints the room's textures (walls, deck, ceiling, counters, cabinets) from noise, pure and DOM-free;
     `surfaceWorker.ts` runs it off the main thread, and `textures.ts` turns the results into materials, plain until
     their maps arrive, and gives geometry texture coordinates in world units (`boxUV`, `planeUV`).
+  - `history.ts` is undo and redo of the lab's arrangement (never fluids). An action that changes the arrangement calls
+    the engine's `mark()` as it starts and `commit()` as it ends (or `change()` around it, if it's instant); a carry is
+    marked at pick-up and committed at set-down.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
     `volumes.ts`); `rumble.ts` is the composition analyzer, `beeper.ts` the cryostabilizer station, `ambience.ts` the ship, `water.ts` drips and streams.
@@ -114,23 +117,19 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **What's drawn is what's hit.** Every mesh a `ToolView` builds is registered as part of the tool for the crosshair's
   raycast, so empty space around it isn't. Register a mesh yourself only to make it a specific part (a tank, valve
   or button); sprites (labels) aren't hit.
-- **Flipped tools** are built in a mirrored group (`art`), so building code works in unflipped local units; valves,
-  dials and writing go in `upright`, placed with `lx`, so they read the same either way. The geometry helpers in
-  `bodies.ts` (`onTool`, `valveLocal`, via `lx`) give positions as the tool stands. A view is rebuilt when its tool
-  flips.
 - **Adding a tool kind** touches all of these:
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially.
   - `ITEMS` and `HOTKEYS` in `engine.ts` (the hotbar's order and keys) and `ICONS` in `Palette.tsx`, unless the tool is
     unique. Only `-` is left on the number row.
   - Tests and the README.
-  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `flippable`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
+  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
 - **Unique tools** (`UNIQUE_TOOLS`: the composition analyzer, the spectroscope, the flow meter and the receptacle) aren't on
   the hotbar and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
   whole cryostabilizer station (`STATION` in `tools.ts`): its tanks are the receptacle, the tester and the reference,
   in that order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved.
 - **Inline instruments** (`INLINE_TOOLS`: the composition analyzer and the spectroscope) are a tube draining straight through at a fixed rate past a cabinet that reads
-  what goes by, over the last `INSTRUMENT_WINDOW` (`Tool.record`). A hose's nozzle let go of over the tube snaps onto its
+  what goes by, as an exponentially weighted average that fades the past smoothly (`INSTRUMENT_TAU`, `Tool.smooth`). A hose's nozzle let go of over the tube snaps onto its
   top (`docked` in `bodies.ts`, via the engine's `gridded`).
 - **The goal** is the target in the station's reference (`tanks[2]`, against `GOAL_TARGET`), not what's lying around
   in vessels.
@@ -141,8 +140,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 
 - Don't give away the chemistry. The player is meant to work it out. The composition analyzer has no text and no
   sextant divider lines, the size sorter's screens look plain, the hotbar has no names, and the faucets aren't labeled (they're the six pure
-  atoms, which the user chose). The spectroscope's axes are labeled lnE and f, at the user's request, with only lnE's
-  whole numbers marked and no peak labeled. Ask before adding any visual cue that reveals how a tool or reaction works.
+  atoms, which the user chose). The spectroscope's axes are labeled E and f, at the user's request: E on a log scale with
+  base-10 log-paper ticks, only the powers of ten numbered, and no peak labeled. It plots each bond at the size of its
+  energy, so uphill and downhill bonds look alike, which the user chose to keep. Ask before adding any visual cue that reveals how a tool or reaction works.
 - The game's text matches the intro's premise. The player is Nadia Hassan, the target species is the cryostabilizer,
   and the ship belongs to Celestia Starlines.
 - Commits are small, one behavior per commit, with a message explaining why. The README changes in the same commit.

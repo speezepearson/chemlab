@@ -66,7 +66,7 @@ export interface SavedTool extends SavedDepth {
   drops?: SavedVessel[];
   /** A heater's tube, stretch by stretch (see Tool.tube). */
   tube?: SavedVessel[];
-  /** Whether it's flipped left to right (see Tool.flipped). */
+  /** From when tools could be flipped left to right; ignored now. */
   flipped?: boolean;
   /** The player's note about it (see Tool.note), if any. */
   note?: string;

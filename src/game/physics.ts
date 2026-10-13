@@ -112,6 +112,31 @@ export function cylinderHitsBox(c: Cylinder, b: Box, slop = 0.01): boolean {
 
 const free = (b: Box, obstacles: readonly Box[]) => !obstacles.some((o) => boxesOverlap(b, o));
 
+/** Whether the straight line from a to b passes through a box, taken as solid all through (its parts aren't looked at). */
+export function segmentHitsBox(a: Vec3, b: Vec3, box: Box): boolean {
+  // in the box's own frame (see footprint), where it's square to the axes
+  const c = Math.cos(box.yaw);
+  const s = Math.sin(box.yaw);
+  const local = (p: Vec3) => ({ x: (p.x - box.x) * c - (p.z - box.z) * s, y: p.y - box.y, z: (p.x - box.x) * s + (p.z - box.z) * c });
+  const p = local(a);
+  const q = local(b);
+  let t0 = 0;
+  let t1 = 1;
+  for (const [k, h] of [['x', box.hx], ['y', box.hy], ['z', box.hz]] as const) {
+    const d = q[k] - p[k];
+    if (Math.abs(d) < 1e-12) {
+      if (Math.abs(p[k]) >= h) return false;
+      continue;
+    }
+    const u = (-h - p[k]) / d;
+    const v = (h - p[k]) / d;
+    t0 = Math.max(t0, Math.min(u, v));
+    t1 = Math.min(t1, Math.max(u, v));
+    if (t0 >= t1) return false;
+  }
+  return true;
+}
+
 /** How finely a move is stepped, so nothing thinner than this is passed through: in world units, and radians. */
 const STEP = 3;
 const TURN_STEP = 0.04;

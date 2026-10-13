@@ -47,14 +47,12 @@ export function onGrid(p: Pose, anchor: Vec3 = { x: 0, y: 0, z: 0 }): Pose {
  * The point of a tool that goes over the middle of a grid cell: the middle of its first tank's mouth. Its other mouths
  * and its spouts are a whole number of cells from it along the tool, so once it's on the grid, they are too.
  */
-export const toolAnchor = (t: Tool): Vec3 => ({ x: lx(t, tankX(t.shape.tanks[0])), y: 0, z: 0 });
+export const toolAnchor = (t: Tool): Vec3 => ({ x: tankX(t.shape.tanks[0]), y: 0, z: 0 });
 
-/** A local x on a tool as it stands: negated if it's flipped (see Tool.flipped). */
-export const lx = (t: Tool, x: number) => (t.flipped ? -x : x);
 
 /** A point in a tool's flat frame (x right, y down from its top center), `z` toward its front, in the room. */
 export function onTool(t: Tool, x: number, y: number, z = 0): Vec3 {
-  return toWorld(t.pose, { x: lx(t, x), y: -y, z });
+  return toWorld(t.pose, { x, y: -y, z });
 }
 
 /** The tip of spout j, where fluid leaves the tool. */
@@ -63,14 +61,15 @@ export function spoutAt(t: Tool, j: number): Vec3 {
 }
 
 /**
- * How far in front of the tool's middle its valves sit: on its front face, or for a round tank, on the pipe under it.
+ * How far in front of the tool's middle its valves sit: on its front face, where they're easy to see and reach; for a
+ * round tank, out in front of the tank on a stem from the pipe under it, so the tank's lower edge doesn't hide it.
  */
-export const valveZ = (t: Tool) => (t.shape.wall ? 7 : t.shape.round ? 8 : TOOL_DEPTH[t.kind].body / 2 + 3);
+export const valveZ = (t: Tool) => (t.shape.wall ? 7 : TOOL_DEPTH[t.kind].body / 2 + 3);
 
-/** A valve's center, in the tool's flat frame as it stands (so mirrored if it's flipped): as its shape places it, or under tank k. */
+/** A valve's center, in the tool's flat frame: as its shape places it, or under tank k. */
 export function valveLocal(t: Tool, k: number): { x: number; y: number } {
   const v = t.shape.valves?.[k] ?? { x: tankX(t.shape.tanks[k]), y: t.shape.valveY };
-  return { x: lx(t, v.x), y: v.y };
+  return { x: v.x, y: v.y };
 }
 
 /** A tank's walls, in the tool's flat frame. */
@@ -101,7 +100,7 @@ export function tankMouth(t: Tool, k: number): Mouth {
   const o = openingOf(t, k);
   const c = onTool(t, (o.x0 + o.x1) / 2, o.y);
   // it spills over its right lip as it stands
-  const rim = toWorld(t.pose, { x: lx(t, (o.x0 + o.x1) / 2) + (o.x1 - o.x0) / 2 + 3, y: -o.y, z: 0 });
+  const rim = toWorld(t.pose, { x: o.x1 + 3, y: -o.y, z: 0 });
   return { v: t.tanks[k], ...c, hx: (o.x1 - o.x0) / 2, hz: o.hz, yaw: t.pose.yaw, rim };
 }
 
@@ -120,7 +119,7 @@ export function tankNoteY(t: Tool, k: number): number {
 }
 
 /**
- * A tool's solid parts, in its flat frame (x right, y down from its top center) as it would stand unflipped, each
+ * A tool's solid parts, in its flat frame (x right, y down from its top center), each
  * reaching `hz` either side of `z` (its middle, if left out) front to back: its tanks (round, for a round tank), and
  * under them its cabinet, or else the pipes, valves and spouts there, across only as far as they reach. The
  * cryostabilizer station's are its funnel, the plate in the wall with its button, and its spouts' pipes out from it.
@@ -179,7 +178,7 @@ export function toolBox(t: Tool): Box {
   const b = t.shape.box;
   const c = { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 };
   const parts: Part[] = toolParts(t).map((p) => ({
-    x: lx(t, (p.x0 + p.x1) / 2 - c.x), y: -((p.y0 + p.y1) / 2 - c.y), z: p.z ?? 0,
+    x: (p.x0 + p.x1) / 2 - c.x, y: -((p.y0 + p.y1) / 2 - c.y), z: p.z ?? 0,
     hx: (p.x1 - p.x0) / 2, hy: (p.y1 - p.y0) / 2, hz: p.hz, round: p.round,
   }));
   const hz = Math.max(TOOL_DEPTH[t.kind].body / 2, ...parts.map((p) => p.hz));
@@ -189,23 +188,7 @@ export function toolBox(t: Tool): Box {
 /** The middle of a tool's bounding box, in its own frame (y up), as it stands: where it's held from. */
 export function toolCenter(t: Tool): Vec3 {
   const b = t.shape.box;
-  return { x: lx(t, (b.x0 + b.x1) / 2), y: -(b.y0 + b.y1) / 2, z: 0 };
-}
-
-/**
- * Flip a tool left to right (see Tool.flipped), about the middle of its box as near as keeps it on the grid, so it
- * stays where it is. Does nothing, returning false, if its shape isn't flippable.
- */
-export function flip(t: Tool): boolean {
-  if (!t.shape.flippable) return false;
-  // the box's middle is at c now and will be at −c, so move the tool 2c along its own x to keep it put: c to the
-  // nearest half cell, so it moves a whole number of cells, and its mouths and spouts (half a cell or a whole number
-  // of cells from its middle) stay over cells' middles
-  const c = Math.round(toolCenter(t).x / (CELL / 2)) * (CELL / 2);
-  const p = toWorld(t.pose, { x: 2 * c, y: 0, z: 0 });
-  t.pose = { ...p, yaw: t.pose.yaw };
-  t.flipped = !t.flipped;
-  return true;
+  return { x: (b.x0 + b.x1) / 2, y: -(b.y0 + b.y1) / 2, z: 0 };
 }
 
 /* ---------------- flasks ---------------- */
@@ -332,7 +315,7 @@ export function spoutNear(t: Tool, x: number, y: number): number | null {
   let best: number | null = null;
   let reach = SPOUT_REACH.x;
   t.shape.spouts.forEach((sx, j) => {
-    const dx = Math.abs(x - lx(t, sx));
+    const dx = Math.abs(x - sx);
     const dy = t.shape.spoutY - y;
     if (dx <= reach && dy <= SPOUT_REACH.up && dy >= -SPOUT_REACH.down) [best, reach] = [j, dx];
   });
@@ -372,7 +355,7 @@ const rodBack = (body: number) => Math.max(body / 2, FLASK_R) + STAND_CLEAR + ST
 /** The stands holding up a tool, unless it's built into a wall: clamped near its top, behind it. */
 export function toolStands(t: Tool, pose = t.pose): Stand[] {
   if (t.shape.wall) return [];
-  const at = (x: number, y: number, z: number) => toWorld(pose, { x: lx(t, x), y: -y, z });
+  const at = (x: number, y: number, z: number) => toWorld(pose, { x, y: -y, z });
   const b = t.shape.box;
   const body = TOOL_DEPTH[t.kind].body;
   const xs = b.x1 - b.x0 > TWO_STANDS ? [b.x0 + 60, b.x1 - 60] : [(b.x0 + b.x1) / 2];
@@ -453,7 +436,7 @@ export function valveNear(t: Tool, x: number, y: number): number | null {
 
 /**
  * Point valve k's lever at (x, y) in the tool's flat frame as it stands (y down): straight up from the valve is fully
- * open, straight right is closed, and in between is partly open, flipped or not. Below the valve it closes, and left
+ * open, straight right is closed, and in between is partly open. Below the valve it closes, and left
  * of it (past the down-left diagonal) it opens, so a wild swing lands at the nearer end. A splitter's lever instead
  * sweeps the upper half: straight left sends everything left, straight right everything right, and below the valve
  * it goes to the nearer side. A dial points at (x, y), turning clockwise from down-left (0) to down-right (1), and

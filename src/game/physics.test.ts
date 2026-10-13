@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boxesOverlap, cylinderHitsBox, moveBox, roomBoxes, walk, type Box } from './physics';
+import { boxesOverlap, cylinderHitsBox, moveBox, roomBoxes, segmentHitsBox, walk, type Box } from './physics';
 
 const box = (x: number, z: number, hx = 10, hz = 10, yaw = 0, y = 0, hy = 10): Box => ({ x, y, z, yaw, hx, hy, hz });
 
@@ -24,6 +24,28 @@ describe('boxesOverlap', () => {
     // a square turned 45° reaches √2 times further toward a corner
     expect(boxesOverlap(box(0, 0), box(24, 0))).toBe(false);
     expect(boxesOverlap(box(0, 0, 10, 10, Math.PI / 4), box(23, 0))).toBe(true);
+  });
+});
+
+describe('segmentHitsBox', () => {
+  it('tells a line through a box from one that passes by or stops short', () => {
+    const b = box(0, 0);
+    expect(segmentHitsBox({ x: -30, y: 0, z: 0 }, { x: 30, y: 0, z: 0 }, b)).toBe(true);
+    expect(segmentHitsBox({ x: -30, y: 0, z: 15 }, { x: 30, y: 0, z: 15 }, b)).toBe(false);
+    expect(segmentHitsBox({ x: -30, y: 0, z: 0 }, { x: -15, y: 0, z: 0 }, b)).toBe(false);
+    expect(segmentHitsBox({ x: -30, y: 25, z: 0 }, { x: 30, y: 25, z: 0 }, b)).toBe(false);
+    // starting inside counts
+    expect(segmentHitsBox({ x: 0, y: 0, z: 0 }, { x: 30, y: 30, z: 30 }, b)).toBe(true);
+  });
+
+  it('turns the box by its yaw', () => {
+    // a long thin box along x is missed by a line along x off to its side once it's turned a quarter
+    const long = box(0, 0, 50, 2);
+    const a = { x: -30, y: 0, z: 30 };
+    const c = { x: 30, y: 0, z: -30 };
+    expect(segmentHitsBox(a, c, long)).toBe(true);
+    expect(segmentHitsBox({ x: 40, y: 0, z: -10 }, { x: 40, y: 0, z: 10 }, long)).toBe(true);
+    expect(segmentHitsBox({ x: 40, y: 0, z: -10 }, { x: 40, y: 0, z: 10 }, { ...long, yaw: Math.PI / 2 })).toBe(false);
   });
 });
 

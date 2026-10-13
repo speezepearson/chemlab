@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FLASK_R, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_BASE, aimValve, onGrid, toolAnchor, flaskBox, flaskLip, flaskMouth, flip,
+  FLASK_R, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_BASE, aimValve, onGrid, toolAnchor, flaskBox, flaskLip, flaskMouth,
   docked, nozzleBox, nozzleMounts, nozzleStand, onScale, scaleSpot, snapReach, spoutNear, spoutAt, standBase, tankMouth, toolBox, toolStands, valveLocal,
   valveNear,
 } from './bodies';
@@ -39,19 +39,17 @@ describe('the grid', () => {
     expect(p.z - 50).toBeCloseTo(450);
   });
 
-  it("puts every mouth and spout of a tool on it over the middle of a cell, however it's turned or flipped", () => {
+  it("puts every mouth and spout of a tool on it over the middle of a cell, however it's turned", () => {
     for (const kind of Object.keys(SHAPES) as ToolKind[])
-      for (const yaw of [0.3, 1.9, -2.5])
-        for (const flipped of [false, true]) {
-          const t = new Tool(kind, 0);
-          t.flipped = flipped && !!t.shape.flippable;
-          t.pose = onGrid(at(321, 500, 777, yaw), toolAnchor(t));
-          const pts = [...t.tanks.map((_, k) => tankMouth(t, k)), ...t.shape.spouts.map((_, j) => spoutAt(t, j))];
-          for (const p of pts) {
-            expect(toCell(p.x), kind).toBeCloseTo(p.x, 6);
-            expect(toCell(p.z), kind).toBeCloseTo(p.z, 6);
-          }
+      for (const yaw of [0.3, 1.9, -2.5]) {
+        const t = new Tool(kind, 0);
+        t.pose = onGrid(at(321, 500, 777, yaw), toolAnchor(t));
+        const pts = [...t.tanks.map((_, k) => tankMouth(t, k)), ...t.shape.spouts.map((_, j) => spoutAt(t, j))];
+        for (const p of pts) {
+          expect(toCell(p.x), kind).toBeCloseTo(p.x, 6);
+          expect(toCell(p.z), kind).toBeCloseTo(p.z, 6);
         }
+      }
   });
 
   it("puts both of a scale's places for a flask over cells' middles", () => {
@@ -94,26 +92,6 @@ describe('tools in the room', () => {
     expect(spoutAt(sep, last).z).toBeCloseTo(-sep.shape.spouts[last]);
   });
 
-  it('flip left to right about as near their middle as keeps them on the grid, mirroring their spouts', () => {
-    for (const kind of ['separator', 'sorter', 'heater'] as const)
-      for (const yaw of [0, Math.PI / 2]) {
-        const t = new Tool(kind, 0);
-        t.pose = onGrid(at(130, 500, 420, yaw), toolAnchor(t));
-        const box = toolBox(t);
-        const spouts = t.shape.spouts.map((_, j) => spoutAt(t, j));
-        expect(flip(t)).toBe(true);
-        expect(Math.hypot(toolBox(t).x - box.x, toolBox(t).z - box.z)).toBeLessThanOrEqual(CELL / 2);
-        // the spout that was leftmost is now the rightmost, and they're all still over cells' middles
-        const last = t.shape.spouts.length - 1;
-        expect(spoutAt(t, last).x - spoutAt(t, 0).x).toBeCloseTo(spouts[0].x - spouts[last].x);
-        for (let j = 0; j <= last; j++) {
-          expect(toCell(spoutAt(t, j).x)).toBeCloseTo(spoutAt(t, j).x);
-          expect(toCell(spoutAt(t, j).z)).toBeCloseTo(spoutAt(t, j).z);
-        }
-      }
-    expect(flip(new Tool('dispenser', 1))).toBe(false);
-  });
-
   it('bump into each other only where their boxes meet', () => {
     const a = new Tool('dispenser', 0, at(0, 500, 0));
     expect(boxesOverlap(toolBox(a), toolBox(new Tool('dispenser', 1, at(60, 500, 0))))).toBe(true);
@@ -130,8 +108,6 @@ describe('spoutNear', () => {
     expect(spoutNear(sep, sep.shape.spouts[4], y - 25)).toBe(4);
     expect(spoutNear(sep, sep.shape.spouts[4], y - 60)).toBeNull();
     expect(spoutNear(sep, (sep.shape.spouts[1] + sep.shape.spouts[2]) / 2, y)).toBeNull();
-    sep.flipped = true;
-    expect(spoutNear(sep, -sep.shape.spouts[0], y)).toBe(0);
   });
 });
 
@@ -142,13 +118,6 @@ describe('valveNear', () => {
     expect(valveNear(ht, v.x + 5, v.y + 3)).toBe(1);
     expect(valveNear(ht, v.x + 40, v.y + 40)).toBeNull();
     expect(valveNear(new Tool('sorter', 0), 0, 0)).toBeNull();
-  });
-
-  it('keeps valves where they were on a flipped tool, mirrored', () => {
-    const ht = new Tool('heater', 0);
-    const v = valveLocal(ht, 0);
-    flip(ht);
-    expect(valveLocal(ht, 0).x).toBeCloseTo(-v.x);
   });
 });
 
@@ -165,15 +134,6 @@ describe('aimValve', () => {
     expect(ht.valves[k]).toBeCloseTo(1);
   });
 
-  it('still opens upward and closes to the right on a flipped tool', () => {
-    const sep = new Tool('separator', 0);
-    flip(sep);
-    const v = valveLocal(sep, 0);
-    aimValve(sep, 0, v.x, v.y - 30);
-    expect(sep.valves[0]).toBeCloseTo(1);
-    aimValve(sep, 0, v.x + 30, v.y);
-    expect(sep.valves[0]).toBeCloseTo(0);
-  });
 
   it('opens pointing up, closes pointing right, and ignores the core', () => {
     const t = new Tool('dispenser', 0);

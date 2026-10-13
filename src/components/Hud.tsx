@@ -99,8 +99,7 @@ function TouchButton({
 /**
  * On a touch screen, while playing: the stick that walks, bottom left, and the one that looks, bottom right; and
  * buttons standing in for the keys and the right button. Over the look stick, Grab (E) and the right button, which
- * is named for what it'll do and, while a valve turns, aims its lever as the finger drags; and Flip (F) when there's
- * something to flip. Over the move stick, Crouch (C), and while something's held, a pad to drag (across to turn it,
+ * is named for what it'll do and, while a valve turns, aims its lever as the finger drags; and Note (N) when there's something to write a note about. Over the move stick, while something's held, a pad to drag (across to turn it,
  * up and down to hold it further or nearer, or for a hose's nozzle, to slide its stand out or in) and Put away
  * (Backspace).
  */
@@ -111,7 +110,7 @@ export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudSta
       <Stick engine={engine} which="move" />
       <Stick engine={engine} which="look" />
       <div className="touch-buttons right">
-        {hud.flip && <TouchButton label="Flip" className="small" down={() => engine.touchFlip()} />}
+        {hud.label && <TouchButton label="Note" className="small" down={() => engine.touchNote()} />}
         <TouchButton
           label={hud.hand}
           lit={hud.right || hud.pencil}
@@ -124,7 +123,6 @@ export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudSta
       <div className="touch-buttons left">
         {hud.holding && <TouchButton label="Put away" className="small" down={() => engine.touchPutAway()} />}
         {hud.holding && <TouchButton label="Turn" className="pad" drag={(dx, dy) => engine.turnHeld(dx, dy)} />}
-        <TouchButton label="Crouch" className="small" down={() => engine.touchCrouch(true)} up={() => engine.touchCrouch(false)} />
       </div>
     </>
   );
@@ -144,12 +142,6 @@ function MouseHint({ side }: { side: 'left' | 'right' }) {
 /** One key or button of an action (see Action): a key cap, or a little mouse with the button lit. */
 function Key({ k }: { k: string }) {
   if (k === 'LMB' || k === 'RMB') return <MouseHint side={k === 'LMB' ? 'left' : 'right'} />;
-  if (k === 'LMB2')
-    return (
-      <span className="twice">
-        <MouseHint side="left" />×2
-      </span>
-    );
   return <kbd>{k}</kbd>;
 }
 
@@ -175,7 +167,7 @@ function Actions({ actions }: { actions: readonly Action[] }) {
 }
 
 /**
- * The crosshair, with hints by it for what E, F and the mouse buttons would do; the aim while a valve turns; and, on a
+ * The crosshair, with hints by it for what the mouse buttons would do; the aim while a valve turns; and, on a
  * screen with a mouse and keys, everything else that can be done just now, in a corner, unless `/` has hidden it.
  */
 export function Hud({ hud, help }: { hud: HudState; help: boolean }) {
@@ -184,8 +176,6 @@ export function Hud({ hud, help }: { hud: HudState; help: boolean }) {
     <>
       <div className={hud.aim ? 'crosshair dim' : 'crosshair'} />
       <div className="hints">
-        {(hud.grab || hud.drop) && <kbd>E</kbd>}
-        {hud.flip && <kbd>F</kbd>}
         {hud.press && <MouseHint side="left" />}
         {hud.right && <MouseHint side="right" />}
       </div>
