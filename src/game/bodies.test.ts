@@ -294,6 +294,14 @@ describe('docking', () => {
     // docked, the nozzle sits clear of the tube
     expect(boxesOverlap(nozzleBox(new Hose({ faucet: 0 }, docked(over(100), [a]), 0)), toolBox(a))).toBe(false);
   });
+
+  it("snaps a nozzle onto a flow meter's tube, clear of it", () => {
+    const m = new Tool('meter', 0, at(450, 800, 150));
+    const top = tankMouth(m, 0);
+    const p = docked({ x: top.x, y: top.y + 100, z: top.z, yaw: 0 }, [m]);
+    expect(p.y).toBeCloseTo(top.y + 1);
+    expect(boxesOverlap(nozzleBox(new Hose({ faucet: 0 }, p, 0)), toolBox(m))).toBe(false);
+  });
 });
 
 describe('collision shapes', () => {
