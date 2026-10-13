@@ -195,6 +195,7 @@ The faucets pour single atoms only, so every molecule, the target included, has 
   - The swap prefactor: if it's too high, recoloring is trivial and the whole puzzle is getting the topology right.
   - Heat capacity: R + G alone heats up noticeably.
   - Whether the six colors stay distinguishable in mixtures.
+  - A minimum rate for the station's supply. It only has to keep up with what the passengers use, about 340 molecules a sim second, far under a drop every 2 s (about 250,000 molecules a second), and a line that barely manages that makes the sleep long: the 30-flask shortfall at a drop every 2 s is about 120,000 sim s, which the fast-forward ran at 44 to 250 sim s per real second in headless Chromium (more with fewer vessels holding fluid), so 8 to 45 minutes. A rate that fills the shortfall within a few minutes of sleep would bound it.
 - **Playtester notes** (not yet acted on):
   - Make sure there's a synthesis pathway: a route that actually reaches more than 95% cryostabilizer.
   - Maybe add an off switch to the new device. The note doesn't say which device is meant.
