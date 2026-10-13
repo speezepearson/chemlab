@@ -42,8 +42,10 @@ export const toCardinal = (yaw: number) => wrapAngle(Math.round(yaw / (Math.PI /
 
 /** Height of every counter: the sink counters along the walls, and the islands. */
 export const LIFT = 420;
-/** How far the wall counters come out from the walls: two grid cells. */
+/** How far the back wall's counter comes out from it: two grid cells. */
 export const COUNTER_D = 2 * CELL;
+/** How far the right wall's counter, under the faucets, comes out from it: one grid cell, so they're in easy reach. */
+export const SINK_D = CELL;
 /**
  * The islands' size, across and front to back, and where their grid starts and how far apart they are, all in whole
  * grid cells: each is ten cells by four.
@@ -62,8 +64,8 @@ export interface Counter {
  * wall under the faucets, and a grid of islands out in the room, like an undergraduate lab's benches.
  */
 export const COUNTERS: readonly Counter[] = [
-  { x0: ROOM.x0, x1: ROOM.x1 - COUNTER_D, z0: ROOM.z0, z1: ROOM.z0 + COUNTER_D },
-  { x0: ROOM.x1 - COUNTER_D, x1: ROOM.x1, z0: ROOM.z0, z1: ROOM.z1 },
+  { x0: ROOM.x0, x1: ROOM.x1 - SINK_D, z0: ROOM.z0, z1: ROOM.z0 + COUNTER_D },
+  { x0: ROOM.x1 - SINK_D, x1: ROOM.x1, z0: ROOM.z0, z1: ROOM.z1 },
   ...Array.from({ length: ISLAND.cols * ISLAND.rows }, (_, i) => {
     const x0 = ISLAND.x0 + (i % ISLAND.cols) * ISLAND.dx;
     const z0 = ISLAND.z0 + Math.floor(i / ISLAND.cols) * ISLAND.dz;

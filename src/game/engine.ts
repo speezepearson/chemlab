@@ -198,10 +198,12 @@ export const TOUCH = typeof matchMedia === 'function' && matchMedia('(pointer: c
 /** How long two clicks can be apart and count as a double-click, in ms. */
 const DOUBLE_MS = 380;
 /**
- * Where the faucets are: along the right wall over its counter, this high, a grid cell apart, each spout over the
- * middle of a cell of the counter's row nearest the wall (see CELL).
+ * Where the faucets are: along the right wall over its counter, a grid cell apart, each spout over the middle of a
+ * cell of the counter's one row (see CELL, SINK_D). Their spouts are a little under eye level, high enough over the
+ * counter for a flask on a scale (whose mouth is 112 up) to go under one, at the foot of a neck FAUCET_NECK long.
  */
-const FAUCET_Y = LIFT + 300;
+const FAUCET_Y = LIFT + 160;
+const FAUCET_NECK = 30;
 const FAUCET_Z0 = 3.5 * CELL;
 const FAUCET_GAP = CELL;
 const FAUCET_OUT = CELL / 2;
@@ -317,7 +319,7 @@ export class GameEngine {
       return {
         start,
         spout: { x: ROOM.x1 - FAUCET_OUT, y: FAUCET_Y, z },
-        wall: { x: ROOM.x1 - 14, y: FAUCET_Y + 70, z },
+        wall: { x: ROOM.x1 - 14, y: FAUCET_Y + FAUCET_NECK, z },
         output: faucetOutput(start, chem),
         note: '',
       };
