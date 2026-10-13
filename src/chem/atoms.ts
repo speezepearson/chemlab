@@ -20,6 +20,9 @@ export const ATOM_RGB: Record<Atom, RGBTriple> = {
   Y: [240, 202, 48],
 };
 
+/** How much each atom weighs, in µg (see GRAMS_PER_WEIGHT in scale.ts), so a billion of weight w weigh w kg. No two weigh the same. */
+export const ATOM_WEIGHT: Record<Atom, number> = { R: 6, G: 3, B: 4, C: 2, M: 1, Y: 5 };
+
 /** Bit k of a bond mask is the bond between the two groups BIT_PAIRS[k]. */
 export const BIT_PAIRS: readonly (readonly [Group, Group])[] = [
   [0, 1],
