@@ -1157,7 +1157,9 @@ class ToolView {
       const x = tankX(tk);
       // the column's back, its fluid, and the glass in front
       block(art, darkMat, x - paneW / 2, x + paneW / 2, 0, H, wall, wall + 0.5);
-      const fm = new FluidMesh([new THREE.BoxGeometry(paneW - 1, H, plate - 3).translate(x, -H / 2, wall + 0.5 + (plate - 3) / 2)], art);
+      // held a little off the column's back and the pane, so where they'd meet they don't flicker into each other
+      // (seen through the fluid's open top)
+      const fm = new FluidMesh([new THREE.BoxGeometry(paneW - 1, H, plate - 4).translate(x, -H / 2, wall + 1.5 + (plate - 4) / 2)], art);
       for (const m of fm.meshes) pick(m, 'tank', k);
       this.fluids.push({ fm, level: (v) => onTool(t, 0, H * (1 - Math.min(1, volume(v) / v.cap))).y });
       const pane = new THREE.Mesh(new THREE.PlaneGeometry(paneW, H).translate(x, -H / 2, face - 0.5), glassMat);
