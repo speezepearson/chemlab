@@ -1356,7 +1356,7 @@ class ToolView {
     this.verdict!.emissive.set(v ?? 0x000000);
     // the screen: the cryostabilizer in the reference / what's needed, in litres
     const s = this.screen!;
-    const text = `${((t.tanks[2].n[TARGET] / CAP) * FLASK_L).toFixed(3)} L / ${GOAL_L.toFixed(3)} L`;
+    const text = `${((t.tanks[2].n[TARGET] / CAP) * FLASK_L).toFixed(2)} L / ${GOAL_L.toFixed(2)} L`;
     if (s.key !== text) {
       s.key = text;
       const sc = STATION.screen;

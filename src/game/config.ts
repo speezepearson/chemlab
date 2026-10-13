@@ -6,10 +6,10 @@ export const N_FLASKS = 8;
  * The sum in the intro: the passengers still asleep, the days left to Mu Ceti, the cryostabilizer each needs a day,
  * and what's left on board, which is the cryostabilizer reference's hundred flasks.
  */
-export const VOYAGE = { passengers: 32_210, days: 4_456, mlPerPassengerDay: 0.000035, presentL: 2.811 };
-/** Litres in a flask (a billion molecules): what the reference's hundred flasks make the 2.811 L that's left. */
+export const VOYAGE = { passengers: 32_210, days: 4_456, mlPerPassengerDay: 0.0003735, presentL: 30 };
+/** Litres in a flask (a billion molecules): what the reference's hundred flasks make the 30 L that's left, 300 mL. */
 export const FLASK_L = VOYAGE.presentL / 100;
-/** The cryostabilizer needed to reach Mu Ceti, in litres: the intro's sum, about 5.023 L. */
+/** The cryostabilizer needed to reach Mu Ceti, in litres: the intro's sum, about 53.61 L. */
 export const GOAL_L = (VOYAGE.passengers * VOYAGE.mlPerPassengerDay * VOYAGE.days) / 1000;
 /**
  * The target to win, in molecules: GOAL_L, about 179 flasks of it, in the cryostabilizer reference, which starts with
