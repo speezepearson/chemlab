@@ -5,7 +5,7 @@ import { NS, SPECIES } from '../chem/species';
 import { CAP } from './config';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
-import { CELL, ORIGIN, type Pose, type Vec3 } from './space';
+import { CELL, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
 
 /** Capacity of each tank on a tool, in atoms. */
 export const TANK_CAP = 4 * CAP;
@@ -259,37 +259,62 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
  * of the counter's row of cells nearest the wall, where the funnel and spouts are, and the wall is `out` behind it.
  * - paneW, paneH: each column's pane, across and tall; the column behind it is as tall.
  * - out: how far the funnel and spouts stand out from the wall.
+ * - top: how high the columns' tops are, in the room.
  * - plate: how far the plate the panes are set in stands out from the wall.
+ * - block: the plate's edges, in the flat frame: a swappable block of the wall, two of the wall's panels across and one
+ *   high (see WALL_PANEL), lined up with them, with a rubber seam round it.
  * - funnel: the funnel's mouth, `y` down from the columns' tops (about level with the receptacle's bottom, within
  *   easy reach), reaching w either side of its middle; it narrows to its stem h below that.
- * - labelY: where the columns' labels end, above them.
+ * - labelY: the middle of the labels printed on the plate above the columns.
  * - autoflush: how full the receptacle is, by volume, when it flushes itself into the tester, as if its button were
  *   pressed; a red line on the wall marks it.
+ * - gauge: a stack of LCD segments just right of the tester, as tall as the panes, showing how far the reference is
+ *   toward the goal (see gaugeSegments): x0..x1 across, and how many segments.
  * - panel: the panel's front, in the flat frame, how far it stands out from the plate, and its lamps, verdict lamp,
  *   button and screen.
  */
+const STATION_TOP = LIFT + 400;
 export const STATION = {
   paneW: 24,
   paneH: 260,
+  top: STATION_TOP,
   out: CELL / 2,
   plate: 12,
+  block: {
+    x0: -CELL / 2,
+    x1: -CELL / 2 + 2 * WALL_PANEL.w,
+    y0: STATION_TOP - 2 * WALL_PANEL.h,
+    y1: STATION_TOP - WALL_PANEL.h,
+  },
   funnel: { y: 180, w: 30, h: 30 },
-  labelY: -24,
+  labelY: -22,
   autoflush: 0.9,
+  gauge: { x0: CELL + 20, x1: CELL + 30, segments: 26 },
   panel: {
-    x0: 2 * CELL - 62, x1: 2 * CELL + 62, y0: 70, y1: 150, depth: 8,
-    lamps: { x0: 2 * CELL - 44, dx: 11, y: 84, r: 3.2 },
-    verdict: { x: 2 * CELL + 36, y: 84, r: 5 },
-    button: { x0: 2 * CELL - 44, x1: 2 * CELL + 4, y0: 96, y1: 109 },
-    screen: { x0: 2 * CELL - 50, x1: 2 * CELL + 50, y0: 120, y1: 140 },
+    x0: 2 * CELL - 54, x1: 2 * CELL + 74, y0: 70, y1: 150, depth: 8,
+    lamps: { x0: 2 * CELL - 34, dx: 11, y: 84, r: 3.2 },
+    verdict: { x: 2 * CELL + 46, y: 84, r: 5 },
+    button: { x0: 2 * CELL - 34, x1: 2 * CELL + 14, y0: 96, y1: 109 },
+    screen: { x0: 2 * CELL - 40, x1: 2 * CELL + 60, y0: 120, y1: 140 },
   },
 };
+
+/**
+ * What each of the station's gauge's segments shows, bottom up, with the reference holding `held` of `cap` and the
+ * goal at `goal` (all in molecules): lit green if it's wholly below what's held, flashing red if any of it is below
+ * the goal, and dark otherwise.
+ */
+export function gaugeSegments(held: number, goal: number, cap: number, n = STATION.gauge.segments): ('held' | 'wanted' | 'off')[] {
+  return Array.from({ length: n }, (_, i) =>
+    ((i + 1) / n) * cap <= held ? 'held' : (i / n) * cap < goal ? 'wanted' : 'off',
+  );
+}
 /** How much the receptacle holds, by volume, and so the tester it flushes into: a hundred flasks. */
 export const RECEPTACLE_CAP = 100 * CAP;
 /**
- * How much the cryostabilizer reference holds, by volume: about three times the goal (see GOAL_TARGET), so the goal's
- * line is a third of the way up its pane, and there's room for it even if everything the tester passes into it is
- * only just pure enough, and the rest of it single atoms.
+ * How much the cryostabilizer reference holds, by volume: about three times the goal (see GOAL_TARGET), so the goal is
+ * a third of the way up its gauge, and there's room for it even if everything the tester passes into it is only just
+ * pure enough, and the rest of it single atoms.
  */
 export const REFERENCE_CAP = 540 * CAP;
 /** The target the reference starts with, in molecules: the hundred flasks left on board (see VOYAGE). */
@@ -600,11 +625,11 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     // the cryostabilizer station: columns in the wall, behind panes (see STATION), a funnel into the receptacle, a
     // waste nozzle under the tester and a faucet under the reference, a grid cell apart (see CELL)
     tanks: [
-      { name: 'receptacle', x0: -STATION.paneW / 2, x1: STATION.paneW / 2, cap: RECEPTACLE_CAP, label: ['cryostabilizer', 'receptacle'] },
+      { name: 'buffer', x0: -STATION.paneW / 2, x1: STATION.paneW / 2, cap: RECEPTACLE_CAP, label: ['buffer'] },
       { name: 'tester', x0: CELL - STATION.paneW / 2, x1: CELL + STATION.paneW / 2, cap: RECEPTACLE_CAP, sealed: true, label: ['tester'] },
       {
-        name: 'reference', x0: 3 * CELL - STATION.paneW / 2, x1: 3 * CELL + STATION.paneW / 2, cap: REFERENCE_CAP, sealed: true,
-        label: ['cryostabilizer', 'reference'],
+        name: 'ship reservoir', x0: 3 * CELL - STATION.paneW / 2, x1: 3 * CELL + STATION.paneW / 2, cap: REFERENCE_CAP, sealed: true,
+        label: ['ship reservoir'],
       },
     ],
     tankH: STATION.paneH,
@@ -616,7 +641,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spouts: [CELL, 3 * CELL],
     valveY: STATION.paneH + 24,
     spoutY: STATION.paneH + 44,
-    box: { x0: -STATION.funnel.w - 30, x1: 3 * CELL + 30, y0: STATION.labelY - 50, y1: STATION.paneH + 46 },
+    box: { x0: STATION.block.x0 - 6, x1: STATION.block.x1 + 6, y0: STATION.block.y0 - 6, y1: STATION.block.y1 + 6 },
   },
   meter: {
     // a funnel draining straight through a cabinet with a display (see METER_BODY) and out a spout

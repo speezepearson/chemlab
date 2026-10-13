@@ -108,11 +108,11 @@ const CABINETS: readonly ToolKind[] = ['spectrometer', 'meter'];
 /**
  * Where, in a tool's flat frame, the player's note about tank k is written (its middle's height): above the tank's
  * opening and the tool's label, or the tank's own (the most lines of any of the tool's tanks', so they line up); on
- * the cryostabilizer station, above its columns' labels.
+ * the cryostabilizer station, just above its block.
  */
 export function tankNoteY(t: Tool, k: number): number {
   const lines = Math.max(t.shape.label?.length ?? 0, ...t.shape.tanks.map((tk) => tk.label?.length ?? 0));
-  if (t.shape.wall) return STATION.labelY - 11 * lines - 6;
+  if (t.shape.wall) return STATION.block.y0 - 14;
   return openingOf(t, k).y - (lines ? 11 * lines + 10 : 9);
 }
 
@@ -131,7 +131,7 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
     const face = -out + plate;
     return [
       { x0: -f.w - 2, x1: f.w + 2, y0: f.y - 2, y1: H - 6, hz: f.w + 1 },
-      { x0: b.x0, x1: b.x1, y0: -24, y1: H + 16, hz: plate / 2, z: -out + plate / 2 },
+      { x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, hz: plate / 2 + 1, z: -out + plate / 2 + 1 },
       { x0: p.x0, x1: p.x1, y0: p.y0, y1: p.y1, hz: p.depth / 2, z: face + p.depth / 2 },
       ...sh.spouts.map((x) => ({ x0: x - 8, x1: x + 8, y0: H + 10, y1: sh.spoutY, hz: (out + 8) / 2, z: (8 - out) / 2 })),
     ];

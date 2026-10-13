@@ -272,6 +272,8 @@ export class GameEngine {
   private wake: Wake = 'closed';
   /** How far the ship has turned, in radians (see SPIN), for the stars. */
   private spin = 0;
+  /** Sim seconds the lab has run, for what blinks on sim time. */
+  private clock = 0;
   private wakeT = Infinity;
   /** The cryostabilizer station's sounds, through its cycle (see Tool.press). */
   private beepers = new Map<Tool, Beeper>();
@@ -1724,6 +1726,7 @@ export class GameEngine {
     // the lab waits for the player to press OK in the pod, as it did through the rest of the intro
     const simDt = this.wake === 'pod' ? 0 : dt * this.speed;
     this.spin = (this.spin + SPIN * simDt) % (2 * Math.PI);
+    this.clock += simDt;
     const mouths = (this.open = this.mouths());
     const h = this.held;
 
@@ -2088,7 +2091,7 @@ export class GameEngine {
       eye: this.eye(), yaw: this.player.yaw, pitch: this.player.pitch,
       flasks: this.flasks, tools: this.tools, scales: this.scales, hoses, faucets: this.faucets,
       streams, drops,
-      tarePress: this.tarePress, hot: this.target, shake, dt, alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
+      tarePress: this.tarePress, hot: this.target, shake, dt, clock: this.clock, alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
       airlock: this.airlockLook(),
       papers: this.paperFrame(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(),

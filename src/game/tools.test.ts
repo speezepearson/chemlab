@@ -4,9 +4,12 @@ import { CAP, GOAL_PURITY, GOAL_TARGET } from './config';
 import { heatAt, temperature } from '../chem/reactions';
 import { Vessel, roomFor, volume } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
+import { STATION_POSE } from './presets';
+import { WALL_PANEL } from './space';
+import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, METER, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, SAMPLE_CAP, SCAN_LIGHTS,
-  RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, SEPARATOR, STATION, SEPARATOR_PERFECT, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, aimAt, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, mouthGap, scanLevel, separate, spectrum, type Mouth,
+  RECEPTACLE_CAP, RECEPTACLE_TIMES, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, beepPattern, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, aimAt, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, mouthGap, scanLevel, separate, spectrum, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -329,6 +332,32 @@ describe('cryostabilizer station', () => {
     expect(volume(r.step(0.5)[1]!) / (0.5 * REFERENCE_FLOW * 0.5)).toBeCloseTo(1, 3);
     r.valves[0] = 0;
     expect(r.step(0.5)[1]).toBe(null);
+  });
+
+  it('gauges the reference: green for what it holds, red for what the goal still wants, dark above', () => {
+    // ten segments of 10 each; 34 held of a goal of 72
+    expect(gaugeSegments(34, 72, 100, 10)).toEqual(['held', 'held', 'held', 'wanted', 'wanted', 'wanted', 'wanted', 'wanted', 'off', 'off']);
+    // past the goal, nothing's wanted
+    expect(gaugeSegments(80, 72, 100, 10).filter((g) => g === 'wanted')).toEqual([]);
+  });
+
+  it("is a block of the wall lined up with the wall's panels", () => {
+    const { block, top } = STATION;
+    const pose = STATION_POSE;
+    // the right wall's panels run along it from z = 0, and up from the floor
+    for (const z of [pose.z + block.x0, pose.z + block.x1]) expect(z / WALL_PANEL.w).toBeCloseTo(Math.round(z / WALL_PANEL.w), 9);
+    for (const y of [top - block.y0, top - block.y1]) expect(y / WALL_PANEL.h).toBeCloseTo(Math.round(y / WALL_PANEL.h), 9);
+    expect(TILES.walls.u / 2).toBe(WALL_PANEL.w);
+    expect(TILES.walls.v / 3).toBeCloseTo(WALL_PANEL.h, 9);
+    expect(pose.y).toBe(top);
+    // everything on it is inside it
+    const r = new Tool('receptacle', 0);
+    for (const tk of r.shape.tanks) {
+      expect(tk.x0).toBeGreaterThan(block.x0);
+      expect(tk.x1).toBeLessThan(block.x1);
+    }
+    expect(block.y0).toBeLessThan(STATION.labelY - 5);
+    expect(block.y1).toBeGreaterThan(r.shape.valveY);
   });
 
   it('beeps in a random pattern through its thinking, a few times a second', () => {

@@ -4,8 +4,8 @@ import { T_ROOM, defaultChemParams } from '../chem/params';
 import { SPECIES, TARGET, singleOf, speciesEnergies } from '../chem/species';
 import { CAP, HOME_W } from './config';
 import type { Vessel } from './flask';
-import { CELL, LIFT, ROOM, type Pose } from './space';
-import { REFERENCE_START, type ToolKind } from './tools';
+import { CELL, ROOM, type Pose } from './space';
+import { REFERENCE_START, STATION, type ToolKind } from './tools';
 
 /** Starting contents of one shelf slot. */
 export interface FlaskFill {
@@ -36,7 +36,7 @@ export const SPECTROMETER_AT: Spot = { at: [1.15, 0.3] };
  * into the room, its funnel and spouts over the middles of the cells of the counter's row nearest the wall, and its
  * spouts high enough for a flask under them. Every lab has it, always here.
  */
-export const STATION_POSE: Pose = { x: ROOM.x1 - CELL / 2, y: LIFT + 400, z: 11.5 * CELL, yaw: -Math.PI / 2 };
+export const STATION_POSE: Pose = { x: ROOM.x1 - CELL / 2, y: STATION.top, z: 11.5 * CELL, yaw: -Math.PI / 2 };
 
 /** What the cryostabilizer reference starts with: the hundred flasks of the target left on board (see VOYAGE). */
 export const REFERENCE_FILL: FlaskFill = { contents: [{ species: TARGET, molecules: REFERENCE_START }], T: T_ROOM };

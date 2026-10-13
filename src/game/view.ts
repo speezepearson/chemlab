@@ -18,7 +18,7 @@ import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
   HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, RECEPTACLE_LAMPS, REFERENCE_CAP,
-  FUNNEL_TIP, SCAN_LIGHTS, SORTER_CHUTE, SPECTROMETER, STATION, SUMP_TIP, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
+  FUNNEL_TIP, SCAN_LIGHTS, SORTER_CHUTE, SPECTROMETER, STATION, SUMP_TIP, gaugeSegments, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
 
@@ -81,6 +81,8 @@ export interface Frame {
   shake: ReadonlyMap<Tool, number>;
   /** Real seconds since the last frame, for the beacon. */
   dt: number;
+  /** Sim seconds the lab has run, for what blinks on sim time (the station's gauge). */
+  clock: number;
   /** Whether the alarms are silenced, which the button under the beacon shows. */
   alarmsOff: boolean;
   /** Whether the porthole's blinds are shut, leaving it solid black. */
@@ -188,7 +190,45 @@ const chromeMat = new THREE.MeshStandardMaterial({ color: 0xe2e7e8, metalness: 1
 /** The steel plate the cryostabilizer station's panes are set in, and the lines marked on it. */
 const plateMat = new THREE.MeshStandardMaterial({ color: 0x6f7975, metalness: 0.5, roughness: 0.45 });
 const autoflushMat = new THREE.MeshStandardMaterial({ color: 0xd8443b, roughness: 0.5 });
-const goalMat = new THREE.MeshStandardMaterial({ color: 0x7fd4ad, roughness: 0.5 });
+/** The rubber seam round the cryostabilizer station's block of the wall. */
+const rubberMat = new THREE.MeshStandardMaterial({ color: 0x1a1d1c, roughness: 0.95, metalness: 0 });
+/** The station's gauge's segments: lit green for what's held, red for what's wanted (flashing), and dark. */
+const SEGMENT_COLORS = { held: 0x3cff6a, wanted: 0xff3a2e, off: 0x1d2a21 } as const;
+
+/**
+ * Text printed on a flat face, centered on (x, y) in a flat frame at depth z, `h` tall: pale paint, in capitals, as
+ * signage is. Not a sprite: it lies on the face, and is seen from whatever angle the face is.
+ */
+function printed(parent: THREE.Object3D, text: string, x: number, y: number, z: number, h: number): THREE.Mesh {
+  const ppu = 12;
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d')!;
+  const font = `700 ${h * ppu}px "Schibsted Grotesk", sans-serif`;
+  ctx.font = font;
+  const label = text.toUpperCase();
+  const spacing = 0.12 * h * ppu;
+  const w = ctx.measureText(label).width + spacing * (label.length - 1);
+  c.width = Math.ceil(w + 4);
+  c.height = Math.ceil(h * ppu * 1.3);
+  ctx.font = font;
+  ctx.fillStyle = '#d5dbd8';
+  ctx.textBaseline = 'middle';
+  let at = 2;
+  for (const ch of label) {
+    ctx.fillText(ch, at, c.height / 2);
+    at += ctx.measureText(ch).width + spacing;
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(c.width / ppu, c.height / ppu),
+    new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.7, depthWrite: false }),
+  );
+  m.position.copy(v3(x, y, z));
+  parent.add(m);
+  return m;
+}
 
 /** Points in a flat frame (x right, y down), placed at depth z, as a vector in an object's own frame (y up). */
 const v3 = (x: number, y: number, z = 0) => new THREE.Vector3(x, -y, z);
@@ -677,6 +717,8 @@ class ToolView {
   private verdict?: THREE.MeshStandardMaterial;
   /** How far forward the button's face is when it's out, in local units. */
   private buttonZ = 0;
+  /** The cryostabilizer station's gauge's segments, bottom up. */
+  private segments: THREE.MeshStandardMaterial[] = [];
 
   constructor(
     readonly t: Tool,
@@ -1036,29 +1078,35 @@ class ToolView {
   }
 
   /**
-   * The cryostabilizer station (see STATION): a steel plate on the wall with a narrow glass pane for each column, the
-   * column's fluid behind it filling it from the bottom as the column fills; a glass funnel low in front of the
-   * receptacle, whose stem runs down and back into a pump on the plate; a red line across the receptacle's pane where it flushes
-   * itself, and a pale green one across the reference's where it holds enough; a waste nozzle under the tester, whose
+   * The cryostabilizer station (see STATION): a steel plate, a block of the wall in a rubber seam, with a narrow glass
+   * pane for each column, the column's fluid behind it filling it from the bottom as the column fills, and the column's
+   * name printed above; a glass funnel low in front of the receptacle, whose stem runs down and back into a pump on the
+   * plate; a red line across the receptacle's pane where it flushes itself; a waste nozzle under the tester, whose
    * valve has no handle, since only the station works it; a faucet under the reference (its lever is built with the
-   * other valves); and between them a panel with a row of lamps that blink with the tester's thinking, a verdict lamp,
-   * the button, and a green-on-black screen showing the litres of cryostabilizer in the reference of the litres
-   * needed. Each column is labeled above.
+   * other valves); the gauge of LCD segments just right of the tester (see gaugeSegments); and between that and the
+   * reference a panel with a row of lamps that blink with the tester's thinking, a verdict lamp, the button, and a
+   * green-on-black screen showing the litres of cryostabilizer in the reference of the litres needed.
    */
   private buildStation(scene: THREE.Object3D, pick: (m: THREE.Object3D, part: 'body' | 'tank' | 'button', k?: number) => void): void {
     const { t, art, upright } = this;
     const sh = t.shape;
-    const { paneW, paneH: H, out, plate, funnel: f, panel: p, autoflush } = STATION;
+    const { paneW, paneH: H, out, plate, funnel: f, panel: p, autoflush, block: bk, gauge: g } = STATION;
     const wall = -out;
     const face = wall + plate;
-    const b = sh.box;
-    // the plate, with a slot for each pane
-    const shape = rectPath((b.x0 + b.x1) / 2, -H / 2, b.x1 - b.x0, H + 40, new THREE.Shape());
+    // the plate: a block of the wall, lined up with its panels, with a slot for each pane
+    const shape = rectPath((bk.x0 + bk.x1) / 2, -(bk.y0 + bk.y1) / 2, bk.x1 - bk.x0, bk.y1 - bk.y0, new THREE.Shape());
     for (const tk of sh.tanks) shape.holes.push(rectPath(tankX(tk), -H / 2, paneW, H));
     const pl = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: plate, bevelEnabled: false }), plateMat);
     pl.position.z = wall;
     pl.receiveShadow = true;
     art.add(pl);
+    // a rubber seam all round it, over the panels' seams, as if the block could be pulled and another put in its place
+    const s = 4;
+    for (const [x0, x1, y0, y1] of [
+      [bk.x0 - s, bk.x1 + s, bk.y0 - s, bk.y0 + s], [bk.x0 - s, bk.x1 + s, bk.y1 - s, bk.y1 + s],
+      [bk.x0 - s, bk.x0 + s, bk.y0 + s, bk.y1 - s], [bk.x1 - s, bk.x1 + s, bk.y0 + s, bk.y1 - s],
+    ])
+      block(art, rubberMat, x0, x1, y0, y1, wall, face + 2, 2).castShadow = false;
     sh.tanks.forEach((tk, k) => {
       const x = tankX(tk);
       // the column's back, its fluid, and the glass in front
@@ -1073,18 +1121,21 @@ class ToolView {
       const lid = new THREE.Mesh();
       lid.visible = false;
       this.lids.push(lid);
-      if (tk.label) {
-        const s = textSprite(tk.label);
-        s.position.copy(v3(x, STATION.labelY - 5.5 * tk.label.length, face + 4));
-        upright.add(s);
-      }
+      if (tk.label) printed(art, tk.label.join(' '), x, STATION.labelY, face + 0.1, 11);
       this.labels.push(new Label(upright, v3(x, tankNoteY(t, k))));
       this.glows.push(new Glow(scene));
     });
     const mark = (x: number, share: number, mat: THREE.Material) =>
       (block(art, mat, x - paneW / 2 - 8, x + paneW / 2 + 8, H * (1 - share) - 0.7, H * (1 - share) + 0.7, face, face + 0.4).castShadow = false);
     mark(tankX(sh.tanks[0]), autoflush, autoflushMat);
-    mark(tankX(sh.tanks[2]), GOAL_TARGET / REFERENCE_CAP, goalMat);
+    // the gauge beside the tester: an LCD stack of segments, as tall as the panes, on a dark strip
+    block(art, darkMat, g.x0 - 2, g.x1 + 2, -2, H + 2, face, face + 1);
+    const seg = H / g.segments;
+    for (let i = 0; i < g.segments; i++) {
+      const mat = new THREE.MeshStandardMaterial({ color: SEGMENT_COLORS.off, roughness: 0.4 });
+      block(art, mat, g.x0, g.x1, H - (i + 1) * seg + 1, H - i * seg - 1, face + 1, face + 1.4).castShadow = false;
+      this.segments.push(mat);
+    }
     // the funnel, over the cell in front of the wall, and its stem down and back into a pump on the plate, which
     // pumps whatever lands in it up into the receptacle's column
     const x0 = tankX(sh.tanks[0]);
@@ -1127,7 +1178,7 @@ class ToolView {
     this.screen = new Screen(art, sc.x0, sc.x1, sc.y0, sc.y1, front + 0.6, 8);
   }
 
-  update(hot: Pick | null, shake: number): void {
+  update(hot: Pick | null, shake: number, clock: number): void {
     const { t } = this;
     this.root.position.set(t.pose.x, t.pose.y, t.pose.z);
     this.root.rotation.y = t.pose.yaw;
@@ -1209,7 +1260,7 @@ class ToolView {
         s.tex.needsUpdate = true;
       }
     }
-    if (t.kind === 'receptacle') this.updateStation();
+    if (t.kind === 'receptacle') this.updateStation(clock);
     if (this.lamp) {
       const on = t.scanning && Math.floor(t.scanAge * 3) % 2 === 0;
       const m = this.lamp.material as THREE.MeshStandardMaterial;
@@ -1225,9 +1276,17 @@ class ToolView {
     }
   }
 
-  private updateStation(): void {
+  private updateStation(clock: number): void {
     const { t } = this;
     const c = t.cycle;
+    // the gauge: the reference's target, against the goal; what's still wanted flashes, a second on and half off
+    const blink = clock % 1.5 < 1;
+    gaugeSegments(t.tanks[2].n[TARGET], GOAL_TARGET, REFERENCE_CAP).forEach((st, i) => {
+      const lit = st === 'held' || (st === 'wanted' && blink);
+      const color = lit ? SEGMENT_COLORS[st] : SEGMENT_COLORS.off;
+      this.segments[i].color.set(color);
+      this.segments[i].emissive.set(lit ? color : 0x000000);
+    });
     // a lamp is lit for a moment after each beep that lights it
     this.lamps.forEach((mat, i) => {
       const lit = c?.phase === 'think' && t.beeps.some((bp) => bp.lamp === i && bp.t <= c.age && c.age - bp.t < 0.12);
@@ -2481,7 +2540,7 @@ export class View {
         for (const [o, p] of pickables) if (p.kind === 'tool' && p.t === t) pickables.delete(o);
         this.tools.set(t, new ToolView(t, scene, pickables));
       }
-    for (const v of this.tools.values()) v.update(fr.hot, fr.shake.get(v.t) ?? 0);
+    for (const v of this.tools.values()) v.update(fr.hot, fr.shake.get(v.t) ?? 0, fr.clock);
     for (const v of this.scales.values()) v.update(fr.tarePress === v.sc, fr.hot);
     for (const { h, from, fluid } of fr.hoses) this.hoses.get(h)!.update(from, fluid);
     fr.faucets.forEach((fa, i) => {
