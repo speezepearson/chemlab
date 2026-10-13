@@ -12,7 +12,8 @@ export type SurfaceName = 'deck' | 'walls' | 'ceiling' | 'brushedSteel' | 'grate
 
 /** How much world one copy of each surface's texture covers, across (u) and up (v). */
 export const TILES: Record<SurfaceName, { u: number; v: number }> = {
-  deck: { u: 440, v: 440 },
+  // two grid cells by two (see CELL), so the plates' seams run along cells' edges
+  deck: { u: 400, v: 400 },
   // the room's height (see ROOM): three panels from floor to ceiling
   walls: { u: 440, v: 1300 },
   ceiling: { u: 500, v: 500 },
@@ -166,7 +167,7 @@ function bake(w: number, h: number, bump: number, paint: (x: number, y: number, 
 }
 
 /**
- * The deck: 2 by 2 steel plates, each 220 across, with raised diamond tread inside a smooth border, a bolt at each
+ * The deck: 2 by 2 steel plates, each 200 across, with raised diamond tread inside a smooth border, a bolt at each
  * corner, worn bright where feet go and grimy in the seams.
  */
 function deck(): Baked {
