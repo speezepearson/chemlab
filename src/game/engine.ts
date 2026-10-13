@@ -153,6 +153,11 @@ type Held = (
   /** How far it's turned from facing the player, and how far in front of their eyes it's held. */
   relYaw: number;
   dist: number;
+  /**
+   * Where it was picked up from, and for a tool, whether it was flipped then, for Q to put it back (see putBack);
+   * none for what was made in hand, or a hose just pulled out.
+   */
+  from?: Rest & { flipped?: boolean };
 };
 
 /**
@@ -1050,6 +1055,7 @@ export class GameEngine {
       if (e.repeat || inPod(this.wake)) return;
       if (e.code === 'KeyE') this.grabOrRelease();
       if (e.code === 'KeyF') this.flipTarget();
+      if (e.code === 'KeyQ') this.putBack();
       if (e.code === 'KeyP') this.setPencil(!this.pencil);
       if (e.code === 'KeyN') {
         // the note's text box opens at once, and N mustn't be typed into it
@@ -1141,10 +1147,12 @@ export class GameEngine {
       return;
     }
     if (p.kind === 'flask') {
-      for (const sc of this.scales) sc.remove(p.f);
-      h = { kind: 'flask', f: p.f, relYaw: 0, dist: 0 };
-    } else if (p.kind === 'tool') h = { kind: 'tool', t: p.t, relYaw: 0, dist: 0 };
-    else if (p.kind === 'scale') h = { kind: 'scale', sc: p.sc, relYaw: 0, dist: 0 };
+      const sc = this.scales.find((s) => s.load.some((l) => l.f === p.f));
+      const scale = sc && { sc, dx: sc.load.find((l) => l.f === p.f)!.dx };
+      for (const s of this.scales) s.remove(p.f);
+      h = { kind: 'flask', f: p.f, relYaw: 0, dist: 0, from: { pose: { ...p.f.pose }, ...(scale ? { scale } : {}) } };
+    } else if (p.kind === 'tool') h = { kind: 'tool', t: p.t, relYaw: 0, dist: 0, from: { pose: { ...p.t.pose }, flipped: p.t.flipped } };
+    else if (p.kind === 'scale') h = { kind: 'scale', sc: p.sc, relYaw: 0, dist: 0, from: { pose: { ...p.sc.pose } } };
     else {
       this.holdHose(p.h);
       return;
@@ -1157,10 +1165,12 @@ export class GameEngine {
 
   /**
    * Take hold of a hose's nozzle, where it is: it's small, and the hose trails behind it, so it isn't brought near. Its
-   * stand stays the way it was from it, and as far, until turned or slid.
+   * stand stays the way it was from it, and as far, until turned or slid. A hose `fresh` out of its spout has nowhere to
+   * be put back to (see putBack), so Q rolls it back up.
    */
-  private holdHose(hose: Hose): void {
-    const h: Held = { kind: 'hose', h: hose, reach: hose.reach, relYaw: wrapAngle(hose.turn - this.player.yaw), dist: 0 };
+  private holdHose(hose: Hose, fresh = false): void {
+    const from = fresh ? undefined : { pose: { ...hose.outlet, yaw: 0 }, hose: { turn: hose.turn, reach: hose.reach } };
+    const h: Held = { kind: 'hose', h: hose, reach: hose.reach, relYaw: wrapAngle(hose.turn - this.player.yaw), dist: 0, from };
     h.dist = this.clampDist(h, dist3(this.eye(), hose.outlet));
     this.held = h;
   }
@@ -1191,7 +1201,7 @@ export class GameEngine {
     // its stand starts out behind it, as the player faces
     hose.turn = toCardinal(this.player.yaw);
     this.hoses.push(hose);
-    this.holdHose(hose);
+    this.holdHose(hose, true);
   }
 
   /** Where the spout or faucet a hose runs from is. */
@@ -1226,15 +1236,33 @@ export class GameEngine {
       this.say(pl.why);
       return;
     }
-    this.placeHeld(h, pl.rest.pose);
+    this.setDown(h, pl.rest);
+  }
+
+  /**
+   * Q: put back what's held where it was picked up from (see Held.from), as it was, or if it was made in hand, put it
+   * away (see putAway); a hose just pulled out is rolled back up. With the pencil in hand, Q puts that down instead.
+   */
+  private putBack(): void {
+    if (this.pencil) return this.setPencil(false);
+    const h = this.held;
+    if (!h || inPod(this.wake)) return;
+    if (!h.from) return this.putAway();
+    if (h.kind === 'tool' && h.t.flipped !== !!h.from.flipped) flip(h.t);
+    this.setDown(h, h.from);
+  }
+
+  /** Let go of what's held, at rest (see rest): standing on a scale, for a flask, and for a nozzle, with its stand there. */
+  private setDown(h: Held, rest: Rest): void {
+    this.placeHeld(h, rest.pose);
     if (h.kind === 'flask') {
       h.f.tilt = 0;
-      if (pl.rest.scale) {
-        pl.rest.scale.sc.put(h.f, pl.rest.scale.dx);
+      if (rest.scale) {
+        rest.scale.sc.put(h.f, rest.scale.dx);
         this.settle();
       }
     }
-    if (h.kind === 'hose' && pl.rest.hose) ({ turn: h.h.turn, reach: h.h.reach } = pl.rest.hose);
+    if (h.kind === 'hose' && rest.hose) ({ turn: h.h.turn, reach: h.h.reach } = rest.hose);
     this.held = null;
   }
 
@@ -2204,6 +2232,7 @@ export class GameEngine {
       add(['LMB'], 'click a sheet to type on it');
       add(['RMB'], 'drag to erase');
       add(['P'], 'put the pencil down');
+      add(['Q'], 'put the pencil down');
     }
     if (h) {
       const ok = !!this.placed && 'rest' in this.placed;
@@ -2219,6 +2248,7 @@ export class GameEngine {
       if (h.kind === 'tool' && h.t.shape.flippable) add(['F'], 'flip it');
       if (h.kind === 'hose') add(['Backspace'], 'roll the hose back up');
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it away');
+      if (!this.pencil) add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it away') : 'put it back');
     } else {
       if (this.pencil && p && this.grabbable(p)) add(['E'], 'pick it up');
       if (!this.pencil && this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
