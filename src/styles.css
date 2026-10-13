@@ -94,7 +94,9 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 }
 .palette svg{width:34px;height:34px;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .palette kbd{
-  position:absolute;left:3px;top:1px;font:600 10px "Schibsted Grotesk",sans-serif;color:#d6dfda;opacity:.8;
+  position:absolute;left:1px;top:1px;font:600 10px/12px "Schibsted Grotesk",sans-serif;color:#d6dfda;
+  /* opaque, so the icon under it can't make it hard to read */
+  background:#3a4541;border-radius:3px;padding:0 3px;z-index:1;
 }
 .palette button.pencil.on{outline:2px solid var(--accent);outline-offset:-2px}
 .palette .glass{fill:var(--glasshi);stroke:var(--glass)}
