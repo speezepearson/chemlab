@@ -287,10 +287,11 @@ export const STATION = {
 /** How much the receptacle holds, by volume, and so the tester it flushes into: a hundred flasks. */
 export const RECEPTACLE_CAP = 100 * CAP;
 /**
- * How much the cryostabilizer reference holds, by volume: enough for the goal (see GOAL_TARGET) even if everything
- * the tester passes into it is only just pure enough, and the rest of it single atoms.
+ * How much the cryostabilizer reference holds, by volume: about three times the goal (see GOAL_TARGET), so the goal's
+ * line is a third of the way up its pane, and there's room for it even if everything the tester passes into it is
+ * only just pure enough, and the rest of it single atoms.
  */
-export const REFERENCE_CAP = 210 * CAP;
+export const REFERENCE_CAP = 540 * CAP;
 /** The target the reference starts with, in molecules: the hundred flasks left on board (see VOYAGE). */
 export const REFERENCE_START = 100 * CAP;
 /** How fast the reference's faucet lets it out, fully open, in atoms per sim second: a fifth of a flask a second. */

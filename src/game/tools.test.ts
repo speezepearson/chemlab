@@ -262,12 +262,13 @@ describe('cryostabilizer station', () => {
     return { r, rec, tester, ref, before, wasted, t, phases };
   }
 
-  it('is built into the wall, with a receptacle and a tester the same size, and a reference that can hold the goal', () => {
+  it('is built into the wall, with a receptacle and a tester the same size, and a reference about three times the goal', () => {
     const r = new Tool('receptacle', 0);
     expect(r.tanks.map((v) => v.cap)).toEqual([RECEPTACLE_CAP, RECEPTACLE_CAP, REFERENCE_CAP]);
     expect(r.shape.fixed).toBe(true);
     expect(r.shape.wall).toBe(true);
     expect(REFERENCE_START).toBeLessThan(GOAL_TARGET);
+    expect(REFERENCE_CAP / GOAL_TARGET).toBeCloseTo(3, 1);
     // even if all it's ever passed is only just pure enough, and the rest single atoms
     const target = GOAL_TARGET * roomFor(TARGET);
     expect(target + (GOAL_TARGET * 3 * (1 / GOAL_PURITY - 1)) * roomFor(R)).toBeLessThan(REFERENCE_CAP);
