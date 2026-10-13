@@ -24,13 +24,11 @@ describe('arrangement', () => {
     f.pose = { x: 950, y: 490, z: 150, yaw: 1 };
     f.label = 'acid';
     t.valves[0] = 0.7;
-    t.flipped = true;
     f.N = 5;
     arrange(l, a);
     expect(f.pose).toEqual({ x: 50, y: 490, z: 150, yaw: 0 });
     expect(f.label).toBe('');
     expect(t.valves[0]).toBe(0);
-    expect(t.flipped).toBe(false);
     expect(f.N).toBe(5);
   });
 

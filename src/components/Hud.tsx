@@ -99,8 +99,7 @@ function TouchButton({
 /**
  * On a touch screen, while playing: the stick that walks, bottom left, and the one that looks, bottom right; and
  * buttons standing in for the keys and the right button. Over the look stick, Grab (E) and the right button, which
- * is named for what it'll do and, while a valve turns, aims its lever as the finger drags; Flip (F) when there's
- * something to flip; and Note (N) when there's something to write a note about. Over the move stick, while something's held, a pad to drag (across to turn it,
+ * is named for what it'll do and, while a valve turns, aims its lever as the finger drags; and Note (N) when there's something to write a note about. Over the move stick, while something's held, a pad to drag (across to turn it,
  * up and down to hold it further or nearer, or for a hose's nozzle, to slide its stand out or in) and Put away
  * (Backspace).
  */
@@ -111,7 +110,6 @@ export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudSta
       <Stick engine={engine} which="move" />
       <Stick engine={engine} which="look" />
       <div className="touch-buttons right">
-        {hud.flip && <TouchButton label="Flip" className="small" down={() => engine.touchFlip()} />}
         {hud.label && <TouchButton label="Note" className="small" down={() => engine.touchNote()} />}
         <TouchButton
           label={hud.hand}
@@ -169,7 +167,7 @@ function Actions({ actions }: { actions: readonly Action[] }) {
 }
 
 /**
- * The crosshair, with hints by it for what F and the mouse buttons would do; the aim while a valve turns; and, on a
+ * The crosshair, with hints by it for what the mouse buttons would do; the aim while a valve turns; and, on a
  * screen with a mouse and keys, everything else that can be done just now, in a corner, unless `/` has hidden it.
  */
 export function Hud({ hud, help }: { hud: HudState; help: boolean }) {
@@ -178,7 +176,6 @@ export function Hud({ hud, help }: { hud: HudState; help: boolean }) {
     <>
       <div className={hud.aim ? 'crosshair dim' : 'crosshair'} />
       <div className="hints">
-        {hud.flip && <kbd>F</kbd>}
         {hud.press && <MouseHint side="left" />}
         {hud.right && <MouseHint side="right" />}
       </div>

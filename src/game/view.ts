@@ -3,7 +3,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { temperature, type Fluid } from '../chem/reactions';
 import { LOOK, coronaAlpha, coronaRadius, glowFalloff, haloAlpha, haloRadius } from './appearance';
 import {
-  NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, lx, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
+  NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
 } from './bodies';
 import { TARGET } from '../chem/species';
 import { CAP, FLASK_L, GOAL_L, GOAL_TARGET, TRACE } from './config';
@@ -817,18 +817,14 @@ const setRGB = (c: THREE.Color, rgb: readonly number[]) => c.setRGB(rgb[0] / 255
 const LAMP_COLORS = [0xffb43a, 0x54d0ff, 0xff5a4f, 0x7dff6a, 0xb48cff, 0xfff4c2];
 
 /**
- * A tool, built from its flat outline with depth. Its `art` is mirrored if it's flipped; its valves and its writing
- * are kept in `upright`, which never is, so levers still close to the right and labels still read (see Tool.flipped).
- * Every mesh of it can be hit, glass included, but not the empty space around it.
+ * A tool, built from its flat outline with depth, in `art`. Every mesh of it can be hit, glass included, but not the
+ * empty space around it.
  */
 class ToolView {
   readonly root = new THREE.Group();
-  /** Whether the tool was flipped when this was built: it's rebuilt when that changes. */
-  readonly flipped: boolean;
   /** Everything but the root's placement. */
   private body = new THREE.Group();
   private art = new THREE.Group();
-  private upright = new THREE.Group();
   /**
    * Each tank's fluid, and how high it stands in the room; `fit`, if given, sizes the fluid's solid to that height
    * itself, so it has a top, rather than leaving it to be cut off open there.
@@ -864,14 +860,10 @@ class ToolView {
     pickables: Map<THREE.Object3D, Pick>,
   ) {
     const sh = t.shape;
-    const { art, upright } = this;
+    const { art } = this;
     const D = TOOL_DEPTH[t.kind];
     const pick = (m: THREE.Object3D, part: 'body' | 'tank' | 'valve' | 'button' | 'spout', k = 0) => pickables.set(m, { kind: 'tool', t, part, k });
-    /** Where something at local x stands, for what's kept upright. */
-    const ux = (x: number) => lx(t, x);
-    this.flipped = t.flipped;
-    art.scale.x = t.flipped ? -1 : 1;
-    this.body.add(art, upright);
+    this.body.add(art);
     this.root.add(this.body);
 
     // drain pipes and spouts, from the bottom of the tanks (and their sumps)
@@ -885,7 +877,6 @@ class ToolView {
       });
     else if (t.kind === 'separator') {
       // the manifold: one pipe in, five out, with a divider between each two outlets, and a handle on its left end
-      // (so it doesn't look the same flipped; it says nothing about which side gets what)
       pipes(art, [[0, floor], [0, SEP_BODY.y0]]);
       for (const x of sh.spouts) pipes(art, [[x, SEP_BODY.y1], [x, sh.spoutY - 4]]);
       block(art, panelMat, SEP_BODY.x0, SEP_BODY.x1, SEP_BODY.y0, SEP_BODY.y1, -10, 10, 2);
@@ -989,25 +980,25 @@ class ToolView {
       const lid = block(art, pipeMat, r.x0 - 4, r.x1 + 4, -5, 0, -d / 2 - 3, d / 2 + 3);
       lid.visible = false;
       this.lids.push(lid);
-      this.labels.push(new Label(upright, v3(ux(tankX(sh.tanks[k])), tankNoteY(t, k))));
+      this.labels.push(new Label(art, v3(tankX(sh.tanks[k]), tankNoteY(t, k))));
       this.glows.push(new Glow(scene));
       this.flashFrom(art, built, k);
     });
     if (sh.label) {
       const s = textSprite(sh.label);
-      s.position.copy(v3(ux(0), -21 + (11 * (sh.label.length - 1)) / 2 - 4));
-      upright.add(s);
+      s.position.copy(v3(0, -21 + (11 * (sh.label.length - 1)) / 2 - 4));
+      art.add(s);
     }
     if (t.tanks.length > 1 && !sh.wall)
       sh.tanks.forEach((tk) => {
         const s = textSprite([tk.name], '#e6ece8');
         s.scale.multiplyScalar(0.9);
-        s.position.copy(v3(ux(tankX(tk)), 14, D.tank / 2 + 1));
-        upright.add(s);
+        s.position.copy(v3(tankX(tk), 14, D.tank / 2 + 1));
+        art.add(s);
       });
     // a note about the whole tool, centered over it, above its tanks' labels
     const b = sh.box;
-    this.note = new Label(upright, v3(ux((b.x0 + b.x1) / 2), b.y0 - 8 - (t.tanks.length > 1 ? 13 : 0)));
+    this.note = new Label(art, v3((b.x0 + b.x1) / 2, b.y0 - 8 - (t.tanks.length > 1 ? 13 : 0)));
 
     if (t.kind === 'exchanger') this.buildHelix();
     if (t.kind === 'sorter') this.buildChute();
@@ -1025,22 +1016,22 @@ class ToolView {
         const z = valveZ(t);
         if (k === sh.dial) {
           this.dial = this.buildDial(vc, z);
-          upright.traverse((m) => m.parent === this.dial && pick(m, 'valve', k));
+          art.traverse((m) => m.parent === this.dial && pick(m, 'valve', k));
           return;
         }
-        rod(upright, pipeMat, v3(vc.x, vc.y, 0), v3(vc.x, vc.y, z), 1.5);
+        rod(art, pipeMat, v3(vc.x, vc.y, 0), v3(vc.x, vc.y, z), 1.5);
         const core = new THREE.Mesh(unitCylinder, panelMat);
         core.rotation.x = Math.PI / 2;
         core.scale.set(5, 4, 5);
         core.position.copy(v3(vc.x, vc.y, z));
-        upright.add(core);
+        art.add(core);
         pick(core, 'valve', k);
         const pivot = new THREE.Group();
         pivot.position.copy(v3(vc.x, vc.y, z + 2.5));
         const lever = new THREE.Mesh(new THREE.BoxGeometry(14, 3, 2).translate(6, 0, 0), leverMat);
         lever.castShadow = true;
         pivot.add(lever);
-        upright.add(pivot);
+        art.add(pivot);
         pick(lever, 'valve', k);
         this.levers.set(k, pivot);
       });
@@ -1155,17 +1146,13 @@ class ToolView {
     }
   }
 
-  /**
-   * An inline instrument's cabinet, beside its tube, with an old green-on-black screen. The screen is kept upright, so
-   * it reads the same way flipped or not.
-   */
+  /** An inline instrument's cabinet, beside its tube, with an old green-on-black screen. */
   private buildInstrument(): void {
     const { body: b, screen: s } = INSTRUMENT;
     const D = TOOL_DEPTH[this.t.kind].body;
     block(this.art, panelMat, b.x0, b.x1, b.y0, b.y1, -D / 2, D / 2, 3);
     block(this.art, darkMat, s.x0 - 1.5, s.x1 + 1.5, s.y0 - 1.5, s.y1 + 1.5, D / 2, D / 2 + 0.6);
-    const [x0, x1] = [lx(this.t, s.x0), lx(this.t, s.x1)].sort((a, b) => a - b);
-    this.screen = new Screen(this.upright, x0, x1, s.y0, s.y1, D / 2 + 0.7, 5);
+    this.screen = new Screen(this.art, s.x0, s.x1, s.y0, s.y1, D / 2 + 0.7, 5);
   }
 
   /** A thin thread down the middle of an inline instrument's tube, `h` tall, in the color of what's running through it. */
@@ -1219,7 +1206,7 @@ class ToolView {
       const tick = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2.5, 0.6), darkMat);
       tick.position.copy(v3(vc.x + 11.75 * Math.sin(a), vc.y - 11.75 * Math.cos(a), z - 2.5));
       tick.rotation.z = -a;
-      this.upright.add(tick);
+      this.art.add(tick);
     }
     const knob = new THREE.Mesh(unitCylinder, panelMat);
     knob.rotation.x = Math.PI / 2;
@@ -1231,7 +1218,7 @@ class ToolView {
     pivot.add(pointer);
     const dial = new THREE.Group();
     dial.add(knob, pivot);
-    this.upright.add(dial);
+    this.art.add(dial);
     return dial;
   }
 
@@ -1255,7 +1242,7 @@ class ToolView {
    * green-on-black screen showing the litres of cryostabilizer in the reference of the litres needed.
    */
   private buildStation(scene: THREE.Object3D, pick: (m: THREE.Object3D, part: 'body' | 'tank' | 'button', k?: number) => void): void {
-    const { t, art, upright } = this;
+    const { t, art } = this;
     const sh = t.shape;
     const { paneW, paneH: H, out, plate, funnel: f, autoflush, block: bk, gauge: g, button: bt, lamps: lp, verdict: vd } = STATION;
     // the plate's face is flush with the wall, set into a hole in it (see buildRoom), and the columns are behind
@@ -1311,7 +1298,7 @@ class ToolView {
       lid.visible = false;
       this.lids.push(lid);
       if (tk.label) printed(art, tk.label.join(' '), x, STATION.labelY, face + 0.1, 11);
-      this.labels.push(new Label(upright, v3(x, tankNoteY(t, k))));
+      this.labels.push(new Label(art, v3(x, tankNoteY(t, k))));
       this.glows.push(new Glow(scene));
     });
     const mark = (x: number, share: number, mat: THREE.Material) =>
@@ -2749,13 +2736,6 @@ export class View {
     const targets = new Set(fr.guides.map((g) => g.v));
     flashMat.opacity = FLASH.lo + (FLASH.hi - FLASH.lo) * (0.5 - 0.5 * Math.cos(2 * Math.PI * FLASH.hz * this.clock));
     for (const v of this.flasks.values()) v.update(targets);
-    // a tool flipped since it was built is built again
-    for (const [t, v] of this.tools)
-      if (v.flipped !== t.flipped) {
-        v.dispose();
-        for (const [o, p] of pickables) if (p.kind === 'tool' && p.t === t) pickables.delete(o);
-        this.tools.set(t, new ToolView(t, scene, pickables));
-      }
     for (const v of this.tools.values()) v.update(fr.hot, fr.clock, fr.energies, targets);
     for (const v of this.scales.values()) v.update(fr.tarePress === v.sc, fr.hot);
     for (const { h, from, fluid } of fr.hoses) this.hoses.get(h)!.update(from, fluid);

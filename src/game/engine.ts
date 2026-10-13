@@ -5,7 +5,7 @@ import { POD, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from 
 import { hushAlarms } from './ambience';
 import { beeper, type Beeper } from './beeper';
 import {
-  FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, flip, nozzleBox,
+  FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, nozzleBox,
   docked, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
@@ -82,8 +82,6 @@ export interface Hud {
   aim: { x: number; y: number } | null;
   /** Whether the pencil is in hand. */
   pencil: boolean;
-  /** Whether F would flip something: the tool held, or else the one looked at, if it can be flipped. */
-  flip: boolean;
   /** Whether N would write a note about what the crosshair is on (see GameEngine.note). */
   label: boolean;
   /** What the right button does now, in a word, for the touch screen's button that stands in for it. */
@@ -174,10 +172,10 @@ type Held = (
   dist: number;
   dir?: Vec3;
   /**
-   * Where it was picked up from, and for a tool, whether it was flipped then, for Q to put it back (see putBack);
-   * none for what was made in hand, or a hose just pulled out.
+   * Where it was picked up from, for Q to put it back (see putBack); none for what was made in hand, or a hose just
+   * pulled out.
    */
-  from?: Rest & { flipped?: boolean };
+  from?: Rest;
   /** The hoses pulled out of a tool's spouts as it was picked up (see keepPouring), for Q to roll back up. */
   made?: Hose[];
   /** The hoses pouring into what's carried, which go along with it (see gather). */
@@ -586,7 +584,6 @@ export class GameEngine {
         kind: t.kind, id: t.id, ...this.frac(t.pose), ...depth(t.pose), valves: [...t.valves], tanks: t.tanks.map(saveVessel),
         drops: t.drops.map(saveVessel),
         ...(t.tube.length ? { tube: t.tube.map(saveVessel) } : {}),
-        ...(t.flipped ? { flipped: true } : {}),
         ...(t.note ? { note: t.note } : {}),
       })),
       scales: this.scales.map((sc) => ({
@@ -634,7 +631,6 @@ export class GameEngine {
         t.tanks.forEach((v, k) => st.tanks?.[k] && loadVessel(v, st.tanks[k]));
         t.drops.forEach((v, k) => st.drops?.[k] && loadVessel(v, st.drops[k]));
         t.tube.forEach((v, k) => st.tube?.[k] && loadVessel(v, st.tube[k]));
-        t.flipped = !!st.flipped && !!t.shape.flippable;
         if (typeof st.note === 'string') t.note = st.note;
         return t;
       });
@@ -1014,11 +1010,6 @@ export class GameEngine {
     if (this.locked) this.grabOrRelease();
   }
 
-  /** F: flip the tool held or looked at. */
-  touchFlip(): void {
-    if (this.locked) this.flipTarget();
-  }
-
   /** N: write a note about what the crosshair is on. */
   touchNote(): void {
     if (this.locked) this.writeNote();
@@ -1164,7 +1155,6 @@ export class GameEngine {
       this.keys.add(e.code);
       if (e.repeat || inPod(this.wake)) return;
       if (e.code === 'KeyE') this.grabOrRelease();
-      if (e.code === 'KeyF') this.flipTarget();
       if (e.code === 'KeyQ') this.putBack();
       if (e.code === 'KeyP') this.setPencil(!this.pencil);
       if (e.code === 'KeyN') {
@@ -1269,7 +1259,7 @@ export class GameEngine {
         this.say(made);
         return;
       }
-      h = { kind: 'tool', t: p.t, relYaw: 0, dist: 0, from: { pose: { ...p.t.pose }, flipped: p.t.flipped }, made };
+      h = { kind: 'tool', t: p.t, relYaw: 0, dist: 0, from: { pose: { ...p.t.pose } }, made };
     }
     else if (p.kind === 'scale') h = { kind: 'scale', sc: p.sc, relYaw: 0, dist: 0, from: { pose: { ...p.sc.pose } } };
     else {
@@ -1540,7 +1530,6 @@ export class GameEngine {
     const h = this.held;
     if (!h || inPod(this.wake)) return;
     if (!h.from) return this.putAway();
-    if (h.kind === 'tool' && h.t.flipped !== !!h.from.flipped) flip(h.t);
     this.hoses = this.hoses.filter((x) => !h.made?.includes(x));
     this.unfollow(h);
     this.setDown(h, h.from);
@@ -1570,15 +1559,6 @@ export class GameEngine {
     this.held = null;
     this.pinned = null;
     this.commit();
-  }
-
-  /** Flip the tool being held, or else the one looked at (see flip), if it's one that can be flipped. */
-  private flipTarget(): void {
-    if (inPod(this.wake)) return;
-    const t = this.held?.kind === 'tool' ? this.held.t : this.target?.kind === 'tool' ? this.target.t : null;
-    // flipping what's held is part of carrying it, a step once it's set down
-    if (t && this.held) flip(t);
-    else if (t) this.change(() => flip(t));
   }
 
   private leftDown(): void {
@@ -2653,14 +2633,12 @@ export class GameEngine {
         add(['Shift', '↑↓'], 'slide its stand out or in');
       } else if (h.kind !== 'flask') add(['Shift', '←→'], 'turn it');
       add(['Wheel'], 'hold it nearer or further');
-      if (h.kind === 'tool' && h.t.shape.flippable) add(['F'], 'flip it');
       if (h.kind === 'hose') add(['Backspace'], 'roll the hose back up');
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it away');
       if (!this.pencil) add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it away') : 'put it back');
     } else {
       if (this.pencil && p && this.grabbable(p)) add(['E'], 'pick it up');
       if (!this.pencil && this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
-      if (p?.kind === 'tool' && p.t.shape.flippable) add(['F'], 'flip it');
       add(['1–0'], 'make equipment in your hands');
     }
     if (!this.pencil) {
@@ -2814,7 +2792,6 @@ export class GameEngine {
       right: this.rightWouldDo(),
       aim: this.pencil ? { ...this.cursor } : this.turning ? { ...this.turning.aim } : null,
       pencil: this.pencil,
-      flip: !!(h?.kind === 'tool' ? h.t : !h && p?.kind === 'tool' ? p.t : null)?.shape.flippable,
       label: !inPod(this.wake) && !!this.targetNote(),
       hand: this.pencil ? 'Erase' : h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : 'Turn',
       note: this.flash?.text ?? null,

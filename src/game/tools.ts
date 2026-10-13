@@ -509,11 +509,6 @@ export interface ToolShape {
   valves?: Point[];
   /** Which valve, if any, is a dial instead: it turns clockwise from down-left (0) to down-right (1). */
   dial?: number;
-  /**
-   * Whether it can be flipped left to right (see Tool.flipped). Only tools that work differently flipped can be;
-   * one that's its own mirror image, in what it does if not in every detail, can't.
-   */
-  flippable?: boolean;
   /** Whether its tanks are upright cylinders, as wide front to back as across, rather than boxes; a sump too. */
   round?: boolean;
   /** Whether it stays where it is: it can't be picked up and carried. */
@@ -572,7 +567,6 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     // or a tool's tank fits under each
     spouts: [-2 * CELL, -CELL, 0, CELL, 2 * CELL],
     sump: { w: 14, h: 7 },
-    flippable: true,
     valveY: 96,
     spoutY: 126,
     // the manifold under it (see the engine's SEP_BODY), with a handle on its left end
@@ -596,7 +590,6 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tankCap: FUNNEL_CAP,
     funnel: true,
     noValve: true,
-    flippable: true,
     // a grid cell apart, like the separator's, the first a cell on from the funnel
     spouts: [0, CELL, 2 * CELL],
     valveY: 30,
@@ -613,7 +606,6 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     funnel: true,
     valves: [...HEATER_TAPS.map((_, j) => ({ x: (j - 1) * CELL, y: 72 })), { x: 170, y: 20 }],
     dial: HEATER_TAPS.length,
-    flippable: true,
     // a grid cell apart, like the separator's, under the taps' stretches (see heaterCellX) and then the last
     spouts: [-CELL, 0, CELL, 2 * CELL],
     valveY: 72,
@@ -674,7 +666,6 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tankCap: TUBE_CAP,
     round: true,
     noValve: true,
-    flippable: true,
     spouts: [0, 2 * CELL],
     valveY: TUBE_H,
     spoutY: 116,
@@ -907,11 +898,6 @@ export class Tool {
   beeps: Beep[] = [];
   /** A receptacle's last verdict, shown on its lamp until it's pressed again; null before it's first pressed. */
   verdict: 'pass' | 'fail' | null = null;
-  /**
-   * Whether it's flipped left to right, if its shape is flippable: everything about it is mirrored (its local x
-   * negated) except its valves' levers and any writing, which read the same either way.
-   */
-  flipped = false;
 
   constructor(
     readonly kind: ToolKind,

@@ -50,7 +50,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - `src/game/`: everything else in the game.
   - `engine.ts` owns the lab: what's in it, the player, input, carrying, the pencil and the sim loop.
   - `view.ts` draws it all with Three.js, and raycasts for what the crosshair is on.
-  - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room, and flips tools.
+  - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room.
   - `physics.ts` is the collisions: yawed boxes, the player's cylinder, `moveBox` and `walk`.
   - `space.ts` is the room, poses, and the mapping from the old flat bench to its back wall.
   - `tools.ts` holds tool shapes (flat outlines, y down) and per-step logic, plus drips and the instruments' readings (the spectroscope's graph is `spectroscopeAt`).
@@ -117,17 +117,13 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **What's drawn is what's hit.** Every mesh a `ToolView` builds is registered as part of the tool for the crosshair's
   raycast, so empty space around it isn't. Register a mesh yourself only to make it a specific part (a tank, valve
   or button); sprites (labels) aren't hit.
-- **Flipped tools** are built in a mirrored group (`art`), so building code works in unflipped local units; valves,
-  dials and writing go in `upright`, placed with `lx`, so they read the same either way. The geometry helpers in
-  `bodies.ts` (`onTool`, `valveLocal`, via `lx`) give positions as the tool stands. A view is rebuilt when its tool
-  flips.
 - **Adding a tool kind** touches all of these:
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially.
   - `ITEMS` and `HOTKEYS` in `engine.ts` (the hotbar's order and keys) and `ICONS` in `Palette.tsx`, unless the tool is
     unique. Only `-` is left on the number row.
   - Tests and the README.
-  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `flippable`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
+  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
 - **Unique tools** (`UNIQUE_TOOLS`: the composition analyzer, the spectroscope, the flow meter and the receptacle) aren't on
   the hotbar and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
   whole cryostabilizer station (`STATION` in `tools.ts`): its tanks are the receptacle, the tester and the reference,
