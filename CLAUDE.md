@@ -44,7 +44,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - `src/chem/`: the chemistry.
   - `species.ts` defines the 50 species.
   - `params.ts` holds the bond parameters.
-  - `reactions.ts` is Arrhenius kinetics on whole molecules.
+  - `reactions.ts` is Arrhenius kinetics on whole molecules. The engine steps vessels through `tick`, never `step`.
   - `equilibrium.ts` is the exact full-equilibrium solver, for the presets' and the route's settled mixes. Faucets
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
 - `src/game/`: everything else in the game.
@@ -86,7 +86,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   "volume counts molecules" toggle is off. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
 - **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
   chemistry, cooling, the composition analyzer's reading and hum, the cryostabilizer station's cycle, and the drip and stream sounds. All of it
-  runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The exceptions, at the
+  runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The one exception to the
+  substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
+  caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
   notice; and the player themselves (walking, looking, carrying, tipping a flask), which is input, not the sim. Waking
   in the airlock (the pod's message flickering out, its front opening, the doors closing) is sim time too.
