@@ -349,6 +349,21 @@ export interface NozzleMount {
   reach: number;
 }
 
+/**
+ * Where else a nozzle's stand could go than `want`, best first, for when that's blocked: the same way at every
+ * other reach, nearest first (the longer of two as near), then each quarter turn either side the same way, and last
+ * the way opposite. `want` itself comes first.
+ */
+export function nozzleMounts(want: NozzleMount): NozzleMount[] {
+  const { min, max, step } = NOZZLE_REACH;
+  const reach = snapReach(want.reach);
+  const reaches: number[] = [];
+  for (let r = min; r <= max + 1e-9; r += step) reaches.push(r);
+  reaches.sort((a, b) => Math.abs(a - reach) - Math.abs(b - reach) || b - a);
+  const turns = [0, -1, 1, 2].map((k) => toCardinal(want.turn + (k * Math.PI) / 2));
+  return turns.flatMap((turn) => reaches.map((r) => ({ turn, reach: r })));
+}
+
 /** A stand's base plate, standing at height `y` (the counter's top, or the floor's under it if left out). */
 export function standBase(s: Stand, y = groundAt(s.x, s.z)): Box {
   const { hx, hz, h } = STAND_BASE;

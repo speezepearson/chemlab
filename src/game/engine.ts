@@ -6,8 +6,8 @@ import { hushAlarms } from './ambience';
 import { beeper, type Beeper } from './beeper';
 import {
   FLASK_CENTER, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, flip, nozzleBox,
-  nozzleStand, onBench, onGrid, onScale, onTool, openingOf, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
-  tankMouth, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
+  nozzleMounts, nozzleStand, onBench, onGrid, onScale, onTool, openingOf, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear,
+  standBase, tankMouth, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
 import { CAP, FILL_RATE, GOAL_VOLUME, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
@@ -134,6 +134,8 @@ interface Aim {
 interface Rest {
   pose: Pose;
   scale?: { sc: Scale; dx: number };
+  /** For a hose's nozzle, where its stand goes (see nozzleMounts). */
+  hose?: NozzleMount;
 }
 
 /** What the player is holding. A hose is held by its nozzle. */
@@ -1211,7 +1213,7 @@ export class GameEngine {
         this.settle();
       }
     }
-    if (h.kind === 'hose') ({ turn: h.h.turn, reach: h.h.reach } = this.nozzleWant(h));
+    if (h.kind === 'hose' && pl.rest.hose) ({ turn: h.h.turn, reach: h.h.reach } = pl.rest.hose);
     this.held = null;
   }
 
@@ -1945,7 +1947,8 @@ export class GameEngine {
    * whole footprint must be over (or a flask over a scale, onto its platform); a tool or hose's nozzle on a stand stays at
    * the height it's held, no higher than its stand reaches, while its stand's base goes down onto the counter, which
    * the whole base must be over (what it holds can reach out past the counter's edge). Either way, it mustn't bump into anything on the way down, nor its stand's base sit
-   * on anything but the counter. (Stands don't bump into each other: their rods can stand side by side.)
+   * on anything but the counter. (Stands don't bump into each other: their rods can stand side by side.) A hose's
+   * nozzle's stand goes where it's wanted (see nozzleWant) if it can, or else the first place it can of nozzleMounts.
    */
   private rest(h: Held, p: Pose, obstacles: readonly Box[], solid: readonly Box[]): Rest | string {
     const now = this.heldBox(h);
@@ -1959,8 +1962,7 @@ export class GameEngine {
       return { ...to, y: (y0 + y1) / 2, hy: (y1 - y0) / 2, parts: undefined };
     };
     const box = this.boxAt(h, p);
-    const stands = this.standsAt(h, p);
-    if (stands.length) {
+    const onStands = (stands: Stand[]): Rest | string => {
       const tops = stands.map((st) => counterUnder(standBase(st, 0)));
       if (tops.some((t) => t === null)) return 'Its stand needs a counter under it';
       const drop = Math.max(0, ...stands.map((st, i) => st.clampY - tops[i]! - STAND_MAX));
@@ -1968,7 +1970,21 @@ export class GameEngine {
       if (blocked(span(to, box))) return 'No room';
       if (stands.some((st, i) => solid.some((o) => boxesOverlap(standBase(st, tops[i]!), o)))) return 'No room for its stand';
       return { pose: { ...p, y: p.y - drop } };
+    };
+    if (h.kind === 'hose') {
+      // the nozzle itself is in the way, wherever its stand goes
+      const at = onStands([]);
+      if (typeof at === 'string') return at;
+      let why: string | null = null;
+      for (const m of nozzleMounts(this.nozzleWant(h))) {
+        const r = onStands([nozzleStand(p, m.turn, m.reach)]);
+        if (typeof r !== 'string') return { ...r, hose: m };
+        why ??= r;
+      }
+      return why!;
     }
+    const stands = this.standsAt(h, p);
+    if (stands.length) return onStands(stands);
     if (h.kind === 'flask')
       for (const sc of this.scales) {
         const dx = scaleSpot(sc, p, Infinity);
@@ -1985,11 +2001,14 @@ export class GameEngine {
     return { pose: { ...p, y: p.y - dy } };
   }
 
-  /** The stands that would hold up what's held, at pose p: none for what stands on the bench. */
-  private standsAt(h: Held, p: Pose): Stand[] {
+  /**
+   * The stands that would hold up what's held, at pose p: none for what stands on the bench, and for a hose's nozzle,
+   * where its stand would go if it were set down there (see rest), or where it's wanted if it can't be.
+   */
+  private standsAt(h: Held, p: Pose, rest?: Rest): Stand[] {
     if (h.kind === 'tool') return toolStands(h.t, p);
     if (h.kind !== 'hose') return [];
-    const m = this.nozzleWant(h);
+    const m = rest?.hose ?? this.nozzleWant(h);
     return [nozzleStand(p, m.turn, m.reach)];
   }
 
@@ -2007,9 +2026,12 @@ export class GameEngine {
     const out: { s: Stand; of: Pick }[] = [];
     for (const t of this.tools) for (const s of toolStands(t)) out.push({ s, of: { kind: 'tool', t, part: 'body', k: 0 } });
     const held = this.held;
+    const pl = this.placed;
     for (const h of this.hoses) {
-      // one held stands where it's wanted (see standsAt)
-      const s = held?.kind === 'hose' && held.h === h ? this.standsAt(held, this.heldPose(held))[0] : nozzleStand(h.outlet, h.turn, h.reach);
+      // one held stands where it would be set down (see standsAt)
+      const s =
+        held?.kind === 'hose' && held.h === h ? this.standsAt(held, this.heldPose(held), pl && 'rest' in pl ? pl.rest : undefined)[0]
+        : nozzleStand(h.outlet, h.turn, h.reach);
       out.push({ s, of: { kind: 'hose', h } });
     }
     return out;
@@ -2050,7 +2072,7 @@ export class GameEngine {
     if (!h || !pl) return [];
     const ok = 'rest' in pl;
     const p = ok ? pl.rest.pose : this.heldPose(h);
-    const stands = this.standsAt(h, p);
+    const stands = this.standsAt(h, p, ok ? pl.rest : undefined);
     if (stands.length)
       return stands.map((st) => {
         const b = standBase(st, ok ? (counterUnder(standBase(st, 0)) ?? groundAt(st.x, st.z)) : groundAt(st.x, st.z));
