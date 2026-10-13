@@ -4,7 +4,7 @@ import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { CELL, groundAt, toCardinal, toCell, toWorld, type Pose, type Vec3 } from './space';
 import {
-  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, SHAPES, STATION, TANK_H, tankDepth, tankX, overMouth, type Hose, type Mouth, type Tool,
+  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, SHAPES, STATION, TANK_H, tankDepth, tankX, overMouth, type Hose, type Mouth, type Tool,
   type ToolKind,
 } from './tools';
 
@@ -16,7 +16,7 @@ import {
  */
 
 /** How deep a tool's cabinet is front to back, for the tools that have one deeper than their tanks. */
-const CABINET_DEPTH: Partial<Record<ToolKind, number>> = { analyzer: 50, meter: 40 };
+const CABINET_DEPTH: Partial<Record<ToolKind, number>> = { analyzer: 50, spectroscope: 50, meter: 40 };
 
 /**
  * How deep each tool is front to back, all told, and how deep its tanks are inside: as deep as they need to be to
@@ -145,7 +145,7 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
   const D = TOOL_DEPTH[t.kind];
   const bottom = (sh.tankH ?? TANK_H) + (sh.sump?.h ?? 0);
   if (INLINE_TOOLS.includes(t.kind)) {
-    const c = ANALYZER.body;
+    const c = INSTRUMENT.body;
     const r = D.tank / 2 + 2;
     const past = sh.spouts.filter((x) => x > c.x1);
     return [

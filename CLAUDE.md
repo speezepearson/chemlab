@@ -53,7 +53,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room, and flips tools.
   - `physics.ts` is the collisions: yawed boxes, the player's cylinder, `moveBox` and `walk`.
   - `space.ts` is the room, poses, and the mapping from the old flat bench to its back wall.
-  - `tools.ts` holds tool shapes (flat outlines, y down) and per-step logic, plus drips and the instruments' readings.
+  - `tools.ts` holds tool shapes (flat outlines, y down) and per-step logic, plus drips and the instruments' readings (the spectroscope's graph is `spectroscopeAt`).
   - `flask.ts` has `Vessel`, `transfer`, volume and colors.
   - `cooling.ts` is Newtonian cooling to the room; the engine works out each vessel's exposure from its flat outline.
   - `paper.ts` is sticky notes: the sheets, their strokes and text, in old-bench coordinates. They hang on the back
@@ -125,11 +125,11 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     unique. Only `-` is left on the number row.
   - Tests and the README.
   - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `flippable`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
-- **Unique tools** (`UNIQUE_TOOLS`: the composition analyzer, the flow meter and the receptacle) aren't on the hotbar and
-  can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
+- **Unique tools** (`UNIQUE_TOOLS`: the composition analyzer, the spectroscope, the flow meter and the receptacle) aren't on
+  the hotbar and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
   whole cryostabilizer station (`STATION` in `tools.ts`): its tanks are the receptacle, the tester and the reference,
   in that order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved.
-- **Inline instruments** (`INLINE_TOOLS`) are a tube draining straight through at a fixed rate past a cabinet that reads
+- **Inline instruments** (`INLINE_TOOLS`: the composition analyzer and the spectroscope) are a tube draining straight through at a fixed rate past a cabinet that reads
   what goes by, over the last `INSTRUMENT_WINDOW` (`Tool.record`). A hose's nozzle let go of over the tube snaps onto its
   top (`docked` in `bodies.ts`, via the engine's `gridded`).
 - **The goal** is the target in the station's reference (`tanks[2]`, against `GOAL_TARGET`), not what's lying around
@@ -141,7 +141,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 
 - Don't give away the chemistry. The player is meant to work it out. The composition analyzer has no text and no
   sextant divider lines, the size sorter's screens look plain, the hotbar has no names, and the faucets aren't labeled (they're the six pure
-  atoms, which the user chose). Ask before adding any visual cue that reveals how a tool or reaction works.
+  atoms, which the user chose). The spectroscope's axes are labeled lnE and f, at the user's request, with only lnE's
+  whole numbers marked and no peak labeled. Ask before adding any visual cue that reveals how a tool or reaction works.
 - The game's text matches the intro's premise. The player is Nadia Hassan, the target species is the cryostabilizer,
   and the ship belongs to Celestia Starlines.
 - Commits are small, one behavior per commit, with a message explaining why. The README changes in the same commit.

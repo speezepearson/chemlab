@@ -18,7 +18,7 @@ import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
-  ANALYZER, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, RECEPTACLE_LAMPS, REFERENCE_CAP,
+  ANALYZER, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, RECEPTACLE_LAMPS, REFERENCE_CAP,
   FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, SUMP_TIP, gaugeSegments, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
@@ -82,6 +82,8 @@ export interface Frame {
   dt: number;
   /** Sim seconds the lab has run, for what blinks on sim time (the station's gauge). */
   clock: number;
+  /** Each bond's energy, in BOND_KEYS order, for the spectroscope's graph. */
+  energies: readonly number[];
   /** Whether the alarms are silenced, which the button under the beacon shows. */
   alarmsOff: boolean;
   /** Whether the porthole's blinds are shut, leaving it solid black. */
@@ -489,7 +491,8 @@ function drawAnalysis(sc: Screen, t: Tool): void {
   if (key === sc.key) return;
   sc.key = key;
   const { ctx, ppu } = sc;
-  const { screen: s, hexes } = ANALYZER;
+  const { screen: s } = INSTRUMENT;
+  const { hexes } = ANALYZER;
   const green = (a: number) => `rgba(${PHOSPHOR}, ${a})`;
   ctx.setTransform(ppu, 0, 0, ppu, -s.x0 * ppu, -s.y0 * ppu);
   ctx.fillStyle = '#040a06';
@@ -523,6 +526,66 @@ function drawAnalysis(sc: Screen, t: Tool): void {
     ctx.closePath();
     ctx.stroke();
   });
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+  for (let y = s.y0; y < s.y1; y += 1.5) ctx.fillRect(s.x0, y, s.x1 - s.x0, 0.6);
+  sc.tex.needsUpdate = true;
+}
+
+/**
+ * A spectroscope's screen: a graph of the bonds that passed through it over the last sim second, by energy (see
+ * spectroscopeAt), lnE across with its whole numbers marked, and f up, scaled to the tallest peak, with no numbers.
+ */
+function drawSpectroscope(sc: Screen, t: Tool, energies: readonly number[]): void {
+  const key = `${t.bonds.map((c) => c.toPrecision(3)).join(',')}|${energies.join(',')}`;
+  if (key === sc.key) return;
+  sc.key = key;
+  const { ctx, ppu } = sc;
+  const s = INSTRUMENT.screen;
+  const green = (a: number) => `rgba(${PHOSPHOR}, ${a})`;
+  ctx.setTransform(ppu, 0, 0, ppu, -s.x0 * ppu, -s.y0 * ppu);
+  ctx.fillStyle = '#040a06';
+  ctx.fillRect(s.x0, s.y0, s.x1 - s.x0, s.y1 - s.y0);
+  // the plot, inside a margin for the labels
+  const p = { x0: s.x0 + 10, x1: s.x1 - 5, y0: s.y0 + 6, y1: s.y1 - 13 };
+  const { lnE0, lnE1 } = SPECTROSCOPE;
+  const X = (l: number) => p.x0 + ((l - lnE0) / (lnE1 - lnE0)) * (p.x1 - p.x0);
+  const n = Math.round((p.x1 - p.x0) * ppu);
+  const ys = Array.from({ length: n + 1 }, (_, i) => spectroscopeAt(lnE0 + (i / n) * (lnE1 - lnE0), t.bonds, energies));
+  const top = Math.max(...ys);
+  const Y = (v: number) => p.y1 - (top > 0 ? (0.9 * v) / top : 0) * (p.y1 - p.y0);
+  ctx.strokeStyle = ctx.fillStyle = ctx.shadowColor = green(0.75);
+  ctx.shadowBlur = 1.5 * ppu;
+  ctx.lineWidth = 0.6;
+  ctx.beginPath();
+  ctx.moveTo(p.x0, p.y0);
+  ctx.lineTo(p.x0, p.y1);
+  ctx.lineTo(p.x1, p.y1);
+  ctx.stroke();
+  ctx.font = '5px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (let l = Math.ceil(lnE0); l <= lnE1; l++) {
+    ctx.beginPath();
+    ctx.moveTo(X(l), p.y1);
+    ctx.lineTo(X(l), p.y1 + 1.5);
+    ctx.stroke();
+    ctx.fillText(String(l), X(l), p.y1 + 2.5);
+  }
+  ctx.textAlign = 'right';
+  ctx.fillText('lnE', p.x1, p.y1 + 2.5);
+  ctx.textAlign = 'center';
+  ctx.fillText('f', (s.x0 + p.x0) / 2, p.y0);
+  // the curve, glowing, over a faint fill
+  ctx.beginPath();
+  ctx.moveTo(p.x0, p.y1);
+  ys.forEach((v, i) => ctx.lineTo(p.x0 + i / ppu, Y(v)));
+  ctx.lineTo(p.x1, p.y1);
+  ctx.fillStyle = green(0.12);
+  ctx.fill();
+  ctx.strokeStyle = ctx.shadowColor = green(0.95);
+  ctx.lineWidth = 0.5;
+  ctx.stroke();
   ctx.shadowBlur = 0;
   ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
   for (let y = s.y0; y < s.y1; y += 1.5) ctx.fillRect(s.x0, y, s.x1 - s.x0, 0.6);
@@ -808,14 +871,16 @@ class ToolView {
       const { y, r } = HEATER_TUBE;
       pipes(art, [[tankX(sh.tanks[0]), TH], [tankX(sh.tanks[0]), y - r + 1]]);
       for (const x of sh.spouts) pipes(art, [[x, y + r - 1], [x, sh.spoutY - 4]]);
-    } else if (t.kind === 'analyzer') {
-      // straight down from the tube to its spout, with a branch into the cabinet, and out of the cabinet's far side to
-      // the waste spout
-      const { body: b, inY, wasteY } = ANALYZER;
+    } else if (INLINE_TOOLS.includes(t.kind)) {
+      // straight down from the tube to its spout, with a branch into the cabinet; and the analyzer's out of the
+      // cabinet's far side to its waste spout
+      const { body: b, inY } = INSTRUMENT;
       pipes(art, [[0, TH], [0, sh.spoutY - 4]]);
       pipes(art, [[0, inY], [b.x0, inY]], 1.3);
-      const x = sh.spouts[1];
-      pipes(art, [[b.x1, wasteY], [x, wasteY], [x, sh.spoutY - 4]]);
+      if (t.kind === 'analyzer') {
+        const x = sh.spouts[1];
+        pipes(art, [[b.x1, ANALYZER.wasteY], [x, ANALYZER.wasteY], [x, sh.spoutY - 4]]);
+      }
     } else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);
     sh.spouts.forEach((x, k) => pick(block(art, pipeMat, x - 4, x + 4, sh.spoutY - 6, sh.spoutY, -4, 4), 'spout', k));
 
@@ -906,8 +971,10 @@ class ToolView {
 
     if (t.kind === 'exchanger') this.buildHelix();
     if (t.kind === 'sorter') this.buildChute();
-    if (t.kind === 'analyzer') this.buildAnalyzer();
-    if (INLINE_TOOLS.includes(t.kind)) this.buildThread(TH);
+    if (INLINE_TOOLS.includes(t.kind)) {
+      this.buildInstrument();
+      this.buildThread(TH);
+    }
     if (t.kind === 'heater') this.buildHeater();
     if (t.kind === 'meter') this.buildMeter();
 
@@ -1041,12 +1108,12 @@ class ToolView {
   }
 
   /**
-   * A composition analyzer's cabinet, beside its tube, with an old green-on-black screen and no words anywhere. The
-   * screen is kept upright, so its hexagons read the same way flipped or not.
+   * An inline instrument's cabinet, beside its tube, with an old green-on-black screen. The screen is kept upright, so
+   * it reads the same way flipped or not.
    */
-  private buildAnalyzer(): void {
-    const { body: b, screen: s } = ANALYZER;
-    const D = TOOL_DEPTH.analyzer.body;
+  private buildInstrument(): void {
+    const { body: b, screen: s } = INSTRUMENT;
+    const D = TOOL_DEPTH[this.t.kind].body;
     block(this.art, panelMat, b.x0, b.x1, b.y0, b.y1, -D / 2, D / 2, 3);
     block(this.art, darkMat, s.x0 - 1.5, s.x1 + 1.5, s.y0 - 1.5, s.y1 + 1.5, D / 2, D / 2 + 0.6);
     const [x0, x1] = [lx(this.t, s.x0), lx(this.t, s.x1)].sort((a, b) => a - b);
@@ -1263,7 +1330,7 @@ class ToolView {
     this.screen = new Screen(art, sc.x0, sc.x1, sc.y0, sc.y1, face + 0.6, 8);
   }
 
-  update(hot: Pick | null, clock: number): void {
+  update(hot: Pick | null, clock: number, energies: readonly number[]): void {
     const { t } = this;
     this.root.position.set(t.pose.x, t.pose.y, t.pose.z);
     this.root.rotation.y = t.pose.yaw;
@@ -1332,6 +1399,7 @@ class ToolView {
       setRGB(this.wire!.emissive, rgb).multiplyScalar(Math.min(1, 1.3 * dial));
     }
     if (t.kind === 'analyzer' && this.screen) drawAnalysis(this.screen, t);
+    if (t.kind === 'spectroscope' && this.screen) drawSpectroscope(this.screen, t, energies);
     if (this.thread) {
       const through = new Vessel(Infinity);
       for (const v of t.out) if (v) through.addFrom(v, volume(v));
@@ -2633,7 +2701,7 @@ export class View {
         for (const [o, p] of pickables) if (p.kind === 'tool' && p.t === t) pickables.delete(o);
         this.tools.set(t, new ToolView(t, scene, pickables));
       }
-    for (const v of this.tools.values()) v.update(fr.hot, fr.clock);
+    for (const v of this.tools.values()) v.update(fr.hot, fr.clock, fr.energies);
     for (const v of this.scales.values()) v.update(fr.tarePress === v.sc, fr.hot);
     for (const { h, from, fluid } of fr.hoses) this.hoses.get(h)!.update(from, fluid);
     fr.faucets.forEach((fa, i) => {

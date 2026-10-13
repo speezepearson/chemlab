@@ -1,4 +1,4 @@
-import { GROUP_PRIMARY, type Atom } from '../chem/atoms';
+import { ATOMS, BIT_PAIRS, GROUP, GROUP_PRIMARY, pairKey, type Atom } from '../chem/atoms';
 import { THERMO } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
@@ -355,7 +355,7 @@ export function beepPattern(rand = Math.random): Beep[] {
  * straight through at FUNNEL_RATE however full it is, down to a spout at its foot, past a cabinet beside it that
  * reads what goes by.
  */
-export const INLINE_TOOLS: readonly ToolKind[] = ['analyzer'];
+export const INLINE_TOOLS: readonly ToolKind[] = ['analyzer', 'spectroscope'];
 /** How much an inline instrument's tube holds, by volume: a twentieth of a flask, just a buffer. */
 export const TUBE_CAP = CAP / 20;
 /** How wide an inline instrument's tube is inside, in local units. */
@@ -369,6 +369,16 @@ export const TUBE_H = (TUBE_CAP * SPACE_PER_ATOM) / ((Math.PI / 4) * TUBE_W ** 2
 export const INLINE_DOCK = 150;
 /** How many sim seconds back an inline instrument's reading looks: it reads what passed through it over just that long. */
 export const INSTRUMENT_WINDOW = 1;
+/**
+ * An inline instrument's cabinet, right of its tube, with its screen, and how high the pipe from the tube into it
+ * runs, in local units.
+ */
+export const INSTRUMENT = {
+  body: { x0: 14, x1: 186, y0: 4, y1: 96 },
+  screen: { x0: 24, x1: 176, y0: 14, y1: 86 },
+  inY: 70,
+};
+
 /** How loud the composition analyzer hums while it has something to read, from 0 to 1 (see rumble.ts). */
 export const ANALYZER_HUM = 0.3;
 /** The share of what passes through the composition analyzer that it draws off into its cabinet, to read, and out its waste spout. */
@@ -454,14 +464,14 @@ export function meterText(rate: number): string {
 export const SEXTANT_ATOMS: readonly Atom[] = ['G', 'C', 'B', 'M', 'R', 'Y'];
 
 export type ToolKind =
-  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'heater' | 'analyzer' | 'meter'
-  | 'tank' | 'receptacle';
+  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'heater' | 'analyzer' | 'spectroscope'
+  | 'meter' | 'tank' | 'receptacle';
 
 /**
  * Tools there's only ever one of: not in the palette, and never put away. The receptacle is the whole cryostabilizer
  * station (see STATION), reference and tester included.
  */
-export const UNIQUE_TOOLS: readonly ToolKind[] = ['analyzer', 'meter', 'receptacle'];
+export const UNIQUE_TOOLS: readonly ToolKind[] = ['analyzer', 'spectroscope', 'meter', 'receptacle'];
 
 /**
  * A tool's geometry in local units: multiply by the stage scale and offset by
@@ -670,6 +680,18 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: 116,
     box: { x0: -10, x1: 2 * CELL + 6, y0: -6, y1: 118 },
   },
+  spectroscope: {
+    // a glass tube straight down to a spout, past a cabinet beside it with a screen showing a graph (see SPECTROSCOPE)
+    tanks: [{ name: 'tube', x0: -TUBE_W / 2, x1: TUBE_W / 2 }],
+    tankH: TUBE_H,
+    tankCap: TUBE_CAP,
+    round: true,
+    noValve: true,
+    spouts: [0],
+    valveY: TUBE_H,
+    spoutY: 116,
+    box: { x0: -10, x1: INSTRUMENT.body.x1 + 4, y0: -6, y1: 118 },
+  },
 };
 
 /** The size sorter's chute, in local units: it slopes down from (x0, y0) to (x1, y1), where it turns down into the last spout. */
@@ -679,16 +701,51 @@ export const chuteY = (x: number) =>
   SORTER_CHUTE.y0 + ((x - SORTER_CHUTE.x0) / (SORTER_CHUTE.x1 - SORTER_CHUTE.x0)) * (SORTER_CHUTE.y1 - SORTER_CHUTE.y0);
 
 /**
- * The composition analyzer's cabinet, right of its tube, with its screen and hexagons (centers and radius), and how
- * high the pipe from the tube's foot into it, and the one out of it to its waste spout, run, in local units.
+ * The composition analyzer's hexagons on its screen (centers and radius), and how high the pipe out of its cabinet to
+ * its waste spout runs, in local units.
  */
 export const ANALYZER = {
-  body: { x0: 14, x1: 186, y0: 4, y1: 96 },
-  screen: { x0: 24, x1: 176, y0: 14, y1: 86 },
   hexes: { xs: [50, 100, 150], y: 50, r: 21 },
-  inY: 70,
   wasteY: 84,
 };
+
+/**
+ * The spectroscope's graph (see spectroscopeAt): its x axis runs from lnE0 to lnE1, and each bond's line is a Gaussian
+ * `width` wide (its standard deviation), in lnE.
+ */
+export const SPECTROSCOPE = { lnE0: -0.5, lnE1: 3.5, width: 0.02 };
+
+/** Every bond there can be, by its key (see pairKey): the twelve pairs of atoms from different groups. */
+export const BOND_KEYS: readonly string[] = [
+  ...new Set(ATOMS.flatMap((a) => ATOMS.filter((b) => GROUP[a] !== GROUP[b]).map((b) => pairKey(a, b)))),
+];
+
+/** For each species, its bonds, by their place in BOND_KEYS. */
+const SPECIES_BONDS: readonly (readonly number[])[] = SPECIES.map((sp) =>
+  BIT_PAIRS.flatMap(([g1, g2], k) => (sp.mask & (1 << k) ? [BOND_KEYS.indexOf(pairKey(sp.atoms[g1]!, sp.atoms[g2]!))] : [])),
+);
+
+/** How many of each bond (in BOND_KEYS order) a fluid's molecules have between them. */
+export function bondCounts(f: Fluid): number[] {
+  const out = BOND_KEYS.map(() => 0);
+  for (let s = 0; s < NS; s++) if (f.n[s]) for (const b of SPECIES_BONDS[s]) out[b] += f.n[s];
+  return out;
+}
+
+/**
+ * The height of the spectroscope's graph at x = lnE: each bond's count, `counts` (in BOND_KEYS order), spread as a
+ * Gaussian SPECTROSCOPE.width wide about the log of the size of its energy, `energies` (so an uphill bond shows at its
+ * size too), peaking at its count, all added up. A bond with no energy shows nowhere.
+ */
+export function spectroscopeAt(x: number, counts: readonly number[], energies: readonly number[]): number {
+  const w = SPECTROSCOPE.width;
+  let y = 0;
+  counts.forEach((c, i) => {
+    const e = Math.abs(energies[i]);
+    if (c > 0 && e > 0) y += c * Math.exp(-((x - Math.log(e)) ** 2) / (2 * w * w));
+  });
+  return y;
+}
 
 /** The meter's cabinet, and its display, in local units. */
 export const METER_BODY = { x0: -31, x1: 31, y0: 36, y1: 64, display: { x0: -26, x1: 26, y0: 41, y1: 59 } };
@@ -716,6 +773,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   tank: 'Tank',
   receptacle: 'Cryostabilizer',
   analyzer: 'Composition analyzer',
+  spectroscope: 'Spectroscope',
 };
 
 /**
@@ -797,7 +855,9 @@ export function separatorShares(): number[][] {
  *   shows what flows out, averaged over the last METER.window (see rate and meterText).
  * - A **composition analyzer** is an inline instrument (see INLINE_TOOLS): its tube drains straight through like
  *   the meter's funnel, and it draws off ANALYZER_SAMPLE of what passes, out its waste spout, reading that (see
- *   spectrum) onto a screen, averaged over the last INSTRUMENT_WINDOW.
+ *   composition) onto a screen, averaged over the last INSTRUMENT_WINDOW.
+ * - A **spectroscope** is an inline instrument too, which lets everything through, counting the bonds that pass over
+ *   the last INSTRUMENT_WINDOW (see bondCounts) and showing them by energy as a graph (see spectroscopeAt).
  *
  * Tools run on sim time, so a slow drip into a reacting flask gives the same
  * result at any sim speed.
@@ -820,10 +880,15 @@ export class Tool {
   /** Per spout, the flow on the last step, in flasks per second. */
   flow: number[];
   /**
-   * An analyzer's reading (see spectrum), shown on its screen: what it drew off over the last INSTRUMENT_WINDOW, as
+   * An analyzer's reading (see composition), shown on its screen: what it drew off over the last INSTRUMENT_WINDOW, as
    * shares of its volume; null if nothing passed through it in that time.
    */
   reading: number[] | null = null;
+  /**
+   * A spectroscope's reading: how many of each bond (in BOND_KEYS order) have passed through it per sim second, over
+   * the last INSTRUMENT_WINDOW.
+   */
+  bonds: number[] = BOND_KEYS.map(() => 0);
   /** A meter's reading: what's flowed out of it, by volume per sim second, averaged over the last METER.window. */
   rate = 0;
   /**
@@ -894,9 +959,10 @@ export class Tool {
     this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
     if (this.kind === 'meter') this.rate = this.record(h, [volume(packets[0])], METER.window)[0];
     if (this.kind === 'analyzer') {
-      const [v, ...spec] = this.record(h, [volume(packets[1]), ...spectrum(packets[1], 1)], INSTRUMENT_WINDOW);
+      const [v, ...spec] = this.record(h, [volume(packets[1]), ...composition(packets[1], 1)], INSTRUMENT_WINDOW);
       this.reading = v > 0 ? spec.map((x) => x / v) : null;
     }
+    if (this.kind === 'spectroscope') this.bonds = this.record(h, bondCounts(packets[0]), INSTRUMENT_WINDOW);
     return this.out;
   }
 
@@ -1028,7 +1094,7 @@ export class Tool {
  * (by volume, see VOLUME). So against the sample's own volume, R lights 1R fully, and R–G both 2R and 2G fully; and
  * half R, half G lights 1R and 1G half as bright.
  */
-export function spectrum(f: Fluid, cap: number): number[] {
+export function composition(f: Fluid, cap: number): number[] {
   const out = new Array<number>(18).fill(0);
   for (let s = 0; s < NS; s++) {
     if (!f.n[s]) continue;

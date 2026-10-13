@@ -16,7 +16,7 @@ import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
 import { Flask, Vessel, fluidColor, roomFor, transfer, volume, volumeUnit, type Point } from './flask';
 import { boxesOverlap, moveBox, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
-import { ANALYZER_AT, DEFAULT_PRESET, METER_AT, REFERENCE_FILL, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
+import { ANALYZER_AT, DEFAULT_PRESET, METER_AT, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
@@ -25,7 +25,7 @@ import {
   type Pose, type Vec3,
 } from './space';
 import {
-  ANALYZER, ANALYZER_HUM, HEATER, HEATER_CELLS, HEATER_TUBE, Hose, INLINE_TOOLS, MAX_FLOW, RECEPTACLE_TIMES, SHAPES, STATION, SUMP_TIP, TANK_H,
+  ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, Hose, INLINE_TOOLS, MAX_FLOW, RECEPTACLE_TIMES, SHAPES, STATION, SUMP_TIP, TANK_H,
   TOOL_NAMES, Tool, UNIQUE_TOOLS, aimAt, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, tankX,
   type Mouth, type ToolKind,
 } from './tools';
@@ -601,8 +601,8 @@ export class GameEngine {
   }
 
   /**
-   * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a composition analyzer, a flow
-   * meter and a cryostabilizer station: if there's none, one is added where it starts, the station's reference holding
+   * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a composition analyzer, a
+   * spectroscope, a flow meter and a cryostabilizer station: if there's none, one is added where it starts, the station's reference holding
    * what's left on board (see REFERENCE_FILL). The station is built into the wall, so it's always where it is.
    */
   private uniqueTools(): void {
@@ -617,6 +617,7 @@ export class GameEngine {
       this.tools.push(t);
     };
     add('analyzer', spotPose(ANALYZER_AT));
+    add('spectroscope', spotPose(SPECTROSCOPE_AT));
     add('meter', spotPose(METER_AT));
     add('receptacle', STATION_POSE);
     this.station().pose = { ...STATION_POSE };
@@ -1546,7 +1547,7 @@ export class GameEngine {
       return onTool(t, lamps.x, (lamps.y0 + verdict.y) / 2, -STATION.out);
     }
     if (t.kind === 'analyzer') {
-      const b = ANALYZER.body;
+      const b = INSTRUMENT.body;
       return onTool(t, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
     }
     return onTool(t, 0, 60);
@@ -2137,7 +2138,8 @@ export class GameEngine {
       eye: this.eye(), yaw: this.player.yaw, pitch: this.player.pitch,
       flasks: this.flasks, tools: this.tools, scales: this.scales, hoses, faucets: this.faucets,
       streams, drops,
-      tarePress: this.tarePress, hot: this.target, dt, clock: this.clock, alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
+      tarePress: this.tarePress, hot: this.target, dt, clock: this.clock,
+      energies: BOND_KEYS.map((k) => this.chem.params.bonds[k].E), alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
       airlock: this.airlockLook(),
       papers: this.paperFrame(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(),
