@@ -41,7 +41,7 @@ export const SPECTROSCOPE_AT: Spot = { at: [1.45, 0.5] };
  */
 export const STATION_POSE: Pose = { x: ROOM.x1 - CELL / 2, y: STATION.top, z: 11.5 * CELL, yaw: -Math.PI / 2 };
 
-/** What the cryostabilizer reference starts with: the hundred flasks of the target left on board (see VOYAGE). */
+/** What the ship's reservoir starts with: the hundred flasks of the target left on board (see VOYAGE). */
 export const REFERENCE_FILL: FlaskFill = { contents: [{ species: TARGET, molecules: REFERENCE_START }], T: T_ROOM };
 
 /** A tool on the bench at the start. */

@@ -58,8 +58,8 @@ describe('presets', () => {
     });
   }
 
-  it("fills the cryostabilizer reference with what's left on board, and starts the default game with no supply flask", () => {
-    const ref = new Tool('receptacle', 0).tanks[2];
+  it("fills the ship's reservoir with what's left on board, and starts the default game with no supply flask", () => {
+    const ref = new Tool('receptacle', 0).tanks[1];
     applyFill(ref, REFERENCE_FILL);
     // a hundred flasks of triangles
     expect(ref.n[TARGET]).toBe(REFERENCE_START);
