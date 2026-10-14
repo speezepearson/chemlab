@@ -870,6 +870,8 @@ export class Tool {
   streaming: boolean[];
   /** Per spout, the flow on the last step, in flasks per second. */
   flow: number[];
+  /** What step hands out, emptied and reused from step to step, so stepping allocates no fluid (see packet). */
+  private scratch: Vessel[] = [];
   /**
    * An analyzer's reading (see composition), shown on its screen: what it drew off in the recent past (see
    * INSTRUMENT_TAU), as shares of its volume; null once that's down to less than TRACE a sim second.
@@ -921,12 +923,17 @@ export class Tool {
     return SHAPES[this.kind];
   }
 
-  /** Run for `h` sim seconds. Returns, per spout, the fluid that left it, or null if none did. */
+  /**
+   * Run for `h` sim seconds. Returns, per spout, the fluid that left it, or null if none did. What it returns is the
+   * tool's own, and good only until its next step: move it or copy it, don't keep it.
+   */
   step(h: number): (Vessel | null)[] {
     if (this.kind === 'heater') return this.heat(h);
     if (this.kind === 'receptacle') return this.receive(h);
+    const T = this.tanks.length;
+    const parts = (n: number) => Array.from({ length: n }, (_, j) => this.packet(T + j));
     let packets = this.tanks.map((tank, k) => {
-      const p = new Vessel(Infinity);
+      const p = this.packet(k);
       // a valve, or a funnel without one, lets out in proportion to how high the fluid stands; an instrument's tube
       // drains at a fixed rate, so what it reads is just what's arriving
       const rate =
@@ -937,10 +944,10 @@ export class Tool {
       return p;
     });
     if (this.kind === 'exchanger') counterflow(packets[0], packets[1], EXCHANGE_RATE * h);
-    if (this.kind === 'separator') packets = separate(packets[0]);
-    if (this.kind === 'splitter') packets = divide(packets[0], () => 1 - this.valves[0]);
-    if (this.kind === 'sorter') packets = sieve(packets[0]);
-    if (this.kind === 'analyzer') packets = divide(packets[0], () => 1 - ANALYZER_SAMPLE);
+    if (this.kind === 'separator') packets = separate(packets[0], parts(SEPARATOR_OUTLETS));
+    if (this.kind === 'splitter') packets = divide(packets[0], () => 1 - this.valves[0], parts(2));
+    if (this.kind === 'sorter') packets = sieve(packets[0], parts(3));
+    if (this.kind === 'analyzer') packets = divide(packets[0], () => 1 - ANALYZER_SAMPLE, parts(2));
     this.out = packets.map((p) => (p.N > 0 ? p : null));
     this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
     if (this.kind === 'meter') {
@@ -956,6 +963,15 @@ export class Tool {
       this.bonds = bonds.reduce((a, b) => a + b, 0) >= TRACE ? [...bonds] : bonds.map(() => 0);
     }
     return this.out;
+  }
+
+  /** Scratch fluid i (see scratch), emptied. */
+  private packet(i: number): Vessel {
+    const p = (this.scratch[i] ??= new Vessel(Infinity));
+    if (p.N) p.n.fill(0);
+    p.N = 0;
+    p.Q = 0;
+    return p;
   }
 
   /**
@@ -977,7 +993,7 @@ export class Tool {
    */
   private heat(h: number): (Vessel | null)[] {
     const { tube, valves } = this;
-    const packets = this.shape.spouts.map(() => new Vessel(Infinity));
+    const packets = this.shape.spouts.map((_, j) => this.packet(j));
     const on = Math.min(1, (h * HEATER_CELLS) / Math.max(1e-9, HEATER.transit));
     const last = tube.length - 1;
     transfer(tube[last], packets[HEATER_TAPS.length], volume(tube[last]) * on);
@@ -1039,7 +1055,7 @@ export class Tool {
   private receive(h: number): (Vessel | null)[] {
     const [rec, tester, ref] = this.tanks;
     const out: (Vessel | null)[] = [null, null];
-    const tap = new Vessel(Infinity);
+    const tap = this.packet(0);
     transfer(ref, tap, this.valves[0] * REFERENCE_FLOW * h);
     if (tap.N > 0) out[1] = tap;
     if (!this.cycle && volume(rec) >= STATION.autoflush * rec.cap) this.press();
@@ -1063,7 +1079,7 @@ export class Tool {
       } else {
         if (c.phase === 'pass') evenly(tester, ref);
         else {
-          const p = new Vessel(Infinity);
+          const p = this.packet(1);
           evenly(tester, p);
           if (p.N > 0) out[0] = p;
         }
@@ -1096,23 +1112,27 @@ export function composition(f: Fluid, cap: number): number[] {
  * Pass a fluid over the size sorter's screens (see sorterShares): what falls through the first, what falls through
  * the second, and what goes off the end, in whole molecules, with heat in proportion.
  */
-export function sieve(f: Fluid): Vessel[] {
+export function sieve(f: Fluid, into?: Vessel[]): Vessel[] {
   const shares = sorterShares();
-  return split(f, 3, (s) => shares[SPECIES[s].size - 1]);
+  return split(f, 3, (s) => shares[SPECIES[s].size - 1], into);
 }
 
 /** Split a fluid among the separator's outlets, left to right (see separatorShares), in whole molecules, heat in proportion. */
-export function separate(f: Fluid): Vessel[] {
+export function separate(f: Fluid, into?: Vessel[]): Vessel[] {
   const shares = separatorShares();
-  return split(f, SEPARATOR_OUTLETS, (s) => shares[SEPARATOR_OUTLET[s]]);
+  return split(f, SEPARATOR_OUTLETS, (s) => shares[SEPARATOR_OUTLET[s]], into);
 }
 
 /**
  * Split a fluid `n` ways, sending `shares(s)[j]` of species s to the j-th, in whole molecules (the last takes
- * whatever rounding leaves), with heat in proportion to atoms.
+ * whatever rounding leaves), with heat in proportion to atoms. The parts go into `out`, empty vessels, if it's given.
  */
-export function split(f: Fluid, n: number, shares: (s: number) => readonly number[]): Vessel[] {
-  const out = Array.from({ length: n }, () => new Vessel(Infinity));
+export function split(
+  f: Fluid,
+  n: number,
+  shares: (s: number) => readonly number[],
+  out = Array.from({ length: n }, () => new Vessel(Infinity)),
+): Vessel[] {
   for (let s = 0; s < NS; s++) {
     if (!f.n[s]) continue;
     const sh = shares(s);
@@ -1132,9 +1152,15 @@ export function split(f: Fluid, n: number, shares: (s: number) => readonly numbe
   return out;
 }
 
-/** Split a fluid into left and right, sending `leftShare(s)` of species s left, in whole molecules, heat in proportion. */
-export function divide(f: Fluid, leftShare: (s: number) => number): [Vessel, Vessel] {
-  const out: [Vessel, Vessel] = [new Vessel(Infinity), new Vessel(Infinity)];
+/**
+ * Split a fluid into left and right, sending `leftShare(s)` of species s left, in whole molecules, heat in
+ * proportion. The parts go into `out`, empty vessels, if it's given.
+ */
+export function divide(
+  f: Fluid,
+  leftShare: (s: number) => number,
+  out: Vessel[] = [new Vessel(Infinity), new Vessel(Infinity)],
+): [Vessel, Vessel] {
   for (let s = 0; s < NS; s++) {
     if (!f.n[s]) continue;
     const left = Math.min(f.n[s], roundRandom(f.n[s] * leftShare(s)));
@@ -1145,7 +1171,7 @@ export function divide(f: Fluid, leftShare: (s: number) => number): [Vessel, Ves
   }
   out[0].Q = f.N > 0 ? Math.min(f.Q, roundRandom((f.Q * out[0].N) / f.N)) : 0;
   out[1].Q = f.Q - out[0].Q;
-  return out;
+  return [out[0], out[1]];
 }
 
 /**
