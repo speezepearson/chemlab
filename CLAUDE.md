@@ -12,6 +12,9 @@ same commit as any behavior change. This file holds what README doesn't: how to 
     in `src/chem/testChem.ts`, and one that touches a tunable reads its current value rather than a literal.
 - `npm run route`: the synthesis-route harness (`src/game/route.ts`). It prints a report; `--silent=false` is already
   in the script.
+- `npm run bench`: the headless sim benchmark (`bench/sim.ts`): the real engine in Node with the view and audio
+  stubbed out, on fixed seeds. `npm run bench -- prod --mode=tight --load=bench/saves/line.json --tightstats` runs
+  the user's production line as fast as it goes, as while asleep. Its header lists the modes and scenes.
 - `npx vite --port 5199 --strictPort`: the dev server, for browser checks.
 
 ## Checking things in a browser

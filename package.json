@@ -9,7 +9,8 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "route": "vitest run src/game/route.test.ts --silent=false",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "bench": "vite build --config bench/vite.bench.config.ts --logLevel warn && node bench/dist/sim.js"
   },
   "dependencies": {
     "react": "^19.3.0",
