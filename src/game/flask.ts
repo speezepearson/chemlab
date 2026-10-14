@@ -74,6 +74,7 @@ export class Vessel implements Fluid {
     const f = amount / vs;
     let added = 0;
     for (let s = 0; s < NS; s++) {
+      if (!src.n[s]) continue;
       const m = roundRandom(src.n[s] * f);
       this.n[s] += m;
       added += m * SPECIES[s].size;
@@ -105,12 +106,14 @@ export class Flask extends Vessel {
  * the sink if dst is null), with heat in proportion; returns the atoms actually moved.
  */
 export function transfer(src: Fluid, dst: (Fluid & { cap: number }) | null, amount: number): number {
+  if (src.N <= 0) return 0;
   const vs = volume(src);
   amount = Math.min(amount, vs, dst ? dst.cap - volume(dst) : Infinity);
   if (amount <= 0) return 0;
   const f = amount / vs;
   let moved = 0;
   for (let s = 0; s < NS; s++) {
+    if (!src.n[s]) continue;
     const m = Math.min(src.n[s], roundRandom(src.n[s] * f));
     if (!m) continue;
     src.n[s] -= m;

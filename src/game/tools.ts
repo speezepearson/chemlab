@@ -1136,6 +1136,7 @@ export function split(f: Fluid, n: number, shares: (s: number) => readonly numbe
 export function divide(f: Fluid, leftShare: (s: number) => number): [Vessel, Vessel] {
   const out: [Vessel, Vessel] = [new Vessel(Infinity), new Vessel(Infinity)];
   for (let s = 0; s < NS; s++) {
+    if (!f.n[s]) continue;
     const left = Math.min(f.n[s], roundRandom(f.n[s] * leftShare(s)));
     out[0].n[s] = left;
     out[1].n[s] = f.n[s] - left;

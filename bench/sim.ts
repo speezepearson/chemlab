@@ -15,8 +15,7 @@
  * call, 1), --warm (30), --sim (120), --reps (3, best and median reported), --tightstats (chem stats, step time by
  * vessel kind, Tool.step by tool kind).
  * Experiments: --substep=X (try another substep length), --nochem (tick does nothing), --slab (Vessels' counts as
- * views into a shared buffer instead of their own Float64Array), --faststep (bench/stepFast.ts), and building with
- * BENCH_FAST_TRANSFER=1 (transfer/addFrom skip absent species). --save=DIR writes each scene's SaveState for the
+ * views into a shared buffer instead of their own Float64Array), --faststep (bench/stepFast.ts). --save=DIR writes each scene's SaveState for the
  * browser bench (bench/browser.cjs); --load=FILE starts from one.
  * For a CPU profile:  node --cpu-prof --cpu-prof-dir=bench/prof bench/dist/sim.js busy --mode=time
  *   then:  node bench/cpuprofile.mjs bench/prof/<file>.cpuprofile

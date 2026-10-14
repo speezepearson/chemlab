@@ -27,17 +27,8 @@ export default defineConfig({
         // and let it try Vessels whose counts are views into a shared slab (--slab), since a 400-byte Float64Array
         // gets an off-heap backing store, which costs ~2 us to allocate
         if (id.endsWith('/src/game/flask.ts')) {
-          let out = code.replace('n = new Float64Array(NS);', 'n = (globalThis as any).__slab ? (globalThis as any).__slab() : new Float64Array(NS);');
+          const out = code.replace('n = new Float64Array(NS);', 'n = (globalThis as any).__slab ? (globalThis as any).__slab() : new Float64Array(NS);');
           if (out === code) this.warn('Vessel hook not found in flask.ts');
-          // BENCH_FAST_TRANSFER=1 at build time: transfer and addFrom skip absent species instead of drawing a random
-          // number for each of the 50 (same results in distribution: roundRandom(0) is always 0)
-          if (process.env.BENCH_FAST_TRANSFER) {
-            const before = out;
-            out = out
-              .replace('const m = roundRandom(src.n[s] * f);', 'if (!src.n[s]) continue;\n      const m = roundRandom(src.n[s] * f);')
-              .replace('const m = Math.min(src.n[s], roundRandom(src.n[s] * f));', 'if (!src.n[s]) continue;\n    const m = Math.min(src.n[s], roundRandom(src.n[s] * f));');
-            if (out === before) this.warn('transfer hook not found in flask.ts');
-          }
           return out;
         }
         if (!id.endsWith('/src/game/engine.ts')) return null;
