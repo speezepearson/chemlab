@@ -218,6 +218,15 @@ describe('flow meter', () => {
     expect(m.rate / feed).toBeCloseTo(Math.exp(-1), 1);
     run(40 * INSTRUMENT_TAU, false);
     expect(m.rate).toBe(0);
+    // and starts again from nothing: an idle meter isn't stepped, but nothing it read is left over
+    run(INSTRUMENT_TAU, true);
+    expect(m.rate / feed).toBeCloseTo(1 - Math.exp(-1), 1);
+  });
+
+  it('lets nothing out while empty', () => {
+    const t = new Tool('splitter', 0);
+    expect(t.step(0.02)).toEqual([null, null]);
+    expect(t.flow).toEqual([0, 0]);
   });
 
   it(`shows millions per second in ${METER_DIGITS} digits, to as many decimals as fit`, () => {

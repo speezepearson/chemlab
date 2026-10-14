@@ -930,6 +930,12 @@ export class Tool {
   step(h: number): (Vessel | null)[] {
     if (this.kind === 'heater') return this.heat(h);
     if (this.kind === 'receptacle') return this.receive(h);
+    // with nothing in it and its readings faded to nothing, a step would do nothing; an instrument's smoothing starts
+    // again from nothing measured, as it would have to within less than TRACE
+    if (this.tanks.every((tk) => tk.N <= 0) && this.rate === 0 && !this.reading && this.bonds.every((b) => b === 0)) {
+      this.smoothed = null;
+      return this.none();
+    }
     const T = this.tanks.length;
     const parts = (n: number) => Array.from({ length: n }, (_, j) => this.packet(T + j));
     let packets = this.tanks.map((tank, k) => {
@@ -974,6 +980,13 @@ export class Tool {
     return p;
   }
 
+  /** A step that lets nothing out. */
+  private none(): (Vessel | null)[] {
+    this.out.fill(null);
+    this.flow.fill(0);
+    return this.out;
+  }
+
   /**
    * An inline instrument's reading after a step of h sim seconds in which it measured x: the exponentially weighted
    * average (see INSTRUMENT_TAU) of what it's measured, per sim second, entry by entry. It's exact for whatever passed
@@ -993,6 +1006,7 @@ export class Tool {
    */
   private heat(h: number): (Vessel | null)[] {
     const { tube, valves } = this;
+    if (this.tanks[0].N <= 0 && tube.every((v) => v.N <= 0)) return this.none();
     const packets = this.shape.spouts.map((_, j) => this.packet(j));
     const on = Math.min(1, (h * HEATER_CELLS) / Math.max(1e-9, HEATER.transit));
     const last = tube.length - 1;
