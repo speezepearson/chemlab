@@ -69,6 +69,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `history.ts` is undo and redo of the lab's arrangement (never fluids). An action that changes the arrangement calls
     the engine's `mark()` as it starts and `commit()` as it ends (or `change()` around it, if it's instant); a carry is
     marked at pick-up and committed at set-down.
+  - `outline.ts` is the player's settings for the outline round what the crosshair is on; the view's `Outliner` draws
+    it over the finished frame, from a mask of the meshes registered as that thing's parts.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
     `volumes.ts`); `rumble.ts` is the composition analyzer, `beeper.ts` the cryostabilizer station, `ambience.ts` the ship, `water.ts` drips and streams.

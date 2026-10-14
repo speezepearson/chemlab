@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { defaultChemParams, restoreDefaultChem } from './chem/params';
 import { ReactionNetwork } from './chem/reactions';
 import { AppearancePanel } from './components/AppearancePanel';
+import { OutlinePanel } from './components/OutlinePanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
 import { FlaskEditor } from './components/FlaskEditor';
 import { Hud, StartHint, TouchControls } from './components/Hud';
@@ -225,6 +226,7 @@ export function App() {
           {god && <ChemistryPanel key={chemVersion} network={network} />}
           {god && <AppearancePanel />}
           <SoundPanel god={god} />
+          <OutlinePanel />
           <button
             className="replay"
             onClick={() => {

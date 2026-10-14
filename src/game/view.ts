@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { temperature, type Fluid } from '../chem/reactions';
+import { OUTLINE } from './outline';
 import { LOOK, coronaAlpha, coronaRadius, glowFalloff, haloAlpha, haloRadius } from './appearance';
 import {
   NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
@@ -2627,6 +2628,154 @@ function buildFaucets(
 
 /* ---------------- the view ---------------- */
 
+/** The thing a pick is part of, to outline all of it: a tool for any of its parts, a faucet for its knob or spout. */
+function thingOf(p: Pick): unknown {
+  switch (p.kind) {
+    case 'flask': return p.f;
+    case 'tool': return p.t;
+    case 'scale': return p.sc;
+    case 'hose': return p.h;
+    case 'faucet': return `faucet ${p.i}`;
+    default: return p.kind;
+  }
+}
+
+/** The layer what's outlined is put on, for the moment its silhouette is drawn (see Outliner). */
+const OUTLINE_LAYER = 4;
+
+const quadVertex = /* glsl */ `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+}`;
+
+/**
+ * The outline round whatever the crosshair is on (see OUTLINE in outline.ts), drawn over the finished frame. Its
+ * silhouette, the whole of it whatever's in front, goes into a mask; then each pixel finds how far it is from the
+ * mask, along its row and then down its column (the nearest along each row first, so the second pass gets the true
+ * distance), and the pixels within the outline's width of it are painted, the outermost blended for a smooth edge.
+ */
+class Outliner {
+  private mask = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+  private rows = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+  private silhouette = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, depthTest: false, depthWrite: false });
+  /** Along each row: how many pixels off the nearest masked pixel is, over 255; 0 in the mask, 1 for none in reach. */
+  private across = new THREE.ShaderMaterial({
+    uniforms: { mask: { value: null }, texel: { value: new THREE.Vector2() }, reach: { value: 1 } },
+    vertexShader: quadVertex,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D mask;
+      uniform vec2 texel;
+      uniform int reach;
+      varying vec2 vUv;
+      bool on(float dx) { return texture2D(mask, vUv + vec2(dx * texel.x, 0.0)).r > 0.5; }
+      void main() {
+        float d = 255.0;
+        if (on(0.0)) d = 0.0;
+        else for (int i = 1; i <= reach; i++) if (on(float(i)) || on(-float(i))) { d = float(i); break; }
+        gl_FragColor = vec4(d / 255.0, 0.0, 0.0, 1.0);
+      }`,
+    depthTest: false,
+    depthWrite: false,
+  });
+  /** Down each column: the distance to the mask, and the outline's color as far out as its width. */
+  private down = new THREE.ShaderMaterial({
+    uniforms: {
+      rows: { value: null }, texel: { value: new THREE.Vector2() }, reach: { value: 1 }, width: { value: 1 },
+      color: { value: new THREE.Color() },
+    },
+    vertexShader: quadVertex,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D rows;
+      uniform vec2 texel;
+      uniform int reach;
+      uniform float width;
+      uniform vec3 color;
+      varying vec2 vUv;
+      void main() {
+        float best = 1e4;
+        for (int j = -reach; j <= reach; j++) {
+          float h = texture2D(rows, vUv + vec2(0.0, float(j) * texel.y)).r * 255.0;
+          if (h < 254.5) best = min(best, length(vec2(h, float(j))));
+        }
+        float a = clamp(width + 0.5 - best, 0.0, 1.0);
+        if (best < 0.5 || a <= 0.0) discard;
+        gl_FragColor = vec4(color, a);
+        #include <colorspace_fragment>
+      }`,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  });
+  private quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.across);
+  private quadScene = new THREE.Scene().add(this.quad);
+  private quadCamera = new THREE.Camera();
+  private size = new THREE.Vector2();
+  private clear = new THREE.Color();
+
+  constructor() {
+    this.quad.frustumCulled = false;
+  }
+
+  /** Outline `meshes` over what `renderer` last drew of `scene`. */
+  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, meshes: THREE.Object3D[]): void {
+    const width = OUTLINE.width * renderer.getPixelRatio();
+    if (width <= 0 || !meshes.length) return;
+    const reach = Math.min(254, Math.ceil(width + 0.5));
+    const { x: w, y: h } = renderer.getDrawingBufferSize(this.size);
+    if (this.mask.width !== w || this.mask.height !== h) {
+      this.mask.setSize(w, h);
+      this.rows.setSize(w, h);
+    }
+
+    // the silhouette, alone on a layer of its own, with no background, shadows or lights
+    for (const m of meshes) m.layers.enable(OUTLINE_LAYER);
+    const bg = scene.background;
+    const clearAlpha = renderer.getClearAlpha();
+    renderer.getClearColor(this.clear);
+    scene.background = null;
+    scene.overrideMaterial = this.silhouette;
+    renderer.shadowMap.autoUpdate = false;
+    renderer.setClearColor(0x000000, 0);
+    camera.layers.set(OUTLINE_LAYER);
+    renderer.setRenderTarget(this.mask);
+    renderer.render(scene, camera);
+    camera.layers.set(0);
+    scene.overrideMaterial = null;
+    scene.background = bg;
+    renderer.shadowMap.autoUpdate = true;
+    for (const m of meshes) m.layers.disable(OUTLINE_LAYER);
+
+    const texel = new THREE.Vector2(1 / w, 1 / h);
+    const a = this.across.uniforms;
+    a.mask.value = this.mask.texture;
+    a.texel.value = texel;
+    a.reach.value = reach;
+    this.quad.material = this.across;
+    renderer.setRenderTarget(this.rows);
+    renderer.render(this.quadScene, this.quadCamera);
+
+    const u = this.down.uniforms;
+    u.rows.value = this.rows.texture;
+    u.texel.value = texel;
+    u.reach.value = reach;
+    u.width.value = width;
+    (u.color.value as THREE.Color).set(OUTLINE.color);
+    this.quad.material = this.down;
+    renderer.setRenderTarget(null);
+    renderer.autoClear = false;
+    renderer.render(this.quadScene, this.quadCamera);
+    renderer.autoClear = true;
+    renderer.setClearColor(this.clear, clearAlpha);
+  }
+
+  dispose(): void {
+    this.mask.dispose();
+    this.rows.dispose();
+  }
+}
+
 /** Draws the lab with Three.js, from the player's eyes, and says what's under the crosshair. */
 export class View {
   /** The field of view is 90°, top to bottom. */
@@ -2655,6 +2804,7 @@ export class View {
   /** The room's lights, and how bright each is, to be dimmed while the cryopod is shut (see AirlockLook.dark). */
   private roomLights: { light: THREE.Light; base: number }[] = [];
   private raycaster = new THREE.Raycaster();
+  private outliner = new Outliner();
   private clock = 0;
   private stars = starField();
 
@@ -2795,6 +2945,7 @@ export class View {
 
     this.renderer.render(scene, this.camera);
     this.renderGuides();
+    this.renderOutline(fr.hot);
   }
 
   /**
@@ -2830,6 +2981,14 @@ export class View {
     renderer.shadowMap.autoUpdate = true;
     renderer.autoClear = true;
     scene.background = bg;
+  }
+
+  /** The outline round everything that's part of what the crosshair is on (see Outliner). */
+  private renderOutline(hot: Pick | null): void {
+    if (!hot) return;
+    const thing = thingOf(hot);
+    const meshes = [...this.pickables].filter(([, p]) => thingOf(p) === thing).map(([o]) => o);
+    this.outliner.render(this.renderer, this.scene, this.camera, meshes);
   }
 
   /** Every stand, its base on whatever's under it: a counter, or the floor under something held out over it. */
@@ -3005,6 +3164,7 @@ export class View {
   }
 
   dispose(): void {
+    this.outliner.dispose();
     this.renderer.dispose();
   }
 }
