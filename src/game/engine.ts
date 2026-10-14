@@ -2012,6 +2012,8 @@ export class GameEngine {
    * spills straight down the sink.
    */
   private overflow(v: Vessel): void {
+    // a fluid's volume is never more than its atoms, so most vessels needn't be measured
+    if (v.N <= v.cap) return;
     const over = volume(v) - v.cap;
     if (over <= 0) return;
     const out = new Vessel(Infinity);

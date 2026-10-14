@@ -165,7 +165,7 @@ export function dropRate(atoms: number): number {
  */
 export function drip(drop: Vessel, out: Vessel | null, h: number, rand = Math.random): Vessel | null {
   if (out && out.N >= DRIP_FLOW * h) {
-    transfer(drop, out, volume(drop));
+    if (drop.N > 0) transfer(drop, out, volume(drop));
     return out;
   }
   if (out) transfer(out, drop, volume(out));
