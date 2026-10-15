@@ -251,29 +251,25 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
 }
 
 /**
- * The cryostabilizer station, built into the right wall (see STATION_POSE in presets.ts): three tall columns in the
- * wall, the receptacle, the tester and the reference, each seen through a narrow glass pane, with a glass funnel low
- * in front of the receptacle, whatever lands in which is pumped straight up into it; a waste nozzle under the tester
- * and a faucet under the reference; and a panel of lamps, a button and a screen between the tester and the
- * reference. In its own flat frame, x runs along the wall and y down from the columns' tops; z = 0 is over the middle
- * of the counter's row of cells nearest the wall, where the funnel and spouts are, and the wall is `out` behind it.
- * - paneW, paneH: each column's pane, across and tall; the column behind it is as tall.
+ * The cryostabilizer station, built into the right wall (see STATION_POSE in presets.ts): the ship's reservoir, a tall
+ * column in the wall seen through a narrow glass pane, with a faucet under it; and beside it, low down, a glass funnel
+ * over a diverter, which sends what drains from the funnel up into the reservoir if it's pure enough, or else down
+ * and out a waste spigot under it, with a little LCD between the funnel and the spigot showing which way it's going.
+ * In its own flat frame, x runs along the wall and y down from the column's top; z = 0 is over the middle of the
+ * counter's row of cells nearest the wall, where the funnel and spouts are, and the wall is `out` behind it.
+ * - paneW, paneH: the reservoir's pane, across and tall; the column behind it is as tall.
  * - out: how far the funnel and spouts stand out from the wall.
- * - top: how high the columns' tops are, in the room.
- * - plate: how deep the plate the panes are set in goes into the wall, its face flush with the wall.
+ * - top: how high the column's top is, in the room.
+ * - plate: how deep the plate the pane is set in goes into the wall, its face flush with the wall.
  * - block: the plate's edges, in the flat frame: a swappable block of the wall, two of the wall's panels across and one
  *   high (see WALL_PANEL), lined up with them, with a rubber seam round it.
- * - funnel: the funnel's mouth, `y` down from the columns' tops (about level with the receptacle's bottom, within
- *   easy reach), reaching w either side of its middle; it narrows to its stem h below that.
- * - labelY: the middle of the labels printed on the plate above the columns.
- * - autoflush: how full the receptacle is, by volume, when it flushes itself into the tester, as if its button were
- *   pressed; a red line on the wall marks it.
- * - gauge: a stack of LCD segments just right of the reference, as tall as the panes, showing how far the reference is
+ * - funnel: the funnel's mouth, `y` down from the column's top (within easy reach), reaching w either side of its
+ *   middle; it narrows to its stem h below that.
+ * - display: the diverter's LCD, on the plate between the funnel and the waste spigot.
+ * - labelY: the middle of the reservoir's label, printed on the plate above its column.
+ * - gauge: a stack of LCD segments just right of the reservoir, as tall as the pane, showing how far the reservoir is
  *   toward the goal (see gaugeSegments): x0..x1 across, and how many segments.
- * - button: the big round flush button, between the receptacle and the tester: its middle and radius.
- * - lamps: the column of lamps that blink while the tester thinks, just right of the tester, top down, with the
- *   verdict lamp under them.
- * - screen: the readout of the litres in the reference, under its label.
+ * - screen: the readout of the litres in the reservoir, under its label.
  */
 const STATION_TOP = LIFT + 400;
 export const STATION = {
@@ -289,17 +285,19 @@ export const STATION = {
     y1: STATION_TOP - WALL_PANEL.h,
   },
   funnel: { y: 180, w: 30, h: 30 },
+  display: { x0: CELL - 28, x1: CELL + 28, y0: 222, y1: 262 },
   labelY: -31,
-  autoflush: 0.9,
-  gauge: { x0: 3 * CELL + 20, x1: 3 * CELL + 30, segments: 26 },
-  button: { x: CELL / 2, y: 120, r: 15 },
-  lamps: { x: CELL + 30, y0: 130, dy: 15, r: 3.6 },
-  verdict: { x: CELL + 30, y: 230, r: 5.5 },
-  screen: { x0: 3 * CELL - 50, x1: 3 * CELL + 50, y0: -19, y1: -4 },
+  gauge: { x0: 2 * CELL + 20, x1: 2 * CELL + 30, segments: 26 },
+  screen: { x0: 2 * CELL - 50, x1: 2 * CELL + 50, y0: -19, y1: -4 },
 };
 
+/** The station's funnel's inside, as drawn (see Piece): a square funnel narrowing from its mouth to its stem. */
+export const STATION_FUNNEL: Piece[] = [
+  { h: STATION.funnel.h, w0: FUNNEL_TIP, d0: FUNNEL_TIP, w1: 2 * STATION.funnel.w, d1: 2 * STATION.funnel.w },
+];
+
 /**
- * What each of the station's gauge's segments shows, bottom up, with the reference holding `held` of `cap` and the
+ * What each of the station's gauge's segments shows, bottom up, with the reservoir holding `held` of `cap` and the
  * goal at `goal` (all in molecules): lit green if it's wholly below what's held, flashing red if any of it is below
  * the goal, and dark otherwise.
  */
@@ -308,47 +306,23 @@ export function gaugeSegments(held: number, goal: number, cap: number, n = STATI
     ((i + 1) / n) * cap <= held ? 'held' : (i / n) * cap < goal ? 'wanted' : 'off',
   );
 }
-/** How much the receptacle holds, by volume, and so the tester it flushes into: a hundred flasks. */
-export const RECEPTACLE_CAP = 100 * CAP;
+/** How much the station's funnel holds, by volume: as much as it's drawn to hold (see SPACE_PER_ATOM), about 0.6 flask. */
+export const INTAKE_CAP = Math.round(spaceOf(STATION_FUNNEL) / SPACE_PER_ATOM);
 /**
- * How much the cryostabilizer reference holds, by volume: about three times the goal (see GOAL_TARGET), so the goal is
- * a third of the way up its gauge, and there's room for it even if everything the tester passes into it is only just
- * pure enough, and the rest of it single atoms.
+ * How much the ship's reservoir holds, by volume: about three times the goal (see GOAL_TARGET), so the goal is a third
+ * of the way up its gauge, and there's room for it even if everything let into it is only just pure enough, and the
+ * rest of it single atoms.
  */
 export const REFERENCE_CAP = 540 * CAP;
-/** The target the reference starts with, in molecules: the hundred flasks left on board (see VOYAGE). */
+/** The target the reservoir starts with, in molecules: the hundred flasks left on board (see VOYAGE). */
 export const REFERENCE_START = 100 * CAP;
-/** How fast the reference's faucet lets it out, fully open, in atoms per sim second: a fifth of a flask a second. */
+/** How fast the reservoir's faucet lets it out, fully open, in atoms per sim second: a fifth of a flask a second. */
 export const REFERENCE_FLOW = 0.2 * MAX_FLOW;
 /**
- * The station's cycle, in sim seconds: the receptacle flushes into the tester, the tester thinks, beeping and
- * blinking, then passes what it holds into the reference, or rejects it out its waste nozzle, each evenly over the
- * time given.
+ * How long the diverter's LCD shows fluid going through it after the last of it went by, in sim seconds, so a drip
+ * reads as a flow rather than a flicker.
  */
-export const RECEPTACLE_TIMES = { flush: 1.5, think: 1.6, pass: 1.5, reject: 2.5 };
-/** How many lamps blink on a receptacle while it thinks. */
-export const RECEPTACLE_LAMPS = 6;
-/** The pitches a receptacle beeps at while it thinks, in Hz: a pentatonic scale, high up. */
-const BEEP_PITCHES = [880, 1047, 1175, 1397, 1568, 1760, 2093, 2349];
-
-/** One beep in a receptacle's thinking: when, which lamp it lights, and at what pitch. */
-export interface Beep {
-  t: number;
-  lamp: number;
-  freq: number;
-}
-
-/** A random run of beeps for a receptacle to think with, every 0.07 to 0.15 s across RECEPTACLE_TIMES.think. */
-export function beepPattern(rand = Math.random): Beep[] {
-  const out: Beep[] = [];
-  for (let t = 0.05; t < RECEPTACLE_TIMES.think - 0.1; t += 0.07 + 0.08 * rand())
-    out.push({
-      t,
-      lamp: Math.floor(rand() * RECEPTACLE_LAMPS),
-      freq: BEEP_PITCHES[Math.floor(rand() * BEEP_PITCHES.length)],
-    });
-  return out;
-}
+export const DIVERTER_HOLD = 0.4;
 
 /**
  * The inline instruments: each is a vertical glass tube, whose top a hose's nozzle snaps onto (see INLINE_DOCK), draining
@@ -462,7 +436,7 @@ export type ToolKind =
 
 /**
  * Tools there's only ever one of: not in the palette, and never put away. The receptacle is the whole cryostabilizer
- * station (see STATION), reference and tester included.
+ * station (see STATION), reservoir included.
  */
 export const UNIQUE_TOOLS: readonly ToolKind[] = ['analyzer', 'spectroscope', 'receptacle'];
 
@@ -618,23 +592,22 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -BIG_TANK_W / 2 - 4, x1: BIG_TANK_W / 2 + 4, y0: -6, y1: BIG_TANK_H + 46 },
   },
   receptacle: {
-    // the cryostabilizer station: columns in the wall, behind panes (see STATION), a funnel into the receptacle, a
-    // waste nozzle under the tester and a faucet under the reference, a grid cell apart (see CELL)
+    // the cryostabilizer station: a funnel, and the reservoir's column in the wall, behind a pane (see STATION); a waste
+    // spigot under the funnel and a faucet under the reservoir, a grid cell apart (see CELL)
     tanks: [
-      { name: 'buffer', x0: -STATION.paneW / 2, x1: STATION.paneW / 2, cap: RECEPTACLE_CAP, label: ['buffer'] },
-      { name: 'tester', x0: CELL - STATION.paneW / 2, x1: CELL + STATION.paneW / 2, cap: RECEPTACLE_CAP, sealed: true, label: ['tester'] },
+      { name: 'funnel', x0: CELL - STATION.funnel.w, x1: CELL + STATION.funnel.w, cap: INTAKE_CAP },
       {
-        name: 'ship reservoir', x0: 3 * CELL - STATION.paneW / 2, x1: 3 * CELL + STATION.paneW / 2, cap: REFERENCE_CAP, sealed: true,
+        name: 'ship reservoir', x0: 2 * CELL - STATION.paneW / 2, x1: 2 * CELL + STATION.paneW / 2, cap: REFERENCE_CAP, sealed: true,
         label: ['ship reservoir'],
       },
     ],
     tankH: STATION.paneH,
-    // the reference's faucet's; the tester's waste valve has no handle, since only the station works it
-    valves: [{ x: 3 * CELL, y: STATION.paneH + 24 }],
+    // the reservoir's faucet's; the funnel drains through the diverter, which only the station works
+    valves: [{ x: 2 * CELL, y: STATION.paneH + 24 }],
     maxFlow: REFERENCE_FLOW,
     fixed: true,
     wall: true,
-    spouts: [CELL, 3 * CELL],
+    spouts: [CELL, 2 * CELL],
     valveY: STATION.paneH + 24,
     spoutY: STATION.paneH + 44,
     box: { x0: STATION.block.x0 - 6, x1: STATION.block.x1 + 6, y0: STATION.block.y0 - 6, y1: STATION.block.y1 + 6 },
@@ -838,11 +811,10 @@ export function separatorShares(): number[][] {
  *   a spout, let fluid out sooner, less heated.
  * - A **tank** is a dispenser holding a hundred flasks, drawn as big as a hundred flasks, with ten faint
  *   graduations across it.
- * - A **receptacle** is the cryostabilizer station, built into the wall (see STATION): a receptacle, a tester and the
- *   cryostabilizer reference. Pressing its button, or filling the receptacle to STATION.autoflush, flushes the
- *   receptacle into the tester (see press), which thinks for a moment, beeping; then, if what it holds is more than
- *   GOAL_PURITY target, it passes it into the reference, and otherwise rejects it out its waste nozzle, the first
- *   spout. The reference lets out a trickle through its faucet, the second spout, as far as its one valve is open.
+ * - A **receptacle** is the cryostabilizer station, built into the wall (see STATION): a funnel and the ship's
+ *   reservoir. The funnel drains straight through (at FUNNEL_RATE) into a diverter, which sends what's more than
+ *   GOAL_PURITY target into the reservoir, and the rest out the waste spigot, the first spout. The reservoir lets out
+ *   a trickle through its faucet, the second spout, as far as its one valve is open.
  * - A **flow meter** is an inline instrument (see INLINE_TOOLS): its tube drains straight through to one spout, and
  *   it shows what flows out, averaged over the recent past (see INSTRUMENT_TAU, rate and meterText).
  * - A **composition analyzer** is an inline instrument too, and it draws off ANALYZER_SAMPLE of what passes, out its waste spout, reading that (see
@@ -894,12 +866,13 @@ export class Tool {
    * has one: on a tool with one tank, its tank's label (Vessel.label) does the job.
    */
   note = '';
-  /** A receptacle's cycle, from pressing its button until its tester is empty again (see press); null between. */
-  cycle: { phase: 'flush' | 'think' | 'pass' | 'reject'; age: number } | null = null;
-  /** The beeps of a receptacle's thinking (see beepPattern), for its lamps and its sound. */
-  beeps: Beep[] = [];
-  /** A receptacle's last verdict, shown on its lamp until it's pressed again; null before it's first pressed. */
-  verdict: 'pass' | 'fail' | null = null;
+  /**
+   * Where a receptacle's diverter sends what drains from its funnel: into the reservoir, or out the waste spigot. It
+   * stays where it last sent anything, and starts on the waste.
+   */
+  gate: 'reservoir' | 'waste' = 'waste';
+  /** Sim seconds since anything last went through a receptacle's diverter; Infinity if nothing has. */
+  sinceFlow = Infinity;
 
   constructor(
     readonly kind: ToolKind,
@@ -1048,57 +1021,25 @@ export class Tool {
   }
 
   /**
-   * Press a receptacle's button: start it flushing into its tester (see receive), with a new pattern of beeps for
-   * the tester's thinking. Does nothing, returning false, while a cycle is under way.
-   */
-  press(): boolean {
-    if (this.kind !== 'receptacle' || this.cycle) return false;
-    this.cycle = { phase: 'flush', age: 0 };
-    this.beeps = beepPattern();
-    this.verdict = null;
-    return true;
-  }
-
-  /**
-   * A receptacle's step. Its reference's faucet lets out as far as its valve is open, at REFERENCE_FLOW. With no
-   * cycle under way, a receptacle full to STATION.autoflush starts one, as if its button were pressed. Through a
-   * cycle, the receptacle flushes into the tester; the tester thinks for RECEPTACLE_TIMES.think, then judges what it
-   * holds: more than GOAL_PURITY target, and it passes it into the reference, else it rejects it out its waste
-   * nozzle, each evenly over its time in RECEPTACLE_TIMES.
+   * A receptacle's step. Its reservoir's faucet lets out as far as its valve is open, at REFERENCE_FLOW. Its funnel
+   * drains straight through at FUNNEL_RATE, however full it is, into the diverter, which judges what comes through: more
+   * than GOAL_PURITY target (see sustenance), and it goes into the reservoir (as much as fits), else out the waste
+   * spigot.
    */
   private receive(h: number): (Vessel | null)[] {
-    const [rec, tester, ref] = this.tanks;
+    const [funnel, ref] = this.tanks;
     const out: (Vessel | null)[] = [null, null];
     const tap = this.packet(0);
     transfer(ref, tap, this.valves[0] * REFERENCE_FLOW * h);
     if (tap.N > 0) out[1] = tap;
-    if (!this.cycle && volume(rec) >= STATION.autoflush * rec.cap) this.press();
-    const c = this.cycle;
-    if (c) {
-      c.age += h;
-      // evenly, so it's empty just as the time's up
-      const evenly = (from: Vessel, to: Vessel) => {
-        const left = RECEPTACLE_TIMES[c.phase] - (c.age - h);
-        transfer(from, to, left <= h ? volume(from) : (volume(from) * h) / left);
-      };
-      const done = c.age >= RECEPTACLE_TIMES[c.phase];
-      if (c.phase === 'flush') {
-        evenly(rec, tester);
-        if (done) this.cycle = { phase: 'think', age: 0 };
-      } else if (c.phase === 'think') {
-        if (done) {
-          this.verdict = sustenance(tester) > 0 ? 'pass' : 'fail';
-          this.cycle = { phase: this.verdict === 'pass' ? 'pass' : 'reject', age: 0 };
-        }
-      } else {
-        if (c.phase === 'pass') evenly(tester, ref);
-        else {
-          const p = this.packet(1);
-          evenly(tester, p);
-          if (p.N > 0) out[0] = p;
-        }
-        if (done) this.cycle = null;
-      }
+    const p = this.packet(1);
+    transfer(funnel, p, FUNNEL_RATE * h);
+    this.sinceFlow += h;
+    if (p.N > 0) {
+      this.sinceFlow = 0;
+      this.gate = sustenance(p) > 0 ? 'reservoir' : 'waste';
+      if (this.gate === 'reservoir') transfer(p, ref, volume(p));
+      if (p.N > 0) out[0] = p;
     }
     this.out = out;
     this.flow = out.map((p) => (p ? volume(p) / (MAX_FLOW * h) : 0));

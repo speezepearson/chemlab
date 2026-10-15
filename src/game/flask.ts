@@ -85,7 +85,10 @@ export class Vessel implements Fluid {
   }
 }
 
-/** Atoms of the target in a fluid the receptacle takes: all of them if it's more than GOAL_PURITY target, else none. */
+/**
+ * Atoms of the target in a fluid the cryostabilizer station's diverter lets into the reservoir: all of them if it's
+ * more than GOAL_PURITY target, else none.
+ */
 export function sustenance(f: Fluid): number {
   const t = f.n[TARGET] * SPECIES[TARGET].size;
   return f.N > 0 && t > GOAL_PURITY * f.N ? t : 0;
