@@ -24,7 +24,9 @@ export const POD = {
  * Sim seconds the message in the pod takes to flicker out, its front to slide up, and the doors to slide shut or open:
  * they run on sim time, like everything else, so pausing stops them.
  */
-export const WAKE_S = { flicker: 0.7, open: 1.6, close: 1.2, fade: 1.5, arrive: 3 };
+export const WAKE_S = { flicker: 0.7, open: 1.6, close: 1.2, fade: 1.5, arrive: 5 };
+/** Real seconds, once the pod's open at Mu Ceti, before the screen starts fading to white (see Wake's arriving). */
+export const BLINDED_S = 1;
 /** Real seconds the screen takes to fade in from black as the player wakes from a sleep. */
 export const RISE_S = 1.5;
 

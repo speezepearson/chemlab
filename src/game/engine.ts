@@ -1,7 +1,7 @@
 import { equilibrate } from '../chem/equilibrium';
 import { Lag, temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
-import { AIRLOCK, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
+import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
   FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, nozzleBox,
@@ -37,7 +37,7 @@ import {
   PAPER_HANDLE, PAPER_HEADER, PAPER_MIN, PAPER_TEXT, PAPER_TEXT_MAX, Paper, eraseAt, extend, loadPaper, savePaper,
   textAt,
 } from './paper';
-import { View, type AirlockLook, type FaucetSpot, type Frame, type GuideLook, type Pick } from './view';
+import { ARRIVAL, View, type AirlockLook, type FaucetSpot, type Frame, type GuideLook, type Pick } from './view';
 import { WaterSounds } from './water';
 
 /** What the info panel shows for one vessel: all of it in god mode, otherwise just its color. */
@@ -98,6 +98,8 @@ export interface Hud {
   white: number;
   /** Whether the game's over, won: the player has arrived at Mu Ceti (see Wake's arrived). */
   ended: boolean;
+  /** Whether god mode's preview of the end's white void is up (see GameEngine.previewArrival). */
+  preview: boolean;
   /** While the player's asleep in the pod (see Wake), the whole sim seconds they've slept; otherwise null. */
   slept: number | null;
   /** While they're asleep, the litres of cryostabilizer in the ship's reservoir, to two places; otherwise null. */
@@ -354,6 +356,11 @@ export class GameEngine {
   private arrival = false;
   /** The litres of cryostabilizer the pod's message says are on board: how much there was when they were put in it. */
   private podLitres = 0;
+  /**
+   * While previewing the end's white void (see previewArrival), how the player stood before, to put them back; null
+   * otherwise.
+   */
+  private previewing: { x: number; z: number; yaw: number; pitch: number } | null = null;
   /** While settling into the pod (see Wake), where the player started from, and how many real seconds it's been. */
   private settling: { x: number; z: number; yaw: number; pitch: number; t: number } | null = null;
   /** Runs the sleeping lab a slice at a time (see pump), independent of frames. */
@@ -1202,9 +1209,11 @@ export class GameEngine {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       // Enter is OK on the message inside the cryopod, as it was on the notice it replaced
       if (e.code === 'Enter' && this.wake === 'pod') this.pressOk();
+      // in god mode, = shows the end's white void, or puts the lab back
+      if (e.code === 'Equal' && !e.repeat && (this.god || this.previewing)) this.previewArrival(!this.previewing);
       if (!this.locked) return;
       this.keys.add(e.code);
-      if (e.repeat || inPod(this.wake)) return;
+      if (e.repeat || inPod(this.wake) || this.previewing) return;
       if (e.code === 'KeyE') this.grabOrRelease();
       if (e.code === 'KeyQ') this.putBack();
       if (e.code === 'KeyP') this.setPencil(!this.pencil);
@@ -2098,7 +2107,7 @@ export class GameEngine {
     if (this.wake === 'settling') this.settleIn(dt);
     if (this.held) this.follow(this.held);
     this.view.look(this.eye(), this.player.yaw, this.player.pitch);
-    if (!this.turning) this.target = this.view.pick(REACH, this.heldObject());
+    if (!this.turning) this.target = this.previewing ? null : this.view.pick(REACH, this.heldObject());
     this.simulate(dt);
     // the end stands the lab still as it was when there was enough, so it goes on in real time
     if (this.arrival && this.wake !== 'pod') this.stepWake(dt);
@@ -2121,8 +2130,8 @@ export class GameEngine {
       p.yaw = wrapAngle(p.yaw - look.x * Math.abs(look.x) * STICK_TURN * dt);
       p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch - look.y * Math.abs(look.y) * STICK_TILT * dt));
     }
-    // shut in the pod, they can only look
-    if (inPod(this.wake)) return;
+    // shut in the pod, or in the preview of the end, they can only look
+    if (inPod(this.wake) || this.previewing) return;
     const h = this.held;
     if (fwd || side) {
       // keys walk at full speed whichever way; the move stick as far as it's pushed
@@ -2966,6 +2975,11 @@ export class GameEngine {
   private airlockLook(): AirlockLook {
     const w = this.wake;
     const t = this.wakeT;
+    if (this.previewing) {
+      const up = ARRIVAL.open;
+      const notice = { arrival: true } as const;
+      return { door: 1, front: up, dark: 1 - up, message: false, notice, okHot: false, lamp: false, arrival: true };
+    }
     // how far up the pod's front is: sliding up as they wake, down as they settle in, and otherwise up but while
     // they're shut in it
     const up =
@@ -2985,7 +2999,26 @@ export class GameEngine {
       okHot: w === 'pod' && this.target?.kind === 'wake',
       // flashing while the doors stand open to sleep, a second on and half a second off, on sim time
       lamp: w === 'open' && this.clock % 1.5 < 1,
+      arrival: this.arrival && (w === 'arriving' || w === 'arrived'),
     };
+  }
+
+  /**
+   * Show the end's white void (see ARRIVAL) in place of the lab, or put the lab back: for god mode, to see how it
+   * looks. The player stands in the pod, facing out, and can look around but not walk; the pod's front stands as far
+   * open as ARRIVAL.open says. The lab runs on as ever, unseen.
+   */
+  previewArrival(on: boolean): void {
+    if (on === !!this.previewing || (on && inPod(this.wake))) return;
+    const p = this.player;
+    if (on) {
+      this.emptyHanded();
+      this.previewing = { x: p.x, z: p.z, yaw: p.yaw, pitch: p.pitch };
+      Object.assign(p, IN_POD);
+    } else {
+      Object.assign(p, this.previewing);
+      this.previewing = null;
+    }
   }
 
   private rightWouldDo(): boolean {
@@ -3026,7 +3059,12 @@ export class GameEngine {
       note: this.flash?.text ?? null,
       actions: this.actions(),
       black: this.black(),
-      white: this.wake === 'arriving' ? ease(this.wakeT / WAKE_S.arrive) : this.wake === 'arrived' ? 1 : 0,
+      // blinded a while by the white void once the pod's open, then all white
+      white:
+        this.wake === 'arriving' ? ease((this.wakeT - WAKE_S.open - BLINDED_S) / (WAKE_S.arrive - WAKE_S.open - BLINDED_S))
+        : this.wake === 'arrived' ? 1
+        : 0,
+      preview: !!this.previewing,
       ended: this.wake === 'arrived',
       slept: this.sleeping ? Math.floor(this.clock - this.sleeping.from) : null,
       litres: this.sleeping ? Math.floor(100 * this.reservoirLitres()) / 100 : null,

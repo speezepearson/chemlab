@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { defaultChemParams, restoreDefaultChem } from './chem/params';
 import { ReactionNetwork } from './chem/reactions';
 import { AppearancePanel } from './components/AppearancePanel';
+import { ArrivalPanel } from './components/ArrivalPanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
 import { FlaskEditor } from './components/FlaskEditor';
 import { Hud, StartHint, TouchControls } from './components/Hud';
@@ -245,7 +246,7 @@ export function App() {
           {engine && hud && <TouchControls engine={engine} hud={hud} />}
           {inspection && <InfoPanel info={inspection} />}
           {engine && <Palette engine={engine} pencil={pencil} />}
-          {hud && !hud.locked && !hud.inPod && !intro && editing === null && labeling === null && !paperEdit && (
+          {hud && !hud.locked && !hud.inPod && !hud.preview && !intro && editing === null && labeling === null && !paperEdit && (
             <StartHint />
           )}
           {engine && editing !== null && <FlaskEditor engine={engine} id={editing} onClose={() => setEditing(null)} />}
@@ -257,6 +258,7 @@ export function App() {
           )}
           {won && hud && !hud.inPod && <div id="win">Enough cryostabilizer to reach Mu Ceti.</div>}
           {hud && <SleepScreen hud={hud} />}
+          {hud?.preview && <ArrivalPanel />}
           {engine && hud && (
             <Ending
               hud={hud}

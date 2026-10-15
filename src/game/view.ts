@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { temperature, type Fluid } from '../chem/reactions';
 import { LOOK, coronaAlpha, coronaRadius, glowFalloff, haloAlpha, haloRadius } from './appearance';
 import {
@@ -132,6 +136,18 @@ const depthOnly = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.D
 const GUIDE_DASH = { on: 9, off: 7 };
 /** The layer guides' streams are drawn on, apart from everything else (see View.render). */
 const GUIDE_LAYER = 3;
+/** The layer of what's seen at Mu Ceti (see View.renderArrival): the pod, and the white light round it. */
+const VOID_LAYER = 4;
+
+/**
+ * How the light of Mu Ceti looks as the pod opens on it at the end (see AirlockLook.arrival): a white void, `void` times
+ * as bright as white, so that it blooms over everything (`bloom` strength, `radius`, from a brightness of `threshold`
+ * up); the light pouring into the pod from it, from out in front (`light`) and all round (`ambient`); and how bright it
+ * all comes out on the screen (`exposure`, through ACES tone mapping). Tunable in god mode's preview of it, along with
+ * how far open the pod is there (`open`, which the game itself doesn't use).
+ */
+export const ARRIVAL = { void: 8, bloom: 2.2, radius: 0.9, threshold: 1, light: 6, ambient: 2.5, exposure: 1.3, open: 1 };
+export const ARRIVAL_DEFAULTS = { ...ARRIVAL };
 
 /** Stripes for a guide's dashes, as an alpha map: on at the top of each repeat, off below. */
 const dashTexture = (() => {
@@ -2312,6 +2328,8 @@ export interface AirlockLook {
   notice: { arrival: true } | { arrival: false; litres: number };
   /** Whether the green lamp over the doorway is lit: it flashes while the doors stand open to sleep. */
   lamp: boolean;
+  /** Whether the pod is in the white void of Mu Ceti, at the end, with nothing of the lab to be seen (see ARRIVAL). */
+  arrival: boolean;
 }
 
 /**
@@ -2446,6 +2464,8 @@ class AirlockView {
     pod.add(this.ok);
     pickables.set(this.ok, { kind: 'wake' });
     this.setMessage(notice());
+    // the pod is all that's left at Mu Ceti (see View.renderArrival)
+    pod.traverse((o) => o.layers.enable(VOID_LAYER));
     g.add(pod);
     scene.add(g);
   }
@@ -2703,6 +2723,8 @@ export class View {
   /** The field of view is 90°, top to bottom. */
   readonly camera = new THREE.PerspectiveCamera(90, 1, 2, 8000);
   private renderer: THREE.WebGLRenderer;
+  /** What the white void of Mu Ceti is drawn with (see renderArrival), once it's needed. */
+  private void?: ReturnType<View['buildVoid']>;
   private scene = new THREE.Scene();
   private pickables = new Map<THREE.Object3D, Pick>();
   private flasks = new Map<Flask, FlaskView>();
@@ -2865,8 +2887,78 @@ export class View {
     this.beacon.beacon.intensity = 9000 * pulse * pulse * lit;
     (this.beacon.lamp.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.3 + 1.2 * pulse;
 
+    if (fr.airlock.arrival) {
+      this.renderArrival(fr.airlock.front);
+      return;
+    }
     this.renderer.render(scene, this.camera);
     this.renderGuides();
+  }
+
+  /**
+   * The pod in the white void of Mu Ceti, and nothing else (see ARRIVAL): it's drawn on a layer of its own, inside a
+   * sphere far brighter than white, lit by white light from out in front and all round, pouring in as far as its front
+   * is `open`, with what's brighter than the bloom's threshold bleeding over everything, and toned down to the screen.
+   */
+  private renderArrival(open: number): void {
+    const { renderer, scene, camera } = this;
+    const v = (this.void ??= this.buildVoid());
+    v.sky.material.color.setScalar(ARRIVAL.void);
+    v.sun.intensity = ARRIVAL.light * open;
+    v.fill.intensity = ARRIVAL.ambient * open;
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+    if (size.x !== v.size.x || size.y !== v.size.y) {
+      v.size.copy(size);
+      v.composer.setPixelRatio(1);
+      v.composer.setSize(size.x, size.y);
+    }
+    Object.assign(v.bloom, { strength: ARRIVAL.bloom, radius: ARRIVAL.radius, threshold: ARRIVAL.threshold });
+    const [bg, env, envI] = [scene.background, scene.environment, scene.environmentIntensity];
+    scene.background = null;
+    scene.environment = v.env;
+    scene.environmentIntensity = open;
+    camera.layers.set(VOID_LAYER);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = ARRIVAL.exposure;
+    v.composer.render();
+    renderer.toneMapping = THREE.NoToneMapping;
+    renderer.toneMappingExposure = 1;
+    camera.layers.set(0);
+    [scene.background, scene.environment, scene.environmentIntensity] = [bg, env, envI];
+  }
+
+  /** What renderArrival draws with, made the first time it's needed. */
+  private buildVoid() {
+    const { renderer, scene, camera } = this;
+    const at = new THREE.Vector3(POD.x, 600, POD.z);
+    const onVoid = <T extends THREE.Object3D>(o: T): T => {
+      o.layers.set(VOID_LAYER);
+      scene.add(o);
+      return o;
+    };
+    // the void: a sphere round the pod, seen from inside, brighter than white
+    const sky = onVoid(
+      new THREE.Mesh(new THREE.SphereGeometry(6000, 32, 16), new THREE.MeshBasicMaterial({ side: THREE.BackSide, depthWrite: false })),
+    );
+    sky.position.copy(at);
+    // the light pouring in from out in front, and from all round
+    const sun = onVoid(new THREE.DirectionalLight(0xffffff, 0));
+    sun.position.set(at.x, at.y + 300, at.z - 3000);
+    sun.target.position.copy(at);
+    scene.add(sun.target);
+    const fill = onVoid(new THREE.HemisphereLight(0xffffff, 0xffffff, 0));
+    // what its metal reflects: white all round
+    const white = new THREE.Scene();
+    white.background = new THREE.Color(0xffffff);
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const env = pmrem.fromScene(white).texture;
+    pmrem.dispose();
+    const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType }));
+    composer.addPass(new RenderPass(scene, camera));
+    const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), ARRIVAL.bloom, ARRIVAL.radius, ARRIVAL.threshold);
+    composer.addPass(bloom);
+    composer.addPass(new OutputPass());
+    return { sky, sun, fill, env, composer, bloom, size: new THREE.Vector2() };
   }
 
   /**

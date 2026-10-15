@@ -240,6 +240,17 @@ canvas{display:block;width:100%;height:100%;touch-action:none}
 .sleep-time{position:absolute;bottom:28px;left:0;right:0;text-align:center;line-height:1.7;font:13px ui-monospace,"SF Mono",Menlo,Consolas,monospace;letter-spacing:.08em;color:#5f6b64}
 
 /* ---------------- the end, in the light of Mu Ceti ---------------- */
+.arrival-panel{
+  position:absolute;top:12px;right:12px;z-index:70;background:rgba(20,26,23,.88);color:#dfe7e2;border-radius:8px;
+  padding:10px 12px;font-size:13px;box-shadow:0 6px 20px var(--shadow)
+}
+.arrival-panel span{color:#8a968f;margin-left:6px}
+.arrival-panel table{margin-top:6px;border-collapse:collapse}
+.arrival-panel td{padding:2px 6px 2px 0;white-space:nowrap}
+.arrival-panel td:last-child{font-variant-numeric:tabular-nums;text-align:right;min-width:42px}
+.arrival-panel input[type=range]{width:150px}
+.arrival-buttons{display:flex;gap:8px;margin-top:8px}
+
 .ending{position:absolute;inset:0;z-index:60;background:#fff;color:#1d2420;display:flex;align-items:center;justify-content:center}
 .ending-won{text-align:center;padding:0 24px}
 .ending-won h2{font-weight:600;font-size:40px;margin:0 0 6px}
