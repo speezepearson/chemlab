@@ -2354,19 +2354,33 @@ class AirlockView {
     const { x, w, d, h, wall, door } = AIRLOCK;
     const z1 = ROOM.z1;
     const g = new THREE.Group();
-    const panel = surfaceMat('walls', { tint: 0xc4cac8, metalness: 0.15 });
+    const metal = new THREE.MeshStandardMaterial({ color: 0x737a78, roughness: 0.42, metalness: 0.6 });
     const hidden = new THREE.MeshBasicMaterial({ visible: false });
-    // the chamber, seen from inside, paneled like the lab and on the same deck; its front is the wall with the
-    // doorway, below
-    const [walls, floor] = [surfaceMat('walls', { tint: 0xc4cac8, metalness: 0.15, side: THREE.BackSide }), surfaceMat('deck', { metalness: 0.55, side: THREE.BackSide })];
+    // the chamber, seen from inside: plain gray metal, on the lab's deck; its front is the wall with the doorway, below
+    const [walls, floor] = [metal.clone(), surfaceMat('deck', { metalness: 0.55, side: THREE.BackSide })];
+    walls.side = THREE.BackSide;
     const room = new THREE.Mesh(boxUV(new THREE.BoxGeometry(w, h, d), 'walls', { z: 440 }), [walls, walls, walls, floor, walls, hidden]);
     room.position.set(x, h / 2, z1 + wall + d / 2);
     g.add(room);
     const shape = rectPath(0, h / 2, w, h, new THREE.Shape());
     shape.holes.push(rectPath(0, door.h / 2 + 0.25, door.w, door.h - 0.5));
-    const inside = new THREE.Mesh(planeUV(new THREE.ShapeGeometry(shape), 'walls', -w / 2, 0), panel);
+    const inside = new THREE.Mesh(new THREE.ShapeGeometry(shape), metal);
     inside.position.set(x, 0, z1 + wall);
     g.add(inside);
+    // red lights in its ceiling: lenses and their glow (not lights, which would cost every surface in the lab)
+    const red = new THREE.MeshStandardMaterial({ color: 0x3a0a08, emissive: 0xff2a1a, emissiveIntensity: 1.4 });
+    for (const side of [-1, 1]) {
+      const at = new THREE.Vector3(x + side * (w / 4), h - 3, z1 + wall + d / 2);
+      const lens = new THREE.Mesh(new THREE.BoxGeometry(46, 6, 22), red);
+      lens.position.copy(at);
+      g.add(lens);
+      const glow = new THREE.Sprite(
+        new THREE.SpriteMaterial({ map: glowTexture(2), color: 0xff2a1a, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }),
+      );
+      glow.scale.set(160, 160, 1);
+      glow.position.copy(at).add(new THREE.Vector3(0, -12, 0));
+      g.add(glow);
+    }
     // the doorway's sides and top, through the wall's thickness: planes only, with nothing lying in either wall's face
     const jambMat = darkMat.clone();
     jambMat.side = THREE.DoubleSide;
@@ -2385,17 +2399,30 @@ class AirlockView {
     sill.position.set(x, 0, z1 + wall / 2);
     sill.receiveShadow = true;
     g.add(sill);
-    // the doors, each half the doorway, sliding apart into the wall
+    // the doors, each half the doorway, sliding apart into the wall, with a dark gasket down the edge where they meet;
+    // and another pair, just like them, across the chamber's far end, always shut, to the outside
     const doorMat = new THREE.MeshPhysicalMaterial({ color: 0xa3ada9, roughness: 0.45, metalness: 0.35, clearcoat: 0.3 });
-    for (const side of [-1, 1]) {
+    const stripeMat = new THREE.MeshStandardMaterial({ color: 0xc9a227, roughness: 0.6 });
+    const gasketMat = new THREE.MeshStandardMaterial({ color: 0x141817, roughness: 0.85 });
+    const half = (side: number) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(door.w / 2, door.h, 12), doorMat);
-      m.position.set(x, door.h / 2, z1 + wall / 2);
       m.userData.side = side;
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(door.w / 2 - 2, 26, 14), new THREE.MeshStandardMaterial({ color: 0xc9a227, roughness: 0.6 }));
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(door.w / 2 - 2, 26, 14), stripeMat);
       stripe.position.y = -door.h / 2 + 120;
       m.add(stripe);
+      const gasket = new THREE.Mesh(new THREE.BoxGeometry(1.5, door.h, 13), gasketMat);
+      gasket.position.x = (-side * door.w) / 4 + side * 0.75;
+      m.add(gasket);
+      return m;
+    };
+    for (const side of [-1, 1]) {
+      const m = half(side);
+      m.position.set(x, door.h / 2, z1 + wall / 2);
       this.doors.push(m);
       g.add(m);
+      const far = half(side);
+      far.position.set(x + (side * door.w) / 4, door.h / 2, z1 + wall + d - 6);
+      g.add(far);
     }
     // the green lamp over the doorway, on the lab's side: a lens in a dark housing, and a glow round it (a glow, not a
     // light, since every light in the scene costs every surface it might fall on)
@@ -2412,44 +2439,45 @@ class AirlockView {
     this.lampGlow.scale.set(220, 220, 1);
     this.lampGlow.position.set(x, door.h + 70, z1 - 20);
     g.add(this.lampGlow);
-    // the pod: a plinth, and a metal shell whose front half slides up into the ceiling
+    // the pod: a plinth, a metal shell, its body round all but its door, under a whole dome, and its door: POD.arc of
+    // the body's round, facing the lab, hinged on its edge toward +x, swinging out
     const shell = new THREE.MeshStandardMaterial({ color: 0x8c9692, roughness: 0.45, metalness: 0.35, side: THREE.DoubleSide });
     const pod = new THREE.Group();
     pod.position.set(POD.x, 0, POD.z);
-    const plinth = new THREE.Mesh(new THREE.CylinderGeometry(POD.r + 10, POD.r + 14, POD.base, 40), darkMat);
+    const plinth = new THREE.Mesh(new THREE.CylinderGeometry(POD.r + 10, POD.r + 14, POD.base, 48), darkMat);
     plinth.position.y = POD.base / 2;
     pod.add(plinth);
     const body = POD.top - POD.base;
-    // three.js puts theta 0 at +z: the back half faces +z, the front half (toward the room, −z) the other way
-    const half = (front: boolean, mat: THREE.Material, r: number) => {
-      const cyl = new THREE.Mesh(new THREE.CylinderGeometry(r, r, body, 40, 1, true, front ? Math.PI / 2 : -Math.PI / 2, Math.PI), mat);
-      cyl.position.y = POD.base + body / 2;
-      const dome = new THREE.Mesh(new THREE.SphereGeometry(r, 40, 12, front ? Math.PI : 0, Math.PI, 0, Math.PI / 2), mat);
-      dome.position.y = POD.top;
-      return [cyl, dome];
-    };
-    for (const m of half(false, shell, POD.r + 2)) pod.add(m);
+    // three.js puts theta 0 at +z, and the door faces the lab, −z: theta π
+    const [d0, d1] = [Math.PI - POD.arc / 2, Math.PI + POD.arc / 2];
+    const back = new THREE.Mesh(new THREE.CylinderGeometry(POD.r + 2, POD.r + 2, body, 48, 1, true, d1, 2 * Math.PI - POD.arc), shell);
+    back.position.y = POD.base + body / 2;
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(POD.r + 2, 48, 16, 0, 2 * Math.PI, 0, Math.PI / 2), shell);
+    dome.position.y = POD.top;
+    pod.add(back, dome);
     const band = new THREE.Mesh(new THREE.TorusGeometry(POD.r + 3, 3, 8, 48).rotateX(Math.PI / 2), darkMat);
     band.position.y = POD.top;
     pod.add(band);
-    for (const m of half(true, shell, POD.r)) {
-      m.castShadow = true;
-      this.front.add(m);
-    }
+    const hinge = new THREE.Vector3(POD.r * Math.sin(d0), 0, POD.r * Math.cos(d0));
+    const leaf = new THREE.Mesh(new THREE.CylinderGeometry(POD.r, POD.r, body, 16, 1, true, d0, POD.arc), shell);
+    leaf.castShadow = true;
+    leaf.position.set(-hinge.x, POD.base + body / 2, -hinge.z);
+    this.front.position.copy(hinge);
+    this.front.add(leaf);
     pod.add(this.front);
-    // two dim emergency lights on the inside of the front, either side of the message, the only light while it's
-    // shut (see View.render); they go up with it
+    // two dim emergency lights in the pod's ceiling, either side, a little in front of the face: the only light while
+    // it's shut (see View.render)
     for (const side of [-1, 1]) {
       const bulb = new THREE.Mesh(
-        new THREE.SphereGeometry(2.5, 12, 8),
+        new THREE.SphereGeometry(3, 12, 8),
         new THREE.MeshStandardMaterial({ color: 0x5a3010, emissive: 0xff9a3c, emissiveIntensity: 0.8 }),
       );
-      const at = new THREE.Vector3(side * 42, eye + 20, -Math.sqrt(POD.r * POD.r - 42 * 42) + 2);
+      const at = new THREE.Vector3(side * 36, POD.top + 25, -40);
       bulb.position.copy(at);
-      this.front.add(bulb);
-      const light = new THREE.PointLight(0xff9a3c, 300, 260, 2);
-      light.position.copy(at).add(new THREE.Vector3(-side * 5, 0, 5));
-      this.front.add(light);
+      pod.add(bulb);
+      const light = new THREE.PointLight(0xff9a3c, 300, 300, 2);
+      light.position.copy(at).add(new THREE.Vector3(0, -8, 0));
+      pod.add(light);
     }
     // the message, projected on the inside of the front, in front of the face, facing in (see setMessage), with its OK
     // button
@@ -2507,8 +2535,8 @@ class AirlockView {
     this.lampGlow.visible = a.lamp;
     const { x, door } = AIRLOCK;
     for (const m of this.doors) m.position.x = x + m.userData.side * (door.w / 4 + a.door * (door.w / 2 + 6));
-    // up past the ceiling, out of sight
-    this.front.position.y = a.front * (AIRLOCK.h + 40);
+    // its door swings out on its hinge
+    this.front.rotation.y = -a.front * POD.swing;
     // off its layer it's neither drawn nor hit by the crosshair
     for (const m of [this.message, this.ok]) m.layers.set(a.message ? 0 : 1);
     (this.ok.material as THREE.MeshBasicMaterial).map = this.okTex[a.okHot ? 1 : 0];

@@ -1,23 +1,37 @@
 import type { Box } from './physics';
-import { ROOM } from './space';
+import { ROOM, WALL_PANEL } from './space';
 
 /**
  * The airlock: a small chamber behind the front wall, just big enough for a standing cryopod, where the player wakes
  * the first time (see GameEngine.enterPod). All in world units.
- * - x: the middle of its doorway, along the front wall.
+ * - x: the middle of its doorway, along the front wall: the doorway is two of the wall's panels across and two high,
+ *   lined up with them, as the cryostabilizer station is (the front wall's panels run from its end at ROOM.x1).
  * - w, d, h: the chamber inside, across, front to back and high.
  * - wall: how thick the wall with the doorway is, which the doors slide into.
  * - door: the doorway, across and high.
  */
-export const AIRLOCK = { x: 150, w: 320, d: 230, h: 1100, wall: 30, door: { w: 240, h: 1014 } };
+export const AIRLOCK = {
+  x: ROOM.x1 - 10 * WALL_PANEL.w,
+  w: 2 * WALL_PANEL.w,
+  d: 320,
+  h: 1100,
+  wall: 30,
+  door: { w: 2 * WALL_PANEL.w, h: 2 * WALL_PANEL.h },
+};
 
-/** The cryopod: where it stands (its axis), its shell's radius, and how high its body and dome go. */
+/**
+ * The cryopod: where it stands (its axis), its shell's radius, and how high its body and dome go. Its door is `arc` of
+ * its body's round, facing the lab, hinged on its edge toward +x (so on the right as the player stands in it), and
+ * swings out by `swing`; the dome is whole, over all of it.
+ */
 export const POD = {
   x: AIRLOCK.x,
-  z: ROOM.z1 + AIRLOCK.wall + AIRLOCK.d - 72,
-  r: 62,
+  z: ROOM.z1 + AIRLOCK.wall + AIRLOCK.d - 102,
+  r: 87,
   base: 14,
-  top: 654,
+  top: 701,
+  arc: (80 * Math.PI) / 180,
+  swing: (105 * Math.PI) / 180,
 };
 
 /**
