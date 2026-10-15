@@ -10,7 +10,7 @@ import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, BOND_KEYS, SPECTROSCOPE, bondCounts, spectroscopeAt, INSTRUMENT_TAU, TUBE_CAP,
-  INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -339,6 +339,26 @@ describe('cryostabilizer station', () => {
     expect(r.sinceDelivery).toBeCloseTo(0.02, 9);
     r.step(0.02);
     expect(r.sinceDelivery).toBeCloseTo(0.04, 9);
+  });
+
+  it(`filters ${100 * RESERVOIR_FILTER}% of what has a yellow atom in it out of the reservoir each sim second`, () => {
+    const r = new Tool('receptacle', 0);
+    const ref = r.tanks[1];
+    const Y = singleOf('Y');
+    const YR = SPECIES.find((s) => s.size === 2 && s.atoms.includes('Y') && s.atoms.includes('R'))!.i;
+    ref.setMolecules(TARGET, 1e9);
+    ref.setMolecules(Y, 1e8);
+    ref.setMolecules(YR, 1e8);
+    ref.setMolecules(R, 1e8);
+    ref.setTemperature(2);
+    for (let t = 0; t < 50; t++) r.step(0.02);
+    expect(ref.n[Y] / 1e8).toBeCloseTo(1 - RESERVOIR_FILTER, 3);
+    expect(ref.n[YR] / 1e8).toBeCloseTo(1 - RESERVOIR_FILTER, 3);
+    // the rest is left as it was, and the heat goes with what's taken
+    expect(ref.n[TARGET]).toBe(1e9);
+    expect(ref.n[R]).toBe(1e8);
+    expect(atomTotal(ref)).toBe(ref.N);
+    expect(temperature(ref)).toBeCloseTo(2, 4);
   });
 
   it("lets the reservoir out its faucet, as far as its valve is open, and slower than a tank at most", () => {

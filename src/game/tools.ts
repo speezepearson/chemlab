@@ -319,6 +319,33 @@ export const REFERENCE_START = 100 * CAP;
 /** How fast the reservoir's faucet lets it out, fully open, in atoms per sim second: a fifth of a flask a second. */
 export const REFERENCE_FLOW = 0.2 * MAX_FLOW;
 /**
+ * The reservoir's filter: each sim second it takes out this share of every molecule with a yellow atom in it, which
+ * would otherwise slowly break the cryostabilizer down (see filter).
+ */
+export const RESERVOIR_FILTER = 0.05;
+/** The species with a yellow atom in them, which the reservoir's filter takes out. */
+const YELLOW = SPECIES.filter((s) => s.atoms.includes('Y')).map((s) => s.i);
+
+/**
+ * The reservoir's filter over h sim seconds: RESERVOIR_FILTER of each species with a yellow atom in it each sim
+ * second, smoothly, in whole molecules, with their share of the heat, gone for good.
+ */
+export function filter(v: Vessel, h: number): void {
+  if (v.N <= 0) return;
+  const share = 1 - (1 - RESERVOIR_FILTER) ** h;
+  let atoms = 0;
+  for (const s of YELLOW) {
+    if (!v.n[s]) continue;
+    const m = Math.min(v.n[s], roundRandom(v.n[s] * share));
+    v.n[s] -= m;
+    atoms += m * SPECIES[s].size;
+  }
+  if (!atoms) return;
+  v.Q -= Math.min(v.Q, roundRandom((v.Q * atoms) / v.N));
+  v.N -= atoms;
+  if (v.N <= 0) v.Q = 0;
+}
+/**
  * How long the diverter's LCD shows fluid going through it after the last of it went by, in sim seconds, so a drip
  * reads as a flow rather than a flicker.
  */
@@ -1026,7 +1053,7 @@ export class Tool {
    * A receptacle's step. Its reservoir's faucet lets out as far as its valve is open, at REFERENCE_FLOW. Its funnel
    * drains straight through at FUNNEL_RATE, however full it is, into the diverter, which judges what comes through: more
    * than GOAL_PURITY target (see sustenance), and it goes into the reservoir (as much as fits), else out the waste
-   * spigot.
+   * spigot. The reservoir's filter takes out what has a yellow atom in it (see filter).
    */
   private receive(h: number): (Vessel | null)[] {
     const [funnel, ref] = this.tanks;
@@ -1044,6 +1071,7 @@ export class Tool {
       if (this.gate === 'reservoir' && transfer(p, ref, volume(p)) > 0) this.sinceDelivery = 0;
       if (p.N > 0) out[0] = p;
     }
+    filter(ref, h);
     this.out = out;
     this.flow = out.map((p) => (p ? volume(p) / (MAX_FLOW * h) : 0));
     return out;
