@@ -532,8 +532,8 @@ class Screen {
 /**
  * The cryostabilizer station's diverter's LCD: a pipe down from the funnel, branching off toward the reservoir, with
  * the diverter's flap across whichever way it isn't sending what comes through, and that way lit while anything's
- * going through: green into the reservoir, red down to the waste spigot. Only the pipes' walls, the flap and what's
- * in the pipes are drawn, straight on the plate.
+ * going through: green into the reservoir, red down to the waste spigot, filling the pipe right up to its walls; the
+ * rest of the pipes black inside. Only the pipes, the flap and what's in them are drawn, straight on the plate.
  */
 function drawDiverter(sc: Screen, gate: 'reservoir' | 'waste', flowing: boolean): void {
   const key = `${gate} ${flowing}`;
@@ -560,14 +560,13 @@ function drawDiverter(sc: Screen, gate: 'reservoir' | 'waste', flowing: boolean)
   };
   ctx.lineCap = 'butt';
   ctx.lineJoin = 'miter';
-  // their walls: each stroked wide in the walls' color, then hollowed out
+  // their walls: each stroked wide in the walls' color, then filled black inside, and the way it's sending lit
+  // right up to the walls
   const wallColor = 'rgba(200, 222, 210, 0.75)';
   for (const p of [down, branch]) stroke(p, 9, wallColor);
-  ctx.globalCompositeOperation = 'destination-out';
   for (const p of [down, branch]) stroke(p, 6, '#000');
-  ctx.globalCompositeOperation = 'source-over';
   if (flowing)
-    stroke(gate === 'reservoir' ? [[x, 0], ...branch] : down, 4.5, gate === 'reservoir' ? '#3cff6a' : '#ff3a2e');
+    stroke(gate === 'reservoir' ? [[x, 0], ...branch] : down, 6, gate === 'reservoir' ? '#3cff6a' : '#ff3a2e');
   // the flap: along the branch's lower wall, across the pipe below it; or across the branch's mouth
   ctx.lineCap = 'round';
   stroke(gate === 'reservoir' ? [[x - 3, j + 1.2], [x + 3, j + 7.2]] : [[x + 2.9, j + 7.1], [x + 7.1, j + 2.9]], 1.6, wallColor);
