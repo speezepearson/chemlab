@@ -756,6 +756,12 @@ function glowTexture(sharpness: number): THREE.Texture {
 }
 
 /** The light a hot vessel gives off: a wide halo and a tight corona, washing out whatever's around it. */
+/**
+ * How much the glows of hot fluid show: not at all while the cryopod is shut, since they're the lab's light (see
+ * AirlockLook.dark), and they're drawn over everything, so its front wouldn't hide them.
+ */
+const GLOWS = { lit: 1 };
+
 class Glow {
   private halo = new THREE.Sprite(new THREE.SpriteMaterial({ blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, transparent: true }));
   private corona = new THREE.Sprite(new THREE.SpriteMaterial({ blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, transparent: true }));
@@ -771,6 +777,7 @@ class Glow {
     // a trace of hot fluid shouldn't blaze like a full flask
     const amount = Math.sqrt(Math.min(1, (4 * volume(f)) / cap));
     const set = (s: THREE.Sprite, R: number, alpha: number, sharpness: number) => {
+      alpha *= GLOWS.lit;
       s.visible = !!color && alpha * amount >= 0.002;
       if (!s.visible) return;
       s.position.copy(at);
@@ -2773,6 +2780,7 @@ export class View {
   }
 
   render(fr: Frame): void {
+    GLOWS.lit = 1 - fr.airlock.dark;
     this.clock += fr.dt;
     const { scene, pickables } = this;
     this.look(fr.eye, fr.yaw, fr.pitch);
