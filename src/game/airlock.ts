@@ -24,7 +24,9 @@ export const POD = {
  * Sim seconds the message in the pod takes to flicker out, its front to slide up, and the doors to slide shut or open:
  * they run on sim time, like everything else, so pausing stops them.
  */
-export const WAKE_S = { flicker: 0.7, open: 1.6, close: 1.2, fade: 1.5 };
+export const WAKE_S = { flicker: 0.7, open: 1.6, close: 1.2, fade: 1.5, arrive: 3 };
+/** Real seconds the screen takes to fade in from black as the player wakes from a sleep. */
+export const RISE_S = 1.5;
 
 /**
  * Where the player is in waking up, the first time (and on a replay of the intro), and how the airlock stands after:
@@ -40,16 +42,22 @@ export const WAKE_S = { flicker: 0.7, open: 1.6, close: 1.2, fade: 1.5 };
  *   stopped walking, and it's their own movement, so it goes in real time (see SETTLE_S).
  * - boarding: settled in, the pod's front slides down in front of them, and then all fades to black.
  * - asleep: in the pod, asleep, while the lab runs on (see sleep.ts) until the goal's reached, or the station stops
- *   delivering and they wake, as at first but with no message: opening, out and closed again.
+ *   delivering. Then they wake in the pod as at first, the screen fading in from black: back to pod, with the same
+ *   message (its numbers brought up to date), or, if there's enough cryostabilizer, a welcome to Mu Ceti.
+ * - arriving: OK was pressed on the welcome, and the message has flickered out: the pod's front slides up, and the
+ *   screen fades to white in the light of Mu Ceti. The lab stands still as it was when there was enough, so this
+ *   goes in real time (see WAKE_S.arrive).
+ * - arrived: all white, and the game's won; the player can carry on in the lab from there, or start again.
  */
-export type Wake = 'pod' | 'flicker' | 'opening' | 'out' | 'closed' | 'open' | 'settling' | 'boarding' | 'asleep';
+export type Wake =
+  | 'pod' | 'flicker' | 'opening' | 'out' | 'closed' | 'open' | 'settling' | 'boarding' | 'asleep' | 'arriving' | 'arrived';
 
 /** Real seconds the player takes to ease into place in the pod as they get in (see Wake's settling). */
 export const SETTLE_S = 1.4;
 
 /** Whether the player is still shut in the pod. */
 export function inPod(w: Wake): boolean {
-  return w === 'pod' || w === 'flicker' || w === 'opening' || w === 'settling' || w === 'boarding' || w === 'asleep';
+  return w !== 'out' && w !== 'closed' && w !== 'open';
 }
 
 const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number): Box => ({

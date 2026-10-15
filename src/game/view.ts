@@ -13,7 +13,7 @@ import { SCALE_SHAPE, type Scale } from './scale';
 import { COUNTERS, LIFT, PAPER_Z, ROOM, groundAt, toWorld, type Vec3 } from './space';
 import { PORT_FRAC, PORT_WALL, porthole, type Porthole } from './porthole';
 import { AIRLOCK, POD } from './airlock';
-import { notice } from '../intro/notice';
+import { arrival, notice, type Block } from '../intro/notice';
 import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
@@ -2199,7 +2199,7 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, w: number): strin
  * The notice (see intro/notice.ts) as light projected on the inside of the pod's front: pale blue text on a faint
  * glow, with room at the bottom right for the OK button, which is its own mesh. Returns the canvas, laid out to fit.
  */
-function messageCanvas(): HTMLCanvasElement {
+function messageCanvas(blocks: readonly Block[]): HTMLCanvasElement {
   const c = document.createElement('canvas');
   const ctx = c.getContext('2d')!;
   const sans = (wt: number, px: number) => `${wt} ${px}px "Schibsted Grotesk", sans-serif`;
@@ -2210,7 +2210,7 @@ function messageCanvas(): HTMLCanvasElement {
   const rules: number[] = [];
   const boxes: { y0: number; y1: number }[] = [];
   let y = MSG_PAD;
-  for (const b of notice()) {
+  for (const b of blocks) {
     if (b.kind === 'hr') {
       y += 16;
       rules.push(y);
@@ -2305,6 +2305,11 @@ export interface AirlockLook {
   message: boolean;
   /** Whether the crosshair is on the OK button. */
   okHot: boolean;
+  /**
+   * What the message says: the notice that wakes the player, with the litres of cryostabilizer on board; or, once
+   * there's enough, the one welcoming them to Mu Ceti.
+   */
+  notice: { arrival: true } | { arrival: false; litres: number };
   /** Whether the green lamp over the doorway is lit: it flashes while the doors stand open to sleep. */
   lamp: boolean;
 }
@@ -2317,11 +2322,15 @@ export interface AirlockLook {
 class AirlockView {
   private doors: THREE.Mesh[] = [];
   private front = new THREE.Group();
-  private message: THREE.Mesh;
+  private message!: THREE.Mesh;
   private ok: THREE.Mesh;
+  /** The pod, which the message hangs in, and what the message says now (see setMessage). */
+  private pod: THREE.Group;
+  private said = '';
   private okTex = [okTexture(false), okTexture(true)];
   private lamp: THREE.MeshStandardMaterial;
   private lampGlow: THREE.Sprite;
+  private eye: number;
   private last: AirlockLook | null = null;
 
   constructor(scene: THREE.Scene, pickables: Map<THREE.Object3D, Pick>, eye: number) {
@@ -2425,31 +2434,53 @@ class AirlockView {
       light.position.copy(at).add(new THREE.Vector3(-side * 5, 0, 5));
       this.front.add(light);
     }
-    // the message, projected on the inside of the front, in front of the face, facing in
-    const tex = new THREE.CanvasTexture(messageCanvas());
+    // the message, projected on the inside of the front, in front of the face, facing in (see setMessage), with its OK
+    // button
+    this.pod = pod;
+    this.eye = eye;
+    const unit = MESSAGE_W / MSG_PX;
+    this.ok = new THREE.Mesh(
+      new THREE.PlaneGeometry(OK_PX.w * unit, OK_PX.h * unit),
+      new THREE.MeshBasicMaterial({ map: this.okTex[0], transparent: true, depthWrite: false, toneMapped: false }),
+    );
+    pod.add(this.ok);
+    pickables.set(this.ok, { kind: 'wake' });
+    this.setMessage(notice());
+    g.add(pod);
+    scene.add(g);
+  }
+
+  /** Project these blocks as the message, its OK button at its bottom right. */
+  private setMessage(blocks: readonly Block[]): void {
+    if (this.message) {
+      this.message.removeFromParent();
+      this.message.geometry.dispose();
+      const m = this.message.material as THREE.MeshBasicMaterial;
+      m.map?.dispose();
+      m.dispose();
+    }
+    const tex = new THREE.CanvasTexture(messageCanvas(blocks));
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
     const img = tex.image as HTMLCanvasElement;
     const mh = (MESSAGE_W * img.height) / img.width;
     const msgMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false });
     this.message = new THREE.Mesh(new THREE.PlaneGeometry(MESSAGE_W, mh), msgMat);
-    // it hangs a little low, so the eyes start on its heading and look down to OK
-    const cy = eye + 27 - mh / 2;
+    // it hangs a little low, so the eyes start on its heading and look down to OK; a short one, at the eyes
+    const cy = this.eye + Math.min(27, 2 + mh / 2) - mh / 2;
     this.message.position.set(0, cy, -MESSAGE_AT);
-    pod.add(this.message);
+    this.message.layers.set(this.ok.layers.mask === 1 ? 0 : 1);
+    this.pod.add(this.message);
     const unit = MESSAGE_W / MSG_PX;
-    this.ok = new THREE.Mesh(
-      new THREE.PlaneGeometry(OK_PX.w * unit, OK_PX.h * unit),
-      new THREE.MeshBasicMaterial({ map: this.okTex[0], transparent: true, depthWrite: false, toneMapped: false }),
-    );
     this.ok.position.set(MESSAGE_W / 2 - (MSG_PAD + OK_PX.w / 2) * unit, cy - mh / 2 + (MSG_PAD + OK_PX.h / 2) * unit, -MESSAGE_AT + 0.3);
-    pod.add(this.ok);
-    pickables.set(this.ok, { kind: 'wake' });
-    g.add(pod);
-    scene.add(g);
   }
 
   update(a: AirlockLook): void {
+    const said = a.notice.arrival ? 'arrival' : a.notice.litres.toFixed(2);
+    if (said !== this.said) {
+      this.said = said;
+      this.setMessage(a.notice.arrival ? arrival() : notice(a.notice.litres));
+    }
     const l = this.last;
     if (l && l.door === a.door && l.front === a.front && l.dark === a.dark && l.message === a.message && l.okHot === a.okHot && l.lamp === a.lamp) return;
     this.last = { ...a };

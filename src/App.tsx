@@ -7,7 +7,7 @@ import { FlaskEditor } from './components/FlaskEditor';
 import { Hud, StartHint, TouchControls } from './components/Hud';
 import { LabelEditor } from './components/LabelEditor';
 import { PaperTextEditor } from './components/PaperTextEditor';
-import { SleepScreen } from './components/Sleep';
+import { Ending, SleepScreen } from './components/Sleep';
 import { SoundPanel } from './components/SoundPanel';
 import { Intro } from './components/Intro';
 import { InfoPanel } from './components/InfoPanel';
@@ -255,8 +255,20 @@ export function App() {
           {engine && labeling !== null && (
             <LabelEditor key={labeling} engine={engine} id={labeling} onClose={() => setLabeling(null)} />
           )}
-          {won && hud?.slept === null && <div id="win">Enough cryostabilizer to reach Mu Ceti.</div>}
-          {engine && hud && <SleepScreen hud={hud} won={won} onWake={() => engine.wakeUp()} />}
+          {won && hud && !hud.inPod && <div id="win">Enough cryostabilizer to reach Mu Ceti.</div>}
+          {hud && <SleepScreen hud={hud} />}
+          {engine && hud && (
+            <Ending
+              hud={hud}
+              onReset={() => {
+                // the lab as it was at first, and the intro again
+                reset();
+                setIntro('replay');
+                setPreLog(true);
+              }}
+              onContinue={() => engine.continueTinkering()}
+            />
+          )}
         </div>
       </div>
       {intro && <Intro skipStart={intro === 'replay'} resume={intro === 'resume'} onLogEnd={endLog} onDone={endIntro} />}

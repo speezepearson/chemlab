@@ -1,7 +1,7 @@
 import { equilibrate } from '../chem/equilibrium';
 import { Lag, temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
-import { POD, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
+import { AIRLOCK, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
   FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, nozzleBox,
@@ -10,7 +10,7 @@ import {
 } from './bodies';
 import { chime } from './chime';
 import { diverter, type Diverter } from './diverter';
-import { CAP, DELIVERY, FILL_RATE, GOAL_TARGET, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
+import { CAP, DELIVERY, FILL_RATE, FLASK_L, GOAL_TARGET, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
 import { FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
@@ -94,6 +94,10 @@ export interface Hud {
   actions: Action[];
   /** How far the screen has faded to black as the player falls asleep in the pod, or wakes, 0 to 1. */
   black: number;
+  /** How far the screen has faded to white in the light of Mu Ceti (see Wake's arriving), 0 to 1. */
+  white: number;
+  /** Whether the game's over, won: the player has arrived at Mu Ceti (see Wake's arrived). */
+  ended: boolean;
   /** While the player's asleep in the pod (see Wake), the whole sim seconds they've slept; otherwise null. */
   slept: number | null;
 }
@@ -339,8 +343,15 @@ export class GameEngine {
   private wakeT = Infinity;
   /** While asleep (see Wake), the sleep under way (see sleep.ts), its stats, and the clock when it began. */
   private sleeping: { run: Generator<void, Woke>; stats: SleepStats; from: number; woke: Woke | null } | null = null;
-  /** Whether the player is waking from a sleep, so the screen fades in from black as the pod opens. */
-  private rising = false;
+  /** Real seconds since the player woke from a sleep, while the screen fades in from black (see RISE_S); else null. */
+  private riseT: number | null = null;
+  /**
+   * Whether the player woke because there's enough cryostabilizer for the rest of the voyage: the pod welcomes them to
+   * Mu Ceti, and what follows is the end (see Wake's arriving).
+   */
+  private arrival = false;
+  /** The litres of cryostabilizer the pod's message says are on board: how much there was when they were put in it. */
+  private podLitres = 0;
   /** While settling into the pod (see Wake), where the player started from, and how many real seconds it's been. */
   private settling: { x: number; z: number; yaw: number; pitch: number; t: number } | null = null;
   /** Runs the sleeping lab a slice at a time (see pump), independent of frames. */
@@ -542,7 +553,9 @@ export class GameEngine {
     this.won = false;
     // a lab loads with the airlock shut, until its station has been delivering steadily again, and anyone in it or
     // asleep in the pod wakes in the lab
-    if (this.wake === 'open' || this.wake === 'settling' || this.wake === 'boarding' || this.wake === 'asleep') {
+    if (this.wake === 'open' || this.wake === 'settling' || this.wake === 'boarding' || this.wake === 'asleep' || this.arrival) {
+      this.arrival = false;
+      this.riseT = null;
       this.wake = 'closed';
       this.wakeT = Infinity;
       this.sleeping = null;
@@ -2085,6 +2098,9 @@ export class GameEngine {
     this.view.look(this.eye(), this.player.yaw, this.player.pitch);
     if (!this.turning) this.target = this.view.pick(REACH, this.heldObject());
     this.simulate(dt);
+    // the end stands the lab still as it was when there was enough, so it goes on in real time
+    if (this.arrival && this.wake !== 'pod') this.stepWake(dt);
+    if (this.riseT !== null) this.riseT = this.riseT + dt >= RISE_S ? null : this.riseT + dt;
     this.render(dt);
     this.inspect(now);
     this.hud(now);
@@ -2178,7 +2194,8 @@ export class GameEngine {
     this.landed = [];
     this.pour = null;
     // the lab waits for the player to press OK in the pod, as it did through the rest of the intro
-    const simDt = quiet ? dt : this.wake === 'pod' ? 0 : dt * this.speed;
+    // and once there's enough cryostabilizer, the lab stands still as it was then, through the end
+    const simDt = quiet ? dt : this.wake === 'pod' || this.arrival ? 0 : dt * this.speed;
     this.spin = (this.spin + SPIN * simDt) % (2 * Math.PI);
     this.clock += simDt;
     const mouths = (this.open = this.mouths());
@@ -2771,7 +2788,14 @@ export class GameEngine {
     this.wake = 'pod';
     this.wakeT = 0;
     this.sleeping = null;
-    this.rising = false;
+    this.riseT = null;
+    this.arrival = false;
+    this.podLitres = this.reservoirLitres();
+  }
+
+  /** The litres of cryostabilizer in the ship's reservoir. */
+  private reservoirLitres(): number {
+    return (this.station().tanks[1].n[TARGET] / CAP) * FLASK_L;
   }
 
   /** Put the player in the pod, facing the lab, empty-handed (see emptyHanded). */
@@ -2852,7 +2876,7 @@ export class GameEngine {
       s.woke = r.value;
       // a jump can reach the goal, with no substep after it to see it
       if (r.value === 'goal') this.goal();
-      else this.wakeUp();
+      this.wakeFrom(r.value);
       return;
     }
     this.pumper.port2.postMessage(null);
@@ -2884,17 +2908,34 @@ export class GameEngine {
     const t = this.wakeT;
     if (this.wake === 'boarding') return ease((t - WAKE_S.open) / WAKE_S.fade);
     if (this.wake === 'asleep') return 1;
-    if (this.wake === 'opening' && this.rising) return 1 - ease(t / WAKE_S.open);
+    if (this.riseT !== null) return 1 - ease(this.riseT / RISE_S);
     return 0;
   }
 
-  /** Wake the player from a sleep: the pod opens as the screen fades in from black, and they can walk out. */
-  wakeUp(): void {
-    if (this.wake !== 'asleep') return;
+  /**
+   * Wake the player from a sleep, in the pod as at first, as the screen fades in from black (see Wake's asleep): with
+   * the same message, its numbers up to date, if the station stopped delivering; or a welcome to Mu Ceti, if there's
+   * enough cryostabilizer.
+   */
+  private wakeFrom(why: Woke): void {
     this.sleeping = null;
-    this.rising = true;
-    this.wake = 'opening';
+    this.wake = 'pod';
     this.wakeT = 0;
+    this.riseT = 0;
+    this.arrival = why === 'goal';
+    this.podLitres = this.reservoirLitres();
+  }
+
+  /**
+   * Once arrived at Mu Ceti (see Wake's arrived), carry on in the lab as it was when there was enough cryostabilizer:
+   * the player stands just out of the airlock, facing the lab, with its doors shut.
+   */
+  continueTinkering(): void {
+    if (this.wake !== 'arrived') return;
+    this.arrival = false;
+    this.wake = 'closed';
+    this.wakeT = Infinity;
+    Object.assign(this.player, { x: AIRLOCK.x, z: ROOM.z1 - 150, yaw: 0, pitch: 0 });
   }
 
   /** OK, on the message inside the pod: it flickers out, the pod's front slides up, and then the player can walk. */
@@ -2912,11 +2953,10 @@ export class GameEngine {
       this.wake = w;
       this.wakeT = 0;
     };
-    if (this.wake === 'flicker' && t >= WAKE_S.flicker) next('opening');
-    else if (this.wake === 'opening' && t >= WAKE_S.open) {
-      next('out');
-      this.rising = false;
-    } else if (this.wake === 'boarding' && t >= WAKE_S.open + WAKE_S.fade) next('asleep');
+    if (this.wake === 'flicker' && t >= WAKE_S.flicker) next(this.arrival ? 'arriving' : 'opening');
+    else if (this.wake === 'opening' && t >= WAKE_S.open) next('out');
+    else if (this.wake === 'arriving' && t >= WAKE_S.arrive) next('arrived');
+    else if (this.wake === 'boarding' && t >= WAKE_S.open + WAKE_S.fade) next('asleep');
     else if (this.wake === 'out' && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
     // steady delivery opens the doors again, and once it stops they close, when she's out in the lab
     else if (this.wake === 'closed' && this.station().steady >= DELIVERY.streak) next('open');
@@ -2927,14 +2967,22 @@ export class GameEngine {
   private airlockLook(): AirlockLook {
     const w = this.wake;
     const t = this.wakeT;
+    // how far up the pod's front is: sliding up as they wake, down as they settle in, and otherwise up but while
+    // they're shut in it
+    const up =
+      w === 'opening' || w === 'arriving' ? ease(t / WAKE_S.open)
+      : w === 'boarding' ? 1 - ease(t / WAKE_S.open)
+      : w === 'pod' || w === 'flicker' || w === 'asleep' ? 0
+      : 1;
     // the message flickers, on less and less of the time, until it's gone
     const flick = w === 'flicker' && Math.sin(t * 90) + Math.sin(t * 37) > 2.6 * (t / WAKE_S.flicker) - 0.6;
     return {
       door: w === 'closed' ? 1 - ease(t / WAKE_S.close) : w === 'open' ? ease(t / WAKE_S.close) : 1,
-      front: w === 'opening' ? ease(t / WAKE_S.open) : w === 'boarding' ? 1 - ease(t / WAKE_S.open) : inPod(w) && w !== 'settling' ? 0 : 1,
+      front: up,
       // the room's light floods in as the front slides up, and is shut out as it slides down
-      dark: w === 'opening' ? 1 - ease(t / WAKE_S.open) : w === 'boarding' ? ease(t / WAKE_S.open) : inPod(w) && w !== 'settling' ? 1 : 0,
+      dark: 1 - up,
       message: w === 'pod' || flick,
+      notice: this.arrival ? { arrival: true } : { arrival: false, litres: this.podLitres },
       okHot: w === 'pod' && this.target?.kind === 'wake',
       // flashing while the doors stand open to sleep, a second on and half a second off, on sim time
       lamp: w === 'open' && this.clock % 1.5 < 1,
@@ -2979,6 +3027,8 @@ export class GameEngine {
       note: this.flash?.text ?? null,
       actions: this.actions(),
       black: this.black(),
+      white: this.wake === 'arriving' ? ease(this.wakeT / WAKE_S.arrive) : this.wake === 'arrived' ? 1 : 0,
+      ended: this.wake === 'arrived',
       slept: this.sleeping ? Math.floor(this.clock - this.sleeping.from) : null,
     };
     const key = JSON.stringify(hud);

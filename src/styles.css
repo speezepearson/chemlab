@@ -238,14 +238,17 @@ canvas{display:block;width:100%;height:100%;touch-action:none}
 /* ---------------- asleep in the cryopod ---------------- */
 .sleep{position:absolute;inset:0;z-index:50;background:#000;color:#b9c4bd;display:flex;align-items:center;justify-content:center}
 .sleep-time{position:absolute;bottom:28px;left:0;right:0;text-align:center;font:13px ui-monospace,"SF Mono",Menlo,Consolas,monospace;letter-spacing:.08em;color:#5f6b64}
-.sleep-won{max-width:520px;padding:0 24px;text-align:center;line-height:1.5}
-.sleep-won h2{font-weight:500;font-size:26px;color:#e3ebe5;margin:0 0 16px}
-.sleep-won p{margin:0 0 12px}
-.sleep-won button{
-  margin-top:16px;background:transparent;color:#b9c4bd;border:1px solid #4a554f;border-radius:4px;
-  font:15px ui-monospace,"SF Mono",Menlo,Consolas,monospace;padding:8px 24px;letter-spacing:.1em
+
+/* ---------------- the end, in the light of Mu Ceti ---------------- */
+.ending{position:absolute;inset:0;z-index:60;background:#fff;color:#1d2420;display:flex;align-items:center;justify-content:center}
+.ending-won{text-align:center;padding:0 24px}
+.ending-won h2{font-weight:600;font-size:40px;margin:0 0 6px}
+.ending-won p{font-size:20px;margin:0 0 36px;color:#4a554f}
+.ending-buttons{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+.ending-buttons button{
+  background:transparent;color:#1d2420;border:1px solid #9aa5a0;border-radius:6px;font:inherit;font-size:16px;padding:9px 22px
 }
-.sleep-won button:hover{color:#e3ebe5;border-color:#7d8a83}
+.ending-buttons button:hover{border-color:#1d2420}
 
 /* ---------------- intro ---------------- */
 .intro{
