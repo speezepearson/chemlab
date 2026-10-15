@@ -1,5 +1,6 @@
 import { Fragment, useReducer, useState } from 'react';
 import { LOOK, resetLook, type ColorModel, type Look } from '../game/appearance';
+import { DEFAULT_OUTLINE, MAX_OUTLINE_WIDTH, OUTLINE, setOutline } from '../game/outline';
 import { DragNumber } from './DragNumber';
 
 /** The numeric settings in Look, the ones a DragNumber can edit. */
@@ -40,7 +41,10 @@ const GROUPS: Group[] = [
   },
 ];
 
-/** Debug panel: live-tune the temperature appearance curves and how composition looks (see game/appearance.ts). */
+/**
+ * Debug panel: live-tune the temperature appearance curves and how composition looks (see game/appearance.ts), and
+ * the outline round what the crosshair is on (see game/outline.ts).
+ */
 export function AppearancePanel() {
   const [, rerender] = useReducer((x: number) => x + 1, 0);
   const numRow = (label: string, key: NumKey) => (
@@ -129,6 +133,45 @@ export function AppearancePanel() {
                 {numRow('α triple', 'alpha3')}
               </>
             )}
+            <tr className="group">
+              <td colSpan={2}>
+                <b>Outline</b> <span>round what the crosshair is on; thickness in pixels, 0 for none</span>
+              </td>
+            </tr>
+            <tr>
+              <td>color</td>
+              <td>
+                <input
+                  type="color"
+                  aria-label="outline color"
+                  value={OUTLINE.color}
+                  onChange={(e) => {
+                    setOutline({ color: e.target.value });
+                    rerender();
+                  }}
+                />
+              </td>
+            </tr>
+            <tr>
+              <td>thickness</td>
+              <td>
+                <label className="slider">
+                  <input
+                    type="range"
+                    aria-label="outline thickness"
+                    min={0}
+                    max={MAX_OUTLINE_WIDTH}
+                    step={0.5}
+                    value={OUTLINE.width}
+                    onChange={(e) => {
+                      setOutline({ width: +e.target.value });
+                      rerender();
+                    }}
+                  />
+                  <output>{OUTLINE.width}</output>
+                </label>
+              </td>
+            </tr>
           </tbody>
         </table>
         <p>
@@ -139,6 +182,7 @@ export function AppearancePanel() {
           <button
             onClick={() => {
               resetLook();
+              setOutline({ ...DEFAULT_OUTLINE });
               rerender();
             }}
           >
