@@ -7,6 +7,7 @@ import { FlaskEditor } from './components/FlaskEditor';
 import { Hud, StartHint, TouchControls } from './components/Hud';
 import { LabelEditor } from './components/LabelEditor';
 import { PaperTextEditor } from './components/PaperTextEditor';
+import { SleepScreen } from './components/Sleep';
 import { SoundPanel } from './components/SoundPanel';
 import { Intro } from './components/Intro';
 import { InfoPanel } from './components/InfoPanel';
@@ -254,7 +255,8 @@ export function App() {
           {engine && labeling !== null && (
             <LabelEditor key={labeling} engine={engine} id={labeling} onClose={() => setLabeling(null)} />
           )}
-          {won && <div id="win">Enough cryostabilizer to reach Mu Ceti.</div>}
+          {won && hud?.slept === null && <div id="win">Enough cryostabilizer to reach Mu Ceti.</div>}
+          {engine && hud && <SleepScreen hud={hud} won={won} onWake={() => engine.wakeUp()} />}
         </div>
       </div>
       {intro && <Intro skipStart={intro === 'replay'} resume={intro === 'resume'} onLogEnd={endLog} onDone={endIntro} />}

@@ -21,6 +21,7 @@ import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_P
 import { rumble, type Rumble } from './rumble';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
+import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
 import {
   CELL, COUNTERS, LIFT, PAPER_Z, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toCardinal, toFrac, toLocal, toWorld, wrapAngle,
   type Pose, type Vec3,
@@ -90,6 +91,10 @@ export interface Hud {
   note: string | null;
   /** Everything the player can do just now besides walking and looking, with how (see Action), for a reminder. */
   actions: Action[];
+  /** How far the screen has faded to black as the player falls asleep in the pod, or wakes, 0 to 1. */
+  black: number;
+  /** While the player's asleep in the pod (see Wake), the whole sim seconds they've slept; otherwise null. */
+  slept: number | null;
 }
 
 /**
@@ -220,6 +225,11 @@ const EYE = 620;
 const PLAYER_R = 45;
 /** Walking speed, in world units per real second. */
 const WALK = 840;
+/**
+ * Real milliseconds the sleeping lab runs for at a time (see pump), between which the page gets on with anything
+ * else, so it stays responsive.
+ */
+const SLEEP_SLICE_MS = 12;
 /** How far away something can be and still be picked up or pressed. */
 const REACH = 460;
 /** The nearest and furthest something can be held, from the eyes to its middle, beyond its own size. */
@@ -329,6 +339,12 @@ export class GameEngine {
    * DELIVERY.gap sim seconds; 0 while it isn't (see Wake's open).
    */
   private steady = 0;
+  /** While asleep (see Wake), the sleep under way (see sleep.ts), its stats, and the clock when it began. */
+  private sleeping: { run: Generator<void, Woke>; stats: SleepStats; from: number; woke: Woke | null } | null = null;
+  /** Whether the player is waking from a sleep, so the screen fades in from black as the pod opens. */
+  private rising = false;
+  /** Runs the sleeping lab a slice at a time (see pump), independent of frames. */
+  private pumper = new MessageChannel();
   /** The cryostabilizer station's diverter's sounds, while it's swinging or letting into the reservoir. */
   private diverters = new Map<Tool, Diverter>();
   /** The player's sticky notes, on the back wall, the one on top last (see paper.ts). They're notes, not lab, so Reset keeps them. */
@@ -395,6 +411,8 @@ export class GameEngine {
 
   destroy(): void {
     cancelAnimationFrame(this.raf);
+    this.sleeping = null;
+    this.pumper.port1.close();
     this.resizeObserver.disconnect();
     for (const c of this.cleanups) c();
     for (const r of this.rumbles.values()) r.stop();
@@ -522,11 +540,16 @@ export class GameEngine {
 
   private afterLoad(): void {
     this.won = false;
-    // a lab loads with the airlock shut, until its station has been delivering steadily again
+    // a lab loads with the airlock shut, until its station has been delivering steadily again, and anyone in it or
+    // asleep in the pod wakes in the lab
     this.steady = 0;
-    if (this.wake === 'open') {
+    if (this.wake === 'open' || this.wake === 'boarding' || this.wake === 'asleep') {
       this.wake = 'closed';
       this.wakeT = Infinity;
+      this.sleeping = null;
+      const p = this.player;
+      const r = this.inRoom({ x: p.x, y: 0, z: p.z, yaw: p.yaw });
+      [p.x, p.z] = [r.x, r.z];
     }
     for (const d of this.diverters.values()) d.stop();
     this.diverters.clear();
@@ -2050,6 +2073,13 @@ export class GameEngine {
   private frame = (now: number): void => {
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
+    // asleep, the screen is black: nothing to draw, and the lab runs on its own (see fallAsleep)
+    if (this.wake === 'asleep') {
+      if (!this.sleeping) this.fallAsleep();
+      this.hud(now);
+      this.raf = requestAnimationFrame(this.frame);
+      return;
+    }
     this.move(dt);
     if (this.held) this.follow(this.held);
     this.view.look(this.eye(), this.player.yaw, this.player.pitch);
@@ -2086,6 +2116,11 @@ export class GameEngine {
       const r = walk(body, dx, dz, this.obstacles(h));
       p.x = r.x;
       p.z = r.z;
+      // walking into the open pod is getting into it, to sleep
+      if (this.wake === 'open' && Math.hypot(p.x - POD.x, p.z - POD.z) < POD.r) {
+        this.board();
+        return;
+      }
     }
     if (h?.kind !== 'flask' || !this.rightHeld) this.pinned = null;
     if (!h) return;
@@ -2133,13 +2168,17 @@ export class GameEngine {
     return h.h;
   }
 
-  private simulate(dt: number): void {
+  /**
+   * Run the lab for a frame of dt real seconds; or, `quiet`, for dt sim seconds with nothing drawn or heard, as while
+   * the player sleeps (see Sleeper.advance).
+   */
+  private simulate(dt: number, quiet = false): void {
     this.spills.clear();
     this.inflow.clear();
     this.landed = [];
     this.pour = null;
     // the lab waits for the player to press OK in the pod, as it did through the rest of the intro
-    const simDt = this.wake === 'pod' ? 0 : dt * this.speed;
+    const simDt = quiet ? dt : this.wake === 'pod' ? 0 : dt * this.speed;
     this.spin = (this.spin + SPIN * simDt) % (2 * Math.PI);
     this.clock += simDt;
     const mouths = (this.open = this.mouths());
@@ -2211,6 +2250,10 @@ export class GameEngine {
         this.tools.forEach((t, j) => {
           if (t === stillTool) return;
           t.step(step).forEach((out, k) => {
+            if (quiet) {
+              pour(t.drops[k], out, spouts[j][k], targets[j][k], this.loose(t, k));
+              return;
+            }
             tally(toolTotals[j][k], out, false); // before pouring, which can gather it into a drop
             tally(toolTotals[j][k], null, pour(t.drops[k], out, spouts[j][k], targets[j][k], this.loose(t, k)));
           });
@@ -2237,7 +2280,7 @@ export class GameEngine {
         }
         for (const [v, e] of exposures) cool(v, e, step);
       }
-      this.tools.forEach((t, j) =>
+      if (!quiet) this.tools.forEach((t, j) =>
         toolTotals[j].forEach(({ v, streamed }, k) => {
           t.out[k] = v.N > 0 ? v : null;
           t.flow[k] = volume(v) / (MAX_FLOW * simDt);
@@ -2246,6 +2289,10 @@ export class GameEngine {
       );
     }
     this.spillTime = simDt;
+    if (quiet) {
+      this.goal();
+      return;
+    }
 
     // an analyzer hums quietly while it has something to read, on sim time, so silent while paused
     for (const t of this.tools) {
@@ -2289,7 +2336,11 @@ export class GameEngine {
     }
     this.water.update(dt, this.landed.map((p) => this.hear(p)), streams);
 
-    // goal: enough of the target in the ship's reservoir
+    this.goal();
+  }
+
+  /** The goal: enough of the target in the ship's reservoir. */
+  private goal(): void {
     if (this.station().tanks[1].n[TARGET] >= GOAL_TARGET && !this.won) {
       this.won = true;
       this.cb.onWin();
@@ -2708,6 +2759,15 @@ export class GameEngine {
    * they press OK (see pressOk). Whatever they held is set down if it can be, or else put away.
    */
   enterPod(): void {
+    this.intoPod();
+    this.wake = 'pod';
+    this.wakeT = 0;
+    this.sleeping = null;
+    this.rising = false;
+  }
+
+  /** Put the player in the pod, facing the lab, empty-handed: whatever they held is set down, or else put away. */
+  private intoPod(): void {
     if (this.held) this.release();
     if (this.held && !(this.held.kind === 'tool' && UNIQUE_TOOLS.includes(this.held.t.kind))) this.putAway();
     this.held = null;
@@ -2715,7 +2775,92 @@ export class GameEngine {
     this.endTurn();
     this.rightHeld = false;
     Object.assign(this.player, { x: POD.x, z: POD.z, yaw: 0, pitch: -0.12 });
-    this.wake = 'pod';
+  }
+
+  /** The player walked into the open pod: it closes on them, and they fall asleep (see Wake). */
+  private board(): void {
+    this.intoPod();
+    this.wake = 'boarding';
+    this.wakeT = 0;
+  }
+
+  /**
+   * The player has fallen asleep: the lab's sounds fall silent (the ship's ambience plays on), and the lab runs on
+   * (see sleep.ts) as fast as it can, a slice at a time (see pump), until the goal's reached (when they stay asleep,
+   * and have won) or the station stops delivering (when they wake).
+   */
+  private fallAsleep(): void {
+    this.water.update(0.1, [], new Map());
+    for (const r of this.rumbles.values()) r.stop();
+    this.rumbles.clear();
+    for (const d of this.diverters.values()) d.stop();
+    this.diverters.clear();
+    const stats = { plain: 0, jumped: 0, jumps: 0 };
+    this.sleeping = { run: sleep(this.sleeper(), stats), stats, from: this.clock, woke: null };
+    this.pumper.port1.onmessage = () => this.pump();
+    this.pumper.port2.postMessage(null);
+  }
+
+  /**
+   * Run the sleeping lab for a slice of real time, SLEEP_SLICE_MS, then let the page get on with anything else (a
+   * message comes after whatever's waiting) and run another; while it's paused, check back now and then.
+   */
+  private pump(): void {
+    const s = this.sleeping;
+    if (!s || s.woke || this.wake !== 'asleep') return;
+    if (this.speed === 0) {
+      setTimeout(() => this.pumper.port2.postMessage(null), 100);
+      return;
+    }
+    const now = performance.now();
+    while (performance.now() - now < SLEEP_SLICE_MS) {
+      const r = s.run.next();
+      if (!r.done) continue;
+      s.woke = r.value;
+      // a jump can reach the goal, with no substep after it to see it
+      if (r.value === 'goal') this.goal();
+      else this.wakeUp();
+      return;
+    }
+    this.pumper.port2.postMessage(null);
+  }
+
+  /** The lab as the sleeper sees it (see sleep.ts). */
+  private sleeper(): Sleeper {
+    return {
+      vessels: () => [
+        ...this.flasks.map((v) => ({ v, terminal: true })),
+        ...this.tools.flatMap((t) => [
+          ...t.tanks.map((v, k) => ({ v, terminal: !drains(t, k) })),
+          ...t.tube.map((v) => ({ v, terminal: false })),
+        ]),
+      ],
+      station: this.station(),
+      clock: () => this.clock,
+      advance: (dt) => this.simulate(dt, true),
+      skip: (dt) => {
+        this.clock += dt;
+        this.spin = (this.spin + SPIN * dt) % (2 * Math.PI);
+        this.steady += dt;
+      },
+    };
+  }
+
+  /** How far the screen has faded to black (see Hud.black). */
+  private black(): number {
+    const t = this.wakeT;
+    if (this.wake === 'boarding') return ease((t - WAKE_S.open) / WAKE_S.fade);
+    if (this.wake === 'asleep') return 1;
+    if (this.wake === 'opening' && this.rising) return 1 - ease(t / WAKE_S.open);
+    return 0;
+  }
+
+  /** Wake the player from a sleep: the pod opens as the screen fades in from black, and they can walk out. */
+  wakeUp(): void {
+    if (this.wake !== 'asleep') return;
+    this.sleeping = null;
+    this.rising = true;
+    this.wake = 'opening';
     this.wakeT = 0;
   }
 
@@ -2735,7 +2880,10 @@ export class GameEngine {
       this.wakeT = 0;
     };
     if (this.wake === 'flicker' && t >= WAKE_S.flicker) next('opening');
-    else if (this.wake === 'opening' && t >= WAKE_S.open) next('out');
+    else if (this.wake === 'opening' && t >= WAKE_S.open) {
+      next('out');
+      this.rising = false;
+    } else if (this.wake === 'boarding' && t >= WAKE_S.open + WAKE_S.fade) next('asleep');
     else if (this.wake === 'out' && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
     // steady delivery opens the doors again, and once it stops they close, when she's out in the lab
     else if (this.wake === 'closed' && this.steady >= DELIVERY.streak) next('open');
@@ -2750,9 +2898,9 @@ export class GameEngine {
     const flick = w === 'flicker' && Math.sin(t * 90) + Math.sin(t * 37) > 2.6 * (t / WAKE_S.flicker) - 0.6;
     return {
       door: w === 'closed' ? 1 - ease(t / WAKE_S.close) : w === 'open' ? ease(t / WAKE_S.close) : 1,
-      front: w === 'opening' ? ease(t / WAKE_S.open) : inPod(w) ? 0 : 1,
-      // the room's light floods in as the front slides up
-      dark: w === 'opening' ? 1 - ease(t / WAKE_S.open) : inPod(w) ? 1 : 0,
+      front: w === 'opening' ? ease(t / WAKE_S.open) : w === 'boarding' ? 1 - ease(t / WAKE_S.open) : inPod(w) ? 0 : 1,
+      // the room's light floods in as the front slides up, and is shut out as it slides down
+      dark: w === 'opening' ? 1 - ease(t / WAKE_S.open) : w === 'boarding' ? ease(t / WAKE_S.open) : inPod(w) ? 1 : 0,
       message: w === 'pod' || flick,
       okHot: w === 'pod' && this.target?.kind === 'wake',
     };
@@ -2772,11 +2920,9 @@ export class GameEngine {
   /** Whether fluid would leave a tool's spouts if it ran. */
   private wouldFlow(t: Tool): boolean {
     // the station's reservoir through its faucet, or its funnel through the diverter
-    if (t.kind === 'receptacle') return (t.valves[0] > 0 && t.tanks[1].N > TRACE) || t.tanks[0].N > TRACE;
-    const free = t.kind === 'splitter' || t.kind === 'sorter' || t.kind === 'heater' || INLINE_TOOLS.includes(t.kind);
-    const drains = (k: number) => free || t.valves[k] > 0;
+    if (t.kind === 'receptacle') return t.tanks.some((v, k) => v.N > TRACE && drains(t, k));
     // a heater's tube runs whatever its valves say
-    return (t.shape.spouts.length > 0 && t.tanks.some((v, k) => v.N > TRACE && drains(k))) || t.tube.some((v) => v.N > TRACE);
+    return (t.shape.spouts.length > 0 && t.tanks.some((v, k) => v.N > TRACE && drains(t, k))) || t.tube.some((v) => v.N > TRACE);
   }
 
   private hud(now: number): void {
@@ -2797,12 +2943,23 @@ export class GameEngine {
       hand: this.pencil ? 'Erase' : h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : 'Turn',
       note: this.flash?.text ?? null,
       actions: this.actions(),
+      black: this.black(),
+      slept: this.sleeping ? Math.floor(this.clock - this.sleeping.from) : null,
     };
     const key = JSON.stringify(hud);
     if (key === this.lastHud) return;
     this.lastHud = key;
     this.cb.onHud(hud);
   }
+}
+
+/**
+ * Whether tank k of a tool lets fluid out on its own: a funnel or an instrument's tube always (the station's funnel
+ * through its diverter), a tank with a valve as long as it's open.
+ */
+function drains(t: Tool, k: number): boolean {
+  if (t.kind === 'receptacle') return k === 0 || t.valves[0] > 0;
+  return t.kind === 'splitter' || t.kind === 'sorter' || t.kind === 'heater' || INLINE_TOOLS.includes(t.kind) || t.valves[k] > 0;
 }
 
 export type { ToolKind };
