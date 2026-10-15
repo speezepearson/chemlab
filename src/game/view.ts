@@ -146,7 +146,7 @@ const VOID_LAYER = 4;
  * all comes out on the screen (`exposure`, through ACES tone mapping). Tunable in god mode's preview of it, along with
  * how far open the pod is there (`open`, which the game itself doesn't use).
  */
-export const ARRIVAL = { void: 8, bloom: 2.2, radius: 0.9, threshold: 1, light: 6, ambient: 2.5, exposure: 1.3, open: 1 };
+export const ARRIVAL = { void: 8, bloom: 1.16, radius: 0.08, threshold: 1, light: 6, ambient: 2.5, exposure: 1.3, open: 1 };
 export const ARRIVAL_DEFAULTS = { ...ARRIVAL };
 
 /** Stripes for a guide's dashes, as an alpha map: on at the top of each repeat, off below. */
