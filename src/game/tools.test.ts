@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SPECIES, TARGET, singleOf, speciesIndex } from '../chem/species';
-import { CAP, GOAL_PURITY, GOAL_TARGET } from './config';
+import { CAP, DELIVERY, GOAL_PURITY, GOAL_TARGET } from './config';
 import { heatAt, temperature } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { Vessel, roomFor, volume } from './flask';
@@ -10,7 +10,7 @@ import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, BOND_KEYS, SPECTROSCOPE, bondCounts, spectroscopeAt, INSTRUMENT_TAU, TUBE_CAP,
-  INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  clockText, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -324,6 +324,27 @@ describe('cryostabilizer station', () => {
     r.step(0.02);
     expect(r.gate).toBe('waste');
     expect(r.sinceFlow).toBeCloseTo(0.02, 9);
+  });
+
+  it(`keeps time it's been delivering steadily, at least every ${DELIVERY.gap} sim s`, () => {
+    const r = new Tool('receptacle', 0);
+    const funnel = r.tanks[0];
+    // a dribble every 2 sim s
+    for (let t = 0; t < 10; t++) {
+      if (t % 2 === 0) funnel.setMolecules(TARGET, 1000);
+      r.step(1);
+    }
+    expect(r.steady).toBeCloseTo(10, 9);
+    // and a gap longer than DELIVERY.gap starts it again
+    for (let t = 0; t < DELIVERY.gap + 1; t++) r.step(1);
+    expect(r.steady).toBe(0);
+  });
+
+  it('shows lengths of time as a clock does', () => {
+    expect(clockText(0)).toBe('0:00');
+    expect(clockText(42.9)).toBe('0:42');
+    expect(clockText(12 * 60 + 5)).toBe('12:05');
+    expect(clockText(3723)).toBe('1:02:03');
   });
 
   it('keeps time since it last let anything into the reservoir', () => {

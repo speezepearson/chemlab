@@ -2,7 +2,7 @@ import { ATOMS, BIT_PAIRS, GROUP, GROUP_PRIMARY, pairKey, type Atom } from '../c
 import { THERMO } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
-import { CAP, TRACE } from './config';
+import { CAP, DELIVERY, TRACE } from './config';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
 import { CELL, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
@@ -289,6 +289,8 @@ export const STATION = {
   labelY: -31,
   gauge: { x0: 2 * CELL + 20, x1: 2 * CELL + 30, segments: 26 },
   screen: { x0: 2 * CELL - 50, x1: 2 * CELL + 50, y0: -19, y1: -4 },
+  /** The screen showing how long it's been delivering steadily (see Tool.steady), left of the reservoir's. */
+  steadyScreen: { x0: 2 * CELL - 160, x1: 2 * CELL - 60, y0: -19, y1: -4 },
 };
 
 /** The station's funnel's inside, as drawn (see Piece): a square funnel narrowing from its mouth to its stem. */
@@ -325,6 +327,14 @@ export const REFERENCE_FLOW = 0.2 * MAX_FLOW;
 export const RESERVOIR_FILTER = 0.05;
 /** The species with a yellow atom in them, which the reservoir's filter takes out. */
 const YELLOW = SPECIES.filter((s) => s.atoms.includes('Y')).map((s) => s.i);
+
+/** A length of time on a screen, as a clock does: "0:42", "12:05", "1:02:03". */
+export function clockText(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const two = (n: number) => String(n).padStart(2, '0');
+  const [h, m] = [Math.floor(s / 3600), Math.floor(s / 60) % 60];
+  return h > 0 ? `${h}:${two(m)}:${two(s % 60)}` : `${m}:${two(s % 60)}`;
+}
 
 /**
  * The reservoir's filter over h sim seconds: RESERVOIR_FILTER of each species with a yellow atom in it each sim
@@ -902,6 +912,11 @@ export class Tool {
   sinceFlow = Infinity;
   /** Sim seconds since a receptacle's diverter last let anything into the reservoir; Infinity if it never has. */
   sinceDelivery = Infinity;
+  /**
+   * Sim seconds a receptacle has been delivering steadily, letting cryostabilizer into the reservoir at least every
+   * DELIVERY.gap sim seconds; 0 while it isn't. Shown on its screen (see clockText), and it opens the airlock.
+   */
+  steady = 0;
 
   constructor(
     readonly kind: ToolKind,
@@ -1071,6 +1086,7 @@ export class Tool {
       if (this.gate === 'reservoir' && transfer(p, ref, volume(p)) > 0) this.sinceDelivery = 0;
       if (p.N > 0) out[0] = p;
     }
+    this.steady = this.sinceDelivery <= DELIVERY.gap ? this.steady + h : 0;
     filter(ref, h);
     this.out = out;
     this.flow = out.map((p) => (p ? volume(p) / (MAX_FLOW * h) : 0));

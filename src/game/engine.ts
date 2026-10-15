@@ -8,6 +8,7 @@ import {
   docked, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
+import { chime } from './chime';
 import { diverter, type Diverter } from './diverter';
 import { CAP, DELIVERY, FILL_RATE, GOAL_TARGET, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
@@ -334,11 +335,6 @@ export class GameEngine {
   /** Sim seconds the lab has run, for what blinks on sim time. */
   private clock = 0;
   private wakeT = Infinity;
-  /**
-   * Sim seconds the station has been delivering steadily, letting cryostabilizer into the reservoir at least every
-   * DELIVERY.gap sim seconds; 0 while it isn't (see Wake's open).
-   */
-  private steady = 0;
   /** While asleep (see Wake), the sleep under way (see sleep.ts), its stats, and the clock when it began. */
   private sleeping: { run: Generator<void, Woke>; stats: SleepStats; from: number; woke: Woke | null } | null = null;
   /** Whether the player is waking from a sleep, so the screen fades in from black as the pod opens. */
@@ -542,7 +538,6 @@ export class GameEngine {
     this.won = false;
     // a lab loads with the airlock shut, until its station has been delivering steadily again, and anyone in it or
     // asleep in the pod wakes in the lab
-    this.steady = 0;
     if (this.wake === 'open' || this.wake === 'boarding' || this.wake === 'asleep') {
       this.wake = 'closed';
       this.wakeT = Infinity;
@@ -2209,6 +2204,7 @@ export class GameEngine {
     });
 
     const gateFrom = this.tools.map((t) => t.gate);
+    const steadyFrom = this.station().steady;
     const vessels = this.vessels();
     // how exposed each one's fluid is to the room, from how it stands now; it hardly changes in a frame
     const exposures = simDt > 0 ? this.exposures() : [];
@@ -2237,9 +2233,7 @@ export class GameEngine {
         if (out) tot.v.addFrom(out, volume(out), true);
         tot.streamed ||= streamed;
       };
-      const station = this.station();
       for (let i = 0; i < sub; i++) {
-        this.steady = station.sinceDelivery <= DELIVERY.gap ? this.steady + step : 0;
         this.stepWake(step);
         if (D && this.pour) {
           const out = new Vessel(Infinity);
@@ -2327,6 +2321,9 @@ export class GameEngine {
         d.stop(); // quiet a while, or the lab was replaced
         this.diverters.delete(t);
       }
+    // and it chimes as it's been delivering steadily for long enough to open the airlock
+    const st = this.station();
+    if (steadyFrom < DELIVERY.streak && st.steady >= DELIVERY.streak) chime(this.hear(this.machineAt(st)));
 
     // fluid's sounds, each heard from where it lands: a stream from the mouth it runs into
     const streams = new Map<Vessel, { flow: number; full: number; at: Placement }>();
@@ -2841,7 +2838,7 @@ export class GameEngine {
       skip: (dt) => {
         this.clock += dt;
         this.spin = (this.spin + SPIN * dt) % (2 * Math.PI);
-        this.steady += dt;
+        this.station().steady += dt;
       },
     };
   }
@@ -2886,8 +2883,8 @@ export class GameEngine {
     } else if (this.wake === 'boarding' && t >= WAKE_S.open + WAKE_S.fade) next('asleep');
     else if (this.wake === 'out' && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
     // steady delivery opens the doors again, and once it stops they close, when she's out in the lab
-    else if (this.wake === 'closed' && this.steady >= DELIVERY.streak) next('open');
-    else if (this.wake === 'open' && this.steady === 0 && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
+    else if (this.wake === 'closed' && this.station().steady >= DELIVERY.streak) next('open');
+    else if (this.wake === 'open' && this.station().steady === 0 && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
   }
 
   /** How the airlock looks just now, for the view. */
@@ -2903,6 +2900,8 @@ export class GameEngine {
       dark: w === 'opening' ? 1 - ease(t / WAKE_S.open) : w === 'boarding' ? ease(t / WAKE_S.open) : inPod(w) ? 1 : 0,
       message: w === 'pod' || flick,
       okHot: w === 'pod' && this.target?.kind === 'wake',
+      // flashing while the doors stand open to sleep, a second on and half a second off, on sim time
+      lamp: w === 'open' && this.clock % 1.5 < 1,
     };
   }
 

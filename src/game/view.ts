@@ -18,7 +18,7 @@ import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
-  ANALYZER, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
+  clockText, ANALYZER, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
@@ -885,6 +885,8 @@ class ToolView {
   private note: Label;
   private glows: Glow[] = [];
   private screen?: Screen;
+  /** The station's screen showing how long it's been delivering steadily. */
+  private steadyScreen?: Screen;
   /** The cryostabilizer station's diverter's LCD (see drawDiverter). */
   private diverter?: Screen;
   /** What's running down an inline instrument's tube, shown as a thin thread of its color. */
@@ -1385,10 +1387,13 @@ class ToolView {
     valve.scale.set(4.5, 8, 4.5);
     valve.position.copy(v3(sh.spouts[0], sh.valveY, 0));
     art.add(valve);
-    // the readout of the litres in the reservoir, under its label
-    const sc = STATION.screen;
-    block(art, darkMat, sc.x0 - 1.5, sc.x1 + 1.5, sc.y0 - 1.5, sc.y1 + 1.5, face, face + 0.5);
-    this.screen = new Screen(art, sc.x0, sc.x1, sc.y0, sc.y1, face + 0.6, 8);
+    // the readout of the litres in the reservoir, under its label, and beside it, how long it's been delivering steadily
+    const screen = (sc: { x0: number; x1: number; y0: number; y1: number }) => {
+      block(art, darkMat, sc.x0 - 1.5, sc.x1 + 1.5, sc.y0 - 1.5, sc.y1 + 1.5, face, face + 0.5);
+      return new Screen(art, sc.x0, sc.x1, sc.y0, sc.y1, face + 0.6, 8);
+    };
+    this.screen = screen(STATION.screen);
+    this.steadyScreen = screen(STATION.steadyScreen);
   }
 
   update(clock: number, energies: readonly number[], targets: ReadonlySet<Vessel>): void {
@@ -1504,12 +1509,26 @@ class ToolView {
       this.segments[i].emissive.set(lit ? color : 0x000000);
     });
     drawDiverter(this.diverter!, t.gate, t.sinceFlow < DIVERTER_HOLD);
-    // the screen: the cryostabilizer in the reservoir / what's needed, in litres
-    const s = this.screen!;
-    const text = `${((t.tanks[1].n[TARGET] / CAP) * FLASK_L).toFixed(2)} L / ${GOAL_L.toFixed(2)} L`;
+    // the screens: the cryostabilizer in the reservoir / what's needed, in litres; and how long it's been delivering
+    // steadily
+    phosphor(this.screen!, STATION.screen, `${((t.tanks[1].n[TARGET] / CAP) * FLASK_L).toFixed(2)} L / ${GOAL_L.toFixed(2)} L`);
+    phosphor(this.steadyScreen!, STATION.steadyScreen, `STEADY ${clockText(t.steady)}`);
+  }
+
+  dispose(): void {
+    this.root.removeFromParent();
+    disposeGeometry(this.root);
+    for (const { fm } of this.fluids) fm.dispose();
+    for (const g of this.glows) g.dispose();
+    this.screen?.tex.dispose();
+    this.steadyScreen?.tex.dispose();
+  }
+}
+
+/** Show a line of text on a green-on-black screen covering `sc`, in the tool's frame, if it isn't already. */
+function phosphor(s: Screen, sc: { x0: number; x1: number; y0: number; y1: number }, text: string): void {
     if (s.key !== text) {
       s.key = text;
-      const sc = STATION.screen;
       s.ctx.setTransform(s.ppu, 0, 0, s.ppu, -sc.x0 * s.ppu, -sc.y0 * s.ppu);
       s.ctx.fillStyle = '#040a06';
       s.ctx.fillRect(sc.x0, sc.y0, sc.x1 - sc.x0, sc.y1 - sc.y0);
@@ -1524,15 +1543,6 @@ class ToolView {
       for (let y = sc.y0; y < sc.y1; y += 1.5) s.ctx.fillRect(sc.x0, y, sc.x1 - sc.x0, 0.6);
       s.tex.needsUpdate = true;
     }
-  }
-
-  dispose(): void {
-    this.root.removeFromParent();
-    disposeGeometry(this.root);
-    for (const { fm } of this.fluids) fm.dispose();
-    for (const g of this.glows) g.dispose();
-    this.screen?.tex.dispose();
-  }
 }
 
 /* ---------------- scales ---------------- */
@@ -2288,6 +2298,8 @@ export interface AirlockLook {
   message: boolean;
   /** Whether the crosshair is on the OK button. */
   okHot: boolean;
+  /** Whether the green lamp over the doorway is lit: it flashes while the doors stand open to sleep. */
+  lamp: boolean;
 }
 
 /**
@@ -2301,6 +2313,8 @@ class AirlockView {
   private message: THREE.Mesh;
   private ok: THREE.Mesh;
   private okTex = [okTexture(false), okTexture(true)];
+  private lamp: THREE.MeshStandardMaterial;
+  private lampLight: THREE.PointLight;
   private last: AirlockLook | null = null;
 
   constructor(scene: THREE.Scene, pickables: Map<THREE.Object3D, Pick>, eye: number) {
@@ -2350,6 +2364,18 @@ class AirlockView {
       this.doors.push(m);
       g.add(m);
     }
+    // the green lamp over the doorway, on the lab's side: a lens in a dark housing, and the light it throws, which
+    // stays in the scene (at no intensity while it's off) so lighting it costs nothing
+    const housing = new THREE.Mesh(new THREE.BoxGeometry(70, 30, 12), darkMat);
+    housing.position.set(x, door.h + 70, z1 - 6);
+    g.add(housing);
+    this.lamp = new THREE.MeshStandardMaterial({ color: 0x15361c, emissive: 0x3dff6a, emissiveIntensity: 0 });
+    const lens = new THREE.Mesh(new THREE.BoxGeometry(56, 18, 4), this.lamp);
+    lens.position.set(x, door.h + 70, z1 - 13);
+    g.add(lens);
+    this.lampLight = new THREE.PointLight(0x3dff6a, 0, 500, 2);
+    this.lampLight.position.set(x, door.h + 70, z1 - 40);
+    g.add(this.lampLight);
     // the pod: a plinth, and a metal shell whose front half slides up into the ceiling
     const shell = new THREE.MeshStandardMaterial({ color: 0x8c9692, roughness: 0.45, metalness: 0.35, side: THREE.DoubleSide });
     const pod = new THREE.Group();
@@ -2415,8 +2441,10 @@ class AirlockView {
 
   update(a: AirlockLook): void {
     const l = this.last;
-    if (l && l.door === a.door && l.front === a.front && l.dark === a.dark && l.message === a.message && l.okHot === a.okHot) return;
+    if (l && l.door === a.door && l.front === a.front && l.dark === a.dark && l.message === a.message && l.okHot === a.okHot && l.lamp === a.lamp) return;
     this.last = { ...a };
+    this.lamp.emissiveIntensity = a.lamp ? 1.6 : 0;
+    this.lampLight.intensity = a.lamp ? 4000 : 0;
     const { x, door } = AIRLOCK;
     for (const m of this.doors) m.position.x = x + m.userData.side * (door.w / 4 + a.door * (door.w / 2 + 6));
     // up past the ceiling, out of sight
