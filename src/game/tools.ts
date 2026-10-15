@@ -873,6 +873,8 @@ export class Tool {
   gate: 'reservoir' | 'waste' = 'waste';
   /** Sim seconds since anything last went through a receptacle's diverter; Infinity if nothing has. */
   sinceFlow = Infinity;
+  /** Sim seconds since a receptacle's diverter last let anything into the reservoir; Infinity if it never has. */
+  sinceDelivery = Infinity;
 
   constructor(
     readonly kind: ToolKind,
@@ -1035,10 +1037,11 @@ export class Tool {
     const p = this.packet(1);
     transfer(funnel, p, FUNNEL_RATE * h);
     this.sinceFlow += h;
+    this.sinceDelivery += h;
     if (p.N > 0) {
       this.sinceFlow = 0;
       this.gate = sustenance(p) > 0 ? 'reservoir' : 'waste';
-      if (this.gate === 'reservoir') transfer(p, ref, volume(p));
+      if (this.gate === 'reservoir' && transfer(p, ref, volume(p)) > 0) this.sinceDelivery = 0;
       if (p.N > 0) out[0] = p;
     }
     this.out = out;

@@ -326,6 +326,21 @@ describe('cryostabilizer station', () => {
     expect(r.sinceFlow).toBeCloseTo(0.02, 9);
   });
 
+  it('keeps time since it last let anything into the reservoir', () => {
+    const r = new Tool('receptacle', 0);
+    const funnel = r.tanks[0];
+    expect(r.sinceDelivery).toBe(Infinity);
+    funnel.setMolecules(TARGET, 1000);
+    r.step(0.02);
+    expect(r.sinceDelivery).toBe(0);
+    // what it turns away doesn't count
+    funnel.setMolecules(R, 1000);
+    r.step(0.02);
+    expect(r.sinceDelivery).toBeCloseTo(0.02, 9);
+    r.step(0.02);
+    expect(r.sinceDelivery).toBeCloseTo(0.04, 9);
+  });
+
   it("lets the reservoir out its faucet, as far as its valve is open, and slower than a tank at most", () => {
     const r = new Tool('receptacle', 0, undefined, [1]);
     const ref = r.tanks[1];

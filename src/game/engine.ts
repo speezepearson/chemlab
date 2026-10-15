@@ -9,7 +9,7 @@ import {
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
 import { diverter, type Diverter } from './diverter';
-import { CAP, FILL_RATE, GOAL_TARGET, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
+import { CAP, DELIVERY, FILL_RATE, GOAL_TARGET, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
 import { FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
@@ -324,6 +324,11 @@ export class GameEngine {
   /** Sim seconds the lab has run, for what blinks on sim time. */
   private clock = 0;
   private wakeT = Infinity;
+  /**
+   * Sim seconds the station has been delivering steadily, letting cryostabilizer into the reservoir at least every
+   * DELIVERY.gap sim seconds; 0 while it isn't (see Wake's open).
+   */
+  private steady = 0;
   /** The cryostabilizer station's diverter's sounds, while it's swinging or letting into the reservoir. */
   private diverters = new Map<Tool, Diverter>();
   /** The player's sticky notes, on the back wall, the one on top last (see paper.ts). They're notes, not lab, so Reset keeps them. */
@@ -517,6 +522,12 @@ export class GameEngine {
 
   private afterLoad(): void {
     this.won = false;
+    // a lab loads with the airlock shut, until its station has been delivering steadily again
+    this.steady = 0;
+    if (this.wake === 'open') {
+      this.wake = 'closed';
+      this.wakeT = Infinity;
+    }
     for (const d of this.diverters.values()) d.stop();
     this.diverters.clear();
     this.falling = [];
@@ -2187,7 +2198,9 @@ export class GameEngine {
         if (out) tot.v.addFrom(out, volume(out), true);
         tot.streamed ||= streamed;
       };
+      const station = this.station();
       for (let i = 0; i < sub; i++) {
+        this.steady = station.sinceDelivery <= DELIVERY.gap ? this.steady + step : 0;
         this.stepWake(step);
         if (D && this.pour) {
           const out = new Vessel(Infinity);
@@ -2724,6 +2737,9 @@ export class GameEngine {
     if (this.wake === 'flicker' && t >= WAKE_S.flicker) next('opening');
     else if (this.wake === 'opening' && t >= WAKE_S.open) next('out');
     else if (this.wake === 'out' && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
+    // steady delivery opens the doors again, and once it stops they close, when she's out in the lab
+    else if (this.wake === 'closed' && this.steady >= DELIVERY.streak) next('open');
+    else if (this.wake === 'open' && this.steady === 0 && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
   }
 
   /** How the airlock looks just now, for the view. */
@@ -2733,7 +2749,7 @@ export class GameEngine {
     // the message flickers, on less and less of the time, until it's gone
     const flick = w === 'flicker' && Math.sin(t * 90) + Math.sin(t * 37) > 2.6 * (t / WAKE_S.flicker) - 0.6;
     return {
-      door: w === 'closed' ? 1 - ease(t / WAKE_S.close) : 1,
+      door: w === 'closed' ? 1 - ease(t / WAKE_S.close) : w === 'open' ? ease(t / WAKE_S.close) : 1,
       front: w === 'opening' ? ease(t / WAKE_S.open) : inPod(w) ? 0 : 1,
       // the room's light floods in as the front slides up
       dark: w === 'opening' ? 1 - ease(t / WAKE_S.open) : inPod(w) ? 1 : 0,

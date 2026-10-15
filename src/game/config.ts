@@ -18,6 +18,11 @@ export const GOAL_L = (VOYAGE.passengers * VOYAGE.mlPerPassengerDay * VOYAGE.day
 export const GOAL_TARGET = (GOAL_L / FLASK_L) * CAP;
 /** The station's diverter lets only fluid more than this pure in the target (by atoms) into the reservoir. */
 export const GOAL_PURITY = 0.95;
+/**
+ * Steady delivery, which opens the airlock (see Wake): the station letting cryostabilizer into the reservoir at least
+ * once every `gap` sim seconds, for `streak` sim seconds on end.
+ */
+export const DELIVERY = { gap: 3, streak: 60 };
 /** Amounts of fluid below this many atoms count as nothing: too little to see or pour. */
 export const TRACE = CAP * 1e-6;
 /**
