@@ -71,7 +71,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     marked at pick-up and committed at set-down.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
-    `volumes.ts`); `rumble.ts` is the composition analyzer, `beeper.ts` the cryostabilizer station, `ambience.ts` the ship, `water.ts` drips and streams.
+    `volumes.ts`); `rumble.ts` is the composition analyzer, `diverter.ts` the cryostabilizer station, `ambience.ts` the ship, `water.ts` drips and streams.
     New sounds play into a channel's `bus()`, never straight to the destination, so the sliders reach them. A sound
     in the lab goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),
     so it fades and pans with where it is relative to the player's head.
@@ -86,7 +86,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Volume isn't atoms.** Capacities and flows are in `volume()` units: molecules by default, or atoms when the
   "volume counts molecules" toggle is off. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
 - **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
-  chemistry, cooling, the composition analyzer's reading and hum, the cryostabilizer station's cycle, and the drip and stream sounds. All of it
+  chemistry, cooling, the composition analyzer's reading and hum, the cryostabilizer station's diverter and display, and the drip and stream sounds. All of it
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The one exception to the
   substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
@@ -132,13 +132,13 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
 - **Unique tools** (`UNIQUE_TOOLS`: the composition analyzer, the spectroscope and the receptacle) aren't on
   the hotbar and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
-  whole cryostabilizer station (`STATION` in `tools.ts`): its tanks are the receptacle, the tester and the reference,
-  in that order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved.
+  whole cryostabilizer station (`STATION` in `tools.ts`): its tanks are the funnel and the ship's reservoir, in that
+  order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved.
 - **Inline instruments** (`INLINE_TOOLS`: the composition analyzer, the spectroscope and the flow meter) are a tube draining straight through at a fixed rate past a cabinet
   (or the flow meter's little readout, `METER_BODY`) that reads what goes by, as an exponentially weighted average that fades the past smoothly (`INSTRUMENT_TAU`,
   `Tool.smooth`). A hose's nozzle let go of over the tube snaps onto its
   top (`docked` in `bodies.ts`, via the engine's `gridded`).
-- **The goal** is the target in the station's reference (`tanks[2]`, against `GOAL_TARGET`), not what's lying around
+- **The goal** is the target in the station's reservoir (`tanks[1]`, against `GOAL_TARGET`), not what's lying around
   in vessels.
 - **Saves** stay at format v1. New fields are optional and the loaders tolerate their absence. Species are stored by
   name.
