@@ -7,6 +7,8 @@
  *
  *   - mode "tight": the sim alone in a tight loop, no frames, as while the player sleeps (sim s per wall s)
  *   - mode "micro": ReactionNetwork.step and tick alone on single fluids, and the bench/stepFast.ts prototype
+ *   - mode "sleep": the player asleep in the cryopod (src/game/sleep.ts) from `--warm` sim s in, until they wake,
+ *     against the lab run as ever for `--sim` sim s: how fast, and how much target each puts in the reservoir
  *
  * Usage:  npm run bench -- [scene ...] [--frames=N] [--speed=S,S2] [--mode=time,breakdown,stats,tight,micro] [--quiet]
  *   e.g.  npm run bench -- busy --speed=1000 --frames=30
@@ -28,11 +30,12 @@ import { T_ROOM, defaultChemParams } from '../src/chem/params';
 import { Lag, ReactionNetwork, heatAt, type Fluid } from '../src/chem/reactions';
 import { NS, SPECIES, TARGET, singleOf, speciesEnergies } from '../src/chem/species';
 import { flaskMouth, tankMouth, NOZZLE_REACH } from '../src/game/bodies';
-import { CAP } from '../src/game/config';
+import { CAP, GOAL_TARGET } from '../src/game/config';
 import { GameEngine } from '../src/game/engine';
 import { Vessel } from '../src/game/flask';
 import { DEFAULT_PRESET, type FlaskFill, type Preset } from '../src/game/presets';
 import { Hose, Tool } from '../src/game/tools';
+import { sleep, sleptFor } from '../src/game/sleep';
 import { stepFast } from './stepFast';
 
 /* ---------------- a deterministic Math.random ---------------- */
@@ -535,6 +538,50 @@ function microStep(): void {
  * engine still splits it into 0.02 s substeps); reports sim seconds per wall second over `sim` sim seconds, after
  * `warm` sim seconds to reach a steady state.
  */
+/** Sleep through a scene (see mode "sleep" above). */
+function asleep(name: string, scene: Scene): void {
+  const warm = Number(opt('warm', '60'));
+  const simS = Number(opt('sim', '600'));
+  const rate = (e: Engine, secs: number, run: () => void) => {
+    const res = e.station().tanks[1];
+    const [n0, c0, w0] = [res.n[TARGET], e.clock, performance.now()];
+    run();
+    const [dn, dc, dw] = [res.n[TARGET] - n0, e.clock - c0, (performance.now() - w0) / 1000];
+    return { perS: dn / dc, simS: dc, wall: dw, speed: dc / dw, secs };
+  };
+  // as ever
+  const plain = makeEngine(scene, 1).e;
+  plain.speed = 1;
+  for (let t = 0; t < warm; t += 1) plain.simulate(1);
+  const p = rate(plain, simS, () => {
+    for (let t = 0; t < simS; t += 1) plain.simulate(1);
+  });
+  // asleep
+  const { e } = makeEngine(scene, 1);
+  e.speed = 1;
+  for (let t = 0; t < warm; t += 1) e.simulate(1);
+  const stats = { plain: 0, jumped: 0, jumps: 0 };
+  let woke = '';
+  const s = rate(e, 0, () => {
+    const run = sleep(e.sleeper(), stats);
+    for (;;) {
+      const r = run.next();
+      if (r.done) {
+        woke = r.value;
+        break;
+      }
+    }
+  });
+  const fl = (x: number) => fmt((x * SPECIES[TARGET].size) / CAP, 6);
+  console.log(
+    `  sleep ${name.padEnd(8)} as ever: ${fl(p.perS)}F of target atoms per sim s, ${fmt(p.speed, 0)}x real time over ${simS} sim s
+` +
+      `                 asleep: ${fl(s.perS)}F per sim s, ${fmt(s.speed, 0)}x real time; woke (${woke}) after ${sleptFor(s.simS)} ` +
+      `(${fmt(s.wall, 1)} s wall): ${stats.jumps} jumps, ${fmt((100 * stats.jumped) / s.simS, 1)}% jumped; ` +
+      `reservoir ${fmt(e.station().tanks[1].n[TARGET] / CAP, 2)}F of target, goal ${fmt(GOAL_TARGET / CAP, 2)}F`,
+  );
+}
+
 function tight(name: string, scene: Scene): void {
   const chunk = Number(opt('chunk', '1'));
   const warm = Number(opt('warm', '30'));
@@ -649,6 +696,10 @@ if (saveDir) {
   process.exit(0);
 }
 if (MODES.includes('micro')) microStep();
+if (MODES.includes('sleep')) {
+  console.log('\n=== asleep in the cryopod');
+  for (const n of names) if (SCENES[n]) asleep(n, SCENES[n]);
+}
 if (MODES.includes('tight')) {
   console.log('\n=== asleep: the sim alone in a tight loop');
   for (const n of names) if (SCENES[n]) tight(n, SCENES[n]);
