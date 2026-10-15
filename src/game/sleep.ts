@@ -465,12 +465,9 @@ export function* sleep(lab: Sleeper, stats: SleepStats = { plain: 0, jumped: 0, 
   }
 }
 
-/** How long a sleep has gone on, for the player: "45 s", "12 min", "3 h 12 min", "1 day 4 h". */
+/** How long a sleep has gone on, for the player, as days, hours, minutes and seconds: "00:03:12:05". */
 export function sleptFor(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
-  const [d, h, m] = [Math.floor(s / 86400), Math.floor(s / 3600) % 24, Math.floor(s / 60) % 60];
-  if (d > 0) return `${d} day${d === 1 ? '' : 's'}${h ? ` ${h} h` : ''}`;
-  if (h > 0) return `${h} h${m ? ` ${m} min` : ''}`;
-  if (m > 0) return `${m} min`;
-  return `${s} s`;
+  const two = (n: number) => String(n).padStart(2, '0');
+  return [Math.floor(s / 86400), Math.floor(s / 3600) % 24, Math.floor(s / 60) % 60, s % 60].map(two).join(':');
 }

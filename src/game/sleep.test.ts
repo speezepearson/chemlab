@@ -125,11 +125,10 @@ describe('sleep', () => {
   });
 
   it('says how long it has gone on', () => {
-    expect(sleptFor(45.9)).toBe('45 s');
-    expect(sleptFor(12 * 60 + 5)).toBe('12 min');
-    expect(sleptFor(3 * 3600)).toBe('3 h');
-    expect(sleptFor(3 * 3600 + 12 * 60)).toBe('3 h 12 min');
-    expect(sleptFor(86400 + 4 * 3600 + 59)).toBe('1 day 4 h');
-    expect(sleptFor(2 * 86400)).toBe('2 days');
+    expect(sleptFor(45.9)).toBe('00:00:00:45');
+    expect(sleptFor(12 * 60 + 5)).toBe('00:00:12:05');
+    expect(sleptFor(3 * 3600 + 12 * 60)).toBe('00:03:12:00');
+    expect(sleptFor(86400 + 4 * 3600 + 59)).toBe('01:04:00:59');
+    expect(sleptFor(123 * 86400)).toBe('123:00:00:00');
   });
 });
