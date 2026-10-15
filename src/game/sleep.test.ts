@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { roundRandom } from '../chem/reactions';
 import { TARGET } from '../chem/species';
-import { CAP, DELIVERY, GOAL_TARGET } from './config';
+import { CAP, DELIVERY, GOAL_TARGET, SUSTAIN } from './config';
 import { Vessel } from './flask';
-import { sleep, sleptFor, type SleepStats, type Sleeper, type Woke } from './sleep';
+import { SLEEP, sleep, sleptFor, type SleepStats, type Sleeper, type Woke } from './sleep';
 import { Tool } from './tools';
 
 /**
@@ -67,20 +67,36 @@ describe('sleep', () => {
     expect(stats.plain).toBeLessThan(0.02 * now());
   });
 
-  it('wakes once the station stops delivering, about when the supply runs out', () => {
-    // a supply draining away with a time constant of 1000 sim s, which delivers whole molecules until it's down to a
-    // few thousand
+  it('wakes once a supply running down delivers less than the passengers use', () => {
+    // a supply draining away with a time constant of 1000 sim s, which falls short once it holds less than SUSTAIN / k
     const k = 1e-3;
     const { l, tank, station, now } = lab(CAP, share(k), 0);
     const { woke, stats } = run(l);
     expect(woke).toBe('stopped');
-    expect(tank.n[TARGET]).toBeLessThan(1e4);
+    // over the last SLEEP.sustain, it delivered less than SUSTAIN a sim second, on average
+    const short = SUSTAIN / k;
+    expect(tank.n[TARGET]).toBeLessThan(short);
+    expect(tank.n[TARGET]).toBeGreaterThan(short * Math.exp(-k * SLEEP.sustain) * 0.8);
     // and no more reached the reservoir than the supply held
     expect(station.tanks[1].n[TARGET] + tank.n[TARGET]).toBeLessThanOrEqual(CAP * (1 + 1e-6));
-    // it ran out about when the plain sim would have: ln(1e9 / a few thousand) time constants
-    expect(now() * k).toBeGreaterThan(10);
-    expect(now() * k).toBeLessThan(15);
+    // when the plain sim would have: ln(1e9 / short) time constants, give or take the minute it's averaged over
+    const when = Math.log(CAP / short) / k;
+    expect(now()).toBeGreaterThan(when);
+    expect(now()).toBeLessThan(when + 2 * SLEEP.sustain);
     expect(stats.jumped).toBeGreaterThan(stats.plain);
+  });
+
+  it(`wakes once it's delivered less than the passengers use over ${SLEEP.sustain} sim s, however often`, () => {
+    // something every substep, so never a gap, but half what's used up
+    const { l, now } = lab(1e15, (_, dt) => (SUSTAIN / 2) * dt, 0);
+    expect(run(l).woke).toBe('stopped');
+    expect(now()).toBeGreaterThanOrEqual(SLEEP.sustain);
+    expect(now()).toBeLessThan(SLEEP.sustain + 1);
+  });
+
+  it('sleeps on to the goal while it delivers more than the passengers use', () => {
+    const { l } = lab(1e15, (_, dt) => 2 * SUSTAIN * dt, GOAL_TARGET - 1e9);
+    expect(run(l).woke).toBe('goal');
   });
 
   it("doesn't overshoot a supply that drains steadily until it suddenly runs out", () => {

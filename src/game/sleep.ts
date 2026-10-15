@@ -2,7 +2,7 @@ import { ATOMS } from '../chem/atoms';
 import { THERMO } from '../chem/params';
 import { roundRandom } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
-import { DELIVERY, GOAL_TARGET } from './config';
+import { DELIVERY, GOAL_TARGET, SUSTAIN } from './config';
 import { roomFor, type Vessel } from './flask';
 import type { Tool } from './tools';
 
@@ -48,7 +48,7 @@ import type { Tool } from './tools';
  *    would overshoot;
  *  - a vessel nothing drains gains no more uncertainty than `precision` of what it holds, until its rate is known;
  *  - no vessel reaches its brim within it, nor within half a window after;
- *  - the reservoir goes no further than the goal.
+ *  - the reservoir goes no further than the goal, nor past where it fills slower than the passengers use it up.
  * After a jump, the lab runs `settle` sim seconds unmeasured, for whatever the jump knocked out of balance (fast
  * reactions and their reverses) to settle, so the next window doesn't mistake its relaxing for a drift. Anything
  * significant but unconfirmed means no jump yet.
@@ -86,6 +86,8 @@ export const SLEEP = {
   settle: 5,
   /** Jumps shorter than this many windows aren't worth it: just run on. */
   minJump: 1,
+  /** Sim seconds over which the reservoir must gain at least what the passengers use up (SUSTAIN), or the sleeper wakes. */
+  sustain: 60,
 };
 
 /** What the sleeper runs: the lab (see GameEngine.sleeper). */
@@ -102,7 +104,10 @@ export interface Sleeper {
   skip(dt: number): void;
 }
 
-/** Why a sleep ended: the reservoir holds enough to reach Mu Ceti, or the station stopped delivering. */
+/**
+ * Why a sleep ended: the reservoir holds enough to reach Mu Ceti, or the station stopped delivering (letting nothing
+ * in for DELIVERY.gap, or less than the passengers use up over SLEEP.sustain).
+ */
 export type Woke = 'goal' | 'stopped';
 
 /** How a sleep went, in sim seconds: run as ever (windows and settling), and jumped. */
@@ -351,8 +356,15 @@ function plan(
     }
     const room = tr.v.cap - vol(last);
     if (room > 1e-6 * tr.v.cap) limit(reach(room, vr, va) - W / 2);
-    // the reservoir, no further than the goal
-    if (tr.v === reservoir) limit(reach(Math.max(0, GOAL_TARGET - last[TARGET]), startRate(out, TARGET, W), out[ACC + TARGET]));
+    if (tr.v === reservoir) {
+      const [r0, a] = [startRate(out, TARGET, W), out[ACC + TARGET]];
+      // no further than the goal
+      limit(reach(Math.max(0, GOAL_TARGET - last[TARGET]), r0, a));
+      // and none at all once it's filling slower than the passengers use it up, nor past when it will: that's for a
+      // window, run as ever, to see
+      if (r0 < SUSTAIN) limit(0);
+      else if (a < 0) limit((SUSTAIN - r0) / a);
+    }
     return out;
   });
   return { dt, rates, seen };
@@ -391,16 +403,31 @@ function jump(tracks: Track[], rates: Float64Array[], dt: number, W: number): vo
 }
 
 /**
- * Sleep: windows and jumps as above, until the reservoir holds the goal, or the station stops delivering (lets
- * nothing into the reservoir for DELIVERY.gap sim seconds). It yields every SLEEP.piece sim seconds of the lab run as
+ * Sleep: windows and jumps as above, until the reservoir holds the goal, or the station stops delivering: lets nothing
+ * into the reservoir for DELIVERY.gap sim seconds, or over any SLEEP.sustain sim seconds, less than the passengers use
+ * up (SUSTAIN; through a jump, the reservoir's taken to have filled evenly). It yields every SLEEP.piece sim seconds of the lab run as
  * ever, and after every jump, so it can be run a little each frame; it returns why it woke. `stats`, if given, is
  * kept up to date.
  */
 export function* sleep(lab: Sleeper, stats: SleepStats = { plain: 0, jumped: 0, jumps: 0 }): Generator<void, Woke> {
   const { window: W, samples: K, piece } = SLEEP;
   const reservoir = lab.station.tanks[1];
+  // the reservoir's target as the sleep goes on, from the last at least SLEEP.sustain ago
+  const filled: [number, number][] = [[lab.clock(), reservoir.n[TARGET]]];
+  const short = (): boolean => {
+    const t = lab.clock();
+    const from = t - SLEEP.sustain;
+    filled.push([t, reservoir.n[TARGET]]);
+    while (filled.length > 2 && filled[1][0] <= from) filled.shift();
+    const [[t0, n0], [t1, n1]] = filled;
+    if (t0 > from) return false;
+    const then = t1 > t0 ? n0 + ((n1 - n0) * (from - t0)) / (t1 - t0) : n0;
+    return reservoir.n[TARGET] - then < SUSTAIN * SLEEP.sustain;
+  };
   const woke = (): Woke | null =>
-    reservoir.n[TARGET] >= GOAL_TARGET ? 'goal' : lab.station.sinceDelivery > DELIVERY.gap ? 'stopped' : null;
+    reservoir.n[TARGET] >= GOAL_TARGET ? 'goal'
+    : short() || lab.station.sinceDelivery > DELIVERY.gap ? 'stopped'
+    : null;
   // run the lab as ever for dt, a piece at a time
   function* run(dt: number): Generator<void, Woke | null> {
     for (let s = 0; s < dt - 1e-9; s += piece) {
