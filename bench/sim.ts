@@ -26,7 +26,7 @@ import { ATOMS, type Atom } from '../src/chem/atoms';
 import { equilibrium } from '../src/chem/equilibrium';
 import { T_ROOM, defaultChemParams } from '../src/chem/params';
 import { Lag, ReactionNetwork, heatAt, type Fluid } from '../src/chem/reactions';
-import { NS, SPECIES, singleOf, speciesEnergies } from '../src/chem/species';
+import { NS, SPECIES, TARGET, singleOf, speciesEnergies } from '../src/chem/species';
 import { flaskMouth, tankMouth, NOZZLE_REACH } from '../src/game/bodies';
 import { CAP } from '../src/game/config';
 import { GameEngine } from '../src/game/engine';
@@ -548,24 +548,19 @@ function tight(name: string, scene: Scene): void {
     for (let t = 0; t < warm; t += chunk) e.simulate(chunk);
     const vc = vesselCount(e);
     const station = e.tools.find((t: Tool) => t.kind === 'receptacle') as Tool;
-    const r0 = station.tanks[2].n.slice();
-    let cycles = 0;
-    let had = !!station.cycle;
+    const reservoir = station.tanks[1];
+    const r0 = reservoir.n[TARGET];
     const t0 = performance.now();
     let worst = 0;
     for (let t = 0; t < simS; t += chunk) {
       const c0 = performance.now();
       e.simulate(chunk);
       worst = Math.max(worst, performance.now() - c0);
-      if (station.cycle && !had) cycles++;
-      had = !!station.cycle;
     }
     walls.push((performance.now() - t0) / 1000);
-    let dRef = 0;
-    for (let s = 0; s < NS; s++) dRef += Math.abs(station.tanks[2].n[s] - r0[s]);
     line =
-      `worst chunk ${fmt(worst, 1)} ms; vessels ${vc.all} (${vc.full} full); receptacle ${fmt(station.tanks[0].N / CAP, 3)}F, ` +
-      `cycles started ${cycles}, reference changed by ${fmt(dRef / CAP, 4)}F of molecules`;
+      `worst chunk ${fmt(worst, 1)} ms; vessels ${vc.all} (${vc.full} full); ` +
+      `target into the reservoir ${fmt(((reservoir.n[TARGET] - r0) * SPECIES[TARGET].size) / CAP / simS, 6)}F of atoms per sim s`;
   }
   walls.sort((a, b) => a - b);
   const wall = walls[0];
