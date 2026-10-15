@@ -1,7 +1,7 @@
 import { equilibrate } from '../chem/equilibrium';
 import { Lag, temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
-import { POD, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
+import { POD, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
   FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, nozzleBox,
@@ -226,6 +226,8 @@ const EYE = 620;
 const PLAYER_R = 45;
 /** Walking speed, in world units per real second. */
 const WALK = 840;
+/** Where the player stands in the pod, and how they face: out at the lab, eyes a little down. */
+const IN_POD = { x: POD.x, z: POD.z, yaw: 0, pitch: -0.12 };
 /**
  * Real milliseconds the sleeping lab runs for at a time (see pump), between which the page gets on with anything
  * else, so it stays responsive.
@@ -339,6 +341,8 @@ export class GameEngine {
   private sleeping: { run: Generator<void, Woke>; stats: SleepStats; from: number; woke: Woke | null } | null = null;
   /** Whether the player is waking from a sleep, so the screen fades in from black as the pod opens. */
   private rising = false;
+  /** While settling into the pod (see Wake), where the player started from, and how many real seconds it's been. */
+  private settling: { x: number; z: number; yaw: number; pitch: number; t: number } | null = null;
   /** Runs the sleeping lab a slice at a time (see pump), independent of frames. */
   private pumper = new MessageChannel();
   /** The cryostabilizer station's diverter's sounds, while it's swinging or letting into the reservoir. */
@@ -538,7 +542,7 @@ export class GameEngine {
     this.won = false;
     // a lab loads with the airlock shut, until its station has been delivering steadily again, and anyone in it or
     // asleep in the pod wakes in the lab
-    if (this.wake === 'open' || this.wake === 'boarding' || this.wake === 'asleep') {
+    if (this.wake === 'open' || this.wake === 'settling' || this.wake === 'boarding' || this.wake === 'asleep') {
       this.wake = 'closed';
       this.wakeT = Infinity;
       this.sleeping = null;
@@ -2076,6 +2080,7 @@ export class GameEngine {
       return;
     }
     this.move(dt);
+    if (this.wake === 'settling') this.settleIn(dt);
     if (this.held) this.follow(this.held);
     this.view.look(this.eye(), this.player.yaw, this.player.pitch);
     if (!this.turning) this.target = this.view.pick(REACH, this.heldObject());
@@ -2763,20 +2768,45 @@ export class GameEngine {
     this.rising = false;
   }
 
-  /** Put the player in the pod, facing the lab, empty-handed: whatever they held is set down, or else put away. */
+  /** Put the player in the pod, facing the lab, empty-handed (see emptyHanded). */
   private intoPod(): void {
+    this.emptyHanded();
+    Object.assign(this.player, IN_POD);
+  }
+
+  /** Leave the player empty-handed: whatever they held is set down if it can be, or else put away. */
+  private emptyHanded(): void {
     if (this.held) this.release();
     if (this.held && !(this.held.kind === 'tool' && UNIQUE_TOOLS.includes(this.held.t.kind))) this.putAway();
     this.held = null;
     this.setPencil(false);
     this.endTurn();
     this.rightHeld = false;
-    Object.assign(this.player, { x: POD.x, z: POD.z, yaw: 0, pitch: -0.12 });
   }
 
-  /** The player walked into the open pod: it closes on them, and they fall asleep (see Wake). */
+  /** The player walked into the open pod: they ease into place in it, it closes on them, and they fall asleep (see Wake). */
   private board(): void {
-    this.intoPod();
+    this.emptyHanded();
+    const { x, z, yaw, pitch } = this.player;
+    this.settling = { x, z, yaw, pitch, t: 0 };
+    this.wake = 'settling';
+    this.wakeT = 0;
+  }
+
+  /** Ease the player into place in the pod over dt real seconds, then let its front close (see Wake's settling). */
+  private settleIn(dt: number): void {
+    const s = this.settling;
+    if (!s) return;
+    s.t = Math.min(SETTLE_S, s.t + dt);
+    const k = ease(s.t / SETTLE_S);
+    const p = this.player;
+    p.x = s.x + (IN_POD.x - s.x) * k;
+    p.z = s.z + (IN_POD.z - s.z) * k;
+    // turning the short way round
+    p.yaw = wrapAngle(s.yaw + wrapAngle(IN_POD.yaw - s.yaw) * k);
+    p.pitch = s.pitch + (IN_POD.pitch - s.pitch) * k;
+    if (s.t < SETTLE_S) return;
+    this.settling = null;
     this.wake = 'boarding';
     this.wakeT = 0;
   }
@@ -2895,9 +2925,9 @@ export class GameEngine {
     const flick = w === 'flicker' && Math.sin(t * 90) + Math.sin(t * 37) > 2.6 * (t / WAKE_S.flicker) - 0.6;
     return {
       door: w === 'closed' ? 1 - ease(t / WAKE_S.close) : w === 'open' ? ease(t / WAKE_S.close) : 1,
-      front: w === 'opening' ? ease(t / WAKE_S.open) : w === 'boarding' ? 1 - ease(t / WAKE_S.open) : inPod(w) ? 0 : 1,
+      front: w === 'opening' ? ease(t / WAKE_S.open) : w === 'boarding' ? 1 - ease(t / WAKE_S.open) : inPod(w) && w !== 'settling' ? 0 : 1,
       // the room's light floods in as the front slides up, and is shut out as it slides down
-      dark: w === 'opening' ? 1 - ease(t / WAKE_S.open) : w === 'boarding' ? ease(t / WAKE_S.open) : inPod(w) ? 1 : 0,
+      dark: w === 'opening' ? 1 - ease(t / WAKE_S.open) : w === 'boarding' ? ease(t / WAKE_S.open) : inPod(w) && w !== 'settling' ? 1 : 0,
       message: w === 'pod' || flick,
       okHot: w === 'pod' && this.target?.kind === 'wake',
       // flashing while the doors stand open to sleep, a second on and half a second off, on sim time

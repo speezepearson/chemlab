@@ -36,15 +36,20 @@ export const WAKE_S = { flicker: 0.7, open: 1.6, close: 1.2, fade: 1.5 };
  * - closed: the doors have closed behind them. This is how every lab starts but the first.
  * - open: the station has been delivering steadily (see DELIVERY), and the doors have slid open again, back to the
  *   pod; they close again once it stops, when the player's out in the lab.
- * - boarding: the player walked into the pod while it was open: its front slides down, and then all fades to black.
+ * - settling: the player walked into the pod while it was open, and is easing into place in it, facing out: they've
+ *   stopped walking, and it's their own movement, so it goes in real time (see SETTLE_S).
+ * - boarding: settled in, the pod's front slides down in front of them, and then all fades to black.
  * - asleep: in the pod, asleep, while the lab runs on (see sleep.ts) until the goal's reached, or the station stops
  *   delivering and they wake, as at first but with no message: opening, out and closed again.
  */
-export type Wake = 'pod' | 'flicker' | 'opening' | 'out' | 'closed' | 'open' | 'boarding' | 'asleep';
+export type Wake = 'pod' | 'flicker' | 'opening' | 'out' | 'closed' | 'open' | 'settling' | 'boarding' | 'asleep';
+
+/** Real seconds the player takes to ease into place in the pod as they get in (see Wake's settling). */
+export const SETTLE_S = 1.4;
 
 /** Whether the player is still shut in the pod. */
 export function inPod(w: Wake): boolean {
-  return w === 'pod' || w === 'flicker' || w === 'opening' || w === 'boarding' || w === 'asleep';
+  return w === 'pod' || w === 'flicker' || w === 'opening' || w === 'settling' || w === 'boarding' || w === 'asleep';
 }
 
 const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number): Box => ({
