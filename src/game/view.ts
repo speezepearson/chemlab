@@ -513,46 +513,51 @@ class Screen {
 }
 
 /**
- * The cryostabilizer station's diverter's LCD: a pipe down from the funnel, branching off toward the reservoir, with
- * the diverter's flap across whichever way it isn't sending what comes through, and that way lit while anything's
- * going through: green into the reservoir, red down to the waste spigot.
+ * The cryostabilizer station's diverter's LCD: a segment display, like the flow meter's digits, that can show only
+ * three things. Its segments are a pipe down from the funnel, branching off toward the reservoir, and a flap across
+ * each way; all are dark (only faintly there, as an LCD's unlit segments are) unless something's going through, and
+ * then the way it's going and the flap across the other are lit: green into the reservoir, red down to the waste.
  */
-function drawDiverter(sc: Screen, gate: 'reservoir' | 'waste', flowing: boolean): void {
-  const key = `${gate} ${flowing}`;
-  if (key === sc.key) return;
-  sc.key = key;
+function drawDiverter(sc: Screen, state: 'reservoir' | 'waste' | 'off'): void {
+  if (state === sc.key) return;
+  sc.key = state;
   const { ctx, ppu } = sc;
   const d = STATION.display;
   const [w, h] = [d.x1 - d.x0, d.y1 - d.y0];
   ctx.setTransform(ppu, 0, 0, ppu, 0, 0);
-  ctx.fillStyle = '#040a06';
+  ctx.fillStyle = '#050603';
   ctx.fillRect(0, 0, w, h);
-  // the pipes' centerlines, in the display's frame: down from the top, with the branch leaving at j, down and
-  // across at 45°, then straight across to the edge toward the reservoir
-  const x = 18;
-  const j = 14;
-  const down: [number, number][] = [[x, 0], [x, h]];
-  const branch: [number, number][] = [[x, j], [x + 10, j + 10], [w, j + 10]];
-  const stroke = (pts: [number, number][], width: number, color: string) => {
+  // each segment, from one point to another (in the display's frame) and half as thick: a bar with pointed ends, as a
+  // seven-segment digit's are, with gaps between them; and which state lights it
+  const SEGMENTS: { a: [number, number]; b: [number, number]; r: number; lit: ('reservoir' | 'waste')[] }[] = [
+    { a: [17, 3], b: [17, 15], r: 2.6, lit: ['reservoir', 'waste'] },
+    { a: [17, 26], b: [17, 38], r: 2.6, lit: ['waste'] },
+    { a: [22, 20], b: [31, 29], r: 2.6, lit: ['reservoir'] },
+    { a: [34, 29], b: [54, 29], r: 2.6, lit: ['reservoir'] },
+    // the flaps: across the pipe down, or across the branch's mouth
+    { a: [13.5, 21], b: [20.5, 24.5], r: 1.1, lit: ['reservoir'] },
+    { a: [17.5, 20.7], b: [22.1, 16.1], r: 1.1, lit: ['waste'] },
+  ];
+  const color = state === 'reservoir' ? '#3cff6a' : '#ff3a2e';
+  for (const { a, b, r, lit } of SEGMENTS) {
+    const on = state !== 'off' && lit.includes(state);
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const [dx, dy] = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+    const [nx, ny] = [-dy, dx];
     ctx.beginPath();
-    pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
-    ctx.lineWidth = width;
-    ctx.strokeStyle = color;
-    ctx.stroke();
-  };
-  ctx.lineCap = 'butt';
-  ctx.lineJoin = 'miter';
-  // their walls: each stroked wide in the walls' color, then hollowed out
-  const wallColor = 'rgba(200, 222, 210, 0.75)';
-  for (const p of [down, branch]) stroke(p, 9, wallColor);
-  for (const p of [down, branch]) stroke(p, 6, '#040a06');
-  if (flowing)
-    stroke(gate === 'reservoir' ? [[x, 0], ...branch] : down, 4.5, gate === 'reservoir' ? '#3cff6a' : '#ff3a2e');
-  // the flap: along the branch's lower wall, across the pipe below it; or across the branch's mouth
-  ctx.lineCap = 'round';
-  stroke(gate === 'reservoir' ? [[x - 3, j + 1.2], [x + 3, j + 7.2]] : [[x + 2.9, j + 7.1], [x + 7.1, j + 2.9]], 1.6, wallColor);
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
-  for (let y = 0; y < h; y += 1.5) ctx.fillRect(0, y, w, 0.6);
+    ctx.moveTo(a[0], a[1]);
+    ctx.lineTo(a[0] + r * (dx + nx), a[1] + r * (dy + ny));
+    ctx.lineTo(b[0] + r * (-dx + nx), b[1] + r * (-dy + ny));
+    ctx.lineTo(b[0], b[1]);
+    ctx.lineTo(b[0] + r * (-dx - nx), b[1] + r * (-dy - ny));
+    ctx.lineTo(a[0] + r * (dx - nx), a[1] + r * (dy - ny));
+    ctx.closePath();
+    ctx.fillStyle = on ? color : 'rgba(200, 222, 210, 0.07)';
+    ctx.shadowColor = on ? color : 'transparent';
+    ctx.shadowBlur = on ? 3 * ppu : 0;
+    ctx.fill();
+  }
+  ctx.shadowBlur = 0;
   sc.tex.needsUpdate = true;
 }
 
@@ -1502,7 +1507,7 @@ class ToolView {
       this.segments[i].color.set(color);
       this.segments[i].emissive.set(lit ? color : 0x000000);
     });
-    drawDiverter(this.diverter!, t.gate, t.sinceFlow < DIVERTER_HOLD);
+    drawDiverter(this.diverter!, t.sinceFlow < DIVERTER_HOLD ? t.gate : 'off');
     // the screen: the cryostabilizer in the reservoir / what's needed, in litres
     const s = this.screen!;
     const text = `${((t.tanks[1].n[TARGET] / CAP) * FLASK_L).toFixed(2)} L / ${GOAL_L.toFixed(2)} L`;
