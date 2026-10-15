@@ -2321,7 +2321,7 @@ class AirlockView {
   private ok: THREE.Mesh;
   private okTex = [okTexture(false), okTexture(true)];
   private lamp: THREE.MeshStandardMaterial;
-  private lampLight: THREE.PointLight;
+  private lampGlow: THREE.Sprite;
   private last: AirlockLook | null = null;
 
   constructor(scene: THREE.Scene, pickables: Map<THREE.Object3D, Pick>, eye: number) {
@@ -2371,8 +2371,8 @@ class AirlockView {
       this.doors.push(m);
       g.add(m);
     }
-    // the green lamp over the doorway, on the lab's side: a lens in a dark housing, and the light it throws, which
-    // stays in the scene (at no intensity while it's off) so lighting it costs nothing
+    // the green lamp over the doorway, on the lab's side: a lens in a dark housing, and a glow round it (a glow, not a
+    // light, since every light in the scene costs every surface it might fall on)
     const housing = new THREE.Mesh(new THREE.BoxGeometry(70, 30, 12), darkMat);
     housing.position.set(x, door.h + 70, z1 - 6);
     g.add(housing);
@@ -2380,9 +2380,12 @@ class AirlockView {
     const lens = new THREE.Mesh(new THREE.BoxGeometry(56, 18, 4), this.lamp);
     lens.position.set(x, door.h + 70, z1 - 13);
     g.add(lens);
-    this.lampLight = new THREE.PointLight(0x3dff6a, 0, 500, 2);
-    this.lampLight.position.set(x, door.h + 70, z1 - 40);
-    g.add(this.lampLight);
+    this.lampGlow = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: glowTexture(2), color: 0x3dff6a, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }),
+    );
+    this.lampGlow.scale.set(220, 220, 1);
+    this.lampGlow.position.set(x, door.h + 70, z1 - 20);
+    g.add(this.lampGlow);
     // the pod: a plinth, and a metal shell whose front half slides up into the ceiling
     const shell = new THREE.MeshStandardMaterial({ color: 0x8c9692, roughness: 0.45, metalness: 0.35, side: THREE.DoubleSide });
     const pod = new THREE.Group();
@@ -2451,7 +2454,7 @@ class AirlockView {
     if (l && l.door === a.door && l.front === a.front && l.dark === a.dark && l.message === a.message && l.okHot === a.okHot && l.lamp === a.lamp) return;
     this.last = { ...a };
     this.lamp.emissiveIntensity = a.lamp ? 1.6 : 0;
-    this.lampLight.intensity = a.lamp ? 4000 : 0;
+    this.lampGlow.visible = a.lamp;
     const { x, door } = AIRLOCK;
     for (const m of this.doors) m.position.x = x + m.userData.side * (door.w / 4 + a.door * (door.w / 2 + 6));
     // up past the ceiling, out of sight
