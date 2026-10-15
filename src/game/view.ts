@@ -10,7 +10,7 @@ import {
   NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
 } from './bodies';
 import { TARGET } from '../chem/species';
-import { CAP, FLASK_L, GOAL_L, GOAL_TARGET, TRACE } from './config';
+import { CAP, DELIVERY, FLASK_L, GOAL_L, GOAL_TARGET, TRACE } from './config';
 import { Vessel, fluidAlpha, fluidRGB, glowColor, volume, type Flask } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, type Scale } from './scale';
@@ -1534,7 +1534,7 @@ class ToolView {
     // the screens: the cryostabilizer in the reservoir / what's needed, in litres; and how long it's been delivering
     // steadily
     phosphor(this.screen!, STATION.screen, `${((t.tanks[1].n[TARGET] / CAP) * FLASK_L).toFixed(2)} L / ${GOAL_L.toFixed(2)} L`);
-    phosphor(this.steadyScreen!, STATION.steadyScreen, `STEADY ${clockText(t.steady)}`);
+    phosphor(this.steadyScreen!, STATION.steadyScreen, t.steady >= DELIVERY.streak ? 'AIRLOCK OPEN' : `STEADY ${clockText(t.steady)}`);
   }
 
   dispose(): void {
