@@ -2,7 +2,7 @@ import { ATOMS, BIT_PAIRS, GROUP, GROUP_PRIMARY, pairKey, type Atom } from '../c
 import { THERMO } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
-import { CAP, TRACE } from './config';
+import { CAP, DELIVERY, TRACE } from './config';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
 import { CELL, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
@@ -165,7 +165,7 @@ export function dropRate(atoms: number): number {
  */
 export function drip(drop: Vessel, out: Vessel | null, h: number, rand = Math.random): Vessel | null {
   if (out && out.N >= DRIP_FLOW * h) {
-    transfer(drop, out, volume(drop));
+    if (drop.N > 0) transfer(drop, out, volume(drop));
     return out;
   }
   if (out) transfer(out, drop, volume(out));
@@ -289,6 +289,8 @@ export const STATION = {
   labelY: -31,
   gauge: { x0: 2 * CELL + 20, x1: 2 * CELL + 30, segments: 26 },
   screen: { x0: 2 * CELL - 50, x1: 2 * CELL + 50, y0: -19, y1: -4 },
+  /** The screen showing how long it's been delivering steadily (see Tool.steady), left of the reservoir's. */
+  steadyScreen: { x0: 2 * CELL - 160, x1: 2 * CELL - 60, y0: -19, y1: -4 },
 };
 
 /** The station's funnel's inside, as drawn (see Piece): a square funnel narrowing from its mouth to its stem. */
@@ -318,6 +320,41 @@ export const REFERENCE_CAP = 540 * CAP;
 export const REFERENCE_START = 100 * CAP;
 /** How fast the reservoir's faucet lets it out, fully open, in atoms per sim second: a fifth of a flask a second. */
 export const REFERENCE_FLOW = 0.2 * MAX_FLOW;
+/**
+ * The reservoir's filter: each sim second it takes out this share of every molecule with a yellow atom in it, which
+ * would otherwise slowly break the cryostabilizer down (see filter).
+ */
+export const RESERVOIR_FILTER = 0.05;
+/** The species with a yellow atom in them, which the reservoir's filter takes out. */
+const YELLOW = SPECIES.filter((s) => s.atoms.includes('Y')).map((s) => s.i);
+
+/** A length of time on a screen, as a clock does: "0:42", "12:05", "1:02:03". */
+export function clockText(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const two = (n: number) => String(n).padStart(2, '0');
+  const [h, m] = [Math.floor(s / 3600), Math.floor(s / 60) % 60];
+  return h > 0 ? `${h}:${two(m)}:${two(s % 60)}` : `${m}:${two(s % 60)}`;
+}
+
+/**
+ * The reservoir's filter over h sim seconds: RESERVOIR_FILTER of each species with a yellow atom in it each sim
+ * second, smoothly, in whole molecules, with their share of the heat, gone for good.
+ */
+export function filter(v: Vessel, h: number): void {
+  if (v.N <= 0) return;
+  const share = 1 - (1 - RESERVOIR_FILTER) ** h;
+  let atoms = 0;
+  for (const s of YELLOW) {
+    if (!v.n[s]) continue;
+    const m = Math.min(v.n[s], roundRandom(v.n[s] * share));
+    v.n[s] -= m;
+    atoms += m * SPECIES[s].size;
+  }
+  if (!atoms) return;
+  v.Q -= Math.min(v.Q, roundRandom((v.Q * atoms) / v.N));
+  v.N -= atoms;
+  if (v.N <= 0) v.Q = 0;
+}
 /**
  * How long the diverter's LCD shows fluid going through it after the last of it went by, in sim seconds, so a drip
  * reads as a flow rather than a flicker.
@@ -842,6 +879,8 @@ export class Tool {
   streaming: boolean[];
   /** Per spout, the flow on the last step, in flasks per second. */
   flow: number[];
+  /** What step hands out, emptied and reused from step to step, so stepping allocates no fluid (see packet). */
+  private scratch: Vessel[] = [];
   /**
    * An analyzer's reading (see composition), shown on its screen: what it drew off in the recent past (see
    * INSTRUMENT_TAU), as shares of its volume; null once that's down to less than TRACE a sim second.
@@ -871,6 +910,13 @@ export class Tool {
   gate: 'reservoir' | 'waste' = 'waste';
   /** Sim seconds since anything last went through a receptacle's diverter; Infinity if nothing has. */
   sinceFlow = Infinity;
+  /** Sim seconds since a receptacle's diverter last let anything into the reservoir; Infinity if it never has. */
+  sinceDelivery = Infinity;
+  /**
+   * Sim seconds a receptacle has been delivering steadily, letting cryostabilizer into the reservoir at least every
+   * DELIVERY.gap sim seconds; 0 while it isn't. Shown on its screen (see clockText), and it opens the airlock.
+   */
+  steady = 0;
 
   constructor(
     readonly kind: ToolKind,
@@ -894,12 +940,23 @@ export class Tool {
     return SHAPES[this.kind];
   }
 
-  /** Run for `h` sim seconds. Returns, per spout, the fluid that left it, or null if none did. */
+  /**
+   * Run for `h` sim seconds. Returns, per spout, the fluid that left it, or null if none did. What it returns is the
+   * tool's own, and good only until its next step: move it or copy it, don't keep it.
+   */
   step(h: number): (Vessel | null)[] {
     if (this.kind === 'heater') return this.heat(h);
     if (this.kind === 'receptacle') return this.receive(h);
+    // with nothing in it and its readings faded to nothing, a step would do nothing; an instrument's smoothing starts
+    // again from nothing measured, as it would have to within less than TRACE
+    if (this.tanks.every((tk) => tk.N <= 0) && this.rate === 0 && !this.reading && this.bonds.every((b) => b === 0)) {
+      this.smoothed = null;
+      return this.none();
+    }
+    const T = this.tanks.length;
+    const parts = (n: number) => Array.from({ length: n }, (_, j) => this.packet(T + j));
     let packets = this.tanks.map((tank, k) => {
-      const p = new Vessel(Infinity);
+      const p = this.packet(k);
       // a valve, or a funnel without one, lets out in proportion to how high the fluid stands; an instrument's tube
       // drains at a fixed rate, so what it reads is just what's arriving
       const rate =
@@ -910,10 +967,10 @@ export class Tool {
       return p;
     });
     if (this.kind === 'exchanger') counterflow(packets[0], packets[1], EXCHANGE_RATE * h);
-    if (this.kind === 'separator') packets = separate(packets[0]);
-    if (this.kind === 'splitter') packets = divide(packets[0], () => 1 - this.valves[0]);
-    if (this.kind === 'sorter') packets = sieve(packets[0]);
-    if (this.kind === 'analyzer') packets = divide(packets[0], () => 1 - ANALYZER_SAMPLE);
+    if (this.kind === 'separator') packets = separate(packets[0], parts(SEPARATOR_OUTLETS));
+    if (this.kind === 'splitter') packets = divide(packets[0], () => 1 - this.valves[0], parts(2));
+    if (this.kind === 'sorter') packets = sieve(packets[0], parts(3));
+    if (this.kind === 'analyzer') packets = divide(packets[0], () => 1 - ANALYZER_SAMPLE, parts(2));
     this.out = packets.map((p) => (p.N > 0 ? p : null));
     this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
     if (this.kind === 'meter') {
@@ -928,6 +985,22 @@ export class Tool {
       const bonds = this.smooth(h, bondCounts(packets[0]));
       this.bonds = bonds.reduce((a, b) => a + b, 0) >= TRACE ? [...bonds] : bonds.map(() => 0);
     }
+    return this.out;
+  }
+
+  /** Scratch fluid i (see scratch), emptied. */
+  private packet(i: number): Vessel {
+    const p = (this.scratch[i] ??= new Vessel(Infinity));
+    if (p.N) p.n.fill(0);
+    p.N = 0;
+    p.Q = 0;
+    return p;
+  }
+
+  /** A step that lets nothing out. */
+  private none(): (Vessel | null)[] {
+    this.out.fill(null);
+    this.flow.fill(0);
     return this.out;
   }
 
@@ -950,7 +1023,8 @@ export class Tool {
    */
   private heat(h: number): (Vessel | null)[] {
     const { tube, valves } = this;
-    const packets = this.shape.spouts.map(() => new Vessel(Infinity));
+    if (this.tanks[0].N <= 0 && tube.every((v) => v.N <= 0)) return this.none();
+    const packets = this.shape.spouts.map((_, j) => this.packet(j));
     const on = Math.min(1, (h * HEATER_CELLS) / Math.max(1e-9, HEATER.transit));
     const last = tube.length - 1;
     transfer(tube[last], packets[HEATER_TAPS.length], volume(tube[last]) * on);
@@ -994,23 +1068,26 @@ export class Tool {
    * A receptacle's step. Its reservoir's faucet lets out as far as its valve is open, at REFERENCE_FLOW. Its funnel
    * drains straight through at FUNNEL_RATE, however full it is, into the diverter, which judges what comes through: more
    * than GOAL_PURITY target (see sustenance), and it goes into the reservoir (as much as fits), else out the waste
-   * spigot.
+   * spigot. The reservoir's filter takes out what has a yellow atom in it (see filter).
    */
   private receive(h: number): (Vessel | null)[] {
     const [funnel, ref] = this.tanks;
     const out: (Vessel | null)[] = [null, null];
-    const tap = new Vessel(Infinity);
+    const tap = this.packet(0);
     transfer(ref, tap, this.valves[0] * REFERENCE_FLOW * h);
     if (tap.N > 0) out[1] = tap;
-    const p = new Vessel(Infinity);
+    const p = this.packet(1);
     transfer(funnel, p, FUNNEL_RATE * h);
     this.sinceFlow += h;
+    this.sinceDelivery += h;
     if (p.N > 0) {
       this.sinceFlow = 0;
       this.gate = sustenance(p) > 0 ? 'reservoir' : 'waste';
-      if (this.gate === 'reservoir') transfer(p, ref, volume(p));
+      if (this.gate === 'reservoir' && transfer(p, ref, volume(p)) > 0) this.sinceDelivery = 0;
       if (p.N > 0) out[0] = p;
     }
+    this.steady = this.sinceDelivery <= DELIVERY.gap ? this.steady + h : 0;
+    filter(ref, h);
     this.out = out;
     this.flow = out.map((p) => (p ? volume(p) / (MAX_FLOW * h) : 0));
     return out;
@@ -1037,23 +1114,27 @@ export function composition(f: Fluid, cap: number): number[] {
  * Pass a fluid over the size sorter's screens (see sorterShares): what falls through the first, what falls through
  * the second, and what goes off the end, in whole molecules, with heat in proportion.
  */
-export function sieve(f: Fluid): Vessel[] {
+export function sieve(f: Fluid, into?: Vessel[]): Vessel[] {
   const shares = sorterShares();
-  return split(f, 3, (s) => shares[SPECIES[s].size - 1]);
+  return split(f, 3, (s) => shares[SPECIES[s].size - 1], into);
 }
 
 /** Split a fluid among the separator's outlets, left to right (see separatorShares), in whole molecules, heat in proportion. */
-export function separate(f: Fluid): Vessel[] {
+export function separate(f: Fluid, into?: Vessel[]): Vessel[] {
   const shares = separatorShares();
-  return split(f, SEPARATOR_OUTLETS, (s) => shares[SEPARATOR_OUTLET[s]]);
+  return split(f, SEPARATOR_OUTLETS, (s) => shares[SEPARATOR_OUTLET[s]], into);
 }
 
 /**
  * Split a fluid `n` ways, sending `shares(s)[j]` of species s to the j-th, in whole molecules (the last takes
- * whatever rounding leaves), with heat in proportion to atoms.
+ * whatever rounding leaves), with heat in proportion to atoms. The parts go into `out`, empty vessels, if it's given.
  */
-export function split(f: Fluid, n: number, shares: (s: number) => readonly number[]): Vessel[] {
-  const out = Array.from({ length: n }, () => new Vessel(Infinity));
+export function split(
+  f: Fluid,
+  n: number,
+  shares: (s: number) => readonly number[],
+  out = Array.from({ length: n }, () => new Vessel(Infinity)),
+): Vessel[] {
   for (let s = 0; s < NS; s++) {
     if (!f.n[s]) continue;
     const sh = shares(s);
@@ -1073,10 +1154,17 @@ export function split(f: Fluid, n: number, shares: (s: number) => readonly numbe
   return out;
 }
 
-/** Split a fluid into left and right, sending `leftShare(s)` of species s left, in whole molecules, heat in proportion. */
-export function divide(f: Fluid, leftShare: (s: number) => number): [Vessel, Vessel] {
-  const out: [Vessel, Vessel] = [new Vessel(Infinity), new Vessel(Infinity)];
+/**
+ * Split a fluid into left and right, sending `leftShare(s)` of species s left, in whole molecules, heat in
+ * proportion. The parts go into `out`, empty vessels, if it's given.
+ */
+export function divide(
+  f: Fluid,
+  leftShare: (s: number) => number,
+  out: Vessel[] = [new Vessel(Infinity), new Vessel(Infinity)],
+): [Vessel, Vessel] {
   for (let s = 0; s < NS; s++) {
+    if (!f.n[s]) continue;
     const left = Math.min(f.n[s], roundRandom(f.n[s] * leftShare(s)));
     out[0].n[s] = left;
     out[1].n[s] = f.n[s] - left;
@@ -1085,7 +1173,7 @@ export function divide(f: Fluid, leftShare: (s: number) => number): [Vessel, Ves
   }
   out[0].Q = f.N > 0 ? Math.min(f.Q, roundRandom((f.Q * out[0].N) / f.N)) : 0;
   out[1].Q = f.Q - out[0].Q;
-  return out;
+  return [out[0], out[1]];
 }
 
 /**

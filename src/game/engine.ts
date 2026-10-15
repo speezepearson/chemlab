@@ -1,15 +1,16 @@
 import { equilibrate } from '../chem/equilibrium';
 import { Lag, temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
-import { POD, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
+import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
   FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, nozzleBox,
   docked, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
+import { chime } from './chime';
 import { diverter, type Diverter } from './diverter';
-import { CAP, FILL_RATE, GOAL_TARGET, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
+import { CAP, DELIVERY, FILL_RATE, FLASK_L, GOAL_TARGET, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
 import { FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
@@ -21,6 +22,7 @@ import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_P
 import { rumble, type Rumble } from './rumble';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
+import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
 import {
   CELL, COUNTERS, LIFT, PAPER_Z, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toCardinal, toFrac, toLocal, toWorld, wrapAngle,
   type Pose, type Vec3,
@@ -35,7 +37,7 @@ import {
   PAPER_HANDLE, PAPER_HEADER, PAPER_MIN, PAPER_TEXT, PAPER_TEXT_MAX, Paper, eraseAt, extend, loadPaper, savePaper,
   textAt,
 } from './paper';
-import { View, type AirlockLook, type FaucetSpot, type Frame, type GuideLook, type Pick } from './view';
+import { ARRIVAL, View, type AirlockLook, type FaucetSpot, type Frame, type GuideLook, type Pick } from './view';
 import { WaterSounds } from './water';
 
 /** What the info panel shows for one vessel: all of it in god mode, otherwise just its color. */
@@ -90,6 +92,18 @@ export interface Hud {
   note: string | null;
   /** Everything the player can do just now besides walking and looking, with how (see Action), for a reminder. */
   actions: Action[];
+  /** How far the screen has faded to black as the player falls asleep in the pod, or wakes, 0 to 1. */
+  black: number;
+  /** How far the screen has faded to white in the light of Mu Ceti (see Wake's arriving), 0 to 1. */
+  white: number;
+  /** Whether the game's over, won: the player has arrived at Mu Ceti (see Wake's arrived). */
+  ended: boolean;
+  /** Whether god mode's preview of the end's white void is up (see GameEngine.previewArrival). */
+  preview: boolean;
+  /** While the player's asleep in the pod (see Wake), the whole sim seconds they've slept; otherwise null. */
+  slept: number | null;
+  /** While they're asleep, the litres of cryostabilizer in the ship's reservoir, to two places; otherwise null. */
+  litres: number | null;
 }
 
 /**
@@ -220,6 +234,13 @@ const EYE = 620;
 const PLAYER_R = 45;
 /** Walking speed, in world units per real second. */
 const WALK = 840;
+/** Where the player stands in the pod, and how they face: out at the lab, eyes a little down. */
+const IN_POD = { x: POD.x, z: POD.z, yaw: 0, pitch: -0.12 };
+/**
+ * Real milliseconds the sleeping lab runs for at a time (see pump), between which the page gets on with anything
+ * else, so it stays responsive.
+ */
+const SLEEP_SLICE_MS = 12;
 /** How far away something can be and still be picked up or pressed. */
 const REACH = 460;
 /** The nearest and furthest something can be held, from the eyes to its middle, beyond its own size. */
@@ -324,6 +345,26 @@ export class GameEngine {
   /** Sim seconds the lab has run, for what blinks on sim time. */
   private clock = 0;
   private wakeT = Infinity;
+  /** While asleep (see Wake), the sleep under way (see sleep.ts), its stats, and the clock when it began. */
+  private sleeping: { run: Generator<void, Woke>; stats: SleepStats; from: number; woke: Woke | null } | null = null;
+  /** Real seconds since the player woke from a sleep, while the screen fades in from black (see RISE_S); else null. */
+  private riseT: number | null = null;
+  /**
+   * Whether the player woke because there's enough cryostabilizer for the rest of the voyage: the pod welcomes them to
+   * Mu Ceti, and what follows is the end (see Wake's arriving).
+   */
+  private arrival = false;
+  /** The litres of cryostabilizer the pod's message says are on board: how much there was when they were put in it. */
+  private podLitres = 0;
+  /**
+   * While previewing the end's white void (see previewArrival), how the player stood before, to put them back; null
+   * otherwise.
+   */
+  private previewing: { x: number; z: number; yaw: number; pitch: number } | null = null;
+  /** While settling into the pod (see Wake), where the player started from, and how many real seconds it's been. */
+  private settling: { x: number; z: number; yaw: number; pitch: number; t: number } | null = null;
+  /** Runs the sleeping lab a slice at a time (see pump), independent of frames. */
+  private pumper = new MessageChannel();
   /** The cryostabilizer station's diverter's sounds, while it's swinging or letting into the reservoir. */
   private diverters = new Map<Tool, Diverter>();
   /** The player's sticky notes, on the back wall, the one on top last (see paper.ts). They're notes, not lab, so Reset keeps them. */
@@ -390,6 +431,8 @@ export class GameEngine {
 
   destroy(): void {
     cancelAnimationFrame(this.raf);
+    this.sleeping = null;
+    this.pumper.port1.close();
     this.resizeObserver.disconnect();
     for (const c of this.cleanups) c();
     for (const r of this.rumbles.values()) r.stop();
@@ -517,6 +560,18 @@ export class GameEngine {
 
   private afterLoad(): void {
     this.won = false;
+    // a lab loads with the airlock shut, until its station has been delivering steadily again, and anyone in it or
+    // asleep in the pod wakes in the lab
+    if (this.wake === 'open' || this.wake === 'settling' || this.wake === 'boarding' || this.wake === 'asleep' || this.arrival) {
+      this.arrival = false;
+      this.riseT = null;
+      this.wake = 'closed';
+      this.wakeT = Infinity;
+      this.sleeping = null;
+      const p = this.player;
+      const r = this.inRoom({ x: p.x, y: 0, z: p.z, yaw: p.yaw });
+      [p.x, p.z] = [r.x, r.z];
+    }
     for (const d of this.diverters.values()) d.stop();
     this.diverters.clear();
     this.falling = [];
@@ -1154,9 +1209,11 @@ export class GameEngine {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       // Enter is OK on the message inside the cryopod, as it was on the notice it replaced
       if (e.code === 'Enter' && this.wake === 'pod') this.pressOk();
+      // in god mode, = shows the end's white void, or puts the lab back
+      if (e.code === 'Equal' && !e.repeat && (this.god || this.previewing)) this.previewArrival(!this.previewing);
       if (!this.locked) return;
       this.keys.add(e.code);
-      if (e.repeat || inPod(this.wake)) return;
+      if (e.repeat || inPod(this.wake) || this.previewing) return;
       if (e.code === 'KeyE') this.grabOrRelease();
       if (e.code === 'KeyQ') this.putBack();
       if (e.code === 'KeyP') this.setPencil(!this.pencil);
@@ -2019,6 +2076,8 @@ export class GameEngine {
    * spills straight down the sink.
    */
   private overflow(v: Vessel): void {
+    // a fluid's volume is never more than its atoms, so most vessels needn't be measured
+    if (v.N <= v.cap) return;
     const over = volume(v) - v.cap;
     if (over <= 0) return;
     const out = new Vessel(Infinity);
@@ -2037,11 +2096,22 @@ export class GameEngine {
   private frame = (now: number): void => {
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
+    // asleep, the screen is black: nothing to draw, and the lab runs on its own (see fallAsleep)
+    if (this.wake === 'asleep') {
+      if (!this.sleeping) this.fallAsleep();
+      this.hud(now);
+      this.raf = requestAnimationFrame(this.frame);
+      return;
+    }
     this.move(dt);
+    if (this.wake === 'settling') this.settleIn(dt);
     if (this.held) this.follow(this.held);
     this.view.look(this.eye(), this.player.yaw, this.player.pitch);
-    if (!this.turning) this.target = this.view.pick(REACH, this.heldObject());
+    if (!this.turning) this.target = this.previewing ? null : this.view.pick(REACH, this.heldObject());
     this.simulate(dt);
+    // the end stands the lab still as it was when there was enough, so it goes on in real time
+    if (this.arrival && this.wake !== 'pod') this.stepWake(dt);
+    if (this.riseT !== null) this.riseT = this.riseT + dt >= RISE_S ? null : this.riseT + dt;
     this.render(dt);
     this.inspect(now);
     this.hud(now);
@@ -2060,8 +2130,8 @@ export class GameEngine {
       p.yaw = wrapAngle(p.yaw - look.x * Math.abs(look.x) * STICK_TURN * dt);
       p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch - look.y * Math.abs(look.y) * STICK_TILT * dt));
     }
-    // shut in the pod, they can only look
-    if (inPod(this.wake)) return;
+    // shut in the pod, or in the preview of the end, they can only look
+    if (inPod(this.wake) || this.previewing) return;
     const h = this.held;
     if (fwd || side) {
       // keys walk at full speed whichever way; the move stick as far as it's pushed
@@ -2073,6 +2143,11 @@ export class GameEngine {
       const r = walk(body, dx, dz, this.obstacles(h));
       p.x = r.x;
       p.z = r.z;
+      // walking into the open pod is getting into it, to sleep
+      if (this.wake === 'open' && Math.hypot(p.x - POD.x, p.z - POD.z) < POD.r) {
+        this.board();
+        return;
+      }
     }
     if (h?.kind !== 'flask' || !this.rightHeld) this.pinned = null;
     if (!h) return;
@@ -2120,13 +2195,18 @@ export class GameEngine {
     return h.h;
   }
 
-  private simulate(dt: number): void {
+  /**
+   * Run the lab for a frame of dt real seconds; or, `quiet`, for dt sim seconds with nothing drawn or heard, as while
+   * the player sleeps (see Sleeper.advance).
+   */
+  private simulate(dt: number, quiet = false): void {
     this.spills.clear();
     this.inflow.clear();
     this.landed = [];
     this.pour = null;
     // the lab waits for the player to press OK in the pod, as it did through the rest of the intro
-    const simDt = this.wake === 'pod' ? 0 : dt * this.speed;
+    // and once there's enough cryostabilizer, the lab stands still as it was then, through the end
+    const simDt = quiet ? dt : this.wake === 'pod' || this.arrival ? 0 : dt * this.speed;
     this.spin = (this.spin + SPIN * simDt) % (2 * Math.PI);
     this.clock += simDt;
     const mouths = (this.open = this.mouths());
@@ -2157,6 +2237,7 @@ export class GameEngine {
     });
 
     const gateFrom = this.tools.map((t) => t.gate);
+    const steadyFrom = this.station().steady;
     const vessels = this.vessels();
     // how exposed each one's fluid is to the room, from how it stands now; it hardly changes in a frame
     const exposures = simDt > 0 ? this.exposures() : [];
@@ -2196,6 +2277,10 @@ export class GameEngine {
         this.tools.forEach((t, j) => {
           if (t === stillTool) return;
           t.step(step).forEach((out, k) => {
+            if (quiet) {
+              pour(t.drops[k], out, spouts[j][k], targets[j][k], this.loose(t, k));
+              return;
+            }
             tally(toolTotals[j][k], out, false); // before pouring, which can gather it into a drop
             tally(toolTotals[j][k], null, pour(t.drops[k], out, spouts[j][k], targets[j][k], this.loose(t, k)));
           });
@@ -2222,7 +2307,7 @@ export class GameEngine {
         }
         for (const [v, e] of exposures) cool(v, e, step);
       }
-      this.tools.forEach((t, j) =>
+      if (!quiet) this.tools.forEach((t, j) =>
         toolTotals[j].forEach(({ v, streamed }, k) => {
           t.out[k] = v.N > 0 ? v : null;
           t.flow[k] = volume(v) / (MAX_FLOW * simDt);
@@ -2231,6 +2316,16 @@ export class GameEngine {
       );
     }
     this.spillTime = simDt;
+    if (quiet) {
+      // nothing's drawn, and what a tool's step handed out is its own, good only until its next step (see Tool.step)
+      for (const t of this.tools) {
+        t.out.fill(null);
+        t.flow.fill(0);
+        t.streaming.fill(false);
+      }
+      this.goal();
+      return;
+    }
 
     // an analyzer hums quietly while it has something to read, on sim time, so silent while paused
     for (const t of this.tools) {
@@ -2247,24 +2342,24 @@ export class GameEngine {
       r.level(simDt > 0 ? ANALYZER_HUM : 0);
     }
 
-    // the station's diverter goes by sim time too: a clunk as it swings, and a rush while it lets into the reservoir
-    // (as long as its display shows it), silent while paused
+    // the station's diverter goes by sim time too: a clunk as it swings
     this.tools.forEach((t, j) => {
       if (t.kind !== 'receptacle') return;
       const swung = t.gate !== gateFrom[j];
-      const rush = simDt > 0 && t.gate === 'reservoir' && t.sinceFlow < DIVERTER_HOLD;
-      if ((swung || rush) && !this.diverters.has(t)) this.diverters.set(t, diverter(this.hear(this.machineAt(t))));
+      if (swung && !this.diverters.has(t)) this.diverters.set(t, diverter(this.hear(this.machineAt(t))));
       const d = this.diverters.get(t);
       if (!d) return;
       d.place(this.hear(this.machineAt(t)));
       if (swung) d.swing(t.gate === 'reservoir');
-      d.flush(rush ? 1 : 0);
     });
     for (const [t, d] of this.diverters)
       if (!this.tools.includes(t) || t.sinceFlow >= DIVERTER_HOLD + 1) {
         d.stop(); // quiet a while, or the lab was replaced
         this.diverters.delete(t);
       }
+    // and it chimes as it's been delivering steadily for long enough to open the airlock
+    const st = this.station();
+    if (steadyFrom < DELIVERY.streak && st.steady >= DELIVERY.streak) chime(this.hear(this.machineAt(st)));
 
     // fluid's sounds, each heard from where it lands: a stream from the mouth it runs into
     const streams = new Map<Vessel, { flow: number; full: number; at: Placement }>();
@@ -2274,7 +2369,11 @@ export class GameEngine {
     }
     this.water.update(dt, this.landed.map((p) => this.hear(p)), streams);
 
-    // goal: enough of the target in the ship's reservoir
+    this.goal();
+  }
+
+  /** The goal: enough of the target in the ship's reservoir. */
+  private goal(): void {
     if (this.station().tanks[1].n[TARGET] >= GOAL_TARGET && !this.won) {
       this.won = true;
       this.cb.onWin();
@@ -2693,15 +2792,158 @@ export class GameEngine {
    * they press OK (see pressOk). Whatever they held is set down if it can be, or else put away.
    */
   enterPod(): void {
+    this.intoPod();
+    this.wake = 'pod';
+    this.wakeT = 0;
+    this.sleeping = null;
+    this.riseT = null;
+    this.arrival = false;
+    this.podLitres = this.reservoirLitres();
+  }
+
+  /** The litres of cryostabilizer in the ship's reservoir. */
+  private reservoirLitres(): number {
+    return (this.station().tanks[1].n[TARGET] / CAP) * FLASK_L;
+  }
+
+  /** Put the player in the pod, facing the lab, empty-handed (see emptyHanded). */
+  private intoPod(): void {
+    this.emptyHanded();
+    Object.assign(this.player, IN_POD);
+  }
+
+  /** Leave the player empty-handed: whatever they held is set down if it can be, or else put away. */
+  private emptyHanded(): void {
     if (this.held) this.release();
     if (this.held && !(this.held.kind === 'tool' && UNIQUE_TOOLS.includes(this.held.t.kind))) this.putAway();
     this.held = null;
     this.setPencil(false);
     this.endTurn();
     this.rightHeld = false;
-    Object.assign(this.player, { x: POD.x, z: POD.z, yaw: 0, pitch: -0.12 });
+  }
+
+  /** The player walked into the open pod: they ease into place in it, it closes on them, and they fall asleep (see Wake). */
+  private board(): void {
+    this.emptyHanded();
+    const { x, z, yaw, pitch } = this.player;
+    this.settling = { x, z, yaw, pitch, t: 0 };
+    this.wake = 'settling';
+    this.wakeT = 0;
+  }
+
+  /** Ease the player into place in the pod over dt real seconds, then let its front close (see Wake's settling). */
+  private settleIn(dt: number): void {
+    const s = this.settling;
+    if (!s) return;
+    s.t = Math.min(SETTLE_S, s.t + dt);
+    const k = ease(s.t / SETTLE_S);
+    const p = this.player;
+    p.x = s.x + (IN_POD.x - s.x) * k;
+    p.z = s.z + (IN_POD.z - s.z) * k;
+    // turning the short way round
+    p.yaw = wrapAngle(s.yaw + wrapAngle(IN_POD.yaw - s.yaw) * k);
+    p.pitch = s.pitch + (IN_POD.pitch - s.pitch) * k;
+    if (s.t < SETTLE_S) return;
+    this.settling = null;
+    this.wake = 'boarding';
+    this.wakeT = 0;
+  }
+
+  /**
+   * The player has fallen asleep: the lab's sounds fall silent (the ship's ambience plays on), and the lab runs on
+   * (see sleep.ts) as fast as it can, a slice at a time (see pump), until the goal's reached (when they stay asleep,
+   * and have won) or the station stops delivering (when they wake).
+   */
+  private fallAsleep(): void {
+    this.water.update(0.1, [], new Map());
+    for (const r of this.rumbles.values()) r.stop();
+    this.rumbles.clear();
+    for (const d of this.diverters.values()) d.stop();
+    this.diverters.clear();
+    const stats = { plain: 0, jumped: 0, jumps: 0 };
+    this.sleeping = { run: sleep(this.sleeper(), stats), stats, from: this.clock, woke: null };
+    this.pumper.port1.onmessage = () => this.pump();
+    this.pumper.port2.postMessage(null);
+  }
+
+  /**
+   * Run the sleeping lab for a slice of real time, SLEEP_SLICE_MS, then let the page get on with anything else (a
+   * message comes after whatever's waiting) and run another; while it's paused, check back now and then.
+   */
+  private pump(): void {
+    const s = this.sleeping;
+    if (!s || s.woke || this.wake !== 'asleep') return;
+    if (this.speed === 0) {
+      setTimeout(() => this.pumper.port2.postMessage(null), 100);
+      return;
+    }
+    const now = performance.now();
+    while (performance.now() - now < SLEEP_SLICE_MS) {
+      const r = s.run.next();
+      if (!r.done) continue;
+      s.woke = r.value;
+      // a jump can reach the goal, with no substep after it to see it
+      if (r.value === 'goal') this.goal();
+      this.wakeFrom(r.value);
+      return;
+    }
+    this.pumper.port2.postMessage(null);
+  }
+
+  /** The lab as the sleeper sees it (see sleep.ts). */
+  private sleeper(): Sleeper {
+    return {
+      vessels: () => [
+        ...this.flasks.map((v) => ({ v, terminal: true })),
+        ...this.tools.flatMap((t) => [
+          ...t.tanks.map((v, k) => ({ v, terminal: !drains(t, k) })),
+          ...t.tube.map((v) => ({ v, terminal: false })),
+        ]),
+      ],
+      station: this.station(),
+      clock: () => this.clock,
+      advance: (dt) => this.simulate(dt, true),
+      skip: (dt) => {
+        this.clock += dt;
+        this.spin = (this.spin + SPIN * dt) % (2 * Math.PI);
+        this.station().steady += dt;
+      },
+    };
+  }
+
+  /** How far the screen has faded to black (see Hud.black). */
+  private black(): number {
+    const t = this.wakeT;
+    if (this.wake === 'boarding') return ease((t - WAKE_S.open) / WAKE_S.fade);
+    if (this.wake === 'asleep') return 1;
+    if (this.riseT !== null) return 1 - ease(this.riseT / RISE_S);
+    return 0;
+  }
+
+  /**
+   * Wake the player from a sleep, in the pod as at first, as the screen fades in from black (see Wake's asleep): with
+   * the same message, its numbers up to date, if the station stopped delivering; or a welcome to Mu Ceti, if there's
+   * enough cryostabilizer.
+   */
+  private wakeFrom(why: Woke): void {
+    this.sleeping = null;
     this.wake = 'pod';
     this.wakeT = 0;
+    this.riseT = 0;
+    this.arrival = why === 'goal';
+    this.podLitres = this.reservoirLitres();
+  }
+
+  /**
+   * Once arrived at Mu Ceti (see Wake's arrived), carry on in the lab as it was when there was enough cryostabilizer:
+   * the player stands just out of the airlock, facing the lab, with its doors shut.
+   */
+  continueTinkering(): void {
+    if (this.wake !== 'arrived') return;
+    this.arrival = false;
+    this.wake = 'closed';
+    this.wakeT = Infinity;
+    Object.assign(this.player, { x: AIRLOCK.x, z: ROOM.z1 - 150, yaw: 0, pitch: 0 });
   }
 
   /** OK, on the message inside the pod: it flickers out, the pod's front slides up, and then the player can walk. */
@@ -2719,25 +2961,64 @@ export class GameEngine {
       this.wake = w;
       this.wakeT = 0;
     };
-    if (this.wake === 'flicker' && t >= WAKE_S.flicker) next('opening');
+    if (this.wake === 'flicker' && t >= WAKE_S.flicker) next(this.arrival ? 'arriving' : 'opening');
     else if (this.wake === 'opening' && t >= WAKE_S.open) next('out');
+    else if (this.wake === 'arriving' && t >= WAKE_S.arrive) next('arrived');
+    else if (this.wake === 'boarding' && t >= WAKE_S.open + WAKE_S.fade) next('asleep');
     else if (this.wake === 'out' && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
+    // steady delivery opens the doors again, and once it stops they close, when she's out in the lab
+    else if (this.wake === 'closed' && this.station().steady >= DELIVERY.streak) next('open');
+    else if (this.wake === 'open' && this.station().steady === 0 && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
   }
 
   /** How the airlock looks just now, for the view. */
   private airlockLook(): AirlockLook {
     const w = this.wake;
     const t = this.wakeT;
+    if (this.previewing) {
+      const up = ARRIVAL.open;
+      const notice = { arrival: true } as const;
+      return { door: 1, front: up, dark: 1 - up, message: false, notice, okHot: false, lamp: false, arrival: true };
+    }
+    // how far up the pod's front is: sliding up as they wake, down as they settle in, and otherwise up but while
+    // they're shut in it
+    const up =
+      w === 'opening' || w === 'arriving' ? ease(t / WAKE_S.open)
+      : w === 'boarding' ? 1 - ease(t / WAKE_S.open)
+      : w === 'pod' || w === 'flicker' || w === 'asleep' ? 0
+      : 1;
     // the message flickers, on less and less of the time, until it's gone
     const flick = w === 'flicker' && Math.sin(t * 90) + Math.sin(t * 37) > 2.6 * (t / WAKE_S.flicker) - 0.6;
     return {
-      door: w === 'closed' ? 1 - ease(t / WAKE_S.close) : 1,
-      front: w === 'opening' ? ease(t / WAKE_S.open) : inPod(w) ? 0 : 1,
-      // the room's light floods in as the front slides up
-      dark: w === 'opening' ? 1 - ease(t / WAKE_S.open) : inPod(w) ? 1 : 0,
+      door: w === 'closed' ? 1 - ease(t / WAKE_S.close) : w === 'open' ? ease(t / WAKE_S.close) : 1,
+      front: up,
+      // the room's light floods in as the front slides up, and is shut out as it slides down
+      dark: 1 - up,
       message: w === 'pod' || flick,
+      notice: this.arrival ? { arrival: true } : { arrival: false, litres: this.podLitres },
       okHot: w === 'pod' && this.target?.kind === 'wake',
+      // flashing while the doors stand open to sleep, a second on and half a second off, on sim time
+      lamp: w === 'open' && this.clock % 1.5 < 1,
+      arrival: this.arrival && (w === 'arriving' || w === 'arrived'),
     };
+  }
+
+  /**
+   * Show the end's white void (see ARRIVAL) in place of the lab, or put the lab back: for god mode, to see how it
+   * looks. The player stands in the pod, facing out, and can look around but not walk; the pod's front stands as far
+   * open as ARRIVAL.open says. The lab runs on as ever, unseen.
+   */
+  previewArrival(on: boolean): void {
+    if (on === !!this.previewing || (on && inPod(this.wake))) return;
+    const p = this.player;
+    if (on) {
+      this.emptyHanded();
+      this.previewing = { x: p.x, z: p.z, yaw: p.yaw, pitch: p.pitch };
+      Object.assign(p, IN_POD);
+    } else {
+      Object.assign(p, this.previewing);
+      this.previewing = null;
+    }
   }
 
   private rightWouldDo(): boolean {
@@ -2754,11 +3035,9 @@ export class GameEngine {
   /** Whether fluid would leave a tool's spouts if it ran. */
   private wouldFlow(t: Tool): boolean {
     // the station's reservoir through its faucet, or its funnel through the diverter
-    if (t.kind === 'receptacle') return (t.valves[0] > 0 && t.tanks[1].N > TRACE) || t.tanks[0].N > TRACE;
-    const free = t.kind === 'splitter' || t.kind === 'sorter' || t.kind === 'heater' || INLINE_TOOLS.includes(t.kind);
-    const drains = (k: number) => free || t.valves[k] > 0;
+    if (t.kind === 'receptacle') return t.tanks.some((v, k) => v.N > TRACE && drains(t, k));
     // a heater's tube runs whatever its valves say
-    return (t.shape.spouts.length > 0 && t.tanks.some((v, k) => v.N > TRACE && drains(k))) || t.tube.some((v) => v.N > TRACE);
+    return (t.shape.spouts.length > 0 && t.tanks.some((v, k) => v.N > TRACE && drains(t, k))) || t.tube.some((v) => v.N > TRACE);
   }
 
   private hud(now: number): void {
@@ -2779,12 +3058,31 @@ export class GameEngine {
       hand: this.pencil ? 'Erase' : h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : 'Turn',
       note: this.flash?.text ?? null,
       actions: this.actions(),
+      black: this.black(),
+      // blinded a while by the white void once the pod's open, then all white
+      white:
+        this.wake === 'arriving' ? ease((this.wakeT - WAKE_S.open - BLINDED_S) / (WAKE_S.arrive - WAKE_S.open - BLINDED_S))
+        : this.wake === 'arrived' ? 1
+        : 0,
+      preview: !!this.previewing,
+      ended: this.wake === 'arrived',
+      slept: this.sleeping ? Math.floor(this.clock - this.sleeping.from) : null,
+      litres: this.sleeping ? Math.floor(100 * this.reservoirLitres()) / 100 : null,
     };
     const key = JSON.stringify(hud);
     if (key === this.lastHud) return;
     this.lastHud = key;
     this.cb.onHud(hud);
   }
+}
+
+/**
+ * Whether tank k of a tool lets fluid out on its own: a funnel or an instrument's tube always (the station's funnel
+ * through its diverter), a tank with a valve as long as it's open.
+ */
+function drains(t: Tool, k: number): boolean {
+  if (t.kind === 'receptacle') return k === 0 || t.valves[0] > 0;
+  return t.kind === 'splitter' || t.kind === 'sorter' || t.kind === 'heater' || INLINE_TOOLS.includes(t.kind) || t.valves[k] > 0;
 }
 
 export type { ToolKind };

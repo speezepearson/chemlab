@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { defaultChemParams, restoreDefaultChem } from './chem/params';
 import { ReactionNetwork } from './chem/reactions';
 import { AppearancePanel } from './components/AppearancePanel';
+import { ArrivalPanel } from './components/ArrivalPanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
 import { FlaskEditor } from './components/FlaskEditor';
 import { Hud, StartHint, TouchControls } from './components/Hud';
 import { LabelEditor } from './components/LabelEditor';
 import { PaperTextEditor } from './components/PaperTextEditor';
+import { Ending, SleepScreen } from './components/Sleep';
 import { SoundPanel } from './components/SoundPanel';
 import { Intro } from './components/Intro';
 import { InfoPanel } from './components/InfoPanel';
@@ -244,7 +246,7 @@ export function App() {
           {engine && hud && <TouchControls engine={engine} hud={hud} />}
           {inspection && <InfoPanel info={inspection} />}
           {engine && <Palette engine={engine} pencil={pencil} />}
-          {hud && !hud.locked && !hud.inPod && !intro && editing === null && labeling === null && !paperEdit && (
+          {hud && !hud.locked && !hud.inPod && !hud.preview && !intro && editing === null && labeling === null && !paperEdit && (
             <StartHint />
           )}
           {engine && editing !== null && <FlaskEditor engine={engine} id={editing} onClose={() => setEditing(null)} />}
@@ -254,7 +256,21 @@ export function App() {
           {engine && labeling !== null && (
             <LabelEditor key={labeling} engine={engine} id={labeling} onClose={() => setLabeling(null)} />
           )}
-          {won && <div id="win">Enough cryostabilizer to reach Mu Ceti.</div>}
+          {won && hud && !hud.inPod && <div id="win">Enough cryostabilizer to reach Mu Ceti.</div>}
+          {hud && <SleepScreen hud={hud} />}
+          {hud?.preview && <ArrivalPanel />}
+          {engine && hud && (
+            <Ending
+              hud={hud}
+              onReset={() => {
+                // the lab as it was at first, and the intro again
+                reset();
+                setIntro('replay');
+                setPreLog(true);
+              }}
+              onContinue={() => engine.continueTinkering()}
+            />
+          )}
         </div>
       </div>
       {intro && <Intro skipStart={intro === 'replay'} resume={intro === 'resume'} onLogEnd={endLog} onDone={endIntro} />}

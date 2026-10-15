@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { temperature, type Fluid } from '../chem/reactions';
 import { OUTLINE } from './outline';
 import { LOOK, coronaAlpha, coronaRadius, glowFalloff, haloAlpha, haloRadius } from './appearance';
@@ -7,19 +11,19 @@ import {
   NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
 } from './bodies';
 import { TARGET } from '../chem/species';
-import { CAP, FLASK_L, GOAL_L, GOAL_TARGET, TRACE } from './config';
+import { CAP, DELIVERY, FLASK_L, GOAL_L, GOAL_TARGET, TRACE } from './config';
 import { Vessel, fluidAlpha, fluidRGB, glowColor, volume, type Flask } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { COUNTERS, LIFT, PAPER_Z, ROOM, groundAt, toWorld, type Vec3 } from './space';
 import { PORT_FRAC, PORT_WALL, porthole, type Porthole } from './porthole';
 import { AIRLOCK, POD } from './airlock';
-import { notice } from '../intro/notice';
+import { arrival, notice, type Block } from '../intro/notice';
 import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
-  ANALYZER, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
+  clockText, ANALYZER, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
@@ -133,6 +137,18 @@ const depthOnly = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.D
 const GUIDE_DASH = { on: 9, off: 7 };
 /** The layer guides' streams are drawn on, apart from everything else (see View.render). */
 const GUIDE_LAYER = 3;
+/** The layer of what's seen at Mu Ceti (see View.renderArrival): the pod, and the white light round it. */
+const VOID_LAYER = 4;
+
+/**
+ * How the light of Mu Ceti looks as the pod opens on it at the end (see AirlockLook.arrival): a white void, `void` times
+ * as bright as white, so that it blooms over everything (`bloom` strength, `radius`, from a brightness of `threshold`
+ * up); the light pouring into the pod from it, from out in front (`light`) and all round (`ambient`); and how bright it
+ * all comes out on the screen (`exposure`, through ACES tone mapping). Tunable in god mode's preview of it, along with
+ * how far open the pod is there (`open`, which the game itself doesn't use).
+ */
+export const ARRIVAL = { void: 8, bloom: 1.16, radius: 0.08, threshold: 1, light: 6, ambient: 2.5, exposure: 1.3, open: 1 };
+export const ARRIVAL_DEFAULTS = { ...ARRIVAL };
 
 /** Stripes for a guide's dashes, as an alpha map: on at the top of each repeat, off below. */
 const dashTexture = (() => {
@@ -517,8 +533,8 @@ class Screen {
 /**
  * The cryostabilizer station's diverter's LCD: a pipe down from the funnel, branching off toward the reservoir, with
  * the diverter's flap across whichever way it isn't sending what comes through, and that way lit while anything's
- * going through: green into the reservoir, red down to the waste spigot. Only the pipes' walls, the flap and what's
- * in the pipes are drawn, straight on the plate.
+ * going through: green into the reservoir, red down to the waste spigot, filling the pipe right up to its walls; the
+ * rest of the pipes black inside. Only the pipes, the flap and what's in them are drawn, straight on the plate.
  */
 function drawDiverter(sc: Screen, gate: 'reservoir' | 'waste', flowing: boolean): void {
   const key = `${gate} ${flowing}`;
@@ -545,14 +561,13 @@ function drawDiverter(sc: Screen, gate: 'reservoir' | 'waste', flowing: boolean)
   };
   ctx.lineCap = 'butt';
   ctx.lineJoin = 'miter';
-  // their walls: each stroked wide in the walls' color, then hollowed out
+  // their walls: each stroked wide in the walls' color, then filled black inside, and the way it's sending lit
+  // right up to the walls
   const wallColor = 'rgba(200, 222, 210, 0.75)';
   for (const p of [down, branch]) stroke(p, 9, wallColor);
-  ctx.globalCompositeOperation = 'destination-out';
   for (const p of [down, branch]) stroke(p, 6, '#000');
-  ctx.globalCompositeOperation = 'source-over';
   if (flowing)
-    stroke(gate === 'reservoir' ? [[x, 0], ...branch] : down, 4.5, gate === 'reservoir' ? '#3cff6a' : '#ff3a2e');
+    stroke(gate === 'reservoir' ? [[x, 0], ...branch] : down, 6, gate === 'reservoir' ? '#3cff6a' : '#ff3a2e');
   // the flap: along the branch's lower wall, across the pipe below it; or across the branch's mouth
   ctx.lineCap = 'round';
   stroke(gate === 'reservoir' ? [[x - 3, j + 1.2], [x + 3, j + 7.2]] : [[x + 2.9, j + 7.1], [x + 7.1, j + 2.9]], 1.6, wallColor);
@@ -757,6 +772,12 @@ function glowTexture(sharpness: number): THREE.Texture {
 }
 
 /** The light a hot vessel gives off: a wide halo and a tight corona, washing out whatever's around it. */
+/**
+ * How much the glows of hot fluid show: not at all while the cryopod is shut, since they're the lab's light (see
+ * AirlockLook.dark), and they're drawn over everything, so its front wouldn't hide them.
+ */
+const GLOWS = { lit: 1 };
+
 class Glow {
   private halo = new THREE.Sprite(new THREE.SpriteMaterial({ blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, transparent: true }));
   private corona = new THREE.Sprite(new THREE.SpriteMaterial({ blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, transparent: true }));
@@ -772,6 +793,7 @@ class Glow {
     // a trace of hot fluid shouldn't blaze like a full flask
     const amount = Math.sqrt(Math.min(1, (4 * volume(f)) / cap));
     const set = (s: THREE.Sprite, R: number, alpha: number, sharpness: number) => {
+      alpha *= GLOWS.lit;
       s.visible = !!color && alpha * amount >= 0.002;
       if (!s.visible) return;
       s.position.copy(at);
@@ -886,6 +908,8 @@ class ToolView {
   private note: Label;
   private glows: Glow[] = [];
   private screen?: Screen;
+  /** The station's screen showing how long it's been delivering steadily. */
+  private steadyScreen?: Screen;
   /** The cryostabilizer station's diverter's LCD (see drawDiverter). */
   private diverter?: Screen;
   /** What's running down an inline instrument's tube, shown as a thin thread of its color. */
@@ -1386,10 +1410,13 @@ class ToolView {
     valve.scale.set(4.5, 8, 4.5);
     valve.position.copy(v3(sh.spouts[0], sh.valveY, 0));
     art.add(valve);
-    // the readout of the litres in the reservoir, under its label
-    const sc = STATION.screen;
-    block(art, darkMat, sc.x0 - 1.5, sc.x1 + 1.5, sc.y0 - 1.5, sc.y1 + 1.5, face, face + 0.5);
-    this.screen = new Screen(art, sc.x0, sc.x1, sc.y0, sc.y1, face + 0.6, 8);
+    // the readout of the litres in the reservoir, under its label, and beside it, how long it's been delivering steadily
+    const screen = (sc: { x0: number; x1: number; y0: number; y1: number }) => {
+      block(art, darkMat, sc.x0 - 1.5, sc.x1 + 1.5, sc.y0 - 1.5, sc.y1 + 1.5, face, face + 0.5);
+      return new Screen(art, sc.x0, sc.x1, sc.y0, sc.y1, face + 0.6, 8);
+    };
+    this.screen = screen(STATION.screen);
+    this.steadyScreen = screen(STATION.steadyScreen);
   }
 
   update(clock: number, energies: readonly number[], targets: ReadonlySet<Vessel>): void {
@@ -1505,12 +1532,26 @@ class ToolView {
       this.segments[i].emissive.set(lit ? color : 0x000000);
     });
     drawDiverter(this.diverter!, t.gate, t.sinceFlow < DIVERTER_HOLD);
-    // the screen: the cryostabilizer in the reservoir / what's needed, in litres
-    const s = this.screen!;
-    const text = `${((t.tanks[1].n[TARGET] / CAP) * FLASK_L).toFixed(2)} L / ${GOAL_L.toFixed(2)} L`;
+    // the screens: the cryostabilizer in the reservoir / what's needed, in litres; and how long it's been delivering
+    // steadily
+    phosphor(this.screen!, STATION.screen, `${((t.tanks[1].n[TARGET] / CAP) * FLASK_L).toFixed(2)} L / ${GOAL_L.toFixed(2)} L`);
+    phosphor(this.steadyScreen!, STATION.steadyScreen, t.steady >= DELIVERY.streak ? 'AIRLOCK OPEN' : `STEADY ${clockText(t.steady)}`);
+  }
+
+  dispose(): void {
+    this.root.removeFromParent();
+    disposeGeometry(this.root);
+    for (const { fm } of this.fluids) fm.dispose();
+    for (const g of this.glows) g.dispose();
+    this.screen?.tex.dispose();
+    this.steadyScreen?.tex.dispose();
+  }
+}
+
+/** Show a line of text on a green-on-black screen covering `sc`, in the tool's frame, if it isn't already. */
+function phosphor(s: Screen, sc: { x0: number; x1: number; y0: number; y1: number }, text: string): void {
     if (s.key !== text) {
       s.key = text;
-      const sc = STATION.screen;
       s.ctx.setTransform(s.ppu, 0, 0, s.ppu, -sc.x0 * s.ppu, -sc.y0 * s.ppu);
       s.ctx.fillStyle = '#040a06';
       s.ctx.fillRect(sc.x0, sc.y0, sc.x1 - sc.x0, sc.y1 - sc.y0);
@@ -1525,15 +1566,6 @@ class ToolView {
       for (let y = sc.y0; y < sc.y1; y += 1.5) s.ctx.fillRect(sc.x0, y, sc.x1 - sc.x0, 0.6);
       s.tex.needsUpdate = true;
     }
-  }
-
-  dispose(): void {
-    this.root.removeFromParent();
-    disposeGeometry(this.root);
-    for (const { fm } of this.fluids) fm.dispose();
-    for (const g of this.glows) g.dispose();
-    this.screen?.tex.dispose();
-  }
 }
 
 /* ---------------- scales ---------------- */
@@ -2183,7 +2215,7 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, w: number): strin
  * The notice (see intro/notice.ts) as light projected on the inside of the pod's front: pale blue text on a faint
  * glow, with room at the bottom right for the OK button, which is its own mesh. Returns the canvas, laid out to fit.
  */
-function messageCanvas(): HTMLCanvasElement {
+function messageCanvas(blocks: readonly Block[]): HTMLCanvasElement {
   const c = document.createElement('canvas');
   const ctx = c.getContext('2d')!;
   const sans = (wt: number, px: number) => `${wt} ${px}px "Schibsted Grotesk", sans-serif`;
@@ -2194,7 +2226,7 @@ function messageCanvas(): HTMLCanvasElement {
   const rules: number[] = [];
   const boxes: { y0: number; y1: number }[] = [];
   let y = MSG_PAD;
-  for (const b of notice()) {
+  for (const b of blocks) {
     if (b.kind === 'hr') {
       y += 16;
       rules.push(y);
@@ -2289,6 +2321,15 @@ export interface AirlockLook {
   message: boolean;
   /** Whether the crosshair is on the OK button. */
   okHot: boolean;
+  /**
+   * What the message says: the notice that wakes the player, with the litres of cryostabilizer on board; or, once
+   * there's enough, the one welcoming them to Mu Ceti.
+   */
+  notice: { arrival: true } | { arrival: false; litres: number };
+  /** Whether the green lamp over the doorway is lit: it flashes while the doors stand open to sleep. */
+  lamp: boolean;
+  /** Whether the pod is in the white void of Mu Ceti, at the end, with nothing of the lab to be seen (see ARRIVAL). */
+  arrival: boolean;
 }
 
 /**
@@ -2299,28 +2340,48 @@ export interface AirlockLook {
 class AirlockView {
   private doors: THREE.Mesh[] = [];
   private front = new THREE.Group();
-  private message: THREE.Mesh;
+  private message!: THREE.Mesh;
   private ok: THREE.Mesh;
+  /** The pod, which the message hangs in, and what the message says now (see setMessage). */
+  private pod: THREE.Group;
+  private said = '';
   private okTex = [okTexture(false), okTexture(true)];
+  private lamp: THREE.MeshStandardMaterial;
+  private lampGlow: THREE.Sprite;
+  private eye: number;
   private last: AirlockLook | null = null;
 
   constructor(scene: THREE.Scene, pickables: Map<THREE.Object3D, Pick>, eye: number) {
     const { x, w, d, h, wall, door } = AIRLOCK;
     const z1 = ROOM.z1;
     const g = new THREE.Group();
-    const panel = surfaceMat('walls', { tint: 0xc4cac8, metalness: 0.15 });
+    const metal = new THREE.MeshStandardMaterial({ color: 0x737a78, roughness: 0.42, metalness: 0.6 });
     const hidden = new THREE.MeshBasicMaterial({ visible: false });
-    // the chamber, seen from inside, paneled like the lab and on the same deck; its front is the wall with the
-    // doorway, below
-    const [walls, floor] = [surfaceMat('walls', { tint: 0xc4cac8, metalness: 0.15, side: THREE.BackSide }), surfaceMat('deck', { metalness: 0.55, side: THREE.BackSide })];
+    // the chamber, seen from inside: plain gray metal, on the lab's deck; its front is the wall with the doorway, below
+    const [walls, floor] = [metal.clone(), surfaceMat('deck', { metalness: 0.55, side: THREE.BackSide })];
+    walls.side = THREE.BackSide;
     const room = new THREE.Mesh(boxUV(new THREE.BoxGeometry(w, h, d), 'walls', { z: 440 }), [walls, walls, walls, floor, walls, hidden]);
     room.position.set(x, h / 2, z1 + wall + d / 2);
     g.add(room);
     const shape = rectPath(0, h / 2, w, h, new THREE.Shape());
     shape.holes.push(rectPath(0, door.h / 2 + 0.25, door.w, door.h - 0.5));
-    const inside = new THREE.Mesh(planeUV(new THREE.ShapeGeometry(shape), 'walls', -w / 2, 0), panel);
+    const inside = new THREE.Mesh(new THREE.ShapeGeometry(shape), metal);
     inside.position.set(x, 0, z1 + wall);
     g.add(inside);
+    // red lights in its ceiling: lenses and their glow (not lights, which would cost every surface in the lab)
+    const red = new THREE.MeshStandardMaterial({ color: 0x3a0a08, emissive: 0xff2a1a, emissiveIntensity: 1.4 });
+    for (const side of [-1, 1]) {
+      const at = new THREE.Vector3(x + side * (w / 4), h - 3, z1 + wall + d / 2);
+      const lens = new THREE.Mesh(new THREE.BoxGeometry(46, 6, 22), red);
+      lens.position.copy(at);
+      g.add(lens);
+      const glow = new THREE.Sprite(
+        new THREE.SpriteMaterial({ map: glowTexture(2), color: 0xff2a1a, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }),
+      );
+      glow.scale.set(160, 160, 1);
+      glow.position.copy(at).add(new THREE.Vector3(0, -12, 0));
+      g.add(glow);
+    }
     // the doorway's sides and top, through the wall's thickness: planes only, with nothing lying in either wall's face
     const jambMat = darkMat.clone();
     jambMat.side = THREE.DoubleSide;
@@ -2339,89 +2400,144 @@ class AirlockView {
     sill.position.set(x, 0, z1 + wall / 2);
     sill.receiveShadow = true;
     g.add(sill);
-    // the doors, each half the doorway, sliding apart into the wall
+    // the doors, each half the doorway, sliding apart into the wall, with a dark gasket down the edge where they meet;
+    // and another pair, just like them, across the chamber's far end, always shut, to the outside
     const doorMat = new THREE.MeshPhysicalMaterial({ color: 0xa3ada9, roughness: 0.45, metalness: 0.35, clearcoat: 0.3 });
-    for (const side of [-1, 1]) {
+    const stripeMat = new THREE.MeshStandardMaterial({ color: 0xc9a227, roughness: 0.6 });
+    const gasketMat = new THREE.MeshStandardMaterial({ color: 0x141817, roughness: 0.85 });
+    const half = (side: number) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(door.w / 2, door.h, 12), doorMat);
-      m.position.set(x, door.h / 2, z1 + wall / 2);
       m.userData.side = side;
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(door.w / 2 - 2, 26, 14), new THREE.MeshStandardMaterial({ color: 0xc9a227, roughness: 0.6 }));
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(door.w / 2 - 2, 26, 14), stripeMat);
       stripe.position.y = -door.h / 2 + 120;
       m.add(stripe);
+      const gasket = new THREE.Mesh(new THREE.BoxGeometry(1.5, door.h, 13), gasketMat);
+      gasket.position.x = (-side * door.w) / 4 + side * 0.75;
+      m.add(gasket);
+      return m;
+    };
+    for (const side of [-1, 1]) {
+      const m = half(side);
+      m.position.set(x, door.h / 2, z1 + wall / 2);
       this.doors.push(m);
       g.add(m);
+      const far = half(side);
+      far.position.set(x + (side * door.w) / 4, door.h / 2, z1 + wall + d - 6);
+      g.add(far);
     }
-    // the pod: a plinth, and a metal shell whose front half slides up into the ceiling
+    // the green lamp over the doorway, on the lab's side: a lens in a dark housing, and a glow round it (a glow, not a
+    // light, since every light in the scene costs every surface it might fall on)
+    const housing = new THREE.Mesh(new THREE.BoxGeometry(70, 30, 12), darkMat);
+    housing.position.set(x, door.h + 70, z1 - 6);
+    g.add(housing);
+    this.lamp = new THREE.MeshStandardMaterial({ color: 0x15361c, emissive: 0x3dff6a, emissiveIntensity: 0 });
+    const lens = new THREE.Mesh(new THREE.BoxGeometry(56, 18, 4), this.lamp);
+    lens.position.set(x, door.h + 70, z1 - 13);
+    g.add(lens);
+    this.lampGlow = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: glowTexture(2), color: 0x3dff6a, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }),
+    );
+    this.lampGlow.scale.set(220, 220, 1);
+    this.lampGlow.position.set(x, door.h + 70, z1 - 20);
+    g.add(this.lampGlow);
+    // the pod: a plinth, a metal shell, its body round all but its door, under a whole dome, and its door: POD.arc of
+    // the body's round, facing the lab, hinged on its edge toward +x, swinging out
     const shell = new THREE.MeshStandardMaterial({ color: 0x8c9692, roughness: 0.45, metalness: 0.35, side: THREE.DoubleSide });
     const pod = new THREE.Group();
     pod.position.set(POD.x, 0, POD.z);
-    const plinth = new THREE.Mesh(new THREE.CylinderGeometry(POD.r + 10, POD.r + 14, POD.base, 40), darkMat);
+    const plinth = new THREE.Mesh(new THREE.CylinderGeometry(POD.r + 10, POD.r + 14, POD.base, 48), darkMat);
     plinth.position.y = POD.base / 2;
     pod.add(plinth);
     const body = POD.top - POD.base;
-    // three.js puts theta 0 at +z: the back half faces +z, the front half (toward the room, −z) the other way
-    const half = (front: boolean, mat: THREE.Material, r: number) => {
-      const cyl = new THREE.Mesh(new THREE.CylinderGeometry(r, r, body, 40, 1, true, front ? Math.PI / 2 : -Math.PI / 2, Math.PI), mat);
-      cyl.position.y = POD.base + body / 2;
-      const dome = new THREE.Mesh(new THREE.SphereGeometry(r, 40, 12, front ? Math.PI : 0, Math.PI, 0, Math.PI / 2), mat);
-      dome.position.y = POD.top;
-      return [cyl, dome];
-    };
-    for (const m of half(false, shell, POD.r + 2)) pod.add(m);
+    // three.js puts theta 0 at +z, and the door faces the lab, −z: theta π
+    const [d0, d1] = [Math.PI - POD.arc / 2, Math.PI + POD.arc / 2];
+    const back = new THREE.Mesh(new THREE.CylinderGeometry(POD.r + 2, POD.r + 2, body, 48, 1, true, d1, 2 * Math.PI - POD.arc), shell);
+    back.position.y = POD.base + body / 2;
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(POD.r + 2, 48, 16, 0, 2 * Math.PI, 0, Math.PI / 2), shell);
+    dome.position.y = POD.top;
+    pod.add(back, dome);
     const band = new THREE.Mesh(new THREE.TorusGeometry(POD.r + 3, 3, 8, 48).rotateX(Math.PI / 2), darkMat);
     band.position.y = POD.top;
     pod.add(band);
-    for (const m of half(true, shell, POD.r)) {
-      m.castShadow = true;
-      this.front.add(m);
-    }
+    const hinge = new THREE.Vector3(POD.r * Math.sin(d0), 0, POD.r * Math.cos(d0));
+    const leaf = new THREE.Mesh(new THREE.CylinderGeometry(POD.r, POD.r, body, 16, 1, true, d0, POD.arc), shell);
+    leaf.castShadow = true;
+    leaf.position.set(-hinge.x, POD.base + body / 2, -hinge.z);
+    this.front.position.copy(hinge);
+    this.front.add(leaf);
     pod.add(this.front);
-    // two dim emergency lights on the inside of the front, either side of the message, the only light while it's
-    // shut (see View.render); they go up with it
+    // two dim emergency lights in the pod's ceiling, either side, a little in front of the face: the only light while
+    // it's shut (see View.render)
     for (const side of [-1, 1]) {
       const bulb = new THREE.Mesh(
-        new THREE.SphereGeometry(2.5, 12, 8),
+        new THREE.SphereGeometry(3, 12, 8),
         new THREE.MeshStandardMaterial({ color: 0x5a3010, emissive: 0xff9a3c, emissiveIntensity: 0.8 }),
       );
-      const at = new THREE.Vector3(side * 42, eye + 20, -Math.sqrt(POD.r * POD.r - 42 * 42) + 2);
+      const at = new THREE.Vector3(side * 36, POD.top + 25, -40);
       bulb.position.copy(at);
-      this.front.add(bulb);
-      const light = new THREE.PointLight(0xff9a3c, 300, 260, 2);
-      light.position.copy(at).add(new THREE.Vector3(-side * 5, 0, 5));
-      this.front.add(light);
+      pod.add(bulb);
+      const light = new THREE.PointLight(0xff9a3c, 300, 300, 2);
+      light.position.copy(at).add(new THREE.Vector3(0, -8, 0));
+      pod.add(light);
     }
-    // the message, projected on the inside of the front, in front of the face, facing in
-    const tex = new THREE.CanvasTexture(messageCanvas());
+    // the message, projected on the inside of the front, in front of the face, facing in (see setMessage), with its OK
+    // button
+    this.pod = pod;
+    this.eye = eye;
+    const unit = MESSAGE_W / MSG_PX;
+    this.ok = new THREE.Mesh(
+      new THREE.PlaneGeometry(OK_PX.w * unit, OK_PX.h * unit),
+      new THREE.MeshBasicMaterial({ map: this.okTex[0], transparent: true, depthWrite: false, toneMapped: false }),
+    );
+    pod.add(this.ok);
+    pickables.set(this.ok, { kind: 'wake' });
+    this.setMessage(notice());
+    // the pod is all that's left at Mu Ceti (see View.renderArrival)
+    pod.traverse((o) => o.layers.enable(VOID_LAYER));
+    g.add(pod);
+    scene.add(g);
+  }
+
+  /** Project these blocks as the message, its OK button at its bottom right. */
+  private setMessage(blocks: readonly Block[]): void {
+    if (this.message) {
+      this.message.removeFromParent();
+      this.message.geometry.dispose();
+      const m = this.message.material as THREE.MeshBasicMaterial;
+      m.map?.dispose();
+      m.dispose();
+    }
+    const tex = new THREE.CanvasTexture(messageCanvas(blocks));
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
     const img = tex.image as HTMLCanvasElement;
     const mh = (MESSAGE_W * img.height) / img.width;
     const msgMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false });
     this.message = new THREE.Mesh(new THREE.PlaneGeometry(MESSAGE_W, mh), msgMat);
-    // it hangs a little low, so the eyes start on its heading and look down to OK
-    const cy = eye + 27 - mh / 2;
+    // it hangs a little low, so the eyes start on its heading and look down to OK; a short one, at the eyes
+    const cy = this.eye + Math.min(27, 2 + mh / 2) - mh / 2;
     this.message.position.set(0, cy, -MESSAGE_AT);
-    pod.add(this.message);
+    this.message.layers.set(this.ok.layers.mask === 1 ? 0 : 1);
+    this.pod.add(this.message);
     const unit = MESSAGE_W / MSG_PX;
-    this.ok = new THREE.Mesh(
-      new THREE.PlaneGeometry(OK_PX.w * unit, OK_PX.h * unit),
-      new THREE.MeshBasicMaterial({ map: this.okTex[0], transparent: true, depthWrite: false, toneMapped: false }),
-    );
     this.ok.position.set(MESSAGE_W / 2 - (MSG_PAD + OK_PX.w / 2) * unit, cy - mh / 2 + (MSG_PAD + OK_PX.h / 2) * unit, -MESSAGE_AT + 0.3);
-    pod.add(this.ok);
-    pickables.set(this.ok, { kind: 'wake' });
-    g.add(pod);
-    scene.add(g);
   }
 
   update(a: AirlockLook): void {
+    const said = a.notice.arrival ? 'arrival' : a.notice.litres.toFixed(2);
+    if (said !== this.said) {
+      this.said = said;
+      this.setMessage(a.notice.arrival ? arrival() : notice(a.notice.litres));
+    }
     const l = this.last;
-    if (l && l.door === a.door && l.front === a.front && l.dark === a.dark && l.message === a.message && l.okHot === a.okHot) return;
+    if (l && l.door === a.door && l.front === a.front && l.dark === a.dark && l.message === a.message && l.okHot === a.okHot && l.lamp === a.lamp) return;
     this.last = { ...a };
+    this.lamp.emissiveIntensity = a.lamp ? 1.6 : 0;
+    this.lampGlow.visible = a.lamp;
     const { x, door } = AIRLOCK;
     for (const m of this.doors) m.position.x = x + m.userData.side * (door.w / 4 + a.door * (door.w / 2 + 6));
-    // up past the ceiling, out of sight
-    this.front.position.y = a.front * (AIRLOCK.h + 40);
+    // its door swings out on its hinge
+    this.front.rotation.y = -a.front * POD.swing;
     // off its layer it's neither drawn nor hit by the crosshair
     for (const m of [this.message, this.ok]) m.layers.set(a.message ? 0 : 1);
     (this.ok.material as THREE.MeshBasicMaterial).map = this.okTex[a.okHot ? 1 : 0];
@@ -2783,6 +2899,8 @@ export class View {
   /** The field of view is 90°, top to bottom. */
   readonly camera = new THREE.PerspectiveCamera(90, 1, 2, 8000);
   private renderer: THREE.WebGLRenderer;
+  /** What the white void of Mu Ceti is drawn with (see renderArrival), once it's needed. */
+  private void?: ReturnType<View['buildVoid']>;
   private scene = new THREE.Scene();
   private pickables = new Map<THREE.Object3D, Pick>();
   private flasks = new Map<Flask, FlaskView>();
@@ -2895,6 +3013,7 @@ export class View {
   }
 
   render(fr: Frame): void {
+    GLOWS.lit = 1 - fr.airlock.dark;
     this.clock += fr.dt;
     const { scene, pickables } = this;
     this.look(fr.eye, fr.yaw, fr.pitch);
@@ -2945,9 +3064,79 @@ export class View {
     this.beacon.beacon.intensity = 9000 * pulse * pulse * lit;
     (this.beacon.lamp.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.3 + 1.2 * pulse;
 
+    if (fr.airlock.arrival) {
+      this.renderArrival(fr.airlock.front);
+      return;
+    }
     this.renderer.render(scene, this.camera);
     this.renderGuides();
     this.renderOutline(fr.hot);
+  }
+
+  /**
+   * The pod in the white void of Mu Ceti, and nothing else (see ARRIVAL): it's drawn on a layer of its own, inside a
+   * sphere far brighter than white, lit by white light from out in front and all round, pouring in as far as its front
+   * is `open`, with what's brighter than the bloom's threshold bleeding over everything, and toned down to the screen.
+   */
+  private renderArrival(open: number): void {
+    const { renderer, scene, camera } = this;
+    const v = (this.void ??= this.buildVoid());
+    v.sky.material.color.setScalar(ARRIVAL.void);
+    v.sun.intensity = ARRIVAL.light * open;
+    v.fill.intensity = ARRIVAL.ambient * open;
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+    if (size.x !== v.size.x || size.y !== v.size.y) {
+      v.size.copy(size);
+      v.composer.setPixelRatio(1);
+      v.composer.setSize(size.x, size.y);
+    }
+    Object.assign(v.bloom, { strength: ARRIVAL.bloom, radius: ARRIVAL.radius, threshold: ARRIVAL.threshold });
+    const [bg, env, envI] = [scene.background, scene.environment, scene.environmentIntensity];
+    scene.background = null;
+    scene.environment = v.env;
+    scene.environmentIntensity = open;
+    camera.layers.set(VOID_LAYER);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = ARRIVAL.exposure;
+    v.composer.render();
+    renderer.toneMapping = THREE.NoToneMapping;
+    renderer.toneMappingExposure = 1;
+    camera.layers.set(0);
+    [scene.background, scene.environment, scene.environmentIntensity] = [bg, env, envI];
+  }
+
+  /** What renderArrival draws with, made the first time it's needed. */
+  private buildVoid() {
+    const { renderer, scene, camera } = this;
+    const at = new THREE.Vector3(POD.x, 600, POD.z);
+    const onVoid = <T extends THREE.Object3D>(o: T): T => {
+      o.layers.set(VOID_LAYER);
+      scene.add(o);
+      return o;
+    };
+    // the void: a sphere round the pod, seen from inside, brighter than white
+    const sky = onVoid(
+      new THREE.Mesh(new THREE.SphereGeometry(6000, 32, 16), new THREE.MeshBasicMaterial({ side: THREE.BackSide, depthWrite: false })),
+    );
+    sky.position.copy(at);
+    // the light pouring in from out in front, and from all round
+    const sun = onVoid(new THREE.DirectionalLight(0xffffff, 0));
+    sun.position.set(at.x, at.y + 300, at.z - 3000);
+    sun.target.position.copy(at);
+    scene.add(sun.target);
+    const fill = onVoid(new THREE.HemisphereLight(0xffffff, 0xffffff, 0));
+    // what its metal reflects: white all round
+    const white = new THREE.Scene();
+    white.background = new THREE.Color(0xffffff);
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const env = pmrem.fromScene(white).texture;
+    pmrem.dispose();
+    const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType }));
+    composer.addPass(new RenderPass(scene, camera));
+    const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), ARRIVAL.bloom, ARRIVAL.radius, ARRIVAL.threshold);
+    composer.addPass(bloom);
+    composer.addPass(new OutputPass());
+    return { sky, sun, fill, env, composer, bloom, size: new THREE.Vector2() };
   }
 
   /**

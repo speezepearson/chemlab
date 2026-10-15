@@ -12,6 +12,9 @@ same commit as any behavior change. This file holds what README doesn't: how to 
     in `src/chem/testChem.ts`, and one that touches a tunable reads its current value rather than a literal.
 - `npm run route`: the synthesis-route harness (`src/game/route.ts`). It prints a report; `--silent=false` is already
   in the script.
+- `npm run bench`: the headless sim benchmark (`bench/sim.ts`): the real engine in Node with the view and audio
+  stubbed out, on fixed seeds. `npm run bench -- prod --mode=tight --load=bench/saves/line.json --tightstats` runs
+  the user's production line as fast as it goes, as while asleep. Its header lists the modes and scenes.
 - `npx vite --port 5199 --strictPort`: the dev server, for browser checks.
 
 ## Checking things in a browser
@@ -61,7 +64,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     wall. While the pencil is in hand, the mouse moves `cursor` rather than the view, and both buttons go to
     `pencilDown`, which works where the cursor's ray meets the wall (`wallAt`).
   - `airlock.ts` is the airlock and cryopod where the player wakes: their size, collisions, and the `Wake` states.
-    `src/intro/notice.ts` is the message projected inside the pod.
+    `sleep.ts` is sleeping in the pod: the lab run in windows, measured, and jumped ahead while it's steady.
+    `src/intro/notice.ts` is the messages projected inside the pod: the notice she wakes to (its litres as of then),
+    and the welcome to Mu Ceti at the end.
   - `porthole.ts` is the porthole's shape, for how much of the wall it takes up.
   - `surfaces.ts` paints the room's textures (walls, deck, ceiling, counters, cabinets) from noise, pure and DOM-free;
     `surfaceWorker.ts` runs it off the main thread, and `textures.ts` turns the results into materials, plain until
@@ -94,7 +99,11 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
   notice; the player themselves (walking, looking, carrying, tipping a flask), which is input, not the sim; and what
-  isn't in the world (the HUD, the guides' flashing). Everything in the world is on sim time, lights included, like
+  isn't in the world (the HUD, the guides' flashing). While the player sleeps in the cryopod, the lab is run as ever in
+  windows and jumped ahead between them (`sleep.ts`): still sim time, just not substep by substep through the jumps.
+  And once the reservoir holds the goal, the lab stands still as it was then through the end (the welcome to Mu Ceti,
+  the pod opening onto white), so that goes in real time, as do the screen's fades in from black on waking.
+  Everything in the world is on sim time, lights included, like
   the emergency beacon; going with the ambience (as the beacon goes with the alarms) doesn't make something an
   exception. Waking in the airlock (the pod's message flickering out, its front opening, the doors closing) is sim
   time too.

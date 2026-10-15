@@ -14,15 +14,19 @@ export type Block =
 const num = (x: number, digits = 0) => x.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
 /** The litres needed, present, and so still to be made, right-aligned together. */
-function litres(): [needed: string, present: string, short: string] {
-  const ls = [GOAL_L, VOYAGE.presentL, GOAL_L - VOYAGE.presentL].map((l) => `${num(l, 2)} L`);
+function litres(presentL: number): [needed: string, present: string, short: string] {
+  const ls = [GOAL_L, presentL, Math.max(0, GOAL_L - presentL)].map((l) => `${num(l, 2)} L`);
   const w = Math.max(...ls.map((l) => l.length)) + 2;
   const [a, b, c] = ls.map((l) => l.padStart(w));
   return [a, b, c];
 }
 
-export function notice(): Block[] {
-  const [needed, present, short] = litres();
+/**
+ * The notice, with `presentL` litres of cryostabilizer on board: at first what's left after the incident, and when
+ * the player wakes from a sleep that ended with the station no longer delivering, what the reservoir holds then.
+ */
+export function notice(presentL: number = VOYAGE.presentL): Block[] {
+  const [needed, present, short] = litres(presentL);
   return [
     { kind: 'brand', text: '✦ Celestia Starlines' },
     { kind: 'h', text: `Good morning, passenger ${PLAYER}!` },
@@ -68,5 +72,13 @@ export function notice(): Block[] {
         'can earn 70,000 bonus lightyears plus our exclusive Cosmic Companion Pass™ when you\'re approved and meet the ' +
         'spending requirements. Apply on your way out today!',
     },
+  ];
+}
+
+/** The notice that wakes the player once there's enough cryostabilizer for the rest of the voyage. */
+export function arrival(): Block[] {
+  return [
+    { kind: 'brand', text: '✦ Celestia Starlines' },
+    { kind: 'h', text: 'Welcome to Mu Ceti.' },
   ];
 }
