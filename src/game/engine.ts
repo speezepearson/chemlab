@@ -2331,18 +2331,15 @@ export class GameEngine {
       r.level(simDt > 0 ? ANALYZER_HUM : 0);
     }
 
-    // the station's diverter goes by sim time too: a clunk as it swings, and a rush while it lets into the reservoir
-    // (as long as its display shows it), silent while paused
+    // the station's diverter goes by sim time too: a clunk as it swings
     this.tools.forEach((t, j) => {
       if (t.kind !== 'receptacle') return;
       const swung = t.gate !== gateFrom[j];
-      const rush = simDt > 0 && t.gate === 'reservoir' && t.sinceFlow < DIVERTER_HOLD;
-      if ((swung || rush) && !this.diverters.has(t)) this.diverters.set(t, diverter(this.hear(this.machineAt(t))));
+      if (swung && !this.diverters.has(t)) this.diverters.set(t, diverter(this.hear(this.machineAt(t))));
       const d = this.diverters.get(t);
       if (!d) return;
       d.place(this.hear(this.machineAt(t)));
       if (swung) d.swing(t.gate === 'reservoir');
-      d.flush(rush ? 1 : 0);
     });
     for (const [t, d] of this.diverters)
       if (!this.tools.includes(t) || t.sinceFlow >= DIVERTER_HOLD + 1) {

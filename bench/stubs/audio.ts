@@ -5,6 +5,6 @@ export class WaterSounds {
 }
 const noop = () => {};
 export const rumble = () => ({ place: noop, level: noop, stop: noop });
-export const diverter = () => ({ place: noop, swing: noop, flush: noop, stop: noop });
+export const diverter = () => ({ place: noop, swing: noop, stop: noop });
 export const hushAlarms = noop;
 export const chime = noop;
