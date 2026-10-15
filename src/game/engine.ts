@@ -100,6 +100,8 @@ export interface Hud {
   ended: boolean;
   /** While the player's asleep in the pod (see Wake), the whole sim seconds they've slept; otherwise null. */
   slept: number | null;
+  /** While they're asleep, the litres of cryostabilizer in the ship's reservoir, to two places; otherwise null. */
+  litres: number | null;
 }
 
 /**
@@ -3027,6 +3029,7 @@ export class GameEngine {
       white: this.wake === 'arriving' ? ease(this.wakeT / WAKE_S.arrive) : this.wake === 'arrived' ? 1 : 0,
       ended: this.wake === 'arrived',
       slept: this.sleeping ? Math.floor(this.clock - this.sleeping.from) : null,
+      litres: this.sleeping ? Math.floor(100 * this.reservoirLitres()) / 100 : null,
     };
     const key = JSON.stringify(hud);
     if (key === this.lastHud) return;

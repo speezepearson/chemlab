@@ -1,16 +1,27 @@
 import { useEffect } from 'react';
+import { GOAL_L } from '../game/config';
 import type { Hud } from '../game/engine';
 import { sleptFor } from '../game/sleep';
 
 /**
- * The screen fading to black as Nadia falls asleep in the cryopod (or in from it as she wakes), and how long she's
- * slept while she's asleep.
+ * The screen fading to black as Nadia falls asleep in the cryopod (or in from it as she wakes), and while she's asleep,
+ * how long she's slept and the cryostabilizer in the ship's reservoir, of what's needed.
  */
 export function SleepScreen({ hud }: { hud: Hud }) {
   if (hud.black <= 0) return null;
   return (
     <div className="sleep" style={{ opacity: hud.black }}>
-      {hud.slept !== null && <div className="sleep-time">asleep · {sleptFor(hud.slept)}</div>}
+      {hud.slept !== null && (
+        <div className="sleep-time">
+          asleep · {sleptFor(hud.slept)}
+          {hud.litres !== null && (
+            <>
+              <br />
+              cryostabilizer {hud.litres.toFixed(2)} L / {GOAL_L.toFixed(2)} L
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
