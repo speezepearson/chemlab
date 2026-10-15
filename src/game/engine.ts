@@ -2289,6 +2289,12 @@ export class GameEngine {
     }
     this.spillTime = simDt;
     if (quiet) {
+      // nothing's drawn, and what a tool's step handed out is its own, good only until its next step (see Tool.step)
+      for (const t of this.tools) {
+        t.out.fill(null);
+        t.flow.fill(0);
+        t.streaming.fill(false);
+      }
       this.goal();
       return;
     }
