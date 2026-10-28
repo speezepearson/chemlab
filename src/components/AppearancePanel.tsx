@@ -43,7 +43,7 @@ const GROUPS: Group[] = [
 
 /**
  * Debug panel: live-tune the temperature appearance curves and how composition looks (see game/appearance.ts), and
- * the outline round what the crosshair is on (see game/outline.ts).
+ * the outline round what the crosshair is on (see game/outline.ts), and where the Milky Way runs.
  */
 export function AppearancePanel() {
   const [, rerender] = useReducer((x: number) => x + 1, 0);
@@ -76,6 +76,31 @@ export function AppearancePanel() {
       <div className="wide">
         <table>
           <tbody>
+            <tr className="group">
+              <td colSpan={2}>
+                <b>Milky Way</b> <span>its middle's angle from straight out of the porthole</span>
+              </td>
+            </tr>
+            <tr>
+              <td>angle</td>
+              <td>
+                <label className="slider">
+                  <input
+                    type="range"
+                    aria-label="Milky Way angle"
+                    min={0}
+                    max={90}
+                    step={1}
+                    value={LOOK.milkyWay}
+                    onChange={(e) => {
+                      LOOK.milkyWay = +e.target.value;
+                      rerender();
+                    }}
+                  />
+                  <output>{LOOK.milkyWay}°</output>
+                </label>
+              </td>
+            </tr>
             {GROUPS.map((g) => (
               <Fragment key={g.title}>
                 <tr className="group">

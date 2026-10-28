@@ -76,7 +76,7 @@ Each vessel's chemistry is stepped by explicit Euler along with everything else,
   - **Hot** fluids glow. The glow's strength is `ln(1+T) / ln(101)`, and it drives the size and opacity of a corona and a wider halo around the flask. At high T it also bleaches the fluid itself toward white.
   - The glow is subtle but visible at T = 1, obvious at T = 10 and nearly blinding at T = 100.
   - God mode shows the actual number.
-  - The **Appearance** debug panel tunes every constant in these curves live. *Copy values* puts the current settings on the clipboard as JSON, and *Restore defaults* undoes your changes.
+  - The **Appearance** debug panel tunes every constant in these curves live. *Copy values* puts the current settings on the clipboard as JSON, and *Restore defaults* undoes your changes. At its top, a slider sets how far the Milky Way's middle passes from straight out of the porthole, from 0° (across its middle) to 90° (square to the wall, out of sight), 50° to start; like the rest of the panel, it isn't saved.
 - **Composition, experimentally:** the Appearance panel can also make color depend on bonds, so reactions show. A fluid is then the atom-weighted average of its molecules' colors, and each molecule's color comes from one of three models:
   - *current*, the default: a molecule is the average of its atoms, so the fluid is the average of its atoms and no reaction changes it;
   - *1: paint*: a molecule's atoms multiply like paints, rescaled to their average's brightness, so C–Y is green and M–Y red;
