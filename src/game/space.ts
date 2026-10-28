@@ -23,8 +23,8 @@ export const ORIGIN: Pose = { x: 0, y: 0, z: 0, yaw: 0 };
 export const ROOM = { x0: -700, x1: 2300, z0: 0, z1: 3000, y1: 1300 };
 /**
  * How fast the ship turns, in radians per sim second: the lab is on the rim of a ring 10 km in radius, spun for 1 g,
- * √(g / r), about one turn every 200 s. It turns about an axis running front to back through the room (z), so the
- * stars sweep past the porthole in the left wall.
+ * √(g / r), about one turn every 200 s. It turns about an axis square to the left wall (x), so the stars wheel round
+ * the middle of the porthole in it.
  */
 export const SPIN = Math.sqrt(9.81 / 10_000);
 /**

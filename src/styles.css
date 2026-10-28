@@ -105,6 +105,9 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .palette .lcd{fill:#26302b;stroke:none}
 .palette .digits{stroke:#9fe0b8;stroke-width:1.5}
 @media (max-width:560px){
+  /* panels span the screen, rather than hanging left off it from their names */
+  details{position:static}
+  details > div{left:16px;right:16px;top:auto;margin-top:6px}
   .palette{gap:3px;padding:4px;flex-wrap:wrap;justify-content:center;width:calc(100% - 24px);box-sizing:border-box}
   .stick{bottom:104px}
   .touch-buttons{bottom:228px}
