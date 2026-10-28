@@ -958,6 +958,11 @@ class ToolView {
       const fork = sh.valveY + 10;
       pipes(art, [[0, TH], [0, fork]]);
       for (const x of sh.spouts) pipes(art, [[0, fork], [x, fork + 16], [x, sh.spoutY - 4]]);
+    } else if (t.kind === 'multiplexer') {
+      // the splitter's fork upside down: each funnel's stem in to where they join, over the valve
+      const join = sh.valveY - 12;
+      for (const tk of sh.tanks) pipes(art, [[tankX(tk), TH], [tankX(tk), join - 16], [0, join]]);
+      pipes(art, [[0, join], [0, sh.spoutY - 4]]);
     } else if (t.kind === 'sorter') {
       const x = tankX(sh.tanks[0]);
       pipes(art, [[x, TH], [x, chuteY(x)]]);
@@ -1442,8 +1447,9 @@ class ToolView {
     });
     this.note.set(t.note);
     for (const [k, pv] of this.levers)
-      // closed points right, open straight up; a splitter's points to the side that gets more
-      pv.rotation.z = t.kind === 'splitter' ? Math.PI * (1 - t.valves[k]) : (t.valves[k] * Math.PI) / 2;
+      // closed points right, open straight up; a splitter's points to the side that gets more, and a multiplexer's to
+      // the side it takes more from
+      pv.rotation.z = t.kind === 'splitter' || t.kind === 'multiplexer' ? Math.PI * (1 - t.valves[k]) : (t.valves[k] * Math.PI) / 2;
     if (this.dial) {
       const d = t.valves[t.shape.dial!];
       this.dial.children[1].rotation.z = -(-0.75 * Math.PI + 1.5 * Math.PI * d);

@@ -208,12 +208,14 @@ export interface PaperEdit {
 }
 
 /** Things that can be made from the hotbar, in its order. */
-export const ITEMS = ['flask', 'dispenser', 'pipette', 'exchanger', 'separator', 'splitter', 'sorter', 'heater', 'scale', 'tank', 'meter'] as const;
+export const ITEMS = [
+  'flask', 'dispenser', 'pipette', 'exchanger', 'separator', 'splitter', 'sorter', 'heater', 'scale', 'tank', 'meter', 'multiplexer',
+] as const;
 export type Item = (typeof ITEMS)[number];
-/** The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0 and -. */
-export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-'] as const;
+/** The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0, - and =. */
+export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '='] as const;
 /** The same keys, as KeyboardEvent codes, so they work whatever the keyboard layout's shift state. */
-const HOTKEY_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus'];
+const HOTKEY_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal'];
 
 /** How tipped a flask held to pour is: past the horizontal, mouth down. */
 const POUR_ANG = Math.PI * 0.61;
@@ -1209,8 +1211,11 @@ export class GameEngine {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       // Enter is OK on the message inside the cryopod, as it was on the notice it replaced
       if (e.code === 'Enter' && this.wake === 'pod') this.pressOk();
-      // in god mode, = shows the end's white void, or puts the lab back
-      if (e.code === 'Equal' && !e.repeat && (this.god || this.previewing)) this.previewArrival(!this.previewing);
+      // in god mode, = shows the end's white void, or puts the lab back, rather than making anything
+      if (e.code === 'Equal' && (this.god || this.previewing)) {
+        if (!e.repeat) this.previewArrival(!this.previewing);
+        return;
+      }
       if (!this.locked) return;
       this.keys.add(e.code);
       if (e.repeat || inPod(this.wake) || this.previewing) return;
@@ -2722,7 +2727,7 @@ export class GameEngine {
     } else {
       if (this.pencil && p && this.grabbable(p)) add(['E'], 'pick it up');
       if (!this.pencil && this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
-      add(['1–0, -'], 'make equipment in your hands');
+      add(['1–0, -, ='], 'make equipment in your hands');
     }
     if (!this.pencil) {
       if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
@@ -3078,10 +3083,12 @@ export class GameEngine {
 
 /**
  * Whether tank k of a tool lets fluid out on its own: a funnel or an instrument's tube always (the station's funnel
- * through its diverter), a tank with a valve as long as it's open.
+ * through its diverter), a multiplexer's funnel unless its valve takes only from the other, a tank with a valve as
+ * long as it's open.
  */
 function drains(t: Tool, k: number): boolean {
   if (t.kind === 'receptacle') return k === 0 || t.valves[0] > 0;
+  if (t.kind === 'multiplexer') return k ? t.valves[0] > 0 : t.valves[0] < 1;
   return t.kind === 'splitter' || t.kind === 'sorter' || t.kind === 'heater' || INLINE_TOOLS.includes(t.kind) || t.valves[k] > 0;
 }
 

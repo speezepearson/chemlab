@@ -40,6 +40,13 @@ const ICONS: Record<string, ReactNode> = {
       <circle className="valve" cx="20" cy="19" r="2.5" />
     </>
   ),
+  multiplexer: (
+    <>
+      <path className="pipe" d="M11 14 V17 L20 23 V37 M29 14 V17 L20 23" />
+      <path className="glass" d="M3 4 H19 L12.5 14 H9.5 Z M21 4 H37 L30.5 14 H27.5 Z" />
+      <circle className="valve" cx="20" cy="29" r="2.5" />
+    </>
+  ),
   sorter: (
     <>
       <path className="pipe" d="M7 12 V16 M15 20 V37 M26 24 V37 M36 27 V37" />

@@ -443,7 +443,7 @@ export function valveNear(t: Tool, x: number, y: number): number | null {
  * open, straight right is closed, and in between is partly open. Below the valve it closes, and left
  * of it (past the down-left diagonal) it opens, so a wild swing lands at the nearer end. A splitter's lever instead
  * sweeps the upper half: straight left sends everything left, straight right everything right, and below the valve
- * it goes to the nearer side. A dial points at (x, y), turning clockwise from down-left (0) to down-right (1), and
+ * it goes to the nearer side; a multiplexer's the same, taking everything from the left or the right. A dial points at (x, y), turning clockwise from down-left (0) to down-right (1), and
  * straight below it goes to the nearer end. Within VALVE_DEADZONE of the valve the angle is too jumpy to mean
  * anything, so the lever stays put.
  */
@@ -456,7 +456,7 @@ export function aimValve(t: Tool, k: number, x: number, y: number): void {
     return;
   }
   const a = Math.atan2(vc.y - y, x - vc.x); // counterclockwise from right
-  if (t.kind === 'splitter') {
+  if (t.kind === 'splitter' || t.kind === 'multiplexer') {
     t.valves[k] = a >= 0 ? 1 - a / Math.PI : a > -Math.PI / 2 ? 1 : 0;
     return;
   }

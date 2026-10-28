@@ -175,12 +175,13 @@ export function drip(drop: Vessel, out: Vessel | null, h: number, rand = Math.ra
   return fell;
 }
 
-/** How much a splitter's funnel holds, in atoms: just a buffer, like a hose's. */
+/** How much a splitter's or multiplexer's funnel holds, in atoms: just a buffer, like a hose's. */
 export const FUNNEL_CAP = CAP / 4;
 /**
  * How fast a splitter's or size sorter's funnel drains when full, in atoms per sim second, whatever a splitter's
- * valve is set to; it drains in proportion to how high its fluid stands (see Tool.level). An inline instrument's tube
- * drains at this rate however full it is.
+ * valve is set to; it drains in proportion to how high its fluid stands (see Tool.level). A multiplexer's two funnels
+ * drain at this rate between them, shared out by its valve. An inline instrument's tube drains at this rate however
+ * full it is.
  */
 export const FUNNEL_RATE = 2 * MAX_FLOW;
 
@@ -468,8 +469,8 @@ export function meterText(rate: number): string {
 export const SEXTANT_ATOMS: readonly Atom[] = ['G', 'C', 'B', 'M', 'R', 'Y'];
 
 export type ToolKind =
-  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'sorter' | 'heater' | 'analyzer' | 'spectroscope'
-  | 'meter' | 'tank' | 'receptacle';
+  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater' | 'analyzer'
+  | 'spectroscope' | 'meter' | 'tank' | 'receptacle';
 
 /**
  * Tools there's only ever one of: not in the palette, and never put away. The receptacle is the whole cryostabilizer
@@ -586,6 +587,22 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     valveY: 42,
     spoutY: 84,
     box: { x0: -116, x1: 116, y0: -6, y1: 86 },
+  },
+  multiplexer: {
+    // the splitter turned upside down: a funnel a grid cell either side of its one spout, their stems joining over the
+    // valve, which picks how much of each goes through
+    tanks: [
+      { name: 'A', x0: -CELL - 22, x1: -CELL + 22 },
+      { name: 'B', x0: CELL - 22, x1: CELL + 22 },
+    ],
+    tankH: 30,
+    tankCap: FUNNEL_CAP,
+    funnel: true,
+    valves: [{ x: 0, y: 64 }],
+    spouts: [0],
+    valveY: 64,
+    spoutY: 88,
+    box: { x0: -126, x1: 126, y0: -6, y1: 90 },
   },
   sorter: {
     // a funnel at the high end of the chute (see SORTER_CHUTE), which drops through two screens, then off its end
@@ -769,6 +786,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   exchanger: 'Heat exchanger',
   separator: 'Separator',
   splitter: 'Splitter',
+  multiplexer: 'Multiplexer',
   sorter: 'Size sorter',
   heater: 'Resistive heater',
   meter: 'Flow meter',
@@ -840,6 +858,9 @@ export function separatorShares(): number[][] {
  * - A **splitter** has a small funnel that drains straight through (at
  *   FUNNEL_RATE) to two spouts. Its valve doesn't open or close: it sets the
  *   share that goes right, from 0 (all left) to 1 (all right).
+ * - A **multiplexer** is a splitter the other way up: two funnels, each draining (at FUNNEL_RATE times how high
+ *   its fluid stands) into one spout between them. Its valve picks which: the share of FUNNEL_RATE the right funnel
+ *   gets, from 0 (only the left drains) to 1 (only the right), the left getting the rest.
  * - A **size sorter** has a funnel like the splitter's, with no valve, draining down a chute through two
  *   screens and off its end, each with a spout under it (see SORTER_SCREENS).
  * - A **resistive heater** has a funnel draining (at HEATER.feed) into one end of a long tube, which carries
@@ -868,7 +889,8 @@ export class Tool {
   readonly tube: Vessel[];
   /**
    * Per valve (one per tank unless the shape places them): 0 (closed) to 1 (MAX_FLOW). Closed by default, so a tool doesn't drip on everything it's carried
-   * over. A splitter's one valve is instead the share going right, half by default.
+   * over. A splitter's one valve is instead the share going right, and a multiplexer's the share taken from the right,
+   * half by default.
    */
   readonly valves: number[];
   /** Per spout, what left it on the last step, for drawing the stream; null if nothing did. */
@@ -929,7 +951,7 @@ export class Tool {
     this.tanks = SHAPES[kind].tanks.map((tk) => new Vessel(tk.cap ?? SHAPES[kind].tankCap ?? TANK_CAP));
     this.tube = Array.from({ length: kind === 'heater' ? HEATER_CELLS : 0 }, () => new Vessel(Infinity));
     const nValves = SHAPES[kind].valves?.length ?? this.tanks.length;
-    this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' ? 0.5 : 0));
+    this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' ? 0.5 : 0));
     this.out = this.shape.spouts.map(() => null);
     this.flow = this.shape.spouts.map(() => 0);
     this.drops = this.shape.spouts.map(() => new Vessel(Infinity));
@@ -958,10 +980,12 @@ export class Tool {
     let packets = this.tanks.map((tank, k) => {
       const p = this.packet(k);
       // a valve, or a funnel without one, lets out in proportion to how high the fluid stands; an instrument's tube
-      // drains at a fixed rate, so what it reads is just what's arriving
+      // drains at a fixed rate, so what it reads is just what's arriving; a multiplexer's valve shares its rate out
+      // between its funnels
       const rate =
         INLINE_TOOLS.includes(this.kind) ? FUNNEL_RATE
         : this.kind === 'splitter' || this.kind === 'sorter' ? FUNNEL_RATE * this.level(k)
+        : this.kind === 'multiplexer' ? FUNNEL_RATE * this.level(k) * (k ? this.valves[0] : 1 - this.valves[0])
         : this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW) * this.level(k);
       transfer(tank, p, rate * h);
       return p;
@@ -969,6 +993,10 @@ export class Tool {
     if (this.kind === 'exchanger') counterflow(packets[0], packets[1], EXCHANGE_RATE * h);
     if (this.kind === 'separator') packets = separate(packets[0], parts(SEPARATOR_OUTLETS));
     if (this.kind === 'splitter') packets = divide(packets[0], () => 1 - this.valves[0], parts(2));
+    if (this.kind === 'multiplexer') {
+      transfer(packets[1], packets[0], volume(packets[1]));
+      packets = [packets[0]];
+    }
     if (this.kind === 'sorter') packets = sieve(packets[0], parts(3));
     if (this.kind === 'analyzer') packets = divide(packets[0], () => 1 - ANALYZER_SAMPLE, parts(2));
     this.out = packets.map((p) => (p.N > 0 ? p : null));

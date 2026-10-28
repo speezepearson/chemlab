@@ -138,7 +138,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially.
   - `ITEMS` and `HOTKEYS` in `engine.ts` (the hotbar's order and keys) and `ICONS` in `Palette.tsx`, unless the tool is
-    unique. The number row is full.
+    unique. The number row is full, through =.
   - Tests and the README.
   - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
 - **Unique tools** (`UNIQUE_TOOLS`: the composition analyzer, the spectroscope and the receptacle) aren't on

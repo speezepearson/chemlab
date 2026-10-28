@@ -534,6 +534,55 @@ describe('splitter', () => {
   });
 });
 
+describe('multiplexer', () => {
+  /** A step of a multiplexer with its valve at `valve`, its left funnel full of R at T 2 and its right full of G at T 6. */
+  function run(valve: number | undefined, h = 0.01) {
+    const mx = new Tool('multiplexer', 0, undefined, valve === undefined ? [] : [valve]);
+    filled(mx.tanks[0], R, FUNNEL_CAP, 2);
+    filled(mx.tanks[1], G, FUNNEL_CAP, 6);
+    const [out] = mx.step(h);
+    return { mx, out };
+  }
+
+  it('has two funnels, holding only a little, and one spout', () => {
+    const mx = new Tool('multiplexer', 0);
+    expect(mx.tanks.map((v) => v.cap)).toEqual([FUNNEL_CAP, FUNNEL_CAP]);
+    expect(mx.shape.spouts).toHaveLength(1);
+    expect(mx.valves).toEqual([0.5]);
+  });
+
+  it('takes only from the left with the valve at 0, and only from the right at 1, at FUNNEL_RATE', () => {
+    for (const [v, from, other] of [[0, R, G], [1, G, R]] as const) {
+      const { out } = run(v);
+      expect(out!.n[other]).toBe(0);
+      expect(out!.N / (FUNNEL_RATE * 0.01)).toBeCloseTo(1, 6);
+      expect(out!.n[from]).toBe(out!.N);
+    }
+  });
+
+  it('shares FUNNEL_RATE out between its funnels by the valve, mixing them, heat and all', () => {
+    const { mx, out } = run(0.25);
+    expect(out!.N / (FUNNEL_RATE * 0.01)).toBeCloseTo(1, 6);
+    expect(out!.n[G] / out!.N).toBeCloseTo(0.25, 3);
+    expect(temperature(out!)).toBeCloseTo(0.75 * 2 + 0.25 * 6, 2);
+    expect(out!.N + mx.tanks[0].N + mx.tanks[1].N).toBe(2 * FUNNEL_CAP);
+  });
+
+  it('drains each funnel in proportion to how high its fluid stands', () => {
+    const mx = new Tool('multiplexer', 0, undefined, [0]);
+    filled(mx.tanks[0], R, FUNNEL_CAP / 2, 1);
+    const [out] = mx.step(0.01);
+    expect(out!.N / (FUNNEL_RATE * 0.5 * 0.01)).toBeCloseTo(1, 5);
+  });
+
+  it('lets nothing out of an empty funnel the valve picks, however full the other', () => {
+    const mx = new Tool('multiplexer', 0, undefined, [1]);
+    filled(mx.tanks[0], R, FUNNEL_CAP, 1);
+    expect(mx.step(0.01)).toEqual([null]);
+    expect(mx.tanks[0].N).toBe(FUNNEL_CAP);
+  });
+});
+
 describe('size sorter', () => {
   const RG = speciesIndex(['R', 'G', null], 1);
 
