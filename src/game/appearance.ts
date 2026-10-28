@@ -59,11 +59,6 @@ export interface Look {
   alpha1: number;
   alpha2: number;
   alpha3: number;
-  /**
-   * How far the Milky Way's middle passes from straight out of the porthole, in degrees: 0 runs it through the middle,
-   * 90 keeps it square to the wall, out of sight.
-   */
-  milkyWay: number;
 }
 
 export function defaultLook(): Look {
@@ -93,7 +88,6 @@ export function defaultLook(): Look {
     alpha1: 0.2,
     alpha2: 0.6,
     alpha3: 1,
-    milkyWay: 50,
   };
 }
 

@@ -1826,7 +1826,7 @@ const PORT_DEPTH = 40;
  * porthole. Kept centered on the eye (see View.render), like a sky. Most are tiny and dim, fewer middling, and a few
  * bright, each a little warm or cool, never strongly colored.
  */
-function starField(): { sky: THREE.Group; band: THREE.Group } {
+function starField(): THREE.Group {
   let seed = 7;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   // tints a star can lean toward: blue-white, white, yellow-white, orange-white
@@ -1855,18 +1855,21 @@ function starField(): { sky: THREE.Group; band: THREE.Group } {
   };
   const sky = new THREE.Group();
   sky.add(layer(16000, 1, 0.12, 0.45), layer(3500, 1.4, 0.3, 0.75), layer(350, 2, 0.55, 1));
-  const band = milkyWay(rnd);
-  sky.add(band);
-  return { sky, band };
+  sky.add(milkyWay(rnd));
+  return sky;
 }
 
 /** How wide the Milky Way is, as the spread of its stars about its middle, in radians. */
 const BAND_SPREAD = 0.13;
+/**
+ * How far the Milky Way's middle passes from straight out of the porthole, in radians (50°). The stars turn about that
+ * line, so it stays this far off: in view only from up close to the porthole, round its edge, never across its middle.
+ */
+const BAND_OFF = 0.87;
 
 /**
  * The Milky Way: a band of countless faint stars, clumped along its length, over a soft glow with a darker lane of
- * dust down its middle, round the sky. Tipped toward the left wall by `View.render`, so that its middle passes
- * LOOK.milkyWay from straight out of the porthole: the stars turn about that line, so it stays that far off.
+ * dust down its middle, round the sky, passing BAND_OFF from straight out of the porthole.
  */
 function milkyWay(rnd: () => number): THREE.Group {
   // how bright the band is at a longitude: uneven, from a few waves of random phase
@@ -1926,6 +1929,9 @@ function milkyWay(rnd: () => number): THREE.Group {
   );
   glow.renderOrder = -1;
   band.add(glow);
+  // tipped toward the left wall, so that its middle passes BAND_OFF from the porthole's axis (−x), whichever way the
+  // stars have turned about it
+  band.rotation.z = -BAND_OFF;
   return band;
 }
 /** How far off the stars are drawn: inside the camera's reach, outside the room's. */
@@ -2936,7 +2942,7 @@ export class View {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.camera.rotation.order = 'YXZ';
     this.scene.background = new THREE.Color(0x010206);
-    this.scene.add(this.stars.sky);
+    this.scene.add(this.stars);
     const sky = new THREE.HemisphereLight(0xe4eef0, 0x4a4440, 1.5);
     this.scene.add(sky);
     // the ceiling panels, as one light from overhead, so what hangs casts its shadow on the counter and floor
@@ -3007,7 +3013,7 @@ export class View {
   look(eye: Vec3, yaw: number, pitch: number): void {
     this.camera.position.set(eye.x, eye.y, eye.z);
     // the stars are too far off to move as the player does
-    this.stars.sky.position.copy(this.camera.position);
+    this.stars.position.copy(this.camera.position);
     this.camera.rotation.set(pitch, yaw, 0);
     this.camera.updateMatrixWorld();
   }
@@ -3017,9 +3023,7 @@ export class View {
     this.clock += fr.dt;
     const { scene, pickables } = this;
     this.look(fr.eye, fr.yaw, fr.pitch);
-    this.stars.sky.rotation.x = fr.spin;
-    // the Milky Way's middle, LOOK.milkyWay off the porthole's axis (−x), whichever way the stars have turned about it
-    this.stars.band.rotation.z = -LOOK.milkyWay * (Math.PI / 180);
+    this.stars.rotation.x = fr.spin;
 
     this.sync(this.flasks, fr.flasks, (f) => new FlaskView(f, scene, pickables));
     this.sync(this.tools, fr.tools, (t) => new ToolView(t, scene, pickables));
