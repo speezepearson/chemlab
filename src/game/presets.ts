@@ -34,6 +34,9 @@ export const ANALYZER_AT: Spot = { at: [1.15, 0.5] };
 /** Where the one and only spectroscope starts, the same way: past the composition analyzer. */
 export const SPECTROSCOPE_AT: Spot = { at: [1.45, 0.5] };
 
+/** Where the one and only bond visualizer starts, the same way: past the spectroscope. */
+export const VISUALIZER_AT: Spot = { at: [1.75, 0.5] };
+
 /**
  * Where the cryostabilizer station is (see STATION in tools.ts): built into the right wall, past the faucets, facing
  * into the room, its funnel and spouts over the middles of the cells of the counter's row nearest the wall, and its

@@ -16,7 +16,7 @@ import {
  */
 
 /** How deep a tool's cabinet is front to back, for the tools that have one deeper than their tanks. */
-const CABINET_DEPTH: Partial<Record<ToolKind, number>> = { analyzer: 50, spectroscope: 50 };
+const CABINET_DEPTH: Partial<Record<ToolKind, number>> = { analyzer: 50, spectroscope: 50, visualizer: 50 };
 
 /**
  * How deep each tool is front to back, all told, and how deep its tanks are inside: as deep as they need to be to

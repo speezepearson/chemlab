@@ -18,7 +18,7 @@ import { Flask, Vessel, fluidColor, roomFor, sustenance, transfer, volume, volum
 import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
-import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
+import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
@@ -758,7 +758,7 @@ export class GameEngine {
 
   /**
    * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a composition analyzer, a
-   * spectroscope and a cryostabilizer station: if there's none, one is added where it starts, the station's reservoir
+   * spectroscope, a bond visualizer and a cryostabilizer station: if there's none, one is added where it starts, the station's reservoir
    * holding what's left on board (see REFERENCE_FILL). The station is built into the wall, so it's always where it is.
    */
   private uniqueTools(): void {
@@ -774,6 +774,7 @@ export class GameEngine {
     };
     add('analyzer', spotPose(ANALYZER_AT));
     add('spectroscope', spotPose(SPECTROSCOPE_AT));
+    add('visualizer', spotPose(VISUALIZER_AT));
     add('receptacle', STATION_POSE);
     this.station().pose = { ...STATION_POSE };
   }

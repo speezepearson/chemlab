@@ -9,7 +9,7 @@ import { STATION_POSE } from './presets';
 import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, BOND_KEYS, SPECTROSCOPE, bondCounts, spectroscopeAt, INSTRUMENT_TAU, TUBE_CAP,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, BOND_ENDS, BOND_HEX, BOND_KEYS, SPECTROSCOPE, bondCorner, bondShares, bondCounts, spectroscopeAt, INSTRUMENT_TAU, TUBE_CAP,
   clockText, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
@@ -786,6 +786,79 @@ describe('spectroscope', () => {
     expect(sc.bonds[bond('RG')] / feed).toBeLessThan(0.45);
     run(40 * INSTRUMENT_TAU, false);
     expect(sc.bonds.every((c) => c === 0)).toBe(true);
+  });
+});
+
+describe('bond visualizer', () => {
+  const bond = (k: string) => BOND_KEYS.indexOf(k);
+  const RG = speciesIndex(['R', 'G', null], 1);
+
+  it('is a one-of-a-kind inline instrument with one spout', () => {
+    expect(INLINE_TOOLS).toContain('visualizer');
+    expect(UNIQUE_TOOLS).toContain('visualizer');
+    expect(new Tool('visualizer', 0).shape.spouts).toHaveLength(1);
+  });
+
+  it("puts the atoms round its hexagon clockwise from 12 o'clock in the analyzer's order", () => {
+    const top = bondCorner(SEXTANT_ATOMS.indexOf('G'));
+    expect(top.x).toBeCloseTo(BOND_HEX.x, 9);
+    expect(top.y).toBeCloseTo(BOND_HEX.y - BOND_HEX.r, 9);
+    // 2 o'clock is up and right of the middle, 6 o'clock straight down
+    const two = bondCorner(SEXTANT_ATOMS.indexOf('C'));
+    expect(two.x).toBeGreaterThan(BOND_HEX.x);
+    expect(two.y).toBeLessThan(BOND_HEX.y);
+    const six = bondCorner(SEXTANT_ATOMS.indexOf('M'));
+    expect(six.x).toBeCloseTo(BOND_HEX.x, 9);
+    expect(six.y).toBeCloseTo(BOND_HEX.y + BOND_HEX.r, 9);
+  });
+
+  it("joins each bond's own two atoms, and never two at opposite corners", () => {
+    BOND_ENDS.forEach(([i, j], b) => {
+      expect([SEXTANT_ATOMS[i], SEXTANT_ATOMS[j]].sort().join('')).toBe(BOND_KEYS[b].split('').sort().join(''));
+      expect(Math.abs(i - j)).not.toBe(3);
+    });
+  });
+
+  it('reads the share, by volume, of molecules with each bond in them', () => {
+    const v = new Vessel(Infinity);
+    v.setMolecules(R, 30);
+    v.setMolecules(RG, 50);
+    v.setMolecules(TARGET, 20);
+    const sh = bondShares(v, volume(v));
+    const w = (n: number, s: number) => (n * roomFor(s)) / volume(v);
+    expect(sh[bond('RG')]).toBeCloseTo(w(50, RG) + w(20, TARGET), 9);
+    expect(sh[bond('RB')]).toBeCloseTo(w(20, TARGET), 9);
+    expect(sh[bond('GB')]).toBeCloseTo(w(20, TARGET), 9);
+    expect(sh[bond('CM')]).toBe(0);
+    // one species with a bond lights its line fully
+    const pure = new Vessel(Infinity);
+    pure.setMolecules(RG, 7);
+    expect(bondShares(pure, volume(pure))[bond('RG')]).toBeCloseTo(1, 12);
+  });
+
+  it('lets everything through, reading what passed lately, fading out smoothly once nothing passes, then dark', () => {
+    const bv = new Tool('visualizer', 0);
+    expect(bv.links).toBeNull();
+    const src = new Vessel(Infinity);
+    src.setMolecules(R, CAP);
+    src.setMolecules(RG, CAP);
+    let [added, through] = [0, 0];
+    const run = (secs: number, on: boolean) => {
+      for (let i = 0; i < Math.round(secs / 0.02); i++) {
+        if (on) added += bv.tanks[0].addFrom(src, 0.25 * CAP * 0.02);
+        through += bv.step(0.02)[0]?.N ?? 0;
+      }
+    };
+    run(20 * INSTRUMENT_TAU, true);
+    expect(through + bv.tanks[0].N).toBe(added);
+    const half = bondShares(src, volume(src))[bond('RG')];
+    expect(bv.links![bond('RG')]).toBeCloseTo(half, 2);
+    expect(bv.links![bond('RB')]).toBe(0);
+    // as it fades it still reads the same mix
+    run(2 * INSTRUMENT_TAU, false);
+    expect(bv.links![bond('RG')]).toBeCloseTo(half, 2);
+    run(30 * INSTRUMENT_TAU, false);
+    expect(bv.links).toBeNull();
   });
 });
 
