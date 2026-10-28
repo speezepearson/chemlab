@@ -758,8 +758,9 @@ export class GameEngine {
 
   /**
    * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a composition analyzer, a
-   * spectroscope, a bond visualizer and a cryostabilizer station: if there's none, one is added where it starts, the station's reservoir
-   * holding what's left on board (see REFERENCE_FILL). The station is built into the wall, so it's always where it is.
+   * spectroscope, a bond visualizer and a cryostabilizer station: if there's none, one is added where it starts, or as
+   * near there as it has room (see roomy), the station's reservoir holding what's left on board (see REFERENCE_FILL). The
+   * station is built into the wall, so it's always where it is.
    */
   private uniqueTools(): void {
     for (const kind of UNIQUE_TOOLS) {
@@ -770,13 +771,35 @@ export class GameEngine {
       if (this.tools.some((t) => t.kind === kind)) return;
       const t = new Tool(kind, this.nextToolId++, at);
       if (kind === 'receptacle') applyFill(t.tanks[1], REFERENCE_FILL);
+      else t.pose = this.roomy(t);
       this.tools.push(t);
     };
+    // the station first, since it's always where it is, for the others to keep clear of
+    add('receptacle', STATION_POSE);
+    this.station().pose = { ...STATION_POSE };
     add('analyzer', spotPose(ANALYZER_AT));
     add('spectroscope', spotPose(SPECTROSCOPE_AT));
     add('visualizer', spotPose(VISUALIZER_AT));
-    add('receptacle', STATION_POSE);
-    this.station().pose = { ...STATION_POSE };
+  }
+
+  /**
+   * Where a tool new to the lab (see uniqueTools) can go: where it is, if it would come to rest there as if set down
+   * (see rest), or else the nearest spot on the grid where it would, at the same height and facing the same way. An
+   * older save can have something where a tool it lacked starts. Where it is, if there's room nowhere.
+   */
+  private roomy(t: Tool): Pose {
+    const h: Held = { kind: 'tool', t, relYaw: 0, dist: 0 };
+    const obstacles = this.obstacles(h);
+    const solid = this.obstacles(h, false);
+    const spots: Pose[] = [];
+    for (let x = ROOM.x0 + CELL / 2; x < ROOM.x1; x += CELL)
+      for (let z = ROOM.z0 + CELL / 2; z < ROOM.z1; z += CELL) spots.push(this.gridded(h, { ...t.pose, x, z }));
+    const off = (p: Pose) => Math.hypot(p.x - t.pose.x, p.z - t.pose.z);
+    for (const p of [this.gridded(h, t.pose), ...spots.sort((a, b) => off(a) - off(b))]) {
+      const r = this.rest(h, p, obstacles, solid);
+      if (typeof r !== 'string') return r.pose;
+    }
+    return t.pose;
   }
 
   /** The cryostabilizer station (see STATION): there's always exactly one. */
