@@ -651,8 +651,8 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tanks: [
       { name: 'funnel', x0: CELL - STATION.funnel.w, x1: CELL + STATION.funnel.w, cap: INTAKE_CAP },
       {
-        name: 'ship reservoir', x0: 2 * CELL - STATION.paneW / 2, x1: 2 * CELL + STATION.paneW / 2, cap: REFERENCE_CAP, sealed: true,
-        label: ['ship reservoir'],
+        name: 'cryostabilizer reservoir', x0: 2 * CELL - STATION.paneW / 2, x1: 2 * CELL + STATION.paneW / 2, cap: REFERENCE_CAP, sealed: true,
+        label: ['cryostabilizer reservoir'],
       },
     ],
     tankH: STATION.paneH,
