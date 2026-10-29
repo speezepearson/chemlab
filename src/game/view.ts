@@ -213,8 +213,12 @@ const chromeMat = new THREE.MeshStandardMaterial({ color: 0xe2e7e8, metalness: 1
 const plateMat = new THREE.MeshStandardMaterial({ color: 0x6f7975, metalness: 0.5, roughness: 0.45 });
 /** The rubber seam round the cryostabilizer station's block of the wall. */
 const rubberMat = new THREE.MeshStandardMaterial({ color: 0x1a1d1c, roughness: 0.95, metalness: 0 });
-/** How wide the hazard tape round the station's block is, and how far apart its stripes repeat, in world units. */
-const TAPE = { w: 10, period: 14 };
+/**
+ * How wide the hazard tape round the station's block is, and how far apart its stripes repeat, in world units; and how
+ * far its inner edge is from the block's edge, across and up, at each corner (bottom left, bottom right, top right, top
+ * left), uneven as if laid on by hand.
+ */
+const TAPE = { w: 10, period: 14, gaps: [[5, 6.5], [7, 4.5], [5.5, 7.5], [4.5, 5.5]] as const };
 
 /**
  * Hazard tape: yellow and black diagonal stripes, as round the alarms' silence button, as a texture that tiles both
@@ -1383,9 +1387,20 @@ class ToolView {
     const gasket = new THREE.Mesh(new THREE.ExtrudeGeometry(seam, { depth: 1.5, bevelEnabled: true, bevelThickness: 0.5, bevelSize: 1, bevelSegments: 2 }), rubberMat);
     gasket.position.z = face - 0.5;
     art.add(gasket);
-    // and hazard tape on the wall round it, just outside the seam
-    const band = rectPath(...rect(TAPE.w), new THREE.Shape());
-    band.holes.push(rectPath(...rect(0)));
+    // and hazard tape on the wall round it, a little way outside the seam, laid on by hand: its inner edge is a few
+    // units out from each corner, by TAPE.gaps, so each side runs not quite parallel to the seam
+    const [cx, cy, bw, bh] = rect(0);
+    const taped = <P extends THREE.Path>(d: number, path: P): P => {
+      const corners = TAPE.gaps.map(([gx, gy], i) => {
+        const [sx, sy] = [i === 0 || i === 3 ? -1 : 1, i < 2 ? -1 : 1];
+        return [cx + sx * (bw / 2 + gx + d), cy + sy * (bh / 2 + gy + d)] as const;
+      });
+      path.moveTo(...corners[3]);
+      for (const c of corners) path.lineTo(...c);
+      return path;
+    };
+    const band = taped(TAPE.w, new THREE.Shape());
+    band.holes.push(taped(0, new THREE.Path()));
     // a shape's texture coordinates are its own x and y, in world units: the texture's repeat makes them stripes
     const tape = new THREE.Mesh(new THREE.ShapeGeometry(band), new THREE.MeshStandardMaterial({ map: tapeTexture(), roughness: 0.55 }));
     tape.position.z = face + 0.3;
