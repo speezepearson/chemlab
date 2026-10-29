@@ -11,6 +11,8 @@
  * And how composition looks (colorModel, cloudy): see fluidHue and fluidAlpha
  * in flask.ts.
  *
+ * And how far the hazard tape round the cryostabilizer station is from its seam: tapeGap, tapeSpread.
+ *
  * LOOK is mutable so the Appearance debug panel can tune it live.
  */
 
@@ -59,6 +61,10 @@ export interface Look {
   alpha1: number;
   alpha2: number;
   alpha3: number;
+  /** How far the hazard tape round the station's block is from its seam on average, in world units. */
+  tapeGap: number;
+  /** How much that varies from corner to corner (see TAPE.uneven in view.ts), in world units. */
+  tapeSpread: number;
 }
 
 export function defaultLook(): Look {
@@ -88,6 +94,8 @@ export function defaultLook(): Look {
     alpha1: 0.2,
     alpha2: 0.6,
     alpha3: 1,
+    tapeGap: 3,
+    tapeSpread: 2.5,
   };
 }
 

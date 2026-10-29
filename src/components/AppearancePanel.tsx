@@ -42,8 +42,9 @@ const GROUPS: Group[] = [
 ];
 
 /**
- * Debug panel: live-tune the temperature appearance curves and how composition looks (see game/appearance.ts), and
- * the outline round what the crosshair is on (see game/outline.ts).
+ * Debug panel: live-tune the temperature appearance curves, how composition looks and the gap round the
+ * cryostabilizer station's hazard tape (see game/appearance.ts), and the outline round what the crosshair is on (see
+ * game/outline.ts).
  */
 export function AppearancePanel() {
   const [, rerender] = useReducer((x: number) => x + 1, 0);
@@ -58,6 +59,28 @@ export function AppearancePanel() {
             rerender();
           }}
         />
+      </td>
+    </tr>
+  );
+  const slider = (label: string, key: NumKey, max: number, step: number) => (
+    <tr key={key}>
+      <td>{label}</td>
+      <td>
+        <label className="slider">
+          <input
+            type="range"
+            aria-label={label}
+            min={0}
+            max={max}
+            step={step}
+            value={LOOK[key]}
+            onChange={(e) => {
+              LOOK[key] = +e.target.value;
+              rerender();
+            }}
+          />
+          <output>{LOOK[key]}</output>
+        </label>
       </td>
     </tr>
   );
@@ -172,6 +195,13 @@ export function AppearancePanel() {
                 </label>
               </td>
             </tr>
+            <tr className="group">
+              <td colSpan={2}>
+                <b>Station tape</b> <span>bare wall between the hazard tape and the station's seam, in world units</span>
+              </td>
+            </tr>
+            {slider('gap', 'tapeGap', 8, 0.25)}
+            {slider('unevenness', 'tapeSpread', 6, 0.25)}
           </tbody>
         </table>
         <p>
