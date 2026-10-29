@@ -135,6 +135,19 @@ describe('aimValve', () => {
   });
 
 
+  it("points a splitter's or multiplexer's lever left for 0, up for even, and right for 1", () => {
+    for (const kind of ['splitter', 'multiplexer'] as const) {
+      const t = new Tool(kind, 0);
+      const v = valveLocal(t, 0);
+      aimValve(t, 0, v.x - 30, v.y);
+      expect(t.valves[0], kind).toBeCloseTo(0);
+      aimValve(t, 0, v.x, v.y - 30);
+      expect(t.valves[0], kind).toBeCloseTo(0.5);
+      aimValve(t, 0, v.x + 30, v.y);
+      expect(t.valves[0], kind).toBeCloseTo(1);
+    }
+  });
+
   it('opens pointing up, closes pointing right, and ignores the core', () => {
     const t = new Tool('dispenser', 0);
     const v = valveLocal(t, 0);

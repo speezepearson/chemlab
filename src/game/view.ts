@@ -23,7 +23,7 @@ import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
-  clockText, ANALYZER, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
+  clockText, ANALYZER, BOND_ENDS, bondCorner, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
@@ -626,6 +626,49 @@ function drawAnalysis(sc: Screen, t: Tool): void {
 }
 
 /**
+ * A bond visualizer's screen: six points round a hexagon, one per atom (see bondCorner), and a line between two of them
+ * for each bond between those atoms going by, glowing as bright as the share of what's passing that has that bond (see
+ * bondShares); just the points while it has nothing to read. No words: reading it is part of the game.
+ */
+function drawBonds(sc: Screen, t: Tool): void {
+  const key = t.links?.map((x) => x.toFixed(2)).join(',') ?? '';
+  if (key === sc.key) return;
+  sc.key = key;
+  const { ctx, ppu } = sc;
+  const s = INSTRUMENT.screen;
+  const green = (a: number) => `rgba(${PHOSPHOR}, ${a})`;
+  ctx.setTransform(ppu, 0, 0, ppu, -s.x0 * ppu, -s.y0 * ppu);
+  ctx.fillStyle = '#040a06';
+  ctx.fillRect(s.x0, s.y0, s.x1 - s.x0, s.y1 - s.y0);
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 1.6;
+  if (t.links)
+    BOND_ENDS.forEach(([i, j], b) => {
+      const a = Math.min(1, t.links![b]);
+      if (a <= 0) return;
+      const [p, q] = [bondCorner(i), bondCorner(j)];
+      ctx.strokeStyle = ctx.shadowColor = green(a);
+      ctx.shadowBlur = 4 * ppu;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(q.x, q.y);
+      ctx.stroke();
+    });
+  ctx.fillStyle = ctx.shadowColor = green(0.85);
+  ctx.shadowBlur = 2 * ppu;
+  for (let i = 0; i < 6; i++) {
+    const p = bondCorner(i);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 1.8, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+  for (let y = s.y0; y < s.y1; y += 1.5) ctx.fillRect(s.x0, y, s.x1 - s.x0, 0.6);
+  sc.tex.needsUpdate = true;
+}
+
+/**
  * A spectroscope's screen: a graph of the bonds passing through it lately, by energy (see spectroscopeAt): E across on
  * a log scale, with ticks as on log paper (at 1 to 9 times each power of ten, the powers of ten longer and numbered),
  * and f up, on a fixed scale (see SPECTROSCOPE.full), clipped at the top, with no numbers.
@@ -958,6 +1001,11 @@ class ToolView {
       const fork = sh.valveY + 10;
       pipes(art, [[0, TH], [0, fork]]);
       for (const x of sh.spouts) pipes(art, [[0, fork], [x, fork + 16], [x, sh.spoutY - 4]]);
+    } else if (t.kind === 'multiplexer') {
+      // the splitter's fork upside down: each funnel's stem in to where they join, over the valve
+      const join = sh.valveY - 12;
+      for (const tk of sh.tanks) pipes(art, [[tankX(tk), TH], [tankX(tk), join - 16], [0, join]]);
+      pipes(art, [[0, join], [0, sh.spoutY - 4]]);
     } else if (t.kind === 'sorter') {
       const x = tankX(sh.tanks[0]);
       pipes(art, [[x, TH], [x, chuteY(x)]]);
@@ -1442,8 +1490,9 @@ class ToolView {
     });
     this.note.set(t.note);
     for (const [k, pv] of this.levers)
-      // closed points right, open straight up; a splitter's points to the side that gets more
-      pv.rotation.z = t.kind === 'splitter' ? Math.PI * (1 - t.valves[k]) : (t.valves[k] * Math.PI) / 2;
+      // closed points right, open straight up; a splitter's points to the side that gets more, and a multiplexer's to
+      // the side it takes more from
+      pv.rotation.z = t.kind === 'splitter' || t.kind === 'multiplexer' ? Math.PI * (1 - t.valves[k]) : (t.valves[k] * Math.PI) / 2;
     if (this.dial) {
       const d = t.valves[t.shape.dial!];
       this.dial.children[1].rotation.z = -(-0.75 * Math.PI + 1.5 * Math.PI * d);
@@ -1494,6 +1543,7 @@ class ToolView {
     }
     if (t.kind === 'analyzer' && this.screen) drawAnalysis(this.screen, t);
     if (t.kind === 'spectroscope' && this.screen) drawSpectroscope(this.screen, t, energies);
+    if (t.kind === 'visualizer' && this.screen) drawBonds(this.screen, t);
     if (this.thread) {
       const through = new Vessel(Infinity);
       for (const v of t.out) if (v) through.addFrom(v, volume(v));

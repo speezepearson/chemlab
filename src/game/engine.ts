@@ -18,7 +18,7 @@ import { Flask, Vessel, fluidColor, roomFor, sustenance, transfer, volume, volum
 import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
-import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
+import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
@@ -208,12 +208,14 @@ export interface PaperEdit {
 }
 
 /** Things that can be made from the hotbar, in its order. */
-export const ITEMS = ['flask', 'dispenser', 'pipette', 'exchanger', 'separator', 'splitter', 'sorter', 'heater', 'scale', 'tank', 'meter'] as const;
+export const ITEMS = [
+  'flask', 'dispenser', 'pipette', 'exchanger', 'separator', 'splitter', 'sorter', 'heater', 'scale', 'tank', 'meter', 'multiplexer',
+] as const;
 export type Item = (typeof ITEMS)[number];
-/** The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0 and -. */
-export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-'] as const;
+/** The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0, - and =. */
+export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '='] as const;
 /** The same keys, as KeyboardEvent codes, so they work whatever the keyboard layout's shift state. */
-const HOTKEY_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus'];
+const HOTKEY_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal'];
 
 /** How tipped a flask held to pour is: past the horizontal, mouth down. */
 const POUR_ANG = Math.PI * 0.61;
@@ -756,8 +758,9 @@ export class GameEngine {
 
   /**
    * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a composition analyzer, a
-   * spectroscope and a cryostabilizer station: if there's none, one is added where it starts, the station's reservoir
-   * holding what's left on board (see REFERENCE_FILL). The station is built into the wall, so it's always where it is.
+   * spectroscope, a bond visualizer and a cryostabilizer station: if there's none, one is added where it starts, or as
+   * near there as it has room (see roomy), the station's reservoir holding what's left on board (see REFERENCE_FILL). The
+   * station is built into the wall, so it's always where it is.
    */
   private uniqueTools(): void {
     for (const kind of UNIQUE_TOOLS) {
@@ -768,12 +771,35 @@ export class GameEngine {
       if (this.tools.some((t) => t.kind === kind)) return;
       const t = new Tool(kind, this.nextToolId++, at);
       if (kind === 'receptacle') applyFill(t.tanks[1], REFERENCE_FILL);
+      else t.pose = this.roomy(t);
       this.tools.push(t);
     };
-    add('analyzer', spotPose(ANALYZER_AT));
-    add('spectroscope', spotPose(SPECTROSCOPE_AT));
+    // the station first, since it's always where it is, for the others to keep clear of
     add('receptacle', STATION_POSE);
     this.station().pose = { ...STATION_POSE };
+    add('analyzer', spotPose(ANALYZER_AT));
+    add('spectroscope', spotPose(SPECTROSCOPE_AT));
+    add('visualizer', spotPose(VISUALIZER_AT));
+  }
+
+  /**
+   * Where a tool new to the lab (see uniqueTools) can go: where it is, if it would come to rest there as if set down
+   * (see rest), or else the nearest spot on the grid where it would, at the same height and facing the same way. An
+   * older save can have something where a tool it lacked starts. Where it is, if there's room nowhere.
+   */
+  private roomy(t: Tool): Pose {
+    const h: Held = { kind: 'tool', t, relYaw: 0, dist: 0 };
+    const obstacles = this.obstacles(h);
+    const solid = this.obstacles(h, false);
+    const spots: Pose[] = [];
+    for (let x = ROOM.x0 + CELL / 2; x < ROOM.x1; x += CELL)
+      for (let z = ROOM.z0 + CELL / 2; z < ROOM.z1; z += CELL) spots.push(this.gridded(h, { ...t.pose, x, z }));
+    const off = (p: Pose) => Math.hypot(p.x - t.pose.x, p.z - t.pose.z);
+    for (const p of [this.gridded(h, t.pose), ...spots.sort((a, b) => off(a) - off(b))]) {
+      const r = this.rest(h, p, obstacles, solid);
+      if (typeof r !== 'string') return r.pose;
+    }
+    return t.pose;
   }
 
   /** The cryostabilizer station (see STATION): there's always exactly one. */
@@ -1209,8 +1235,11 @@ export class GameEngine {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       // Enter is OK on the message inside the cryopod, as it was on the notice it replaced
       if (e.code === 'Enter' && this.wake === 'pod') this.pressOk();
-      // in god mode, = shows the end's white void, or puts the lab back
-      if (e.code === 'Equal' && !e.repeat && (this.god || this.previewing)) this.previewArrival(!this.previewing);
+      // in god mode, = shows the end's white void, or puts the lab back, rather than making anything
+      if (e.code === 'Equal' && (this.god || this.previewing)) {
+        if (!e.repeat) this.previewArrival(!this.previewing);
+        return;
+      }
       if (!this.locked) return;
       this.keys.add(e.code);
       if (e.repeat || inPod(this.wake) || this.previewing) return;
@@ -2722,7 +2751,7 @@ export class GameEngine {
     } else {
       if (this.pencil && p && this.grabbable(p)) add(['E'], 'pick it up');
       if (!this.pencil && this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
-      add(['1–0, -'], 'make equipment in your hands');
+      add(['1–0, -, ='], 'make equipment in your hands');
     }
     if (!this.pencil) {
       if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
@@ -3078,10 +3107,12 @@ export class GameEngine {
 
 /**
  * Whether tank k of a tool lets fluid out on its own: a funnel or an instrument's tube always (the station's funnel
- * through its diverter), a tank with a valve as long as it's open.
+ * through its diverter), a multiplexer's funnel unless its valve takes only from the other, a tank with a valve as
+ * long as it's open.
  */
 function drains(t: Tool, k: number): boolean {
   if (t.kind === 'receptacle') return k === 0 || t.valves[0] > 0;
+  if (t.kind === 'multiplexer') return k ? t.valves[0] > 0 : t.valves[0] < 1;
   return t.kind === 'splitter' || t.kind === 'sorter' || t.kind === 'heater' || INLINE_TOOLS.includes(t.kind) || t.valves[k] > 0;
 }
 
