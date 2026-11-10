@@ -10,8 +10,6 @@ same commit as any behavior change. This file holds what README doesn't: how to 
   - No test may depend on the default chemistry (`defaultChemParams`, `THERMO`) or on the default values of the panel's
     tunables (`DRIP` aside: heater, cooling). They're all in flux. A test that needs reactions uses the fixed chemistry
     in `src/chem/testChem.ts`, and one that touches a tunable reads its current value rather than a literal.
-- `npm run route`: the synthesis-route harness (`src/game/route.ts`). It prints a report; `--silent=false` is already
-  in the script.
 - `npm run bench`: the headless sim benchmark (`bench/sim.ts`): the real engine in Node with the view and audio
   stubbed out, on fixed seeds. `npm run bench -- prod --mode=tight --load=bench/saves/line.json --tightstats` runs
   the user's production line as fast as it goes, as while asleep. Its header lists the modes and scenes.
@@ -48,7 +46,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `species.ts` defines the 50 species.
   - `params.ts` holds the bond parameters.
   - `reactions.ts` is Arrhenius kinetics on whole molecules. The engine steps vessels through `tick`, never `step`.
-  - `equilibrium.ts` is the exact full-equilibrium solver, for the presets' and the route's settled mixes. Faucets
+  - `equilibrium.ts` is the exact full-equilibrium solver, for the editor's Equilibrate button and the bench's settled mixes. Faucets
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
 - `src/game/`: everything else in the game.
   - `engine.ts` owns the lab: what's in it, the player, input, carrying, the pencil and the sim loop.

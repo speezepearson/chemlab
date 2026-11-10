@@ -1,8 +1,7 @@
-import { ATOMS, type Atom } from '../chem/atoms';
-import { equilibrium } from '../chem/equilibrium';
-import { T_ROOM, defaultChemParams } from '../chem/params';
-import { SPECIES, TARGET, singleOf, speciesEnergies } from '../chem/species';
-import { CAP, HOME_W } from './config';
+import { type Atom } from '../chem/atoms';
+import { T_ROOM } from '../chem/params';
+import { SPECIES, TARGET, singleOf } from '../chem/species';
+import { CAP } from './config';
 import type { Vessel } from './flask';
 import { CELL, ROOM, type Pose } from './space';
 import { REFERENCE_START, STATION, type ToolKind } from './tools';
@@ -84,65 +83,6 @@ export interface Preset {
 /** `atoms` atoms' worth of one species. */
 const atomsOf = (species: number, atoms: number) => ({ species, molecules: atoms / SPECIES[species].size });
 
-/** A fluid by its share of each atom, at full chemical equilibrium at T (room temperature if left out). */
-export interface Recipe {
-  atoms: Partial<Record<Atom, number>>;
-  T?: number;
-}
-
-/**
- * The wash route's feed, as [recipe, flasks]: what the game's old R–G and C–Y faucets poured, nearly even R and
- * G with traces of everything else, and 2 : 1 C and Y. route.test.ts builds △RGY from the same.
- */
-export const WASH_FEED: readonly [Recipe, number][] = [
-  [{ atoms: { R: 0.49, G: 0.49, C: 0.005, M: 0.005, B: 0.005, Y: 0.005 }, T: 20 }, 0.5],
-  [{ atoms: { C: 0.666, Y: 0.333, M: 0.001 } }, 1.5],
-];
-
-/**
- * A mix of recipes left to settle at temperature T, each weighted by its flasks, at chemical equilibrium under
- * the default chemistry.
- */
-function settled(mix: readonly [Recipe, number][], T: number): { species: number; molecules: number }[] {
-  const atoms = ATOMS.map((a) => mix.reduce((t, [fa, fl]) => t + fl * (fa.atoms[a] ?? 0), 0));
-  const n = equilibrium(atoms, speciesEnergies(defaultChemParams()), T);
-  return SPECIES.filter((s) => n[s.i] * CAP >= 1).map((s) => ({ species: s.i, molecules: n[s.i] * CAP }));
-}
-
-/** Where the wash route's separator stands; its feed and catch tanks are placed relative to it. */
-const WASH_AT: [number, number] = [0.35, 0.4];
-const WASH_T = 12;
-
-/** The wash route's starting bench. route.test.ts runs the same thing without the UI. */
-export const WASH_PRESET: Preset = {
-  id: 'wash',
-  name: 'Wash route (sandbox)',
-  description:
-    'A sandbox to tinker with: the separator holds △RGY (from ½ flask of nearly even R and G and 1½ of 2 : 1 C ' +
-    'and Y, settled at T = 1) plus 1½ flasks of blue, heated to T = 12. Its two left spouts (all primary, and two ' +
-    'in three primary) are hosed back into its own tank, and hot blue drips in from the tank above. Whatever goes ' +
-    'out the far right spout (all secondary) collects in the catch tank below. Picking this preset also restores ' +
-    'the default chemistry.',
-  flasks: [],
-  tools: [
-    {
-      kind: 'separator', at: WASH_AT, valves: [0.02],
-      tanks: [{ contents: [...settled(WASH_FEED, 1), atomsOf(singleOf('B'), 1.5 * CAP)], T: WASH_T }],
-    },
-    {
-      kind: 'dispenser', at: [WASH_AT[0], 0.1], valves: [0.003],
-      tanks: [{ contents: [atomsOf(singleOf('B'), 4 * CAP)], T: WASH_T }],
-    },
-    // under the separator's far right spout, two grid cells right of its center
-    { kind: 'dispenser', at: [WASH_AT[0] + (2 * CELL) / HOME_W, WASH_AT[1] + 0.25] },
-  ],
-  hoses: [
-    { from: { tool: 0, spout: 0 }, to: { tool: 0 } },
-    { from: { tool: 0, spout: 1 }, to: { tool: 0, up: 44 } },
-  ],
-  defaultChem: true,
-};
-
 const SHOWCASE: [Atom, number][] = [
   ['R', 0], ['G', 0.2], ['B', 0.5], ['Y', 1], ['C', 3], ['M', 10], ['R', 30], ['G', 100],
 ];
@@ -193,7 +133,6 @@ export const PRESETS: readonly Preset[] = [
       { kind: 'dispenser', at: [0.55, 0.5] },
     ],
   },
-  WASH_PRESET,
   {
     id: 'temperatures',
     name: 'Temperature range',

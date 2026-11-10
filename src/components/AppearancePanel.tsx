@@ -175,8 +175,7 @@ export function AppearancePanel() {
           </tbody>
         </table>
         <p>
-          Drag a number sideways to scale it. Try the Temperature range preset to see every temperature at once, and
-          the Wash route preset to see color change as it reacts. Mix runs from 0 (current) to 1 (full model).
+          Drag a number sideways to scale it. Try the Temperature range preset to see every temperature at once. Mix runs from 0 (current) to 1 (full model).
         </p>
         <div className="actions">
           <button
