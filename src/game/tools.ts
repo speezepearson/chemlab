@@ -757,17 +757,18 @@ export function bondCounts(f: Fluid): number[] {
 }
 
 /**
- * The height of the spectroscope's graph at x = lnE, as a share of the screen's (the view clips it at 1): each bond's
- * count, `counts` (in BOND_KEYS order, per sim second), spread as a Gaussian SPECTROSCOPE.width wide about the log of
- * the size of its energy, `energies` (so an uphill bond shows at its size too), peaking at its count over
- * SPECTROSCOPE.full, all added up. A bond with no energy shows nowhere.
+ * The height of the spectroscope's graph at x = lnE, as a share of the half screen either side of its baseline (the
+ * view clips it at ±1): each bond's count, `counts` (in BOND_KEYS order, per sim second), spread as a Gaussian
+ * SPECTROSCOPE.width wide about the log of the size of its energy, `energies`, peaking at its count over
+ * SPECTROSCOPE.full, all added up. A stable bond (E > 0) absorbs, so it's a peak above the baseline; an uphill one
+ * (E < 0) gives energy back, so it's a dip below it, at its size. A bond with no energy shows nowhere.
  */
 export function spectroscopeAt(x: number, counts: readonly number[], energies: readonly number[]): number {
   const { width: w, full } = SPECTROSCOPE;
   let y = 0;
   counts.forEach((c, i) => {
-    const e = Math.abs(energies[i]);
-    if (c > 0 && e > 0) y += (c / full) * Math.exp(-((x - Math.log(e)) ** 2) / (2 * w * w));
+    const e = energies[i];
+    if (c > 0 && e !== 0) y += Math.sign(e) * (c / full) * Math.exp(-((x - Math.log(Math.abs(e))) ** 2) / (2 * w * w));
   });
   return y;
 }
