@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { ATOM_RGB } from '../chem/atoms';
-import { singleOf, speciesIndex } from '../chem/species';
+import { pairOf, singleOf } from '../chem/species';
 import { Vessel, fluidAlpha, fluidHue } from './flask';
 import {
   LOOK, coronaAlpha, coronaRadius, defaultLook, glowFalloff, glowStrength, glowWhiteHeat, haloAlpha, haloRadius,
@@ -82,7 +82,7 @@ describe('temperature appearance', () => {
 describe('composition', () => {
   const R = singleOf('R');
   const G = singleOf('G');
-  const RG = speciesIndex(['R', 'G', null], 1);
+  const RG = pairOf('R', 'G');
   const fluid = (contents: [number, number][]) => {
     const v = new Vessel(Infinity);
     for (const [s, m] of contents) v.setMolecules(s, m);
@@ -106,10 +106,10 @@ describe('composition', () => {
     expect(fluidHue(fluid([[R, 1]]))).toEqual([...ATOM_RGB.R]);
   });
 
-  it('under the paint model, bonding C and Y turns it green', () => {
+  it('under the paint model, bonding R and B turns it purple, red and blue over green', () => {
     LOOK.colorModel = 'paint';
-    const cy = fluidHue(fluid([[speciesIndex(['C', null, 'Y'], 2), 100]]))!;
-    expect(cy[1]).toBeGreaterThan(3 * Math.max(cy[0], cy[2]));
+    const rb = fluidHue(fluid([[pairOf('R', 'B'), 100]]))!;
+    expect(Math.min(rb[0], rb[2])).toBeGreaterThan(1.5 * rb[1]);
   });
 
   it('with mix 0, any model is the default', () => {

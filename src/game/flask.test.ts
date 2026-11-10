@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { SPECIES, TARGET, singleOf, speciesIndex } from '../chem/species';
+import { SPECIES, TARGET, pairOf, singleOf } from '../chem/species';
 import { Flask, VOLUME, Vessel, sustenance, transfer, volume } from './flask';
 import { separate } from './tools';
 import { GOAL_PURITY } from './config';
@@ -84,7 +84,7 @@ describe('whole numbers', () => {
 });
 
 describe('volume by molecules', () => {
-  const RG = speciesIndex(['R', 'G', null], 1);
+  const RG = pairOf('R', 'G');
   afterEach(() => {
     VOLUME.molecules = true;
   });

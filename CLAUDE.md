@@ -43,7 +43,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 ## Architecture
 
 - `src/chem/`: the chemistry.
-  - `species.ts` defines the 50 species.
+  - `atoms.ts` is the four atoms (R, G, B, K) and the six bonds between them; `species.ts` defines the 64 species
+    (every connected graph on a set of distinct colors) and their names, which saves store.
   - `params.ts` holds the bond parameters.
   - `reactions.ts` is Arrhenius kinetics on whole molecules. The engine steps vessels through `tick`, never `step`.
   - `equilibrium.ts` is the exact full-equilibrium solver, for the editor's Equilibrate button and the bench's settled mixes. Faucets
@@ -155,7 +156,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 ## Design preferences
 
 - Don't give away the chemistry. The player is meant to work it out. The composition analyzer has no text and no
-  sextant divider lines, nor the bond visualizer, whose points are unlabeled, the size sorter's screens look plain, the hotbar has no names, and the faucets aren't labeled (they're the six pure
+  divider lines between its sectors, nor the bond visualizer, whose points are unlabeled, the size sorter's screens look plain, the hotbar has no names, and the faucets aren't labeled (they're the four pure
   atoms, which the user chose). The spectroscope's axes are labeled E and f, at the user's request: E on a log scale with
   base-10 log-paper ticks, only the powers of ten numbered, and no peak labeled. It plots each bond at the size of its
   energy, so uphill and downhill bonds look alike, which the user chose to keep. Ask before adding any visual cue that reveals how a tool or reaction works.

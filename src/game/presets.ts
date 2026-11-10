@@ -84,7 +84,7 @@ export interface Preset {
 const atomsOf = (species: number, atoms: number) => ({ species, molecules: atoms / SPECIES[species].size });
 
 const SHOWCASE: [Atom, number][] = [
-  ['R', 0], ['G', 0.2], ['B', 0.5], ['Y', 1], ['C', 3], ['M', 10], ['R', 30], ['G', 100],
+  ['R', 0], ['G', 0.2], ['B', 0.5], ['K', 1], ['R', 3], ['G', 10], ['B', 30], ['K', 100],
 ];
 
 export const PRESETS: readonly Preset[] = [
@@ -119,14 +119,14 @@ export const PRESETS: readonly Preset[] = [
     id: 'separator',
     name: 'Separator demo',
     description:
-      'A separator sorts red from cyan: each molecule goes out the spout for its mix of primary and secondary ' +
-      'atoms, all primary at the far left and all secondary at the far right. The dispensers below catch the two ' +
-      'ends. Turn its sharpness down in the Chemistry panel and some leaks into the spouts beside them.',
+      'A separator sorts red from black: each molecule goes out the spout for the share of its atoms that are ' +
+      'black, none at the far left and all at the far right. The dispensers below catch the two ends. Turn its ' +
+      'sharpness down in the Chemistry panel and some leaks into the spouts beside them.',
     flasks: [],
     tools: [
       {
         kind: 'separator', at: [0.35, 0.2], valves: [0.3],
-        tanks: [{ contents: [atomsOf(singleOf('R'), 2 * CAP), atomsOf(singleOf('C'), 2 * CAP)], T: T_ROOM }],
+        tanks: [{ contents: [atomsOf(singleOf('R'), 2 * CAP), atomsOf(singleOf('K'), 2 * CAP)], T: T_ROOM }],
       },
       // under its end spouts, two grid cells either side of its middle
       { kind: 'dispenser', at: [0.15, 0.5] },

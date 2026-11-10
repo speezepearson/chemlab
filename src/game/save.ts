@@ -1,4 +1,4 @@
-import { THERMO, type ChemParams } from '../chem/params';
+import { THERMO, defaultChemParams, type ChemParams } from '../chem/params';
 import { NS, SPECIES } from '../chem/species';
 import { roomFor, volume, type Vessel } from './flask';
 import type { ToolKind } from './tools';
@@ -126,11 +126,16 @@ export function loadVessel(v: Vessel, saved: SavedVessel): void {
   v.label = typeof saved.label === 'string' ? saved.label : '';
 }
 
-/** Copy saved chemistry parameters over the live ones (known bonds and fields only). */
+/**
+ * Copy saved chemistry parameters over the live ones (known bonds and fields only). A bond the save doesn't have, as
+ * a save from the six-atom chemistry has no black bonds, gets the default chemistry's.
+ */
 export function loadChem(params: ChemParams, chem: SaveState['chem']): void {
   if (!chem) return;
+  const defaults = defaultChemParams().bonds;
   for (const [k, b] of Object.entries(params.bonds)) {
     const s = chem.bonds?.[k];
+    Object.assign(b, defaults[k]);
     if (!s) continue;
     for (const f of ['E', 'Ea', 'A'] as const) if (Number.isFinite(s[f])) b[f] = s[f];
   }

@@ -1,4 +1,4 @@
-import { ATOMS, BIT_PAIRS, GROUP, GROUP_PRIMARY, pairKey, type Atom } from '../chem/atoms';
+import { BOND_KEYS, BONDS, type Atom } from '../chem/atoms';
 import { THERMO } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
 import { NS, SPECIES } from '../chem/species';
@@ -188,7 +188,7 @@ export const FUNNEL_RATE = 2 * MAX_FLOW;
 /**
  * How well the size sorter sorts, editable from the Chemistry panel, from 0 (every size of molecule splits evenly
  * among its three spouts) to 1, the default (singles all fall through the first screen, pairs the second, and
- * triples go off the end). In between, each size goes 1/3 + 2/3·strength out its own spout and the rest evenly out
+ * anything bigger goes off the end). In between, each size goes 1/3 + 2/3·strength out its own spout and the rest evenly out
  * the other two, so at 0.55, 70% out its own and 15% out each of the others.
  */
 export const SORTER = { strength: 1 };
@@ -198,7 +198,7 @@ export function restoreDefaultSorter(): void {
   Object.assign(SORTER, DEFAULT_SORTER);
 }
 
-/** For molecules of each size (1, 2, 3 atoms), the share going out each of the size sorter's spouts, in order. */
+/** For singles, pairs and anything bigger, the share going out each of the size sorter's spouts, in order. */
 export function sorterShares(): number[][] {
   const k = Math.max(0, Math.min(1, SORTER.strength));
   return [0, 1, 2].map((own) => [0, 1, 2].map((j) => (j === own ? 1 / 3 + (2 / 3) * k : (1 - k) / 3)));
@@ -322,12 +322,12 @@ export const REFERENCE_START = 100 * CAP;
 /** How fast the reservoir's faucet lets it out, fully open, in atoms per sim second: a fifth of a flask a second. */
 export const REFERENCE_FLOW = 0.2 * MAX_FLOW;
 /**
- * The reservoir's filter: each sim second it takes out this share of every molecule with a yellow atom in it, which
+ * The reservoir's filter: each sim second it takes out this share of every molecule with a black atom in it, which
  * would otherwise slowly break the cryostabilizer down (see filter).
  */
 export const RESERVOIR_FILTER = 0.05;
-/** The species with a yellow atom in them, which the reservoir's filter takes out. */
-const YELLOW = SPECIES.filter((s) => s.atoms.includes('Y')).map((s) => s.i);
+/** The species with a black atom in them, which the reservoir's filter takes out. */
+const BLACK = SPECIES.filter((s) => s.atoms.includes('K')).map((s) => s.i);
 
 /** A length of time on a screen, as a clock does: "0:42", "12:05", "1:02:03". */
 export function clockText(seconds: number): string {
@@ -338,14 +338,14 @@ export function clockText(seconds: number): string {
 }
 
 /**
- * The reservoir's filter over h sim seconds: RESERVOIR_FILTER of each species with a yellow atom in it each sim
+ * The reservoir's filter over h sim seconds: RESERVOIR_FILTER of each species with a black atom in it each sim
  * second, smoothly, in whole molecules, with their share of the heat, gone for good.
  */
 export function filter(v: Vessel, h: number): void {
   if (v.N <= 0) return;
   const share = 1 - (1 - RESERVOIR_FILTER) ** h;
   let atoms = 0;
-  for (const s of YELLOW) {
+  for (const s of BLACK) {
     if (!v.n[s]) continue;
     const m = Math.min(v.n[s], roundRandom(v.n[s] * share));
     v.n[s] -= m;
@@ -465,8 +465,8 @@ export function meterText(rate: number): string {
   return '9'.repeat(METER_DIGITS);
 }
 
-/** The order of an analyzer hexagon's sextants, clockwise from the top. */
-export const SEXTANT_ATOMS: readonly Atom[] = ['G', 'C', 'B', 'M', 'R', 'Y'];
+/** The order of an analyzer square's sectors, clockwise from the top, and of the bond visualizer's points. */
+export const SECTOR_ATOMS: readonly Atom[] = ['R', 'G', 'B', 'K'];
 
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater' | 'analyzer'
@@ -568,7 +568,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   },
   separator: {
     tanks: [{ name: 'tank', x0: -30, x1: 30 }],
-    // one outlet per mix of primary and secondary (see SEPARATOR_OUTLET), a grid cell apart (see CELL), so a flask
+    // one outlet per share of black (see SEPARATOR_OUTLET), a grid cell apart (see CELL), so a flask
     // or a tool's tank fits under each
     spouts: [-2 * CELL, -CELL, 0, CELL, 2 * CELL],
     sump: { w: 14, h: 7 },
@@ -704,7 +704,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -10, x1: INSTRUMENT.body.x1 + 4, y0: -6, y1: 118 },
   },
   visualizer: {
-    // the spectroscope's tube and cabinet, its screen showing the bonds going by between six points (see BOND_HEX)
+    // the spectroscope's tube and cabinet, its screen showing the bonds going by between four points (see BOND_SQUARE)
     tanks: [{ name: 'tube', x0: -TUBE_W / 2, x1: TUBE_W / 2 }],
     tankH: TUBE_H,
     tankCap: TUBE_CAP,
@@ -724,11 +724,11 @@ export const chuteY = (x: number) =>
   SORTER_CHUTE.y0 + ((x - SORTER_CHUTE.x0) / (SORTER_CHUTE.x1 - SORTER_CHUTE.x0)) * (SORTER_CHUTE.y1 - SORTER_CHUTE.y0);
 
 /**
- * The composition analyzer's hexagons on its screen (centers and radius), and how high the pipe out of its cabinet to
- * its waste spout runs, in local units.
+ * The composition analyzer's squares on its screen (centers, and the distance from a center to a corner), one per
+ * molecule size, and how high the pipe out of its cabinet to its waste spout runs, in local units.
  */
 export const ANALYZER = {
-  hexes: { xs: [50, 100, 150], y: 50, r: 21 },
+  squares: { xs: [43, 81, 119, 157], y: 50, r: 21 },
   wasteY: 84,
 };
 
@@ -739,15 +739,11 @@ export const ANALYZER = {
  */
 export const SPECTROSCOPE = { lnE0: -0.5, lnE1: 3.5, width: 0.02, full: 30_000 };
 
-/** Every bond there can be, by its key (see pairKey): the twelve pairs of atoms from different groups. */
-export const BOND_KEYS: readonly string[] = [
-  ...new Set(ATOMS.flatMap((a) => ATOMS.filter((b) => GROUP[a] !== GROUP[b]).map((b) => pairKey(a, b)))),
-];
+/** Every bond there can be, by its key (see pairKey): the six pairs of atoms. */
+export { BOND_KEYS };
 
 /** For each species, its bonds, by their place in BOND_KEYS. */
-const SPECIES_BONDS: readonly (readonly number[])[] = SPECIES.map((sp) =>
-  BIT_PAIRS.flatMap(([g1, g2], k) => (sp.mask & (1 << k) ? [BOND_KEYS.indexOf(pairKey(sp.atoms[g1]!, sp.atoms[g2]!))] : [])),
-);
+const SPECIES_BONDS: readonly (readonly number[])[] = SPECIES.map((sp) => BONDS.flatMap((_, k) => (sp.mask & (1 << k) ? [k] : [])));
 
 /** How many of each bond (in BOND_KEYS order) a fluid's molecules have between them. */
 export function bondCounts(f: Fluid): number[] {
@@ -773,26 +769,27 @@ export function spectroscopeAt(x: number, counts: readonly number[], energies: r
 }
 
 /**
- * The bond visualizer's hexagon on its screen: its center and radius, in local units. Its corners are the six atoms, in
- * SEXTANT_ATOMS order clockwise from the top, as the composition analyzer's sextants are, and a line joins two of them
- * for each bond between them going by (see bondShares).
+ * The bond visualizer's square on its screen, standing on a corner: its center, and the distance from there to a
+ * corner, in local units. Its corners are the four atoms, in SECTOR_ATOMS order clockwise from the top, as the
+ * composition analyzer's sectors are, and a line joins two of them for each bond between them going by (see
+ * bondShares): its sides, or across it.
  */
-export const BOND_HEX = { x: 100, y: 50, r: 30 };
+export const BOND_SQUARE = { x: 100, y: 50, r: 30 };
 
-/** Corner i of the bond visualizer's hexagon (see BOND_HEX), for SEXTANT_ATOMS[i], in local units: 12 o'clock, 2, 4, and on. */
+/** Corner i of the bond visualizer's square (see BOND_SQUARE), for SECTOR_ATOMS[i], in local units: 12 o'clock, 3, 6 and 9. */
 export function bondCorner(i: number): { x: number; y: number } {
-  const a = ((-90 + 60 * i) * Math.PI) / 180;
-  return { x: BOND_HEX.x + BOND_HEX.r * Math.cos(a), y: BOND_HEX.y + BOND_HEX.r * Math.sin(a) };
+  const a = ((-90 + 90 * i) * Math.PI) / 180;
+  return { x: BOND_SQUARE.x + BOND_SQUARE.r * Math.cos(a), y: BOND_SQUARE.y + BOND_SQUARE.r * Math.sin(a) };
 }
 
-/** For each bond (in BOND_KEYS order), its two atoms' places in SEXTANT_ATOMS, the corners of the line it lights. */
+/** For each bond (in BOND_KEYS order), its two atoms' places in SECTOR_ATOMS, the corners of the line it lights. */
 export const BOND_ENDS: readonly (readonly [number, number])[] = BOND_KEYS.map(
-  (k) => [SEXTANT_ATOMS.indexOf(k[0] as Atom), SEXTANT_ATOMS.indexOf(k[1] as Atom)] as const,
+  (k) => [SECTOR_ATOMS.indexOf(k[0] as Atom), SECTOR_ATOMS.indexOf(k[1] as Atom)] as const,
 );
 
 /**
  * What the bond visualizer shows for a fluid, against `cap`: for each bond (in BOND_KEYS order), how much of `cap`
- * molecules with that bond in them make up (by volume, see VOLUME), as the composition analyzer reads its sextants. So
+ * molecules with that bond in them make up (by volume, see VOLUME), as the composition analyzer reads its sectors. So
  * against the fluid's own volume, R–G lights its line fully, △RGB all three of its, and half R, half R–G its one line
  * half as bright.
  */
@@ -855,19 +852,16 @@ export function restoreDefaultSeparator(): void {
 /** The sharpness from which the separator sorts perfectly: the top of its slider. */
 export const SEPARATOR_PERFECT = 10;
 
-/** How many outlets the separator has, one per mix of primary and secondary atoms a molecule can have. */
+/** How many outlets the separator has, one per share of black atoms a molecule can have. */
 export const SEPARATOR_OUTLETS = 5;
 
 /**
- * Each species' own outlet on the separator, left to right, by the share of its atoms that are primary (R, G, B):
- * all of them (0), two in three (1), half (2), one in three (3), none (4).
+ * Each species' own outlet on the separator, left to right, by the share of its atoms that are black (K): none (0),
+ * one in four (1), one in three (2), half (3), all (4).
  */
 export const SEPARATOR_OUTLET: Uint8Array = Uint8Array.from(SPECIES, (sp) => {
-  const p = sp.atoms.filter((a) => a && GROUP_PRIMARY.includes(a)).length;
-  if (p === sp.size) return 0;
-  if (p === 0) return 4;
-  if (2 * p === sp.size) return 2;
-  return 3 * p === 2 * sp.size ? 1 : 3;
+  if (!sp.atoms.includes('K')) return 0;
+  return sp.size === 1 ? 4 : 5 - sp.size;
 });
 
 let shareCache = { sharpness: NaN, shares: [] as number[][] };
@@ -897,7 +891,7 @@ export function separatorShares(): number[][] {
  * - A **heat exchanger** has two tanks, whose streams pass each other in
  *   counterflow on the way to their spouts, trading heat but never mixing.
  * - A **separator** has one tank and five spouts, and sorts what drains
- *   among them by its mix of primary and secondary colors (see separate).
+ *   among them by the share of its atoms that are black (see separate).
  * - A **splitter** has a small funnel that drains straight through (at
  *   FUNNEL_RATE) to two spouts. Its valve doesn't open or close: it sets the
  *   share that goes right, from 0 (all left) to 1 (all right).
@@ -923,7 +917,7 @@ export function separatorShares(): number[][] {
  * - A **spectroscope** is an inline instrument too, which lets everything through, counting the bonds that pass over
  *   the recent past (see INSTRUMENT_TAU and bondCounts) and showing them by energy as a graph (see spectroscopeAt).
  * - A **bond visualizer** is an inline instrument too, which lets everything through, showing which atoms are bonded
- *   in what passed over the recent past (see INSTRUMENT_TAU and bondShares) as lines across a hexagon (see BOND_HEX).
+ *   in what passed over the recent past (see INSTRUMENT_TAU and bondShares) as lines round a square (see BOND_SQUARE).
  *
  * Tools run on sim time, so a slow drip into a reacting flask gives the same
  * result at any sim speed.
@@ -1151,7 +1145,7 @@ export class Tool {
    * A receptacle's step. Its reservoir's faucet lets out as far as its valve is open, at REFERENCE_FLOW. Its funnel
    * drains straight through at FUNNEL_RATE, however full it is, into the diverter, which judges what comes through: more
    * than GOAL_PURITY target (see sustenance), and it goes into the reservoir (as much as fits), else out the waste
-   * spigot. The reservoir's filter takes out what has a yellow atom in it (see filter).
+   * spigot. The reservoir's filter takes out what has a black atom in it (see filter).
    */
   private receive(h: number): (Vessel | null)[] {
     const [funnel, ref] = this.tanks;
@@ -1178,28 +1172,29 @@ export class Tool {
 }
 
 /**
- * What an analyzer shows for a sample, against `cap`: for each molecule size w (1–3 atoms) and atom color c, in
- * SEXTANT_ATOMS order, at index (w − 1)·6 + c, how much of `cap` molecules of size w with a c atom in them make up
+ * What an analyzer shows for a sample, against `cap`: for each molecule size w (1–4 atoms) and atom color c, in
+ * SECTOR_ATOMS order, at index (w − 1)·4 + c, how much of `cap` molecules of size w with a c atom in them make up
  * (by volume, see VOLUME). So against the sample's own volume, R lights 1R fully, and R–G both 2R and 2G fully; and
  * half R, half G lights 1R and 1G half as bright.
  */
 export function composition(f: Fluid, cap: number): number[] {
-  const out = new Array<number>(18).fill(0);
+  const n = SECTOR_ATOMS.length;
+  const out = new Array<number>(4 * n).fill(0);
   for (let s = 0; s < NS; s++) {
     if (!f.n[s]) continue;
     const sp = SPECIES[s];
-    for (const a of sp.atoms) if (a) out[(sp.size - 1) * 6 + SEXTANT_ATOMS.indexOf(a)] += (f.n[s] * roomFor(s)) / cap;
+    for (const a of sp.atoms) out[(sp.size - 1) * n + SECTOR_ATOMS.indexOf(a)] += (f.n[s] * roomFor(s)) / cap;
   }
   return out;
 }
 
 /**
- * Pass a fluid over the size sorter's screens (see sorterShares): what falls through the first, what falls through
- * the second, and what goes off the end, in whole molecules, with heat in proportion.
+ * Pass a fluid over the size sorter's screens (see sorterShares): what falls through the first (singles), what falls
+ * through the second (pairs), and what goes off the end (anything bigger), in whole molecules, with heat in proportion.
  */
 export function sieve(f: Fluid, into?: Vessel[]): Vessel[] {
   const shares = sorterShares();
-  return split(f, 3, (s) => shares[SPECIES[s].size - 1], into);
+  return split(f, 3, (s) => shares[Math.min(SPECIES[s].size, 3) - 1], into);
 }
 
 /** Split a fluid among the separator's outlets, left to right (see separatorShares), in whole molecules, heat in proportion. */

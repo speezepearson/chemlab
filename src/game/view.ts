@@ -23,7 +23,7 @@ import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
-  clockText, ANALYZER, BOND_ENDS, bondCorner, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
+  clockText, ANALYZER, BOND_ENDS, bondCorner, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
@@ -579,9 +579,9 @@ function drawDiverter(sc: Screen, gate: 'reservoir' | 'waste', flowing: boolean)
 }
 
 /**
- * A composition analyzer's screen: a hexagon per molecule size (1, 2, 3 atoms), each cut into sextants by color (see
- * SEXTANT_ATOMS) that glow as bright as their share of what it's reading, and dark while it has nothing to read. No
- * words, no lines between the sextants: reading it is part of the game.
+ * A composition analyzer's screen: a square per molecule size (1 to 4 atoms), each cut corner to corner into four
+ * sectors by color (see SECTOR_ATOMS) that glow as bright as their share of what it's reading, and dark while it has
+ * nothing to read. No words, no lines between the sectors: reading it is part of the game.
  */
 function drawAnalysis(sc: Screen, t: Tool): void {
   const key = t.reading?.map((x) => x.toFixed(2)).join(',') ?? '';
@@ -589,21 +589,22 @@ function drawAnalysis(sc: Screen, t: Tool): void {
   sc.key = key;
   const { ctx, ppu } = sc;
   const { screen: s } = INSTRUMENT;
-  const { hexes } = ANALYZER;
+  const { squares } = ANALYZER;
+  const n = SECTOR_ATOMS.length;
   const green = (a: number) => `rgba(${PHOSPHOR}, ${a})`;
   ctx.setTransform(ppu, 0, 0, ppu, -s.x0 * ppu, -s.y0 * ppu);
   ctx.fillStyle = '#040a06';
   ctx.fillRect(s.x0, s.y0, s.x1 - s.x0, s.y1 - s.y0);
-  hexes.xs.forEach((cx, w) => {
-    const { y: cy, r } = hexes;
-    // flat-topped, so sextant j runs clockwise from the corner at −120° + 60j°
+  squares.xs.forEach((cx, w) => {
+    const { y: cy, r } = squares;
+    // upright, so sector j runs clockwise from the corner at −135° + 90j°, the first along the top
     const corner = (j: number) => {
-      const a = ((-120 + 60 * j) * Math.PI) / 180;
+      const a = ((-135 + 90 * j) * Math.PI) / 180;
       return [cx + r * Math.cos(a), cy + r * Math.sin(a)] as const;
     };
     if (t.reading)
-      for (let j = 0; j < 6; j++) {
-        const b = Math.min(1, t.reading[w * 6 + j]);
+      for (let j = 0; j < n; j++) {
+        const b = Math.min(1, t.reading[w * n + j]);
         if (b <= 0) continue;
         ctx.fillStyle = ctx.shadowColor = green(b);
         ctx.shadowBlur = 5 * ppu;
@@ -619,7 +620,7 @@ function drawAnalysis(sc: Screen, t: Tool): void {
     ctx.strokeStyle = green(0.85);
     ctx.lineWidth = 0.9;
     ctx.beginPath();
-    for (let j = 0; j < 6; j++) ctx.lineTo(...corner(j));
+    for (let j = 0; j < n; j++) ctx.lineTo(...corner(j));
     ctx.closePath();
     ctx.stroke();
   });
@@ -630,7 +631,7 @@ function drawAnalysis(sc: Screen, t: Tool): void {
 }
 
 /**
- * A bond visualizer's screen: six points round a hexagon, one per atom (see bondCorner), and a line between two of them
+ * A bond visualizer's screen: four points at the corners of a square, one per atom (see bondCorner), and a line between two of them
  * for each bond between those atoms going by, glowing as bright as the share of what's passing that has that bond (see
  * bondShares); just the points while it has nothing to read. No words: reading it is part of the game.
  */
@@ -660,7 +661,7 @@ function drawBonds(sc: Screen, t: Tool): void {
     });
   ctx.fillStyle = ctx.shadowColor = green(0.85);
   ctx.shadowBlur = 2 * ppu;
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < SECTOR_ATOMS.length; i++) {
     const p = bondCorner(i);
     ctx.beginPath();
     ctx.arc(p.x, p.y, 1.8, 0, 2 * Math.PI);

@@ -37,6 +37,29 @@ describe('saves', () => {
     expect(fresh.bonds.RG.E).toBe(42);
   });
 
+  it("load a six-atom save's chemistry, keeping the bonds that survive and giving the rest the defaults", () => {
+    const b = (E: number) => ({ E, Ea: 3, A: 2 });
+    const old = {
+      bonds: { RG: b(42), RM: b(1), CG: b(1), CM: b(1), RY: b(7), CY: b(1), GY: b(1), MY: b(1), RB: b(-2), CB: b(1), GB: b(-3), MB: b(1) },
+      swapA: 0.5,
+      heatCap: 3,
+    };
+    const params = defaultChemParams();
+    params.bonds.RK.E = 99; // edited live, and not in the save
+    loadChem(params, old);
+    expect(Object.keys(params.bonds).sort()).toEqual(['BK', 'GB', 'GK', 'RB', 'RG', 'RK']);
+    expect([params.bonds.RG, params.bonds.RB, params.bonds.GB]).toEqual([b(42), b(-2), b(-3)]);
+    const d = defaultChemParams().bonds;
+    for (const k of ['RK', 'GK', 'BK']) expect(params.bonds[k]).toEqual(d[k]);
+    expect(params.swapA).toBe(0.5);
+  });
+
+  it("drop an old save's species with colors that are gone", () => {
+    const w = new Vessel(100);
+    loadVessel(w, { n: { '△RGY': 5, 'C–M': 5, Y: 5, 'R–G': 4 }, Q: 10 });
+    expect(w.N).toBe(8);
+  });
+
   it('reject strings that are not saves', () => {
     expect(() => decodeSave('hello')).toThrow();
     expect(() => decodeSave('{"v":2}')).toThrow();

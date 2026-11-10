@@ -1,6 +1,7 @@
 import { useReducer } from 'react';
 import { THERMO, T_ROOM, restoreDefaultChem, type BondParams } from '../chem/params';
 import type { ReactionNetwork } from '../chem/reactions';
+import { BOND_KEYS } from '../chem/atoms';
 import { SPECIES, TARGET } from '../chem/species';
 import { VOLUME } from '../game/flask';
 import { CAP } from '../game/config';
@@ -51,7 +52,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
             </tr>
           </thead>
           <tbody>
-            {Object.entries(p.bonds).map(([k, b]) => (
+            {BOND_KEYS.map((k) => [k, p.bonds[k]] as const).map(([k, b]) => (
               <tr key={k}>
                 <td>
                   {k[0]}–{k[1]}
@@ -70,7 +71,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
               </tr>
             ))}
             <tr className="sep">
-              <td>swap A</td>
+              <td>displace A</td>
               <td>
                 <DragNumber value={p.swapA} onChange={(v) => edit(() => (p.swapA = v))} />
               </td>

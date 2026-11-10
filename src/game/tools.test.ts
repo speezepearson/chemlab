@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SPECIES, TARGET, singleOf, speciesIndex } from '../chem/species';
+import { SPECIES, TARGET, bondMask, pairOf, singleOf, speciesIndex } from '../chem/species';
 import { CAP, DELIVERY, GOAL_PURITY, GOAL_TARGET } from './config';
 import { heatAt, temperature } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
@@ -9,8 +9,8 @@ import { STATION_POSE } from './presets';
 import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, BOND_ENDS, BOND_HEX, BOND_KEYS, SPECTROSCOPE, bondCorner, bondShares, bondCounts, spectroscopeAt, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SEXTANT_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, BOND_ENDS, BOND_SQUARE, BOND_KEYS, SPECTROSCOPE, bondCorner, bondShares, bondCounts, spectroscopeAt, INSTRUMENT_TAU, TUBE_CAP,
+  clockText, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -362,11 +362,11 @@ describe('cryostabilizer station', () => {
     expect(r.sinceDelivery).toBeCloseTo(0.04, 9);
   });
 
-  it(`filters ${100 * RESERVOIR_FILTER}% of what has a yellow atom in it out of the reservoir each sim second`, () => {
+  it(`filters ${100 * RESERVOIR_FILTER}% of what has a black atom in it out of the reservoir each sim second`, () => {
     const r = new Tool('receptacle', 0);
     const ref = r.tanks[1];
-    const Y = singleOf('Y');
-    const YR = SPECIES.find((s) => s.size === 2 && s.atoms.includes('Y') && s.atoms.includes('R'))!.i;
+    const Y = singleOf('K');
+    const YR = pairOf('R', 'K');
     ref.setMolecules(TARGET, 1e9);
     ref.setMolecules(Y, 1e8);
     ref.setMolecules(YR, 1e8);
@@ -584,7 +584,7 @@ describe('multiplexer', () => {
 });
 
 describe('size sorter', () => {
-  const RG = speciesIndex(['R', 'G', null], 1);
+  const RG = pairOf('R', 'G');
 
   const withStrength = (k: number, fn: () => void) => {
     const before = SORTER.strength;
@@ -630,6 +630,16 @@ describe('size sorter', () => {
     withStrength(1, () => expect(sort()).toEqual([[1, 0, 0], [0, 1, 0], [0, 0, 1]]));
   });
 
+  it('sends molecules of four atoms off the end, with the triples', () => {
+    const so = new Tool('sorter', 0);
+    filled(so.tanks[0], speciesIndex(['R', 'G', 'B', 'K'], 63), FUNNEL_CAP / 2, 1);
+    so.tanks[0].setMolecules(TARGET, so.tanks[0].n[speciesIndex(['R', 'G', 'B', 'K'], 63)]);
+    const outs = so.step(0.02);
+    expect(outs[0]?.N ?? 0).toBe(0);
+    expect(outs[1]?.N ?? 0).toBe(0);
+    expect(outs[2]!.N).toBeGreaterThan(0);
+  });
+
   it('keeps the temperature of what it sorts', () => {
     const so = new Tool('sorter', 0);
     filled(so.tanks[0], R, FUNNEL_CAP, 3);
@@ -648,9 +658,9 @@ describe('size sorter', () => {
 });
 
 describe('composition analyzer', () => {
-  const RG = speciesIndex(['R', 'G', null], 1);
+  const RG = pairOf('R', 'G');
   const B = singleOf('B');
-  const at = (size: number, atom: 'R' | 'G' | 'B' | 'C' | 'M' | 'Y') => (size - 1) * 6 + SEXTANT_ATOMS.indexOf(atom);
+  const at = (size: number, atom: 'R' | 'G' | 'B' | 'K') => (size - 1) * 4 + SECTOR_ATOMS.indexOf(atom);
 
   const CUP = 1e7;
   /** A sample's reading against CUP, filled with each species by volume. */
@@ -663,7 +673,7 @@ describe('composition analyzer', () => {
   it("reads the share of the sample each size's molecules with each color make up", () => {
     // 20% R, 20% G, 30% B and 30% R–G
     const r = read([[R, 0.2 * CUP], [G, 0.2 * CUP], [B, 0.3 * CUP], [RG, 0.3 * CUP]]);
-    const want = new Array(18).fill(0);
+    const want = new Array(16).fill(0);
     want[at(1, 'R')] = 0.2;
     want[at(1, 'G')] = 0.2;
     want[at(1, 'B')] = 0.3;
@@ -672,13 +682,15 @@ describe('composition analyzer', () => {
     r.forEach((x, i) => expect(x).toBeCloseTo(want[i], 9));
   });
 
-  it('lights a sample of one species fully in each of its sextants', () => {
+  it('lights a sample of one species fully in each of its sectors', () => {
     expect(read([[R, CUP]])[at(1, 'R')]).toBe(1);
     const rg = read([[RG, CUP]]);
     expect([rg[at(2, 'R')], rg[at(2, 'G')]]).toEqual([1, 1]);
     const t = read([[TARGET, CUP]]);
     // as near full as whole triangles get
     for (const a of ['R', 'G', 'B'] as const) expect(t[at(3, a)]).toBeCloseTo(1, 6);
+    const four = read([[speciesIndex(['R', 'G', 'B', 'K'], 63), CUP]]);
+    for (const a of ['R', 'G', 'B', 'K'] as const) expect(four[at(4, a)]).toBeCloseTo(1, 6);
   });
 
   it('reads a half share half as bright, and nothing dark', () => {
@@ -736,12 +748,12 @@ describe('spectroscope', () => {
     const v = new Vessel(Infinity);
     v.setMolecules(R, 5);
     v.setMolecules(TARGET, 7);
-    v.setMolecules(speciesIndex(['R', 'G', 'Y'], 3), 2); // G–R–Y
+    v.setMolecules(speciesIndex(['R', 'G', 'K'], bondMask(['R', 'G'], ['R', 'K'])), 2); // G–R–K
     const c = bondCounts(v);
     expect(c[bond('RG')]).toBe(9);
     expect(c[bond('RB')]).toBe(7);
     expect(c[bond('GB')]).toBe(7);
-    expect(c[bond('RY')]).toBe(2);
+    expect(c[bond('RK')]).toBe(2);
     expect(c.reduce((a, b) => a + b, 0)).toBe(25);
   });
 
@@ -779,7 +791,7 @@ describe('spectroscope', () => {
     run(20 * INSTRUMENT_TAU, true);
     expect(through / ((0.1 + 20 * INSTRUMENT_TAU) * feed)).toBeCloseTo(1, 2);
     for (const k of ['RG', 'RB', 'GB']) expect(sc.bonds[bond(k)] / feed).toBeCloseTo(1, 2);
-    expect(sc.bonds[bond('CM')]).toBe(0);
+    expect(sc.bonds[bond('BK')]).toBe(0);
     // and a step down fades: about e^-1 of it is left after INSTRUMENT_TAU
     run(INSTRUMENT_TAU, false);
     expect(sc.bonds[bond('RG')] / feed).toBeGreaterThan(0.25);
@@ -791,7 +803,7 @@ describe('spectroscope', () => {
 
 describe('bond visualizer', () => {
   const bond = (k: string) => BOND_KEYS.indexOf(k);
-  const RG = speciesIndex(['R', 'G', null], 1);
+  const RG = pairOf('R', 'G');
 
   it('is a one-of-a-kind inline instrument with one spout', () => {
     expect(INLINE_TOOLS).toContain('visualizer');
@@ -799,23 +811,20 @@ describe('bond visualizer', () => {
     expect(new Tool('visualizer', 0).shape.spouts).toHaveLength(1);
   });
 
-  it("puts the atoms round its hexagon clockwise from 12 o'clock in the analyzer's order", () => {
-    const top = bondCorner(SEXTANT_ATOMS.indexOf('G'));
-    expect(top.x).toBeCloseTo(BOND_HEX.x, 9);
-    expect(top.y).toBeCloseTo(BOND_HEX.y - BOND_HEX.r, 9);
-    // 2 o'clock is up and right of the middle, 6 o'clock straight down
-    const two = bondCorner(SEXTANT_ATOMS.indexOf('C'));
-    expect(two.x).toBeGreaterThan(BOND_HEX.x);
-    expect(two.y).toBeLessThan(BOND_HEX.y);
-    const six = bondCorner(SEXTANT_ATOMS.indexOf('M'));
-    expect(six.x).toBeCloseTo(BOND_HEX.x, 9);
-    expect(six.y).toBeCloseTo(BOND_HEX.y + BOND_HEX.r, 9);
+  it("puts the atoms at the corners of a square, clockwise from 12 o'clock in the analyzer's order", () => {
+    const { x, y, r } = BOND_SQUARE;
+    const want = [[x, y - r], [x + r, y], [x, y + r], [x - r, y]];
+    SECTOR_ATOMS.forEach((_, i) => {
+      expect(bondCorner(i).x).toBeCloseTo(want[i][0], 9);
+      expect(bondCorner(i).y).toBeCloseTo(want[i][1], 9);
+    });
   });
 
-  it("joins each bond's own two atoms, and never two at opposite corners", () => {
+  it("joins each bond's own two atoms, one line for each of the six", () => {
+    expect(BOND_ENDS).toHaveLength(6);
+    expect(new Set(BOND_ENDS.map(([i, j]) => [i, j].sort().join())).size).toBe(6);
     BOND_ENDS.forEach(([i, j], b) => {
-      expect([SEXTANT_ATOMS[i], SEXTANT_ATOMS[j]].sort().join('')).toBe(BOND_KEYS[b].split('').sort().join(''));
-      expect(Math.abs(i - j)).not.toBe(3);
+      expect([SECTOR_ATOMS[i], SECTOR_ATOMS[j]].sort().join('')).toBe(BOND_KEYS[b].split('').sort().join(''));
     });
   });
 
@@ -829,7 +838,7 @@ describe('bond visualizer', () => {
     expect(sh[bond('RG')]).toBeCloseTo(w(50, RG) + w(20, TARGET), 9);
     expect(sh[bond('RB')]).toBeCloseTo(w(20, TARGET), 9);
     expect(sh[bond('GB')]).toBeCloseTo(w(20, TARGET), 9);
-    expect(sh[bond('CM')]).toBe(0);
+    expect(sh[bond('BK')]).toBe(0);
     // one species with a bond lights its line fully
     const pure = new Vessel(Infinity);
     pure.setMolecules(RG, 7);
@@ -946,9 +955,7 @@ describe('mouthBelow', () => {
 });
 
 describe('separator', () => {
-  const B = singleOf('B');
-  const Y = singleOf('Y');
-  const C = singleOf('C');
+  const K = singleOf('K');
   const tri = (name: string) => SPECIES.find((s) => s.name === name)!.i;
   const pair = (name: string) => SPECIES.find((s) => s.name === name)!.i;
   const withSharpness = (k: number, fn: () => void) => {
@@ -961,30 +968,30 @@ describe('separator', () => {
     }
   };
 
-  it('gives each molecule its own outlet by its share of primary atoms: all, ⅔, ½, ⅓, none', () => {
+  it('gives each molecule its own outlet by its share of black atoms: none, ¼, ⅓, ½, all', () => {
     expect(SEPARATOR_OUTLET[R]).toBe(0);
     expect(SEPARATOR_OUTLET[tri('△RGB')]).toBe(0);
     expect(SEPARATOR_OUTLET[pair('R–G')]).toBe(0);
-    expect(SEPARATOR_OUTLET[tri('△RGY')]).toBe(1);
-    expect(SEPARATOR_OUTLET[pair('R–Y')]).toBe(2);
-    expect(SEPARATOR_OUTLET[tri('△RMY')]).toBe(3);
-    expect(SEPARATOR_OUTLET[C]).toBe(4);
-    expect(SEPARATOR_OUTLET[pair('C–M')]).toBe(4);
+    expect(SEPARATOR_OUTLET[tri('⊠RGBK')]).toBe(1);
+    expect(SEPARATOR_OUTLET[tri('R–G–B–K')]).toBe(1);
+    expect(SEPARATOR_OUTLET[tri('△RGK')]).toBe(2);
+    expect(SEPARATOR_OUTLET[pair('R–K')]).toBe(3);
+    expect(SEPARATOR_OUTLET[K]).toBe(4);
   });
 
   it('sends most of each molecule out its own outlet, the rest mostly next door, and more so the sharper it is', () => {
     const f = new Vessel(Infinity);
-    for (const sp of [R, tri('△RGY'), pair('R–Y'), tri('△RMY'), C]) f.n[sp] = CAP;
+    for (const sp of [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K]) f.n[sp] = CAP;
     f.N = atomTotal(f);
     let last = 0;
     for (const k of [1, 3, 6]) {
       withSharpness(k, () => {
         const out = separate(f);
         expect(out).toHaveLength(SEPARATOR_OUTLETS);
-        const ownShare = out[2].n[pair('R–Y')] / CAP;
+        const ownShare = out[2].n[tri('△RGK')] / CAP;
         expect(ownShare).toBeGreaterThan(last);
         last = ownShare;
-        [R, tri('△RGY'), pair('R–Y'), tri('△RMY'), C].forEach((sp, own) => {
+        [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K].forEach((sp, own) => {
           const shares = out.map((v) => v.n[sp] / CAP);
           expect(Math.max(...shares)).toBe(shares[own]);
           for (let j = 0; j < SEPARATOR_OUTLETS; j++)
@@ -998,10 +1005,10 @@ describe('separator', () => {
   it('sorts perfectly from SEPARATOR_PERFECT up', () => {
     withSharpness(SEPARATOR_PERFECT, () => {
       const f = new Vessel(Infinity);
-      for (const sp of [R, tri('△RGY'), pair('R–Y'), tri('△RMY'), C]) f.n[sp] = CAP;
+      for (const sp of [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K]) f.n[sp] = CAP;
       f.N = atomTotal(f);
       const out = separate(f);
-      [R, tri('△RGY'), pair('R–Y'), tri('△RMY'), C].forEach((sp, own) =>
+      [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K].forEach((sp, own) =>
         out.forEach((v, j) => expect(v.n[sp]).toBe(j === own ? CAP : 0)),
       );
     });
@@ -1016,7 +1023,7 @@ describe('separator', () => {
 
   it('conserves molecules and heat, which goes with the atoms', () => {
     const f = filled(new Vessel(Infinity), R, CAP, 3);
-    f.setMolecules(Y, CAP / 3);
+    f.setMolecules(K, CAP / 3);
     const out = separate(f);
     expect(out.reduce((t, v) => t + v.N, 0)).toBe(f.N);
     expect(out.reduce((t, v) => t + v.Q, 0)).toBe(f.Q);
@@ -1025,8 +1032,8 @@ describe('separator', () => {
 
   it('drains its tank at the valve rate times its level, out of all five spouts', () => {
     const x = new Tool('separator', 0, undefined, [0.5]);
-    filled(x.tanks[0], B, CAP, 3);
-    x.tanks[0].setMolecules(Y, CAP);
+    filled(x.tanks[0], singleOf('B'), CAP, 3);
+    x.tanks[0].setMolecules(K, CAP);
     const level = x.level(0);
     const out = x.step(0.1);
     expect(out).toHaveLength(SEPARATOR_OUTLETS);
