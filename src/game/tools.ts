@@ -734,10 +734,12 @@ export const ANALYZER = {
 
 /**
  * The spectroscope's graph (see spectroscopeAt): its x axis runs from lnE0 to lnE1, and each bond's line is a Gaussian
- * `width` wide (its standard deviation), in lnE. Its y axis is fixed: a bond passing at `full` a sim second peaks at
- * the top of the screen, so a trace of something shows as a small peak, not a full one.
+ * `width` wide (its standard deviation), in lnE. Its y axis is logarithmic and fixed: a height of ln(1 + f / unit)
+ * over ln(1 + top / unit), for f bonds passing a sim second, so a bond passing at `top` reaches the edge of the screen,
+ * one at `unit` shows as a small spike, and in between every tenfold more stands about as much taller. A strong line
+ * is then a rounded hill whose foot widens the more there is of it, rather than a box.
  */
-export const SPECTROSCOPE = { lnE0: -0.5, lnE1: 3.5, width: 0.02, full: 30_000 };
+export const SPECTROSCOPE = { lnE0: -0.5, lnE1: 3.5, width: 0.02, unit: 30_000, top: 3e10 };
 
 /** Every bond there can be, by its key (see pairKey): the twelve pairs of atoms from different groups. */
 export const BOND_KEYS: readonly string[] = [
@@ -759,18 +761,23 @@ export function bondCounts(f: Fluid): number[] {
 /**
  * The height of the spectroscope's graph at x = lnE, as a share of the half screen either side of its baseline (the
  * view clips it at ±1): each bond's count, `counts` (in BOND_KEYS order, per sim second), spread as a Gaussian
- * SPECTROSCOPE.width wide about the log of the size of its energy, `energies`, peaking at its count over
- * SPECTROSCOPE.full, all added up. A stable bond (E > 0) absorbs, so it's a peak above the baseline; an uphill one
- * (E < 0) gives energy back, so it's a dip below it, at its size. A bond with no energy shows nowhere.
+ * SPECTROSCOPE.width wide about the log of the size of its energy, `energies`, all added up and put on the log scale
+ * (see SPECTROSCOPE). A stable bond (E > 0) absorbs, so it's a peak above the baseline; an uphill one (E < 0) gives
+ * energy back, so it's a dip below it, at its size, on the same scale. Where peaks and dips overlap, the graph is the
+ * one less the other. A bond with no energy shows nowhere.
  */
 export function spectroscopeAt(x: number, counts: readonly number[], energies: readonly number[]): number {
-  const { width: w, full } = SPECTROSCOPE;
-  let y = 0;
+  const { width: w, unit, top } = SPECTROSCOPE;
+  let up = 0;
+  let down = 0;
   counts.forEach((c, i) => {
     const e = energies[i];
-    if (c > 0 && e !== 0) y += Math.sign(e) * (c / full) * Math.exp(-((x - Math.log(Math.abs(e))) ** 2) / (2 * w * w));
+    if (!(c > 0) || e === 0) return;
+    const f = c * Math.exp(-((x - Math.log(Math.abs(e))) ** 2) / (2 * w * w));
+    if (e > 0) up += f;
+    else down += f;
   });
-  return y;
+  return (Math.log1p(up / unit) - Math.log1p(down / unit)) / Math.log1p(top / unit);
 }
 
 /**

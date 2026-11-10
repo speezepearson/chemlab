@@ -745,21 +745,25 @@ describe('spectroscope', () => {
     expect(c.reduce((a, b) => a + b, 0)).toBe(25);
   });
 
-  it("draws each bond as a Gaussian as tall as its count over the full scale, at the log of its energy's size, up if it's stable and down if it's uphill", () => {
-    const { width: w, full } = SPECTROSCOPE;
+  it("draws each bond as a Gaussian on a log scale, at the log of its energy's size, up if it's stable and down if it's uphill", () => {
+    const { width: w, unit, top } = SPECTROSCOPE;
+    const height = (f: number) => Math.log1p(f / unit) / Math.log1p(top / unit);
     const energies = BOND_KEYS.map((_, i) => (i === 0 ? 8 : i === 1 ? -3 : 0));
-    const counts = BOND_KEYS.map((_, i) => (i === 0 ? full : i === 1 ? full / 3 : i === 2 ? 1e6 * full : 0));
+    const counts = BOND_KEYS.map((_, i) => (i === 0 ? top : i === 1 ? unit : i === 2 ? 1e6 * top : 0));
     expect(spectroscopeAt(Math.log(8), counts, energies)).toBeCloseTo(1, 6);
-    expect(spectroscopeAt(Math.log(3), counts, energies)).toBeCloseTo(-1 / 3, 6);
-    expect(spectroscopeAt(Math.log(8) + w, counts, energies)).toBeCloseTo(Math.exp(-0.5), 6);
+    expect(spectroscopeAt(Math.log(3), counts, energies)).toBeCloseTo(-height(unit), 6);
+    expect(spectroscopeAt(Math.log(8) + w, counts, energies)).toBeCloseTo(height(top * Math.exp(-0.5)), 6);
     // far from both, nothing; and the bond with no energy shows nowhere
     expect(spectroscopeAt(Math.log(5), counts, energies)).toBeLessThan(1e-6);
-    // two bonds at one energy add up
+    // a trace is a small spike, and each tenfold more stands taller
+    expect(height(unit)).toBeLessThan(0.1);
+    expect(height(100 * unit) - height(10 * unit)).toBeGreaterThan(0.05);
+    // two bonds at one energy add up before the scale is applied
     const same = BOND_KEYS.map(() => 2);
-    expect(spectroscopeAt(Math.log(2), BOND_KEYS.map(() => full / 100), same)).toBeCloseTo(BOND_KEYS.length / 100, 6);
+    expect(spectroscopeAt(Math.log(2), BOND_KEYS.map(() => unit), same)).toBeCloseTo(height(BOND_KEYS.length * unit), 6);
     // and a peak and a dip at one energy cancel
     const opposed = BOND_KEYS.map((_, i) => (i === 0 ? 2 : i === 1 ? -2 : 0));
-    expect(spectroscopeAt(Math.log(2), BOND_KEYS.map(() => full), opposed)).toBeCloseTo(0, 6);
+    expect(spectroscopeAt(Math.log(2), BOND_KEYS.map(() => unit), opposed)).toBeCloseTo(0, 6);
   });
 
   it('lets everything through, reading the bonds passing lately, per sim second, rising and falling smoothly', () => {

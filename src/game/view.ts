@@ -676,7 +676,7 @@ function drawBonds(sc: Screen, t: Tool): void {
  * A spectroscope's screen: a graph of the bonds passing through it lately, by energy (see spectroscopeAt): E across on
  * a log scale, along a baseline halfway up, with ticks as on log paper (at 1 to 9 times each power of ten, the powers
  * of ten longer, and numbered along the screen's foot), and f up from the baseline for stable bonds and down from it
- * for uphill ones, on a fixed scale (see SPECTROSCOPE.full), clipped at the plot's top and bottom, with no numbers.
+ * for uphill ones, on a fixed log scale (see SPECTROSCOPE), clipped at the plot's top and bottom, with no numbers.
  */
 function drawSpectroscope(sc: Screen, t: Tool, energies: readonly number[]): void {
   const key = `${t.bonds.map((c) => c.toPrecision(3)).join(',')}|${energies.join(',')}`;
