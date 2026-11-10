@@ -465,8 +465,33 @@ export function meterText(rate: number): string {
   return '9'.repeat(METER_DIGITS);
 }
 
-/** The order of an analyzer square's sectors, clockwise from the top, and of the bond visualizer's points. */
+/** The order of an analyzer triangle's sectors in its reading, and of the bond visualizer's points. */
 export const SECTOR_ATOMS: readonly Atom[] = ['R', 'G', 'B', 'K'];
+
+/**
+ * Where each atom is on the instruments' screens, the composition analyzer's and the bond visualizer's alike: a
+ * triangle standing on its base, G at the top, R at the bottom left, B at the bottom right, and K in the middle. As
+ * offsets from the triangle's middle, x right and y down, its corners 1 away.
+ */
+export const ATOM_PLACE: Record<Atom, readonly [number, number]> = {
+  G: [0, -1],
+  R: [-Math.sqrt(3) / 2, 0.5],
+  B: [Math.sqrt(3) / 2, 0.5],
+  K: [0, 0],
+};
+
+/**
+ * An atom's sector of an analyzer triangle, as its three corners (offsets as ATOM_PLACE's): the triangle is cut into
+ * four through the middles of its sides, so each corner's atom has the small triangle at that corner, and K the
+ * upside-down one in the middle.
+ */
+export function analyzerSector(atom: Atom): (readonly [number, number])[] {
+  const corners = (['G', 'B', 'R'] as const).map((a) => ATOM_PLACE[a]);
+  const mid = (p: readonly [number, number], q: readonly [number, number]) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2] as const;
+  if (atom === 'K') return corners.map((p, i) => mid(p, corners[(i + 1) % 3]));
+  const own = ATOM_PLACE[atom];
+  return [own, ...corners.filter((p) => p !== own).map((p) => mid(own, p))];
+}
 
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater' | 'analyzer'
@@ -704,7 +729,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -10, x1: INSTRUMENT.body.x1 + 4, y0: -6, y1: 118 },
   },
   visualizer: {
-    // the spectroscope's tube and cabinet, its screen showing the bonds going by between four points (see BOND_SQUARE)
+    // the spectroscope's tube and cabinet, its screen showing the bonds going by between four points (see BOND_TRIANGLE)
     tanks: [{ name: 'tube', x0: -TUBE_W / 2, x1: TUBE_W / 2 }],
     tankH: TUBE_H,
     tankCap: TUBE_CAP,
@@ -724,11 +749,12 @@ export const chuteY = (x: number) =>
   SORTER_CHUTE.y0 + ((x - SORTER_CHUTE.x0) / (SORTER_CHUTE.x1 - SORTER_CHUTE.x0)) * (SORTER_CHUTE.y1 - SORTER_CHUTE.y0);
 
 /**
- * The composition analyzer's squares on its screen (centers, and the distance from a center to a corner), one per
- * molecule size, and how high the pipe out of its cabinet to its waste spout runs, in local units.
+ * The composition analyzer's triangles on its screen (their middles, and the distance from a middle to a corner), one
+ * per molecule size, and how high the pipe out of its cabinet to its waste spout runs, in local units. A triangle on
+ * its base reaches r above its middle and half that below, so the middles are a quarter of r below the screen's.
  */
 export const ANALYZER = {
-  squares: { xs: [43, 81, 119, 157], y: 50, r: 21 },
+  triangles: { xs: [43, 81, 119, 157], y: 54.75, r: 19 },
   wasteY: 84,
 };
 
@@ -769,20 +795,20 @@ export function spectroscopeAt(x: number, counts: readonly number[], energies: r
 }
 
 /**
- * The bond visualizer's square on its screen, standing on a corner: its center, and the distance from there to a
- * corner, in local units. Its corners are the four atoms, in SECTOR_ATOMS order clockwise from the top, as the
- * composition analyzer's sectors are, and a line joins two of them for each bond between them going by (see
- * bondShares): its sides, or across it.
+ * The bond visualizer's triangle on its screen, standing on its base: its middle, and the distance from there to a
+ * corner, in local units. The four atoms are its corners and its middle, placed as in the composition analyzer's
+ * triangles (see ATOM_PLACE), and a line joins two of them for each bond between them going by (see bondShares): one
+ * of its sides, or from the middle out to a corner.
  */
-export const BOND_SQUARE = { x: 100, y: 50, r: 30 };
+export const BOND_TRIANGLE = { x: 100, y: 58, r: 32 };
 
-/** Corner i of the bond visualizer's square (see BOND_SQUARE), for SECTOR_ATOMS[i], in local units: 12 o'clock, 3, 6 and 9. */
-export function bondCorner(i: number): { x: number; y: number } {
-  const a = ((-90 + 90 * i) * Math.PI) / 180;
-  return { x: BOND_SQUARE.x + BOND_SQUARE.r * Math.cos(a), y: BOND_SQUARE.y + BOND_SQUARE.r * Math.sin(a) };
+/** The bond visualizer's point for SECTOR_ATOMS[i] (see BOND_TRIANGLE), in local units. */
+export function bondPoint(i: number): { x: number; y: number } {
+  const [dx, dy] = ATOM_PLACE[SECTOR_ATOMS[i]];
+  return { x: BOND_TRIANGLE.x + BOND_TRIANGLE.r * dx, y: BOND_TRIANGLE.y + BOND_TRIANGLE.r * dy };
 }
 
-/** For each bond (in BOND_KEYS order), its two atoms' places in SECTOR_ATOMS, the corners of the line it lights. */
+/** For each bond (in BOND_KEYS order), its two atoms' places in SECTOR_ATOMS, the ends of the line it lights. */
 export const BOND_ENDS: readonly (readonly [number, number])[] = BOND_KEYS.map(
   (k) => [SECTOR_ATOMS.indexOf(k[0] as Atom), SECTOR_ATOMS.indexOf(k[1] as Atom)] as const,
 );
@@ -917,7 +943,7 @@ export function separatorShares(): number[][] {
  * - A **spectroscope** is an inline instrument too, which lets everything through, counting the bonds that pass over
  *   the recent past (see INSTRUMENT_TAU and bondCounts) and showing them by energy as a graph (see spectroscopeAt).
  * - A **bond visualizer** is an inline instrument too, which lets everything through, showing which atoms are bonded
- *   in what passed over the recent past (see INSTRUMENT_TAU and bondShares) as lines round a square (see BOND_SQUARE).
+ *   in what passed over the recent past (see INSTRUMENT_TAU and bondShares) as lines between the corners and middle of a triangle (see BOND_TRIANGLE).
  *
  * Tools run on sim time, so a slow drip into a reacting flask gives the same
  * result at any sim speed.

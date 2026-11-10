@@ -9,7 +9,7 @@ import { STATION_POSE } from './presets';
 import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, BOND_ENDS, BOND_SQUARE, BOND_KEYS, SPECTROSCOPE, bondCorner, bondShares, bondCounts, spectroscopeAt, INSTRUMENT_TAU, TUBE_CAP,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, INSTRUMENT_TAU, TUBE_CAP,
   clockText, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
@@ -811,13 +811,40 @@ describe('bond visualizer', () => {
     expect(new Tool('visualizer', 0).shape.spouts).toHaveLength(1);
   });
 
-  it("puts the atoms at the corners of a square, clockwise from 12 o'clock in the analyzer's order", () => {
-    const { x, y, r } = BOND_SQUARE;
-    const want = [[x, y - r], [x + r, y], [x, y + r], [x - r, y]];
-    SECTOR_ATOMS.forEach((_, i) => {
-      expect(bondCorner(i).x).toBeCloseTo(want[i][0], 9);
-      expect(bondCorner(i).y).toBeCloseTo(want[i][1], 9);
-    });
+  it('puts G at the top of a triangle, R at its bottom left, B at its bottom right and K in its middle', () => {
+    const { x, y, r } = BOND_TRIANGLE;
+    const at = (a: 'R' | 'G' | 'B' | 'K') => bondPoint(SECTOR_ATOMS.indexOf(a));
+    expect(at('G').x).toBeCloseTo(x, 9);
+    expect(at('G').y).toBeCloseTo(y - r, 9);
+    expect(at('R').x).toBeCloseTo(x - (r * Math.sqrt(3)) / 2, 9);
+    expect(at('B').x).toBeCloseTo(x + (r * Math.sqrt(3)) / 2, 9);
+    expect(at('R').y).toBeCloseTo(y + r / 2, 9);
+    expect(at('B').y).toBeCloseTo(y + r / 2, 9);
+    expect(at('K')).toEqual({ x, y });
+    // equilateral: every corner as far from each other corner
+    const d = (p: { x: number; y: number }, q: { x: number; y: number }) => Math.hypot(p.x - q.x, p.y - q.y);
+    expect(d(at('G'), at('R'))).toBeCloseTo(d(at('R'), at('B')), 9);
+    expect(d(at('G'), at('B'))).toBeCloseTo(d(at('R'), at('B')), 9);
+  });
+
+  it("cuts the analyzer's triangle into four equal ones, each corner's atom at its corner and K upside down in the middle", () => {
+    const area = (ps: (readonly [number, number])[]) =>
+      Math.abs((ps[1][0] - ps[0][0]) * (ps[2][1] - ps[0][1]) - (ps[2][0] - ps[0][0]) * (ps[1][1] - ps[0][1])) / 2;
+    const whole = area((['G', 'B', 'R'] as const).map((a) => ATOM_PLACE[a]));
+    for (const a of SECTOR_ATOMS) {
+      const s = analyzerSector(a);
+      expect(s).toHaveLength(3);
+      expect(area(s)).toBeCloseTo(whole / 4, 9);
+      // each sector is centered on its atom's place, between the corner and the middle for a corner's
+      const mid = [0, 1].map((k) => (s[0][k] + s[1][k] + s[2][k]) / 3);
+      const want = a === 'K' ? [0, 0] : ATOM_PLACE[a].map((v) => v / 2);
+      expect(mid[0]).toBeCloseTo(want[0], 9);
+      expect(mid[1]).toBeCloseTo(want[1], 9);
+    }
+    // the middle one points down: one corner at the bottom, two level above it
+    const ys = analyzerSector('K').map((p) => p[1]).sort((p, q) => p - q);
+    expect(ys[0]).toBeCloseTo(ys[1], 9);
+    expect(ys[2]).toBeGreaterThan(ys[1]);
   });
 
   it("joins each bond's own two atoms, one line for each of the six", () => {
