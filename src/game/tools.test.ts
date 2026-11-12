@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SPECIES, TARGET, bondMask, pairOf, singleOf, speciesIndex } from '../chem/species';
 import { CAP, DELIVERY, GOAL_PURITY, GOAL_TARGET } from './config';
-import { heatAt, temperature } from '../chem/reactions';
+import { ReactionNetwork, heatAt, temperature } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { COOLING } from './cooling';
 import { Vessel, roomFor, volume } from './flask';
@@ -11,7 +11,7 @@ import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, THERMOMETER, thermometerAt, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  clockText, needleAt, THERMOMETER, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -462,6 +462,82 @@ describe('cryostabilizer station', () => {
     expect((d.x0 + d.x1) / 2).toBe((r.shape.tanks[0].x0 + r.shape.tanks[0].x1) / 2);
     expect(d.y0).toBeGreaterThan(f.y + f.h);
     expect(d.y1).toBeLessThan(r.shape.spoutY);
+  });
+});
+
+describe('swell bulbs', () => {
+  const chain = (...atoms: ('R' | 'G' | 'B')[]) =>
+    speciesIndex(atoms, bondMask([atoms[0], atoms[1]], [atoms[1], atoms[2]]));
+
+  it('are two bulbs with narrow necks, drawn as big as what they hold', () => {
+    const d = new Tool('dilatometer', 0);
+    expect(d.tanks.map((v) => v.cap)).toEqual([BULB_BODY_CAP + BULB_NECK_CAP, BULB_BODY_CAP + BULB_NECK_CAP]);
+    const pieces = tankPieces(d.shape, 0, tankDepth('dilatometer'));
+    expect(spaceOf(pieces) / SPACE_PER_ATOM / d.tanks[0].cap).toBeCloseTo(1, 6);
+    expect(heightOf(pieces)).toBe(BULB.sump.h + BULB.h + BULB.neck.h);
+    // the neck is narrow next to the bulb, so a little more fluid stands a lot higher in it
+    expect(BULB_NECK_CAP / BULB_BODY_CAP).toBeGreaterThan(1 / 8);
+    expect(BULB_NECK_CAP / BULB_BODY_CAP).toBeLessThan(1 / 4);
+    expect(BULB.neck.h / BULB.h).toBeGreaterThan(3);
+  });
+
+  it('show how much each holds by how far up its neck it stands', () => {
+    expect(neckShare(0)).toBe(0);
+    expect(neckShare(BULB_BODY_CAP)).toBe(0);
+    expect(neckShare(BULB_BODY_CAP + BULB_NECK_CAP / 4)).toBeCloseTo(0.25, 9);
+    expect(neckShare(BULB_BODY_CAP + BULB_NECK_CAP)).toBe(1);
+    expect(neckShare(2 * (BULB_BODY_CAP + BULB_NECK_CAP))).toBe(1);
+    // a bulb that's just full, swelling by a twentieth, climbs its neck by that much of the bulb over the neck
+    expect(neckShare(1.05 * BULB_BODY_CAP)).toBeCloseTo((0.05 * BULB_BODY_CAP) / BULB_NECK_CAP, 9);
+    // and its level, for how fast it drains, follows it up the neck
+    const d = new Tool('dilatometer', 0);
+    filled(d.tanks[0], R, BULB_BODY_CAP, 1);
+    const foot = d.level(0);
+    expect(foot).toBeCloseTo((BULB.sump.h + BULB.h) / (BULB.sump.h + BULB.h + BULB.neck.h), 3);
+    filled(d.tanks[0], R, BULB_BODY_CAP + BULB_NECK_CAP / 2, 1);
+    expect(d.level(0)).toBeCloseTo(foot + (1 - foot) / 2, 3);
+  });
+
+  it('heat both bulbs alike toward the wire, as far as the dial is turned, and not at all with it off', () => {
+    const d = new Tool('dilatometer', 0);
+    for (const v of d.tanks) filled(v, R, BULB_BODY_CAP, 1);
+    for (let i = 0; i < 500; i++) d.step(0.02);
+    expect(d.tanks.map(temperature)).toEqual([1, 1]);
+    d.valves[d.shape.dial!] = 0.5;
+    const wire = wireTemperature(0.5);
+    for (let i = 0; i < 5000; i++) d.step(0.02);
+    for (const v of d.tanks) expect(temperature(v) / wire).toBeCloseTo(1, 3);
+    // nothing leaves with its valves shut
+    expect(d.tanks.map((v) => v.N)).toEqual([BULB_BODY_CAP, BULB_BODY_CAP]);
+  });
+
+  it('drain slowly, each through its own valve', () => {
+    const d = new Tool('dilatometer', 0, undefined, [1, 0, 0]);
+    for (const v of d.tanks) filled(v, R, BULB_BODY_CAP + BULB_NECK_CAP, 1);
+    const out = d.step(0.1);
+    expect(out[0]!.N / (PIPETTE_FLOW * 0.1)).toBeCloseTo(1, 6);
+    expect(out[1]).toBeNull();
+  });
+
+  it('show chains among triangles: heated, a chain splits in two, and a triangle only opens', () => {
+    // the fixed test chemistry: its R–G bond breaks at the wire's hottest, and its blue bonds never do
+    const net = new ReactionNetwork(testChemParams());
+    const d = new Tool('dilatometer', 0);
+    const [pure, mixed] = d.tanks;
+    pure.setMolecules(TARGET, BULB_BODY_CAP);
+    mixed.setMolecules(TARGET, 0.8 * BULB_BODY_CAP);
+    mixed.setMolecules(chain('R', 'G', 'B'), 0.1 * BULB_BODY_CAP);
+    mixed.setMolecules(chain('G', 'R', 'B'), 0.1 * BULB_BODY_CAP);
+    for (const v of d.tanks) v.setTemperature(1);
+    d.valves[d.shape.dial!] = 1;
+    for (let i = 0; i < 2000; i++) {
+      d.step(0.01);
+      for (const v of d.tanks) net.step(v, 0.01);
+    }
+    expect(volume(pure)).toBe(BULB_BODY_CAP);
+    expect(neckShare(volume(pure))).toBe(0);
+    expect(volume(mixed)).toBeGreaterThan(BULB_BODY_CAP);
+    expect(neckShare(volume(mixed))).toBeGreaterThan(0);
   });
 });
 

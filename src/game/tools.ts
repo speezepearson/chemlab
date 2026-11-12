@@ -82,7 +82,8 @@ export const FUNNEL_TIP = 6;
 
 /**
  * Tank k of a shape's inside, `d` deep front to back, as it's drawn, bottom up: a sump under its floor, then the
- * tank; a funnel narrowing to its stem; a tube with a little funnel on top; or an upright cylinder.
+ * tank; a funnel narrowing to its stem; a tube with a little funnel on top; or an upright cylinder, with a narrow neck
+ * on top of it if it has one.
  */
 export function tankPieces(sh: ToolShape, k: number, d: number): Piece[] {
   const w = sh.tanks[k].x1 - sh.tanks[k].x0;
@@ -90,7 +91,10 @@ export function tankPieces(sh: ToolShape, k: number, d: number): Piece[] {
   if (sh.round) {
     const s = sh.sump;
     const tank = { h, w0: w, d0: w, w1: w, d1: w, round: true };
-    return s ? [{ h: s.h, w0: SUMP_TIP, d0: SUMP_TIP, w1: s.w, d1: s.w, round: true }, tank] : [tank];
+    const pieces: Piece[] = s ? [{ h: s.h, w0: SUMP_TIP, d0: SUMP_TIP, w1: s.w, d1: s.w, round: true }, tank] : [tank];
+    const n = sh.neck;
+    if (n) pieces.push({ h: n.h, w0: n.w, d0: n.w, w1: n.w, d1: n.w, round: true });
+    return pieces;
   }
   if (sh.funnel) return [{ h, w0: FUNNEL_TIP, d0: FUNNEL_TIP, w1: w, d1: d }];
   const box = { h, w0: w, d0: d, w1: w, d1: d };
@@ -487,6 +491,25 @@ export function thermometerAt(T: number): number {
   return Math.max(0, Math.min(1, Math.log(Math.max(T, 1e-9) / T0) / Math.log(T1 / T0)));
 }
 
+/**
+ * A swell bulb (see SHAPES.dilatometer): a squat round bulb `w` across and `h` tall, over a little sump, under a
+ * narrow neck (see ToolShape.neck) with `marks` graduations up it. The neck holds about a fifth of what the bulb
+ * does, so fluid that fills the bulb and swells by a twentieth climbs a quarter of the neck.
+ */
+export const BULB = { w: 34, h: 20, sump: { w: 10, h: 5 }, neck: { w: 7, h: 90, lip: 6 }, marks: 20 };
+const BULB_BODY: Piece[] = [
+  { h: BULB.sump.h, w0: SUMP_TIP, d0: SUMP_TIP, w1: BULB.sump.w, d1: BULB.sump.w, round: true },
+  { h: BULB.h, w0: BULB.w, d0: BULB.w, w1: BULB.w, d1: BULB.w, round: true },
+];
+/** How much a swell bulb holds below its neck, by volume: as much as it's drawn to hold (see SPACE_PER_ATOM), about 0.29 flask. */
+export const BULB_BODY_CAP = Math.round(spaceOf(BULB_BODY) / SPACE_PER_ATOM);
+/** How much a swell bulb's neck holds, by volume: about 0.055 flask. */
+export const BULB_NECK_CAP = Math.round((((Math.PI / 4) * BULB.neck.w ** 2 * BULB.neck.h) / SPACE_PER_ATOM));
+/** How much of its neck a swell bulb holding `vol` (by volume) fills: 0 while the bulb itself isn't full, 1 at the brim. */
+export function neckShare(vol: number): number {
+  return Math.max(0, Math.min(1, (vol - BULB_BODY_CAP) / BULB_NECK_CAP));
+}
+
 /** How many digits the meter's display has. */
 export const METER_DIGITS = 4;
 
@@ -533,7 +556,7 @@ export function analyzerSector(atom: Atom): (readonly [number, number])[] {
 
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater' | 'analyzer'
-  | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'tank' | 'receptacle';
+  | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'dilatometer' | 'tank' | 'receptacle';
 
 /**
  * Tools there's only ever one of: not in the palette, and never put away. The receptacle is the whole cryostabilizer
@@ -571,6 +594,12 @@ export interface ToolShape {
    * trickling out ever more slowly.
    */
   sump?: { w: number; h: number };
+  /**
+   * A narrow neck on top of each tank (a round one), `w` across and `h` tall, with a lip reaching `lip` either side
+   * of its middle at its top, which is where fluid goes in. The tank fills first, then its neck, so a small change
+   * in how much it holds shows as a big change in how high it stands.
+   */
+  neck?: { w: number; h: number; lip: number };
   /** Whether the tool has no valves to turn. */
   noValve?: boolean;
   /** Where the valves are, if not one under each tank's center at valveY: then there's one valve per entry. */
@@ -740,6 +769,26 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     valveY: TUBE_H,
     spoutY: TUBE_H + 32,
     box: { x0: -15, x1: 15, y0: -6, y1: TUBE_H + 34 },
+  },
+  dilatometer: {
+    // two swell bulbs (see BULB), a grid cell apart, each draining slowly through its own valve to a spout under it,
+    // with a wire wound round both from a box between them, whose dial sets its heat
+    tanks: [
+      { name: 'A', x0: -CELL / 2 - BULB.w / 2, x1: -CELL / 2 + BULB.w / 2 },
+      { name: 'B', x0: CELL / 2 - BULB.w / 2, x1: CELL / 2 + BULB.w / 2 },
+    ],
+    tankH: BULB.h,
+    tankCap: BULB_BODY_CAP + BULB_NECK_CAP,
+    round: true,
+    sump: BULB.sump,
+    neck: BULB.neck,
+    valves: [{ x: -CELL / 2, y: 38 }, { x: CELL / 2, y: 38 }, { x: 0, y: 17 }],
+    dial: 2,
+    maxFlow: PIPETTE_FLOW,
+    spouts: [-CELL / 2, CELL / 2],
+    valveY: 38,
+    spoutY: 54,
+    box: { x0: -CELL / 2 - BULB.w / 2 - 4, x1: CELL / 2 + BULB.w / 2 + 4, y0: -BULB.neck.h - 8, y1: 56 },
   },
   thermometer: {
     // the flow meter's tube and pipe, past the bulb of a thermometer on a card beside them (see THERMOMETER_BODY)
@@ -961,6 +1010,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   heater: 'Resistive heater',
   meter: 'Flow meter',
   thermometer: 'Thermometer',
+  dilatometer: 'Swell bulbs',
   tank: 'Tank',
   receptacle: 'Cryostabilizer',
   analyzer: 'Composition analyzer',
@@ -1044,6 +1094,9 @@ export function separatorShares(): number[][] {
  *   a trickle through its faucet, the second spout, as far as its one valve is open.
  * - A **flow meter** is an inline instrument (see INLINE_TOOLS): its tube drains straight through to one spout, and
  *   it shows what flows out, averaged over the recent past (see INSTRUMENT_TAU, rate and meterText).
+ * - **Swell bulbs** are two little round tanks with narrow necks (see BULB), each draining at up to PIPETTE_FLOW,
+ *   heated alike by a wire whose temperature a dial sets (see wireTemperature and heatBy), so how much each swells
+ *   shows side by side.
  * - A **thermometer** is an inline instrument too, which lets everything through past its bulb, whose temperature
  *   follows what passes (see warm), with two markers left at the highest and lowest it's read (see shake).
  * - A **composition analyzer** is an inline instrument too, and it draws off ANALYZER_SAMPLE of what passes, out its waste spout, reading that (see
@@ -1169,6 +1222,10 @@ export class Tool {
     }
     const T = this.tanks.length;
     const parts = (n: number) => Array.from({ length: n }, (_, j) => this.packet(T + j));
+    if (this.kind === 'dilatometer') {
+      const wireT = wireTemperature(this.valves[this.shape.dial!]);
+      for (const v of this.tanks) heatBy(v, wireT, h);
+    }
     let packets = this.tanks.map((tank, k) => {
       const p = this.packet(k);
       // a valve, or a funnel without one, lets out in proportion to how high the fluid stands; an instrument's tube
@@ -1304,13 +1361,19 @@ export class Tool {
    * How high the fluid in tank k stands, as a share of the tank's full height, for how fast it drains: in step with
    * how full it is, except in a tank with a cup on top (see cupFillHeight), whose narrow tube fills first, or a sump
    * below (see sumpFillHeight), which fills first and is measured from its tip. This goes by the tank's flat outline,
-   * as the game has always drained, not by how it's drawn in the room (see tankPieces), so flows stay as they were.
+   * as the game has always drained, not by how it's drawn in the room (see tankPieces), so flows stay as they were;
+   * but a tank with a neck goes by how it's drawn, from its sump's tip to its neck's top.
    */
   level(k: number): number {
     const v = this.tanks[k];
     const share = Math.min(1, volume(v) / v.cap);
-    const { cup, sump, tanks, tankH = TANK_H } = this.shape;
+    const { cup, sump, neck, tanks, tankH = TANK_H } = this.shape;
     const w = tanks[k].x1 - tanks[k].x0;
+    if (neck) {
+      // a newer shape, with no flows to keep as they were: by how it's drawn
+      const pieces = tankPieces(this.shape, k, w);
+      return levelIn(pieces, share) / heightOf(pieces);
+    }
     if (sump) return sumpFillHeight(share, w, tankH, sump) / (tankH + sump.h);
     if (cup) return cupFillHeight(share, w, tankH, 2 * cup.w, cup.h) / (tankH + cup.h);
     return share;

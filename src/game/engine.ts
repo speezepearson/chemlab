@@ -29,7 +29,7 @@ import {
 } from './space';
 import {
   ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, SUMP_TIP, TANK_H,
-  TOOL_NAMES, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, tankX,
+  TOOL_NAMES, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
   type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
@@ -210,18 +210,18 @@ export interface PaperEdit {
 /** Things that can be made from the hotbar, in its order. */
 export const ITEMS = [
   'flask', 'dispenser', 'pipette', 'exchanger', 'separator', 'splitter', 'sorter', 'heater', 'scale', 'tank', 'meter', 'multiplexer',
-  'thermometer',
+  'thermometer', 'dilatometer',
 ] as const;
 export type Item = (typeof ITEMS)[number];
 /**
  * The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0, - and =; and then, the number
  * row being full, along the bottom row of letters, from Z.
  */
-export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Z'] as const;
+export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Z', 'X'] as const;
 /** The same keys, as KeyboardEvent codes, so they work whatever the keyboard layout's shift state. */
 const HOTKEY_CODES = [
   'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal',
-  'KeyZ',
+  'KeyZ', 'KeyX',
 ];
 
 /** How tipped a flask held to pour is: past the horizontal, mouth down. */
@@ -2071,7 +2071,7 @@ export class GameEngine {
    * Every vessel holding fluid, with how exposed that fluid is to the room (see exposure): how deep it stands, and
    * how wide on average, as it's shown, taking the flat outline its shape is built from. A flask fills its wide base
    * first; a tank fills straight up, a funnel from its narrow stem; a pipette fills its tube, then its cup; a sump
-   * fills first; a heater's tube holds a shallow stream along its floor.
+   * fills first; a swell bulb fills its bulb, then its neck; a heater's tube holds a shallow stream along its floor.
    */
   private exposures(): [Vessel, number][] {
     const out: [Vessel, number][] = [];
@@ -2087,7 +2087,12 @@ export class GameEngine {
       t.tanks.forEach((v, k) => {
         if (v.N <= 0) return;
         const W = sh.tanks[k].x1 - sh.tanks[k].x0;
-        if (sh.cup) {
+        if (sh.neck) {
+          // as it's drawn: its depth, and the side of a square as big across as it is on average
+          const ps = tankPieces(sh, k, W);
+          const h = levelIn(ps, share(v));
+          out.push([v, exposure(h, Math.sqrt((share(v) * spaceOf(ps)) / h))]);
+        } else if (sh.cup) {
           const cupW = 2 * sh.cup.w;
           const h = cupFillHeight(share(v), W, H, cupW, sh.cup.h);
           const area = share(v) * (W * H + ((W + cupW) / 2) * sh.cup.h);
@@ -2795,7 +2800,7 @@ export class GameEngine {
         if (this.hooked(p)) add(['Shift', 'E'], 'pick it up still hooked up');
       }
       if (!this.pencil && this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
-      add(['1–0, -, =, Z'], 'make equipment in your hands');
+      add(['1–0, -, =, Z, X'], 'make equipment in your hands');
     }
     if (!this.pencil) {
       if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');

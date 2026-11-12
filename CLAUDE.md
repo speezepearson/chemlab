@@ -140,7 +140,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     unique. The number row is full, through =, so new ones go along the bottom row of letters, from Z.
   - If it has state of its own that a save should keep, `Tool.memory` and `Tool.remember`.
   - Tests and the README.
-  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
+  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `neck`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
 - **Unique tools** (`UNIQUE_TOOLS`: the composition analyzer, the spectroscope, the bond visualizer and the receptacle) aren't on
   the hotbar and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
   whole cryostabilizer station (`STATION` in `tools.ts`): its tanks are the funnel and the ship's reservoir, in that

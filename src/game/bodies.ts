@@ -80,7 +80,7 @@ export function tankRect(t: Tool, k: number): { x0: number; x1: number; y0: numb
 
 /**
  * Where fluid goes into a tank, in the tool's flat frame: its open top, or the mouth of the little funnel on top if it
- * has one, or the cryostabilizer station's funnel (see STATION).
+ * has one, or the lip of its neck, or the cryostabilizer station's funnel (see STATION).
  */
 export function openingOf(t: Tool, k: number): { x0: number; x1: number; y: number; hz: number } {
   const r = tankRect(t, k);
@@ -89,9 +89,11 @@ export function openingOf(t: Tool, k: number): { x0: number; x1: number; y: numb
     const cx = tankX(t.shape.tanks[k]);
     return { x0: cx - w, x1: cx + w, y, hz: w };
   }
+  const cx = (r.x0 + r.x1) / 2;
+  const neck = t.shape.neck;
+  if (neck) return { x0: cx - neck.lip, x1: cx + neck.lip, y: r.y0 - neck.h, hz: neck.lip };
   const cup = t.shape.cup;
   if (!cup) return { x0: r.x0, x1: r.x1, y: r.y0, hz: TOOL_DEPTH[t.kind].tank / 2 };
-  const cx = (r.x0 + r.x1) / 2;
   return { x0: cx - cup.w, x1: cx + cup.w, y: r.y0 - cup.h, hz: cup.w };
 }
 
@@ -171,7 +173,15 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
     hz: Math.max(D.tank / 2 + 2, sh.cup ? sh.cup.w + 1 : 0), round: sh.round,
   };
   if (sh.round) tanks.hz = (tanks.x1 - tanks.x0) / 2;
-  if (bottom >= b.y1) return [tanks];
+  // tanks with necks: each on its own, round, with its neck above it
+  const neck = sh.neck;
+  const upper = neck
+    ? sh.tanks.flatMap((k) => [
+        { x0: k.x0 - 2, x1: k.x1 + 2, y0: -2, y1: bottom, hz: (k.x1 - k.x0) / 2 + 2, round: true },
+        { x0: tankX(k) - neck.lip, x1: tankX(k) + neck.lip, y0: -neck.h - 2, y1: -2, hz: neck.lip, round: true },
+      ])
+    : [tanks];
+  if (bottom >= b.y1) return upper;
   const valves = sh.noValve ? [] : (sh.valves ?? sh.tanks.map((k) => ({ x: tankX(k), y: sh.valveY })));
   const xs = [...sh.spouts, ...valves.map((v) => v.x), ...sh.tanks.map(tankX)];
   if (t.kind === 'exchanger') xs.push(HELIX.x0, HELIX.x1);
@@ -179,7 +189,7 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
     x0: Math.max(b.x0, Math.min(...xs) - 12), x1: Math.min(b.x1, Math.max(...xs) + 12),
     y0: Math.min(bottom, ...valves.map((v) => v.y - 10)), y1: b.y1, hz: D.body / 2,
   };
-  return [tanks, below];
+  return [...upper, below];
 }
 
 /** A tool's box in the room, for collisions: its bounding box, solid only in its parts (see toolParts). */
