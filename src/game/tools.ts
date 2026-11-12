@@ -1147,6 +1147,9 @@ export const tankX = (tk: { x0: number; x1: number }) => (tk.x0 + tk.x1) / 2;
  */
 export const HELIX = { x0: -CELL / 2, x1: CELL / 2, y: 110, r: 6, halfTwists: 9 };
 
+/** The inside of a tank with a neck, by kind of tool (see Tool.level): every tank of a kind is alike. */
+const necked = new Map<ToolKind, Piece[]>();
+
 export const TOOL_NAMES: Record<ToolKind, string> = {
   dispenser: 'Dispenser',
   pipette: 'Pipette',
@@ -1570,8 +1573,9 @@ export class Tool {
     const { cup, sump, neck, tanks, tankH = TANK_H } = this.shape;
     const w = tanks[k].x1 - tanks[k].x0;
     if (neck) {
-      // a newer shape, with no flows to keep as they were: by how it's drawn
-      const pieces = tankPieces(this.shape, k, w);
+      // a newer shape, with no flows to keep as they were: by how it's drawn (its outline worked out once per kind)
+      let pieces = necked.get(this.kind);
+      if (!pieces) necked.set(this.kind, (pieces = tankPieces(this.shape, k, w)));
       return levelIn(pieces, share) / heightOf(pieces);
     }
     if (sump) return sumpFillHeight(share, w, tankH, sump) / (tankH + sump.h);
