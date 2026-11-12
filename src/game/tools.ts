@@ -766,12 +766,12 @@ export const ANALYZER = {
 
 /**
  * The spectroscope's graph (see spectroscopeAt): its x axis runs from lnE0 to lnE1, and each bond's line is a Gaussian
- * `width` wide (its standard deviation), in lnE. Its y axis is logarithmic and fixed: a height of ln(1 + f / unit)
- * over ln(1 + top / unit), for f bonds passing a sim second, so a bond passing at `top` reaches the edge of the screen,
- * one at `unit` shows as a small spike, and in between every tenfold more stands about as much taller. A strong line
- * is then a rounded hill whose foot widens the more there is of it, rather than a box.
+ * `width` wide (its standard deviation), in lnE. Its y axis, f, is logarithmic and ranges itself to what's passing
+ * (see spectroscopeTop and spectroscopeY): its top is `headroom` times the tallest line, and it shows `decades` powers
+ * of ten below that, so a line that much weaker than the strongest still shows. It reads f in mS, `perMS` bonds a sim
+ * second each: bonds a sim millisecond.
  */
-export const SPECTROSCOPE = { lnE0: -0.5, lnE1: 3.5, width: 0.02, unit: 30_000, top: 3e10 };
+export const SPECTROSCOPE = { lnE0: -0.5, lnE1: 3.5, width: 0.02, decades: 4, headroom: 10 ** 0.5, perMS: 1e3 };
 
 /** Every bond there can be, by its key (see pairKey): the six pairs of atoms. */
 export { BOND_KEYS };
@@ -787,15 +787,13 @@ export function bondCounts(f: Fluid): number[] {
 }
 
 /**
- * The height of the spectroscope's graph at x = lnE, as a share of the half screen either side of its baseline (the
- * view clips it at ±1): each bond's count, `counts` (in BOND_KEYS order, per sim second), spread as a Gaussian
- * SPECTROSCOPE.width wide about the log of the size of its energy, `energies`, all added up and put on the log scale
- * (see SPECTROSCOPE). A stable bond (E > 0) absorbs, so it's a peak above the baseline; an uphill one (E < 0) gives
- * energy back, so it's a dip below it, at its size, on the same scale. Where peaks and dips overlap, the graph is the
- * one less the other. A bond with no energy shows nowhere.
+ * The spectroscope's lines at x = lnE: each bond's count, `counts` (in BOND_KEYS order, per sim second), spread as a
+ * Gaussian SPECTROSCOPE.width wide about the log of the size of its energy, `energies`, all added up, separately for
+ * stable bonds (E > 0, which absorb, so they peak above the baseline) and uphill ones (E < 0, which give energy back,
+ * so they dip below it, at their size). A bond with no energy shows nowhere.
  */
-export function spectroscopeAt(x: number, counts: readonly number[], energies: readonly number[]): number {
-  const { width: w, unit, top } = SPECTROSCOPE;
+export function spectroscopeAt(x: number, counts: readonly number[], energies: readonly number[]): { up: number; down: number } {
+  const w = SPECTROSCOPE.width;
   let up = 0;
   let down = 0;
   counts.forEach((c, i) => {
@@ -805,7 +803,27 @@ export function spectroscopeAt(x: number, counts: readonly number[], energies: r
     if (e > 0) up += f;
     else down += f;
   });
-  return (Math.log1p(up / unit) - Math.log1p(down / unit)) / Math.log1p(top / unit);
+  return { up, down };
+}
+
+/**
+ * The top of the spectroscope's f axis, in bonds a sim second, for lines whose tallest (peak or dip) is `tallest`:
+ * SPECTROSCOPE.headroom times it, so the axis slides with the flow; 0 if there's nothing.
+ */
+export function spectroscopeTop(tallest: number): number {
+  return tallest > 0 ? tallest * SPECTROSCOPE.headroom : 0;
+}
+
+/**
+ * How high f (bonds a sim second) stands on the spectroscope's axis topped at `top` (see spectroscopeTop), as a share
+ * of the half screen above the baseline: ln(1 + f / floor) over ln(1 + top / floor), where floor is SPECTROSCOPE.decades
+ * powers of ten under the top. Well above the floor that's a plain log scale; it eases to 0 at f = 0, so a line meets
+ * the baseline smoothly. A dip of f stands as far below.
+ */
+export function spectroscopeY(f: number, top: number): number {
+  if (!(top > 0)) return 0;
+  const floor = top / 10 ** SPECTROSCOPE.decades;
+  return Math.log1p(f / floor) / Math.log1p(top / floor);
 }
 
 /**

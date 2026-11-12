@@ -23,7 +23,7 @@ import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
-  clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
+  clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
@@ -675,11 +675,20 @@ function drawBonds(sc: Screen, t: Tool): void {
   sc.tex.needsUpdate = true;
 }
 
+/** The spectroscope's number for 10^d mS: 1, 10, 100, then 1k, 10k, ..., 1M, ..., and under 1, .1, .01, .... */
+function fLabel(d: number): string {
+  if (d < 0) return '.' + '0'.repeat(-d - 1) + '1';
+  const [suffix, k] = d >= 9 ? ['G', 9] : d >= 6 ? ['M', 6] : d >= 3 ? ['k', 3] : ['', 0];
+  return String(10 ** (d - k)) + suffix;
+}
+
 /**
- * A spectroscope's screen: a graph of the bonds passing through it lately, by energy (see spectroscopeAt): E across on
- * a log scale, along a baseline halfway up, with ticks as on log paper (at 1 to 9 times each power of ten, the powers
- * of ten longer, and numbered along the screen's foot), and f up from the baseline for stable bonds and down from it
- * for uphill ones, on a fixed log scale (see SPECTROSCOPE), clipped at the plot's top and bottom, with no numbers.
+ * A spectroscope's screen: a graph of the bonds passing through it lately, by energy (see spectroscopeAt). E, in uB,
+ * runs across on a log scale, along a baseline halfway up, with ticks as on log paper (at 1 to 9 times each power of
+ * ten, the powers of ten longer, and numbered along the screen's foot). f, in mS, runs up from the baseline for stable
+ * bonds and down from it for uphill ones, on a log scale that ranges itself to the tallest line (see spectroscopeTop
+ * and spectroscopeY), with log-paper ticks both ways along the left, the powers of ten numbered, so they slide as the
+ * flow changes; clipped at the plot's top and bottom.
  */
 function drawSpectroscope(sc: Screen, t: Tool, energies: readonly number[]): void {
   const key = `${t.bonds.map((c) => c.toPrecision(3)).join(',')}|${energies.join(',')}`;
@@ -691,14 +700,16 @@ function drawSpectroscope(sc: Screen, t: Tool, energies: readonly number[]): voi
   ctx.setTransform(ppu, 0, 0, ppu, -s.x0 * ppu, -s.y0 * ppu);
   ctx.fillStyle = '#040a06';
   ctx.fillRect(s.x0, s.y0, s.x1 - s.x0, s.y1 - s.y0);
-  // the plot, inside a margin for the labels
-  const p = { x0: s.x0 + 10, x1: s.x1 - 5, y0: s.y0 + 5, y1: s.y1 - 9 };
+  // the plot, inside margins for the labels: f's title above, its numbers left, E's numbers and title below
+  const p = { x0: s.x0 + 16, x1: s.x1 - 5, y0: s.y0 + 8, y1: s.y1 - 8 };
   const base = (p.y0 + p.y1) / 2;
-  const { lnE0, lnE1 } = SPECTROSCOPE;
+  const half = base - p.y0;
+  const { lnE0, lnE1, perMS } = SPECTROSCOPE;
   const X = (l: number) => p.x0 + ((l - lnE0) / (lnE1 - lnE0)) * (p.x1 - p.x0);
   const n = Math.round((p.x1 - p.x0) * ppu);
-  const ys = Array.from({ length: n + 1 }, (_, i) => spectroscopeAt(lnE0 + (i / n) * (lnE1 - lnE0), t.bonds, energies));
-  const Y = (v: number) => base - Math.max(-1, Math.min(1, v)) * (base - p.y0);
+  const lines = Array.from({ length: n + 1 }, (_, i) => spectroscopeAt(lnE0 + (i / n) * (lnE1 - lnE0), t.bonds, energies));
+  const top = spectroscopeTop(Math.max(0, ...lines.map((l) => Math.max(l.up, l.down))));
+  const Y = (v: number) => base - Math.max(-1, Math.min(1, v)) * half;
   ctx.strokeStyle = ctx.fillStyle = ctx.shadowColor = green(0.75);
   ctx.shadowBlur = 1.5 * ppu;
   ctx.lineWidth = 0.6;
@@ -721,16 +732,42 @@ function drawSpectroscope(sc: Screen, t: Tool, energies: readonly number[]): voi
       ctx.moveTo(X(l), base - tick / 2);
       ctx.lineTo(X(l), base + tick / 2);
       ctx.stroke();
-      if (m === 1) ctx.fillText(String(+e.toPrecision(1)), X(l), p.y1 + 2);
+      if (m === 1) ctx.fillText(String(+e.toPrecision(1)), X(l), p.y1 + 1.5);
     }
   ctx.textAlign = 'right';
-  ctx.fillText('E', p.x1, p.y1 + 2);
-  ctx.textAlign = 'center';
-  ctx.fillText('f', (s.x0 + p.x0) / 2, p.y0);
+  ctx.fillText('E (uB)', p.x1, p.y1 + 1.5);
+  ctx.textAlign = 'left';
+  ctx.fillText('f (mS)', s.x0 + 2, s.y0 + 1.5);
+  // f's ticks, the same both ways from the baseline, numbered at the powers of ten that have room
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('0', p.x0 - 2.5, base);
+  if (top > 0) {
+    const floor = top / 10 ** SPECTROSCOPE.decades;
+    let last = 0;
+    for (let d = Math.floor(Math.log10(floor / perMS)); d <= Math.ceil(Math.log10(top / perMS)); d++)
+      for (let m = 1; m <= 9; m++) {
+        const f = m * 10 ** d * perMS;
+        if (f < floor || f > top) continue;
+        const h = spectroscopeY(f, top) * half;
+        const tick = m === 1 ? 2 : 1;
+        ctx.beginPath();
+        for (const y of [base - h, base + h]) {
+          ctx.moveTo(p.x0 - tick, y);
+          ctx.lineTo(p.x0, y);
+        }
+        ctx.stroke();
+        if (m === 1 && h >= 4 && h - last >= 5) {
+          last = h;
+          ctx.fillText(fLabel(d), p.x0 - 2.5, base - h);
+          ctx.fillText(fLabel(d), p.x0 - 2.5, base + h);
+        }
+      }
+  }
   // the curve, glowing, over a faint fill back to the baseline
   ctx.beginPath();
   ctx.moveTo(p.x0, base);
-  ys.forEach((v, i) => ctx.lineTo(p.x0 + i / ppu, Y(v)));
+  lines.forEach((l, i) => ctx.lineTo(p.x0 + i / ppu, Y(spectroscopeY(l.up, top) - spectroscopeY(l.down, top))));
   ctx.lineTo(p.x1, base);
   ctx.fillStyle = green(0.12);
   ctx.fill();
