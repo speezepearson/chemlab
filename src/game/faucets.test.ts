@@ -3,7 +3,8 @@ import { T_ROOM } from '../chem/params';
 import { testChemParams } from '../chem/testChem';
 import { ReactionNetwork, atomCounts, heatAt, temperature, type Fluid } from '../chem/reactions';
 import { equilibriumFluid } from '../chem/equilibrium';
-import { NS, SPECIES, bondParam, pairOf } from '../chem/species';
+import { NS, SPECIES, pairOf } from '../chem/species';
+import { pairKey } from '../chem/atoms';
 import { CAP } from './config';
 import { Vessel } from './flask';
 import { FAUCETS, describeFaucet, faucetIndex, faucetOutput, faucetTarget, type Faucet } from './faucets';
@@ -12,9 +13,9 @@ import type { Mouth } from './tools';
 describe('faucets', () => {
   const net = new ReactionNetwork(testChemParams());
 
-  it('are the six atoms, once each', () => {
+  it('are the four atoms, once each, in the order R, G, B, K', () => {
     const starts = FAUCETS.map((fa) => SPECIES[fa.start]);
-    expect(new Set(starts).size).toBe(6);
+    expect(starts.map((s) => s.name)).toEqual(['R', 'G', 'B', 'K']);
     expect(starts.every((s) => s.size === 1)).toBe(true);
   });
 
@@ -50,10 +51,10 @@ describe('faucets', () => {
       });
 
       if (start.size === 2) {
-        const [a, b] = start.atoms.filter((x) => x !== null);
-        const frozen = bondParam(net.params, a!, b!).A === 0;
+        const [a, b] = start.atoms;
+        const frozen = net.params.bonds[pairKey(a, b)].A === 0;
         it(frozen ? "stays whole, since its bond can't break" : 'settles to full equilibrium, since its bond can break', () => {
-          const atoms = Object.fromEntries([a, b].map((x) => [x!, 0.5]));
+          const atoms = Object.fromEntries([a, b].map((x) => [x, 0.5]));
           const full = equilibriumFluid(atoms, net.U, T);
           for (let s = 0; s < NS; s++) {
             const want = frozen ? (s === fa.start ? 0.5 : 0) : full.n[s];
@@ -66,10 +67,10 @@ describe('faucets', () => {
 
   it('settles again when the chemistry changes', () => {
     const own = new ReactionNetwork(testChemParams());
-    const cy: Faucet = { start: pairOf('C', 'Y') };
+    const cy: Faucet = { start: pairOf('G', 'K') };
     const before = faucetOutput(cy, own).n[cy.start];
     expect(faucetOutput(cy, own).n[cy.start]).toBe(before); // cached
-    own.params.bonds.CY.E *= 2;
+    own.params.bonds.GK.E *= 2;
     own.rebuild();
     expect(faucetOutput(cy, own).n[cy.start]).toBeGreaterThan(before);
   });
@@ -80,9 +81,16 @@ describe('faucetIndex', () => {
     FAUCETS.forEach((_, i) => expect(faucetIndex(i, FAUCETS.length)).toBe(i));
   });
 
-  it("finds each atom's faucet among an old save's 18, and nothing for a pair's", () => {
+  const [R, G, B] = ['R', 'G', 'B'].map((a) => FAUCETS.findIndex((fa) => SPECIES[fa.start].name === a));
+
+  it("finds R, G and B's faucets among a six-atom save's R, Y, G, C, B and M, and nothing for the rest", () => {
+    expect(Array.from({ length: 6 }, (_, i) => faucetIndex(i, 6))).toEqual([R, null, G, null, B, null]);
+  });
+
+  it("finds R, G and B's faucets among an old save's 18, and nothing for the rest", () => {
     const found = Array.from({ length: 18 }, (_, i) => faucetIndex(i, 18));
-    expect(found.filter((j) => j !== null).sort()).toEqual(FAUCETS.map((_, i) => i));
+    expect([found[3], found[7], found[11]]).toEqual([R, G, B]);
+    expect(found.filter((j) => j !== null)).toHaveLength(3);
   });
 
   it('finds nothing in a save of any other number', () => {

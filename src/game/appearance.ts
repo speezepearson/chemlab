@@ -54,7 +54,7 @@ export interface Look {
   paintMix: number;
   /** How far a molecule's color goes from its atoms' average to the light model's color (0 to 1). */
   lightMix: number;
-  /** Whether bigger molecules make a fluid cloudier: opacity is the atom-weighted average of alpha1..3 by molecule size. */
+  /** Whether bigger molecules make a fluid cloudier: opacity is the atom-weighted average of alpha1..3 by molecule size, alpha3 for three atoms or four. */
   cloudy: boolean;
   alpha1: number;
   alpha2: number;

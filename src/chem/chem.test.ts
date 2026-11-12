@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { testChemParams } from './testChem';
 import { Lag, QUIET, ReactionNetwork, atomCounts, heatAt, temperature, type Fluid } from './reactions';
-import { NS, SPECIES, TARGET, singleOf, speciesIndex } from './species';
-import { ATOMS, type Atom } from './atoms';
+import { NS, SPECIES, TARGET, bondMask, pairOf, singleOf, speciesIndex } from './species';
+import { ATOMS, BONDS, type Atom } from './atoms';
 import { equilibrate, equilibrium } from './equilibrium';
 
 /** Counts in these tests are in millions of molecules, so the whole-number dynamics are smooth. */
@@ -25,35 +25,59 @@ function run(net: ReactionNetwork, f: Fluid, seconds: number) {
   for (let t = 0; t < seconds; t += h) net.step(f, h);
 }
 
+/** The species with these atoms bonded like this, e.g. sp(['R', 'G'], ['G', 'B']) for R–G–B. */
+const sp = (...bonds: [Atom, Atom][]) => speciesIndex([...new Set(bonds.flat())], bondMask(...bonds));
+const tri = (a: Atom, b: Atom, c: Atom) => sp([a, b], [a, c], [b, c]);
+
 describe('species', () => {
-  it('enumerates 6 singles, 12 pairs and 8 × 4 triples', () => {
-    expect(NS).toBe(50);
-    expect(SPECIES.filter((s) => s.size === 1)).toHaveLength(6);
-    expect(SPECIES.filter((s) => s.size === 2)).toHaveLength(12);
-    expect(SPECIES.filter((s) => s.size === 3)).toHaveLength(32);
+  it('enumerates 4 singles, 6 pairs, 4 × 4 triples and 38 connected graphs on all four atoms', () => {
+    expect(NS).toBe(64);
+    expect(SPECIES.filter((s) => s.size === 1)).toHaveLength(4);
+    expect(SPECIES.filter((s) => s.size === 2)).toHaveLength(6);
+    expect(SPECIES.filter((s) => s.size === 3)).toHaveLength(16);
+    expect(SPECIES.filter((s) => s.size === 4)).toHaveLength(38);
+    // the four-atom graphs: 16 trees, 15 with four bonds, 6 with five, and the one with all six
+    const fours = SPECIES.filter((s) => s.size === 4).map((s) => BONDS.filter((_, k) => s.mask & (1 << k)).length);
+    expect([3, 4, 5, 6].map((b) => fours.filter((x) => x === b).length)).toEqual([16, 15, 6, 1]);
   });
 
-  it('targets the R–G–B triangle', () => {
+  it('holds at most one atom of each color', () => {
+    for (const s of SPECIES) expect(new Set(s.atoms).size).toBe(s.size);
+  });
+
+  it('names every species uniquely, keeping the old names of what survives', () => {
+    expect(new Set(SPECIES.map((s) => s.name)).size).toBe(NS);
     expect(SPECIES[TARGET].name).toBe('△RGB');
+    expect(SPECIES[singleOf('K')].name).toBe('K');
+    expect(SPECIES[pairOf('R', 'K')].name).toBe('R–K');
+    expect(SPECIES[sp(['R', 'G'], ['R', 'B'])].name).toBe('G–R–B');
+    expect(SPECIES[sp(['K', 'G'], ['G', 'B'], ['B', 'R'])].name).toBe('R–B–G–K');
+    expect(SPECIES[sp(['K', 'R'], ['K', 'G'], ['K', 'B'])].name).toBe('K(R,G,B)');
+    expect(SPECIES[sp(['R', 'G'], ['R', 'B'], ['G', 'B'], ['R', 'K'])].name).toBe('△GBR–K');
+    expect(SPECIES[sp(['R', 'G'], ['G', 'K'], ['K', 'B'], ['B', 'R'])].name).toBe('□RGKB');
+    expect(SPECIES[sp(['R', 'G'], ['G', 'K'], ['K', 'B'], ['B', 'R'], ['R', 'K'])].name).toBe('□RGKB+R–K');
+    expect(SPECIES.find((s) => s.size === 4 && s.mask === 63)!.name).toBe('⊠RGBK');
   });
 });
 
 describe('reactions', () => {
   const net = new ReactionNetwork(testChemParams());
+  const RK = pairOf('R', 'K');
+  const RG = pairOf('R', 'G');
 
   it('builds the full network', () => {
-    expect(net.count).toBe(1428);
+    expect(net.count).toBe(408);
   });
 
   it('conserves atoms of every color', () => {
-    const f = fluid([single('R', 60), single('G', 60), single('Y', 40), single('C', 20), single('B', 20)]);
+    const f = fluid([single('R', 60), single('G', 60), single('K', 40), single('B', 20), [RK, 10]]);
     const before = atomCounts(f);
     run(net, f, 30);
     expect(atomCounts(f)).toEqual(before);
   });
 
   it('keeps every count and the heat whole', () => {
-    const f = fluid([single('R', 60), single('G', 60), single('Y', 40), single('C', 20), single('B', 20)]);
+    const f = fluid([single('R', 60), single('G', 60), single('K', 40), single('B', 20)]);
     run(net, f, 10);
     expect(f.n.every(Number.isInteger)).toBe(true);
     expect(Number.isInteger(f.Q)).toBe(true);
@@ -70,30 +94,75 @@ describe('reactions', () => {
     expect(temperature(f)).toBeGreaterThan(1);
   });
 
-  it('never forms or breaks a blue bond directly, even white-hot', () => {
-    const f = fluid([[speciesIndex(['R', 'G', null], 1), 50], single('B', 50), [TARGET, 10]], 50);
-    const blueBonds = () =>
-      SPECIES.reduce((t, s) => t + f.n[s.i] * [2, 4].filter((b) => s.mask & b && s.atoms[2] === 'B').length, 0);
+  it('conserves energy through displacements as well', () => {
+    const f = fluid([[RK, 50], [tri('R', 'G', 'K'), 20], single('G', 30), single('B', 40)], 5);
+    const energy = () => SPECIES.reduce((t, s) => t + f.n[s.i] * net.U[s.i], 0) + f.Q;
+    const E0 = energy();
     run(net, f, 10);
-    // the target's R–G bond can break at this heat, but with no yellow around, blue can't move
+    expect(Math.abs(energy() - E0)).toBeLessThan(1e-4 * Math.abs(E0));
+  });
+
+  it('never forms or breaks a blue bond directly, even white-hot', () => {
+    const f = fluid([[RG, 50], single('B', 50), [TARGET, 10]], 50);
+    const blue = BONDS.flatMap(([i, j], k) => (ATOMS[i] === 'B' || ATOMS[j] === 'B' ? [k] : []));
+    const blueBonds = () => SPECIES.reduce((t, s) => t + f.n[s.i] * blue.filter((k) => s.mask & (1 << k)).length, 0);
+    run(net, f, 10);
+    // the target's R–G bond can break at this heat, but with no black around, blue can't move
     expect(blueBonds()).toBe(20 * M);
     expect(f.n[singleOf('B')]).toBe(50 * M);
   });
 
-  it('swaps blue into △RGY in place of its yellow, uphill', () => {
-    const RGY = speciesIndex(['R', 'G', 'Y'], 7);
-    const f = fluid([[RGY, 50], single('B', 150)], 10);
-    run(net, f, 30);
-    expect(f.n[TARGET]).toBeGreaterThan(0.1 * M);
-    expect(f.n[singleOf('Y')]).toBeGreaterThan(0.1 * M);
+  it('displaces black with a free atom, keeping the shape: R–K + G gives R–G + K', () => {
+    const f = fluid([[RK, 50], single('G', 50)]);
+    const [r] = net.netRates(f);
+    expect(r.from).toEqual([RK, singleOf('G')].sort((a, b) => a - b));
+    expect(r.to).toEqual([RG, singleOf('K')].sort((a, b) => a - b));
   });
 
-  it('gives the target back to any yellow it meets, downhill', () => {
-    const f = fluid([[TARGET, 50], single('Y', 10)]);
+  it('displaces with free black too, uphill as well as down', () => {
+    // R–G + K → R–K + G is all but impossibly uphill in this chemistry, but it exists
+    const f = fluid([[RG, 50], single('K', 50)]);
+    const rates = net.netRates(f);
+    const back = rates.find((r) => r.to.length === 2 && r.to.includes(RK));
+    expect(back?.from).toEqual([RG, singleOf('K')].sort((a, b) => a - b));
+    expect(back!.rate).toBeGreaterThan(0);
+  });
+
+  it('swaps blue into △RGK in place of its black, uphill', () => {
+    const f = fluid([[tri('R', 'G', 'K'), 50], single('B', 150)], 10);
     run(net, f, 30);
-    // each yellow undoes at least one; the heat that releases can free more yellow from the △RGY it makes
-    expect(f.n[TARGET]).toBeLessThanOrEqual(40 * M);
-    expect(f.n[singleOf('B')]).toBeGreaterThanOrEqual(10 * M);
+    expect(f.n[TARGET]).toBeGreaterThan(0.1 * M);
+    expect(f.n[singleOf('K')]).toBeGreaterThan(0.1 * M);
+  });
+
+  it('gives the target back to any black it meets, downhill', () => {
+    const f = fluid([[TARGET, 50], single('K', 10)]);
+    run(net, f, 30);
+    // most of the black frees a blue, though some instead bonds onto a target, where it's no longer free to
+    expect(f.n[singleOf('B')]).toBeGreaterThan(5 * M);
+    expect(f.n[TARGET]).toBeLessThanOrEqual(50 * M - f.n[singleOf('B')]);
+  });
+
+  it('displaces only a free atom, of a color not already in the molecule, with black on one side', () => {
+    // everything at once, hot, so every reaction there is shows
+    const f = fluid(SPECIES.map((s) => [s.i, 1] as [number, number]), 30);
+    const singles = new Set(ATOMS.map(singleOf));
+    const K = singleOf('K');
+    for (const r of net.netRates(f)) {
+      if (r.from.length !== 2 || r.to.length !== 2) continue;
+      // a molecule and a free atom on each side, black free on one side and not the other
+      for (const side of [r.from, r.to]) expect(side.filter((s) => singles.has(s))).toHaveLength(1);
+      expect(r.from.includes(K) !== r.to.includes(K)).toBe(true);
+      const [m, x] = singles.has(r.from[0]) ? [r.from[1], r.from[0]] : r.from;
+      expect(SPECIES[m].atoms).not.toContain(SPECIES[x].atoms[0]);
+      expect(SPECIES[m].size).toBeGreaterThan(1);
+    }
+    // a free atom whose color the molecule has does nothing to it
+    expect(net.netRates(fluid([[RK, 10], single('R', 10)], 0.01)).filter((r) => r.from.length === 2)).toEqual([]);
+    expect(net.netRates(fluid([[RK, 10], single('K', 10)], 0.01)).filter((r) => r.from.length === 2)).toEqual([]);
+    // two molecules never trade bound atoms, only join
+    const two = net.netRates(fluid([[RK, 10], [pairOf('G', 'B'), 10]], 30)).filter((r) => r.from.length === 2);
+    for (const r of two) expect(r.to).toHaveLength(1);
   });
 });
 
@@ -110,8 +179,8 @@ describe('quiet stepping', () => {
   const h = 0.02;
 
   it('follows the kinetics as closely as stepping every substep, in fewer steps', () => {
-    // C and G bind slowly, and a little M swaps in and out of what they make, all far slower than a substep
-    const start = fluid([single('C', 500), single('G', 500), single('M', 50)]);
+    // G and K bind slowly, far slower than a substep
+    const start = fluid([single('G', 500), single('K', 500)]);
     const every = clone(start);
     run(new ReactionNetwork(testChemParams()), every, 30);
     const net = new Counting(testChemParams());
@@ -183,7 +252,7 @@ describe('net rates', () => {
   it('lists what is reacting, busiest first, each the way it is going on net', () => {
     const f = fluid([single('R', 3), single('G', 2)]);
     const rates = net.netRates(f);
-    const RG = speciesIndex(['R', 'G', null], 1);
+    const RG = pairOf('R', 'G');
     expect(rates[0]).toMatchObject({ from: [singleOf('R'), singleOf('G')].sort((a, b) => a - b), to: [RG] });
     for (let i = 0; i < rates.length; i++) {
       expect(rates[i].rate).toBeGreaterThan(0);
@@ -195,7 +264,7 @@ describe('net rates', () => {
   });
 
   it('nets every reaction against its reverse, so nothing is going on at equilibrium', () => {
-    const atoms = ATOMS.map((a) => ({ R: 2, G: 1, C: 1, Y: 3 } as Partial<Record<Atom, number>>)[a] ?? 0);
+    const atoms = ATOMS.map((a) => ({ R: 2, G: 1, B: 1, K: 3 } as Partial<Record<Atom, number>>)[a] ?? 0);
     const N = 1e9;
     const n = equilibrium(atoms.map((v) => (v / 7) * N), net.U, 1.5);
     const f: Fluid = { n, N, Q: heatAt(1.5, N) };
@@ -208,7 +277,7 @@ describe('equilibrium', () => {
   const atoms = (counts: Partial<Record<Atom, number>>) => ATOMS.map((a) => counts[a] ?? 0);
 
   it('conserves atoms', () => {
-    const want = atoms({ R: 2, G: 1, Y: 3 });
+    const want = atoms({ R: 2, G: 1, K: 3 });
     const n = equilibrium(want, net.U, 2);
     expect(atomCounts({ n, N: 6, Q: 0 })).toEqual(want.map((v) => expect.closeTo(v, 10)));
   });
@@ -223,15 +292,24 @@ describe('equilibrium', () => {
 
   it('satisfies detailed balance for bond formation', () => {
     const n = equilibrium(atoms({ R: 1, G: 1 }), net.U, 1);
-    const [R, G, RG] = [singleOf('R'), singleOf('G'), speciesIndex(['R', 'G', null], 1)];
+    const [R, G, RG] = [singleOf('R'), singleOf('G'), pairOf('R', 'G')];
     // formation rate ∝ n_R·n_G/N, breaking rate ∝ n_RG·e^(−E/T), with N = 2 atoms
     const E = net.params.bonds.RG.E;
     expect((n[R] * n[G]) / 2 / (n[RG] * Math.exp(-E))).toBeCloseTo(1, 9);
   });
 
+  it('satisfies detailed balance for displacement', () => {
+    const T = 20;
+    const n = equilibrium(atoms({ R: 1, G: 1, K: 1 }), net.U, T);
+    const [RK, G, RG, K] = [pairOf('R', 'K'), singleOf('G'), pairOf('R', 'G'), singleOf('K')];
+    // R–K + G ⇌ R–G + K, with no barrier: forward ∝ n_RK·n_G·e^(−max(0, ΔU)/T), back ∝ n_RG·n_K·e^(−max(0, −ΔU)/T)
+    const dU = net.U[RG] - net.U[RK];
+    expect((n[RK] * n[G]) / (n[RG] * n[K]) / Math.exp(dU / T)).toBeCloseTo(1, 9);
+  });
+
   it('equilibrates a fluid in whole molecules, keeping every atom and its temperature', () => {
     // blue bonds never form by the kinetics, but equilibrate goes all the way regardless
-    const f = fluid([single('R', 3), single('G', 2), single('B', 1), single('Y', 1)], 0.7);
+    const f = fluid([single('R', 3), single('G', 2), single('B', 1), single('K', 1)], 0.7);
     const before = atomCounts(f);
     equilibrate(f, net.U, 0.7);
     expect(atomCounts(f)).toEqual(before);
@@ -242,9 +320,9 @@ describe('equilibrium', () => {
   });
 
   it('favors the most stable shape of a triple', () => {
-    // △RMY has all three bonds; every other arrangement of R, M and Y has fewer
-    const n = equilibrium(atoms({ R: 1, M: 1, Y: 1 }), net.U, 1);
-    const ring = speciesIndex(['R', 'M', 'Y'], 7);
+    // △RGK has all three bonds; every other arrangement of R, G and K has fewer
+    const n = equilibrium(atoms({ R: 1, G: 1, K: 1 }), net.U, 1);
+    const ring = tri('R', 'G', 'K');
     expect(n[ring]).toBeGreaterThan(0.5);
   });
 });
