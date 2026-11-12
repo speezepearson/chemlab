@@ -23,7 +23,7 @@ import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import {
   clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
-  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, STRIP_ORIGIN, stripInk, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
+  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, STRIP_ORIGIN, stripInk, COLUMN, columnInk, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
 
@@ -666,6 +666,46 @@ function drawStrip(sc: Screen, t: Tool): void {
 const CAPILLARY_X = -1.4;
 
 /**
+ * A column's bed, its top at the top: the paper's cream, a little darker as far down as it's wet; each species on each
+ * stretch of it (see Tool.bed) as ink of its own color, as opaque as columnInk says, single atoms first, so bands lie
+ * over the carrier's tint; blended smoothly from one stretch's middle to the next.
+ */
+function drawColumn(sc: Screen, t: Tool): void {
+  const { bed } = t;
+  const C = bed.length;
+  let sum = 0;
+  bed.forEach((v, c) => (sum += v.N * (c + 1)));
+  const key = `${t.front.toFixed(4)} ${sum}`;
+  if (key === sc.key) return;
+  sc.key = key;
+  const { ctx, ppu } = sc;
+  const [W, L] = [sc.canvas.width / ppu, sc.canvas.height / ppu];
+  ctx.setTransform(ppu, 0, 0, ppu, 0, 0);
+  ctx.fillStyle = '#e6dfc8';
+  ctx.fillRect(0, 0, W, L);
+  if (t.front > 0) {
+    ctx.fillStyle = 'rgba(96, 92, 78, 0.28)';
+    ctx.fillRect(0, 0, W, L * t.front);
+  }
+  const here = SPECIES.map((_, s) => s).filter((s) => bed.some((v) => v.n[s] > 0));
+  here.sort((a, b) => SPECIES[a].size - SPECIES[b].size);
+  for (const s of here) {
+    const rgb = SPECIES[s].color.slice(4, -1);
+    const g = ctx.createLinearGradient(0, 0, 0, L);
+    // stops at each stretch's middle, and its ends held out to the bed's
+    for (let c = 0; c < C; c++) {
+      const color = `rgba(${rgb}, ${columnInk(s, bed[c].n[s])})`;
+      if (c === 0) g.addColorStop(0, color);
+      g.addColorStop((c + 0.5) / C, color);
+      if (c === C - 1) g.addColorStop(1, color);
+    }
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, L);
+  }
+  sc.tex.needsUpdate = true;
+}
+
+/**
  * A thermometer's scale, on the white enamel backing inside its rod (see THERMOMETER_ROD): from 0 at its foot to the
  * kind's top at its top, evenly (see thermometerAt), a tick every `tick` right of where the capillary runs, those at
  * every `long` longer, and those at every `num` numbered at the backing's right edge (see THERMOMETERS). It's drawn
@@ -1235,6 +1275,12 @@ class ToolView {
     }
     else if (t.kind === 'strip') this.buildStrip();
     else if (isThermometer(t.kind)) this.buildThermometer(t.kind);
+    else if (t.kind === 'column') {
+      this.buildColumn();
+      // the funnel's stem down into the tube, and from the tube's foot down through the tap to the spout
+      pipes(art, [[0, TH], [0, COLUMN.tube.y0]]);
+      pipes(art, [[0, COLUMN.tube.y1], [0, sh.spoutY - 4]]);
+    }
     else if (t.kind === 'culture') {
       this.buildCulture();
       // its drain, down from under the plate's frame
@@ -1545,6 +1591,32 @@ class ToolView {
     rod(this.art, rodMat, v3(0, H, z - 2), v3(0, top - 2.5, z - 2), 0.7);
     block(this.art, darkMat, -3.5, 3.5, top - 3, top + 4, z - 2.8, z + 1, 0.5);
     this.screen = new Screen(this.art, -w, w, top, foot, z + 0.31, 6);
+  }
+
+  /**
+   * A column's tube: glass, with a metal collar at each end, and its bed filling it, what's on it shown round it (see
+   * drawColumn).
+   */
+  private buildColumn(): void {
+    const { w, y0, y1 } = COLUMN.tube;
+    const r = w / 2;
+    const mid = -(y0 + y1) / 2;
+    glassFrom(this.art, new THREE.CylinderGeometry(r, r, y1 - y0, 32, 1, true).translate(0, mid, 0));
+    for (const y of [y0, y1]) rod(this.art, pipeMat, v3(0, y - 1.5, 0), v3(0, y + 1.5, 0), r + 0.8);
+    // its canvas runs round the bed and down it, the top of the canvas at the bed's top
+    const ppu = 4;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(4 * ppu);
+    canvas.height = Math.round((y1 - y0) * ppu);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const bed = new THREE.Mesh(
+      new THREE.CylinderGeometry(r - 0.8, r - 0.8, y1 - y0 - 3, 32).translate(0, mid, 0),
+      new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, metalness: 0 }),
+    );
+    bed.receiveShadow = true;
+    this.art.add(bed);
+    this.screen = { canvas, ctx: canvas.getContext('2d')!, tex, key: '', ppu };
   }
 
   /**
@@ -2005,6 +2077,7 @@ class ToolView {
       if (T !== null) column.scale.y = bulb.y0 + 1 - foot + (foot - top) * thermometerAt(t.kind as ThermometerKind, T);
     }
     if (t.kind === 'strip' && this.screen) drawStrip(this.screen, t);
+    if (t.kind === 'column' && this.screen) drawColumn(this.screen, t);
     if (t.kind === 'culture') this.drawCulture(clock);
     if (t.kind === 'meter' && this.screen) {
       const s = this.screen;

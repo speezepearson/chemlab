@@ -4,15 +4,16 @@ import { CAP, DELIVERY, GOAL_PURITY, GOAL_TARGET, TRACE } from './config';
 import { ReactionNetwork, heatAt, temperature } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { COOLING } from './cooling';
-import { Vessel, roomFor, volume } from './flask';
+import { Vessel, roomFor, transfer, volume } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
 import { STATION_POSE } from './presets';
 import { CELL, WALL_PANEL } from './space';
 import { tankMouth } from './bodies';
+import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_RUN, STRIP_ORIGIN, stripInk, scorchAt, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_RUN, STRIP_ORIGIN, stripInk, COLUMN, columnInk, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -801,6 +802,209 @@ describe('wicking strip', () => {
     // what was saved before, of the pad's paper, isn't
     t.remember([0.3, 0.1]);
     expect(t.memory).toEqual([1, 0, 0.5]);
+  });
+});
+
+describe('column', () => {
+  const triangle = speciesIndex(['R', 'G', 'B'], bondMask(['R', 'G'], ['G', 'B'], ['R', 'B']));
+  const chainRGB = speciesIndex(['R', 'G', 'B'], bondMask(['R', 'G'], ['G', 'B']));
+  const C = COLUMN.cells;
+  const H = 0.02;
+  /** Run a column for `seconds`, catching what comes out of its spout in `into`, if given. */
+  const run = (t: Tool, seconds: number, into?: Vessel) => {
+    let out = false;
+    for (let i = 0; i < Math.round(seconds / H); i++) {
+      const [o] = t.step(H);
+      if (!o) continue;
+      out = true;
+      if (into) transfer(o, into, volume(o));
+    }
+    return out;
+  };
+  const onBed = (t: Tool) => t.bed.reduce((a, v) => a + atomTotal(v), 0);
+  /** A column whose bed has soaked through with single green atoms, its funnel empty and its tap shut. */
+  const wet = () => {
+    const t = new Tool('column', 0);
+    while (t.front < 1) {
+      filled(t.tanks[0], G, t.tanks[0].cap, 1);
+      run(t, 0.5);
+    }
+    t.tanks[0].setMolecules(G, 0);
+    return t;
+  };
+  /** Top a column's funnel up with the given shares (by molecules) of the given species. */
+  const topUp = (t: Tool, parts: [number, number][], share = 1) => {
+    const f = t.tanks[0];
+    for (const [s, sh] of parts) f.setMolecules(s, f.n[s] + (sh * share * (f.cap - volume(f))) / roomFor(s));
+    f.setTemperature(1);
+  };
+
+  it('stands on one line, its funnel holding a little', () => {
+    const sh = SHAPES.column;
+    expect(sh.spouts).toEqual([0]);
+    expect(tankX(sh.tanks[0])).toBe(0);
+    expect(sh.tankCap! / CAP).toBeGreaterThan(0.04);
+    expect(sh.tankCap! / CAP).toBeLessThan(0.08);
+    const t = new Tool('column', 0);
+    expect(t.bed.length).toBe(C);
+    expect(t.isOpen(0)).toBe(true);
+  });
+
+  it('soaks a dry bed whether its tap is open or not, letting nothing out until it is wet through', () => {
+    const t = new Tool('column', 0);
+    const [funnel] = t.tanks;
+    filled(funnel, G, funnel.cap, 1);
+    const atoms = funnel.N;
+    expect(run(t, 0.5)).toBe(false);
+    expect(t.front).toBeCloseTo((0.5 * COLUMN.soak) / COLUMN.cap, 3);
+    expect(Math.abs(volume(funnel) - (funnel.cap - 0.5 * COLUMN.soak))).toBeLessThanOrEqual(TRACE);
+    // what it's drunk is on its bed, behind the front
+    expect(funnel.N + onBed(t)).toBe(atoms);
+    t.bed.forEach((v, c) => c >= Math.ceil(t.front * C) && expect(v.N).toBe(0));
+    // it stops when the funnel's dry, and goes on when there's more
+    expect(run(t, 5)).toBe(false);
+    expect(funnel.N).toBe(0);
+    expect(t.front).toBeCloseTo(funnel.cap / COLUMN.cap, 3);
+    for (let i = 0; i < 20 && t.front < 1; i++) {
+      filled(funnel, G, funnel.cap, 1);
+      expect(run(t, 1)).toBe(false);
+    }
+    expect(t.front).toBe(1);
+    expect(Math.abs(onBed(t) - COLUMN.cap)).toBeLessThanOrEqual(TRACE);
+  });
+
+  it('holds everything where it is with its tap shut once wet', () => {
+    const t = wet();
+    topUp(t, [[triangle, 1]]);
+    const funnel = [...t.tanks[0].n];
+    const bed = t.bed.map((v) => [...v.n]);
+    expect(run(t, 5)).toBe(false);
+    expect([...t.tanks[0].n]).toEqual(funnel);
+    expect(t.bed.map((v) => [...v.n])).toEqual(bed);
+  });
+
+  it('lets liquid through as far as its tap is open, and stops when its funnel is empty', () => {
+    for (const open of [1, 0.5]) {
+      const t = wet();
+      t.valves[0] = open;
+      filled(t.tanks[0], G, t.tanks[0].cap, 1);
+      const before = volume(t.tanks[0]);
+      run(t, 1);
+      expect((before - volume(t.tanks[0])) / (open * COLUMN.flow)).toBeCloseTo(1, 3);
+      // through a bed already wet with it, it comes out as fast as it goes in, once it's under way (the carrier
+      // itself runs a little behind the front, so it's a moment coming)
+      filled(t.tanks[0], G, t.tanks[0].cap, 1);
+      run(t, 2 / open);
+      const caught = new Vessel(Infinity);
+      filled(t.tanks[0], G, t.tanks[0].cap, 1);
+      run(t, 1, caught);
+      expect(volume(caught) / (open * COLUMN.flow)).toBeCloseTo(1, 1);
+    }
+    const t = wet();
+    t.valves[0] = 1;
+    filled(t.tanks[0], R, 0.01 * CAP, 1);
+    run(t, 2);
+    expect(t.tanks[0].N).toBe(0);
+    // with the funnel empty, everything stays where it is, a band parked partway down
+    const bed = t.bed.map((v) => [...v.n]);
+    expect(run(t, 5)).toBe(false);
+    expect(t.bed.map((v) => [...v.n])).toEqual(bed);
+    expect(t.bed.slice(0, C / 2).some((v) => v.n[R] > 0)).toBe(true);
+  });
+
+  /**
+   * A wet column fed a slug of `slug` of the bed's volume of the triangle and a chain of the same atoms, half and
+   * half by molecules, then carrier, with its tap open, catching what comes out in slices of `slice` sim seconds.
+   */
+  const fractions = (slug: number, seconds: number, slice = 0.5) => {
+    const t = wet();
+    t.valves[0] = 1;
+    topUp(t, [[triangle, 0.5], [chainRGB, 0.5]], (slug * COLUMN.cap) / t.tanks[0].cap);
+    const fed = { tri: t.tanks[0].n[triangle], chain: t.tanks[0].n[chainRGB] };
+    const atoms = atomTotal(t.tanks[0]) + onBed(t);
+    const slices: Vessel[] = [];
+    const caught = new Vessel(Infinity);
+    let poured = 0;
+    for (let s = 0; s < seconds / slice; s++) {
+      // the carrier goes in once the sample's gone in
+      if (t.tanks[0].N === 0 || t.tanks[0].n[G] > 0) {
+        const before = atomTotal(t.tanks[0]);
+        filled(t.tanks[0], G, t.tanks[0].cap, 1);
+        poured += atomTotal(t.tanks[0]) - before;
+      }
+      const v = new Vessel(Infinity);
+      run(t, slice, v);
+      slices.push(v);
+      caught.addFrom(v, volume(v), true);
+    }
+    return { t, fed, slices, caught, atoms: atoms + poured };
+  };
+
+  it('keeps every atom: in its funnel, on its bed, or out its spout', () => {
+    const { t, caught, atoms } = fractions(0.1, 20);
+    expect(caught.N).toBeGreaterThan(0);
+    expect(atomTotal(t.tanks[0]) + onBed(t) + atomTotal(caught)).toBe(atoms);
+  });
+
+  it('lets a slug of the triangle out ahead of a chain of the same atoms, the first of it pure, and in the end all of both', () => {
+    expect(STRIP_RUN[triangle]).toBeGreaterThan(STRIP_RUN[chainRGB]);
+    const { fed, slices, caught } = fractions(0.1, 120);
+    const tri = slices.map((v) => v.n[triangle]);
+    const chain = slices.map((v) => v.n[chainRGB]);
+    // where the chain's main part comes out: the slice by which half of it has
+    let sum = 0;
+    const chainMid = chain.findIndex((n) => (sum += n) >= fed.chain / 2);
+    // most of the triangle has come out before then, in slices that are, of the two, all triangle
+    const pure = tri.reduce((a, n, i) => (i < chainMid && n > 0 && chain[i] <= 0.001 * n ? a + n : a), 0);
+    expect(pure / fed.tri).toBeGreaterThan(0.5);
+    // and both come out in full, give or take a few molecules
+    expect(caught.n[triangle] / fed.tri).toBeGreaterThan(0.9999);
+    expect(caught.n[chainRGB] / fed.chain).toBeGreaterThan(0.9999);
+  });
+
+  it('fed the mixture continuously, lets the triangle out alone first', () => {
+    const t = wet();
+    t.valves[0] = 1;
+    const slices: Vessel[] = [];
+    for (let s = 0; s < 120; s++) {
+      topUp(t, [[triangle, 0.5], [chainRGB, 0.5]]);
+      const v = new Vessel(Infinity);
+      run(t, 0.5, v);
+      slices.push(v);
+    }
+    const first = (s: number) => slices.findIndex((v) => v.n[s] > 0);
+    expect(first(triangle)).toBeGreaterThanOrEqual(0);
+    expect(first(chainRGB)).toBeGreaterThan(first(triangle) + 4);
+    expect(slices.slice(first(triangle), first(chainRGB)).every((v) => v.n[chainRGB] === 0 && v.n[triangle] > 0)).toBe(true);
+  });
+
+  it('keeps how far its bed has soaked, and what is on it, in a save', () => {
+    const t = new Tool('column', 0);
+    t.remember([0.4]);
+    expect(t.memory).toEqual([0.4]);
+    t.remember([7]);
+    expect(t.memory).toEqual([1]);
+    t.remember([0.3, 0.1]);
+    t.remember(['x']);
+    expect(t.memory).toEqual([1]);
+    const u = wet();
+    topUp(u, [[triangle, 1]], 0.5);
+    u.valves[0] = 1;
+    run(u, 2);
+    const v = new Tool('column', 1);
+    u.bed.forEach((c, k) => loadVessel(v.bed[k], saveVessel(c)));
+    v.remember(u.memory);
+    expect(v.front).toBe(1);
+    expect(v.bed.map((c) => [...c.n])).toEqual(u.bed.map((c) => [...c.n]));
+    expect(v.bed.map((c) => c.Q)).toEqual(u.bed.map((c) => c.Q));
+  });
+
+  it('shows what is on its bed as the strip would, wet: a clear carrier only tints it', () => {
+    expect(columnInk(triangle, 0)).toBe(0);
+    const cell = COLUMN.cap / C;
+    expect(columnInk(G, cell / roomFor(G))).toBeLessThanOrEqual(STRIP.tint);
+    expect(columnInk(triangle, (0.1 * cell) / roomFor(triangle))).toBeGreaterThan(0.2);
+    expect(columnInk(triangle, cell / roomFor(triangle))).toBeGreaterThan(0.9);
   });
 });
 

@@ -603,6 +603,86 @@ export function stripInk(s: number, n: number, dryness: number): number {
   return SPECIES[s].size === 1 ? ink * STRIP.tint * (1 - dryness) : ink;
 }
 
+/**
+ * A bed of packing that a liquid runs through cell by cell: a wicking strip's paper, from its foot up, or a column's
+ * bed, from its top down. Each species on it travels at its own share of the liquid's pace (see STRIP_RUN), and for
+ * each 1 − STRIP.spread of a cell it travels, all but STRIP.spread of what's on each cell moves on into the next, in
+ * whole molecules with their share of the heat; what's left behind moves on later. So what's on it runs STRIP_RUN as
+ * far as the liquid does, a whole cell at a time, and it spreads only by what's left behind, into a band
+ * √(n · spread · (1 − spread)) cells wide (its standard deviation) after n moves. Moving a little of each cell at
+ * every step instead would smear it far wider.
+ */
+export class Bed {
+  /**
+   * Per species, how far it has travelled along the bed, in cells, since it last moved on one (see carry). Not saved:
+   * a bed loaded mid-run loses less than a cell of it.
+   */
+  private readonly drift = new Float64Array(NS);
+
+  constructor(readonly cells: readonly Vessel[]) {}
+
+  /**
+   * The liquid running `dist` cells along the bed, at most half a cell, so that nothing moves twice: each species
+   * travels STRIP_RUN of that, and what moves on, moves from each cell from `last` back to the first into the next,
+   * last first, so nothing moves twice; what moves on from the bed's last cell goes into `out`.
+   */
+  carry(dist: number, last: number, out: Vessel | null = null): void {
+    const { cells } = this;
+    for (let s = 0; s < NS; s++) {
+      this.drift[s] += STRIP_RUN[s] * dist;
+      // what's left behind makes it lag, so it moves on a cell for each 1 − spread it travels
+      if (this.drift[s] < 1 - STRIP.spread) continue;
+      this.drift[s] -= 1 - STRIP.spread;
+      const size = SPECIES[s].size;
+      for (let c = last; c >= 0; c--) {
+        const a = cells[c];
+        const b = c + 1 < cells.length ? cells[c + 1] : out!;
+        const m = a.n[s] && a.n[s] - roundRandom(a.n[s] * STRIP.spread);
+        if (!m) continue;
+        if (a.Q > 0) {
+          const q = Math.min(a.Q, roundRandom((a.Q * m * size) / a.N));
+          a.Q -= q;
+          b.Q += q;
+        }
+        a.n[s] -= m;
+        b.n[s] += m;
+        a.N -= m * size;
+        b.N += m * size;
+      }
+    }
+  }
+}
+
+/**
+ * How a column behaves (see SHAPES.column and Tool.elute). A small funnel on top drains into a glass tube packed with
+ * the strips' blotting stuff, its bed, over a tap and a spout. A dry bed drinks from the funnel, tap open or not; once
+ * it's wet through, what's poured in runs through it only while the tap's open, carrying each species down at its own
+ * pace, as on a strip's paper (see Bed), and out the spout:
+ * - cells: how many stretches the bed is modelled as, from its top to its foot (see Tool.bed);
+ * - cap: how much the bed holds wet through, by volume: a fifth of a flask;
+ * - soak: how fast a dry bed drinks from the funnel, by volume per sim second, the tap open or not: it's wet through
+ *   in 4 sim s;
+ * - flow: how fast liquid runs through a wet bed with the tap fully open, by volume per sim second: a fiftieth of a
+ *   flask, a bed's worth in 10 sim s; in proportion to how far the tap's open;
+ * - funnel: the funnel, reaching w either side of its middle, h deep, holding cap (by volume) as drawn;
+ * - tube: the glass tube under the funnel's stem, w across, from y0 to y1 down from the funnel's mouth, its bed
+ *   filling it.
+ */
+export const COLUMN = {
+  cells: 80, cap: CAP / 5, soak: CAP / 20, flow: CAP / 50,
+  funnel: { w: 11, h: 20, cap: 0.06 * CAP },
+  tube: { w: 16, y0: 26, y1: 186 },
+};
+
+/**
+ * How opaque n molecules of species s make one cell of a column's bed (see COLUMN.cells), in that species' own color:
+ * as stripInk says, wet, for what would take up as much of a cell of a strip's paper as they take up of one of the
+ * bed's. So single atoms only tint it, and a clear carrier leaves it pale.
+ */
+export function columnInk(s: number, n: number): number {
+  return stripInk(s, (n * STRIP.cap * COLUMN.cells) / (COLUMN.cap * STRIP.cells), 0);
+}
+
 /** How scorched fluid at temperature T leaves a wicking strip's paper, from 0 (not at all) to 1 (charred through). */
 export function scorchAt(T: number): number {
   const { from, to } = STRIP.scorch;
@@ -731,7 +811,7 @@ export function analyzerSector(atom: ColorAtom): (readonly [number, number])[] {
 
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater' | 'analyzer'
-  | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'culture' | 'tank'
+  | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'column' | 'culture' | 'tank'
   | 'receptacle';
 
 /**
@@ -1000,6 +1080,17 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: STRIP.tray.h + 13,
     box: { x0: -STRIP.tray.w - 2, x1: STRIP.tray.w + 2, y0: STRIP.paper.foot - STRIP.paper.len - 6, y1: STRIP.tray.h + 13 },
   },
+  column: {
+    // a small glass funnel over a tall glass tube, packed (see COLUMN), over a tap and a spout, all on one line
+    tanks: [{ name: 'funnel', x0: -COLUMN.funnel.w, x1: COLUMN.funnel.w }],
+    tankH: COLUMN.funnel.h,
+    tankCap: COLUMN.funnel.cap,
+    funnel: true,
+    spouts: [0],
+    valveY: COLUMN.tube.y1 + 12,
+    spoutY: COLUMN.tube.y1 + 28,
+    box: { x0: -COLUMN.funnel.w - 2, x1: COLUMN.funnel.w + 2, y0: -6, y1: COLUMN.tube.y1 + 30 },
+  },
   culture: {
     // a flat glass cell, the plate, filled through a funnel on top and drained through a valve under it; the cells
     // stand on the inside of its front (see cultureCells)
@@ -1219,6 +1310,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   thermometerWide: 'Wide thermometer',
   dilatometer: 'Swell bulbs',
   strip: 'Wicking strip',
+  column: 'Column',
   culture: 'Sleeper culture',
   tank: 'Tank',
   receptacle: 'Cryostabilizer',
@@ -1309,6 +1401,9 @@ export function separatorShares(): number[][] {
  * - A **wicking strip** is a strip of paper standing in a shallow tray. A spot of a sample is dabbed onto it (see
  *   dab), and what's in the tray is drawn up it, carrying each species of the spot along at its own pace (see wick
  *   and STRIP_RUN), to leave it as a band once the paper's dry. It's used once.
+ * - A **column** is a small funnel over a tall tube packed with the strips' paper, its bed, over a tap and a spout. A
+ *   dry bed drinks from the funnel until it's wet through; then what's poured in runs through it as far as the tap's
+ *   open, carrying each species down it at its own pace, as on a strip, and out the spout (see elute).
  * - A **sleeper culture** is a flat glass plate of living cells, filled through a funnel on top. What's in it harms
  *   those of them it covers, by its loose ends and its heat (see harm): each dies at random, for good, the sooner the
  *   more harmful the fluid (see sicken). It drains through a valve under it, leaving its cells as they are, as a
@@ -1373,15 +1468,20 @@ export class Tool {
    * other tool.
    */
   readonly paper: Vessel[];
-  /** How far up a wicking strip's paper the wet front has climbed, as a share of its length, from 0 to 1, its top. */
+  /**
+   * A column's bed, stretch by stretch from its top to its foot (see COLUMN.cells), each holding what's on that
+   * stretch; it doesn't react or cool. Empty for any other tool.
+   */
+  readonly bed: Vessel[];
+  /**
+   * How far a wicking strip's wet front has climbed its paper, or a column's has soaked down its bed, as a share of its
+   * length, from 0 to 1, its far end.
+   */
   front = 0;
   /** How far a wicking strip's paper has dried since its front reached the top, from 0 to 1, where it's done. */
   dryness = 0;
-  /**
-   * Per species, how far it has travelled up a wicking strip's paper, in stretches, since it last moved on one (see
-   * wick). Not saved: a strip loaded mid-run loses less than a stretch of it.
-   */
-  private readonly drift = new Float64Array(NS);
+  /** How what's on a wicking strip's paper or a column's bed is carried along it (see Bed); null for any other tool. */
+  private readonly packing: Bed | null;
   /** How scorched a wicking strip's paper is (see scorchAt): by the hottest of what it's taken up. */
   scorch = 0;
   /** Which of a sleeper culture's cells are dead, 1 for each that is, in cultureCells' order; null for any other tool. */
@@ -1432,6 +1532,8 @@ export class Tool {
     this.tanks = SHAPES[kind].tanks.map((tk) => new Vessel(tk.cap ?? SHAPES[kind].tankCap ?? TANK_CAP));
     this.tube = Array.from({ length: kind === 'heater' ? HEATER_CELLS : 0 }, () => new Vessel(Infinity));
     this.paper = Array.from({ length: kind === 'strip' ? STRIP.cells : 0 }, () => new Vessel(Infinity));
+    this.bed = Array.from({ length: kind === 'column' ? COLUMN.cells : 0 }, () => new Vessel(Infinity));
+    this.packing = kind === 'strip' ? new Bed(this.paper) : kind === 'column' ? new Bed(this.bed) : null;
     this.dead = kind === 'culture' ? new Uint8Array(cultureCells().length) : null;
     const nValves = SHAPES[kind].valves?.length ?? this.tanks.length;
     this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' ? 0.5 : 0));
@@ -1457,6 +1559,7 @@ export class Tool {
       this.warm(h);
       return this.none();
     }
+    if (this.kind === 'column') return this.elute(h);
     // a culture's cells sicken in what's in the plate, which then drains like any tank
     if (this.kind === 'culture') this.sicken(h);
     // with nothing in it and its readings faded to nothing, a step would do nothing; an instrument's smoothing starts
@@ -1567,14 +1670,9 @@ export class Tool {
    * paper draws it up: the front climbs as the square root of the time (its distance squared grows steadily), the
    * whole length in STRIP.time, but only as far as the tray can supply, since climbing a share d of the length takes
    * d · STRIP.cap from it. What it draws goes into the foot of the paper, scorching it if that's hot (see scorchAt).
-   * As the front climbs a share d, each species travels STRIP_RUN · d · STRIP.cells stretches' worth (see drift), and
-   * for each 1 − STRIP.spread of a stretch it travels, what's on each stretch behind the front moves on into the next
-   * up, all but STRIP.spread of it, which stays behind to move on later: in whole molecules, top down, never past the
-   * front. So what's on the paper runs STRIP_RUN of the way the front does, and a whole stretch at a time, so it
-   * spreads only by what's left behind, into a band √(n · spread · (1 − spread)) stretches wide (its standard
-   * deviation) after n moves. Moving a little of each stretch at every step instead would smear it far wider. Once the front's at
-   * the top, the paper dries over STRIP.dry, and is done: single atoms dry off it, and it takes up nothing more.
-   * Nothing leaves it.
+   * As the front climbs a share d, what's on the paper is carried d · STRIP.cells stretches' worth up it (see Bed),
+   * never past the front. Once the front's at the top, the paper dries over STRIP.dry, and is done: single atoms dry
+   * off it, and it takes up nothing more. Nothing leaves it.
    */
   private wick(h: number): (Vessel | null)[] {
     const tray = this.tanks[0];
@@ -1603,28 +1701,42 @@ export class Tool {
       transfer(tray, paper[0], (d / passes) * STRIP.cap);
       paper[0].Q = 0;
       this.front = Math.min(1, from + (d * k) / passes);
-      const top = Math.min(C, Math.ceil(this.front * C)) - 2;
-      for (let s = 0; s < NS; s++) {
-        this.drift[s] += STRIP_RUN[s] * (d / passes) * C;
-        // what's left behind makes it lag, so it moves on a stretch for each 1 − spread it travels
-        if (this.drift[s] < 1 - STRIP.spread) continue;
-        this.drift[s] -= 1 - STRIP.spread;
-        // all but a little of what's on each stretch behind the front moves on up: top down, so nothing moves twice,
-        // and from the stretch under the front's at most into the front's
-        const size = SPECIES[s].size;
-        for (let c = top; c >= 0; c--) {
-          const [a, b] = [paper[c], paper[c + 1]];
-          const m = a.n[s] && a.n[s] - roundRandom(a.n[s] * STRIP.spread);
-          if (!m) continue;
-          a.n[s] -= m;
-          b.n[s] += m;
-          a.N -= m * size;
-          b.N += m * size;
-        }
-      }
+      // from the stretch under the front's at most into the front's
+      this.packing!.carry((d / passes) * C, Math.min(C, Math.ceil(this.front * C)) - 2);
     }
     if (this.front > 1 - 1e-9) this.front = 1;
     return this.none();
+  }
+
+  /**
+   * A column's step. While its bed is dry, it drinks from the funnel at COLUMN.soak, tap open or not, the wet front
+   * running down it, until it's wet through, which takes COLUMN.cap; nothing leaves it till then. Once it's wet
+   * through, liquid runs from the funnel into it at COLUMN.flow, as far as the tap's open. Either way only while the
+   * funnel has any: what comes in goes into the bed's top stretch, and as a share d of COLUMN.cap does, what's on the
+   * bed is carried d · COLUMN.cells stretches' worth down it (see Bed), never past the wet front, and once that's at
+   * the foot, out the spout. With the funnel empty or the tap shut, everything on the bed stays where it is.
+   */
+  private elute(h: number): (Vessel | null)[] {
+    const funnel = this.tanks[0];
+    const soaking = this.front < 1;
+    const rate = soaking ? COLUMN.soak : this.valves[0] * COLUMN.flow;
+    if (funnel.N <= 0 || rate <= 0) return this.none();
+    const C = COLUMN.cells;
+    const amount = Math.min(rate * h, volume(funnel), soaking ? (1 - this.front) * COLUMN.cap : Infinity);
+    const d = amount / COLUMN.cap;
+    if (d <= 0) return this.none();
+    const out = soaking ? null : this.packet(0);
+    const passes = Math.ceil(2 * d * C);
+    const from = this.front;
+    for (let k = 1; k <= passes; k++) {
+      transfer(funnel, this.bed[0], amount / passes);
+      if (soaking) this.front = Math.min(1, from + (d * k) / passes);
+      this.packing!.carry((d / passes) * C, soaking ? Math.ceil(this.front * C) - 2 : C - 1, out);
+    }
+    if (this.front > 1 - 1e-9) this.front = 1;
+    this.out[0] = out && out.N > 0 ? out : null;
+    this.flow[0] = out ? volume(out) / (MAX_FLOW * h) : 0;
+    return this.out;
   }
 
   /**
@@ -1651,10 +1763,12 @@ export class Tool {
   /**
    * What a save keeps of an instrument's own state, as numbers, or undefined if it has none: a thermometer's bulb's
    * temperature, and 1 if it's broken or 0 if not; how far a wicking strip's front has climbed, how dry it is and how
-   * scorched (what's on its paper is saved as vessels, see paper); which of a sleeper culture's cells are dead (see dead).
+   * scorched (what's on its paper is saved as vessels, see paper); how far a column's bed has soaked (what's on it is
+   * saved as vessels, see bed); which of a sleeper culture's cells are dead (see dead).
    */
   get memory(): number[] | undefined {
     if (this.kind === 'strip') return [this.front, this.dryness, this.scorch];
+    if (this.kind === 'column') return [this.front];
     if (this.kind === 'culture') return Array.from(this.dead!);
     return isThermometer(this.kind) ? [this.temp, +this.broken] : undefined;
   }
@@ -1665,6 +1779,7 @@ export class Tool {
     if (!Array.isArray(m) || m.length !== want || !m.every((x) => typeof x === 'number' && Number.isFinite(x))) return;
     if (isThermometer(this.kind)) [this.temp, this.broken] = [m[0] as number, (m[1] as number) > 0];
     if (this.kind === 'strip') [this.front, this.dryness, this.scorch] = (m as number[]).map((x) => Math.max(0, Math.min(1, x)));
+    if (this.kind === 'column') this.front = Math.max(0, Math.min(1, (m as number[])[0]));
     if (this.kind === 'culture') this.dead!.set((m as number[]).map((x) => +(x > 0)));
   }
 

@@ -193,18 +193,18 @@ type Held = (
 /** Things that can be made from the hotbar, in its order. */
 export const ITEMS = [
   'flask', 'dispenser', 'pipette', 'exchanger', 'separator', 'splitter', 'sorter', 'heater', 'scale', 'tank', 'meter', 'multiplexer',
-  'thermometer', 'thermometerWide', 'dilatometer', 'strip', 'culture',
+  'thermometer', 'thermometerWide', 'dilatometer', 'strip', 'culture', 'column',
 ] as const;
 export type Item = (typeof ITEMS)[number];
 /**
  * The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0, - and =; and then, the number
- * row being full, along the bottom row of letters, from Z.
+ * row being full, along the bottom row of letters, from Z, and M.
  */
-export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Z', 'X', 'C', 'V', 'B'] as const;
+export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Z', 'X', 'C', 'V', 'B', 'M'] as const;
 /** The same keys, as KeyboardEvent codes, so they work whatever the keyboard layout's shift state. */
 const HOTKEY_CODES = [
   'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal',
-  'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB',
+  'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyM',
 ];
 
 /** How tipped a flask held to pour is: past the horizontal, mouth down. */
@@ -626,6 +626,7 @@ export class GameEngine {
         ...(t.note ? { note: t.note } : {}),
         ...(t.memory ? { memory: t.memory } : {}),
         ...(t.paper.length ? { paper: t.paper.map(saveVessel) } : {}),
+        ...(t.bed.length ? { bed: t.bed.map(saveVessel) } : {}),
       })),
       scales: this.scales.map((sc) => ({
         ...this.frac(sc.pose), ...depth(sc.pose), tare: sc.tare,
@@ -674,6 +675,7 @@ export class GameEngine {
         if (typeof st.note === 'string') t.note = st.note;
         t.remember(st.memory);
         t.paper.forEach((v, k) => st.paper?.[k] && loadVessel(v, st.paper[k]));
+        t.bed.forEach((v, k) => st.bed?.[k] && loadVessel(v, st.bed[k]));
         return t;
       });
     this.nextToolId = Math.max(-1, ...this.tools.map((t) => t.id)) + 1;
@@ -2556,7 +2558,7 @@ export class GameEngine {
       add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it away') : 'put it back');
     } else {
       if (this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
-      add(['1–0, -, =, Z–B'], 'make equipment in your hands');
+      add(['1–0, -, =, Z–B, M'], 'make equipment in your hands');
     }
     if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
     else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
@@ -2731,6 +2733,7 @@ export class GameEngine {
         ...this.tools.flatMap((t) => [
           ...t.tanks.map((v, k) => ({ v, terminal: !drains(t, k) })),
           ...t.tube.map((v) => ({ v, terminal: false })),
+          ...t.bed.map((v) => ({ v, terminal: false })),
         ]),
       ],
       station: this.station(),
@@ -2873,6 +2876,8 @@ export class GameEngine {
   private wouldFlow(t: Tool): boolean {
     // the station's reservoir through its faucet, or its funnel through the diverter
     if (t.kind === 'receptacle') return t.tanks.some((v, k) => v.N > TRACE && drains(t, k));
+    // a column's dry bed drinks what's in its funnel, and lets nothing out
+    if (t.kind === 'column') return t.front >= 1 && t.valves[0] > 0 && t.tanks[0].N > TRACE;
     // a heater's tube runs whatever its valves say
     return (t.shape.spouts.length > 0 && t.tanks.some((v, k) => v.N > TRACE && drains(t, k))) || t.tube.some((v) => v.N > TRACE);
   }
@@ -2920,6 +2925,8 @@ export class GameEngine {
 function drains(t: Tool, k: number): boolean {
   if (t.kind === 'receptacle') return k === 0 || t.valves[0] > 0;
   if (t.kind === 'multiplexer') return k ? t.valves[0] > 0 : t.valves[0] < 1;
+  // a dry column's bed drinks from its funnel, its tap open or not
+  if (t.kind === 'column') return t.front < 1 || t.valves[0] > 0;
   return t.kind === 'splitter' || t.kind === 'sorter' || t.kind === 'heater' || INLINE_TOOLS.includes(t.kind) || t.valves[k] > 0;
 }
 

@@ -122,6 +122,15 @@ const ICONS: Record<string, ReactNode> = {
       <path className="glass" d="M5 29 V35 H35 V29" />
     </>
   ),
+  column: (
+    <>
+      <path className="pipe" d="M20 7.5 V9 M20 30 V38" />
+      <path className="glass" d="M14 1.5 H26 L21 7.5 H19 Z" />
+      <rect x="17" y="9" width="6" height="21" rx="1" style={{ fill: '#e6dfc8', stroke: 'var(--glass)', strokeWidth: 0.8 }} />
+      <path d="M17.6 15 H22.4 M17.6 22 H22.4" style={{ stroke: 'var(--pipe)', strokeWidth: 1.6, opacity: 0.6 }} />
+      <circle className="valve" cx="20" cy="33" r="2.5" />
+    </>
+  ),
   culture: (
     <>
       <path className="pipe" d="M20 30 V38" />
