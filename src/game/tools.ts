@@ -87,7 +87,8 @@ export const FUNNEL_TIP = 6;
  * on top of it if it has one.
  */
 export function tankPieces(sh: ToolShape, k: number, d: number): Piece[] {
-  const w = sh.tanks[k].x1 - sh.tanks[k].x0;
+  // a tank with a neck is filled through an inlet off to one side, and is as wide as its neck says (see ToolShape.neck)
+  const w = sh.neck ? sh.neck.body : sh.tanks[k].x1 - sh.tanks[k].x0;
   const h = sh.tankH ?? TANK_H;
   if (sh.round) {
     const s = sh.sump;
@@ -116,7 +117,7 @@ export function tankDepth(kind: ToolKind): number {
   if (d !== undefined) return d;
   const sh = SHAPES[kind];
   const want = (sh.tankCap ?? TANK_CAP) * SPACE_PER_ATOM;
-  if (sh.round) d = sh.tanks[0].x1 - sh.tanks[0].x0;
+  if (sh.round) d = sh.neck ? sh.neck.body : sh.tanks[0].x1 - sh.tanks[0].x0;
   else {
     let [lo, hi] = [0.1, 5000];
     for (let i = 0; i < 60; i++) {
@@ -494,10 +495,13 @@ export function thermometerAt(T: number): number {
 
 /**
  * A swell bulb (see SHAPES.dilatometer): a squat round bulb `w` across and `h` tall, over a little sump, under a
- * narrow neck (see ToolShape.neck) with `marks` graduations up it. The neck holds about a fifth of what the bulb
- * does, so fluid that fills the bulb and swells by a twentieth climbs a quarter of the neck.
+ * narrow neck (see ToolShape.neck). The neck holds about a fifth of what the bulb does, so fluid that fills the bulb
+ * and swells by a twentieth climbs a quarter of the neck. The two bulbs stand pressed together like the letters
+ * "db": their necks side by side in the middle, `gap` apart, each up from the inner edge of its bulb, with `marks`
+ * graduations across both; and each is filled through a little funnel (`inlet`: reaching w either side of its
+ * middle, h deep, its mouth at height y) out on its far shoulder, the two a grid cell apart.
  */
-export const BULB = { w: 34, h: 20, sump: { w: 10, h: 5 }, neck: { w: 7, h: 90, lip: 6 }, marks: 20 };
+export const BULB = { w: 34, h: 20, sump: { w: 10, h: 5 }, neck: { w: 7, h: 90 }, marks: 20, gap: 1, inlet: { w: 7, h: 8, y: -14 } };
 const BULB_BODY: Piece[] = [
   { h: BULB.sump.h, w0: SUMP_TIP, d0: SUMP_TIP, w1: BULB.sump.w, d1: BULB.sump.w, round: true },
   { h: BULB.h, w0: BULB.w, d0: BULB.w, w1: BULB.w, d1: BULB.w, round: true },
@@ -711,11 +715,13 @@ export interface ToolShape {
    */
   sump?: { w: number; h: number };
   /**
-   * A narrow neck on top of each tank (a round one), `w` across and `h` tall, with a lip reaching `lip` either side
-   * of its middle at its top, which is where fluid goes in. The tank fills first, then its neck, so a small change
-   * in how much it holds shows as a big change in how high it stands.
+   * A narrow neck on top of each tank (a round one, `body` across), `w` across and `h` tall. The tank fills first,
+   * then its neck, so a small change in how much it holds shows as a big change in how high it stands. Such a tank
+   * isn't under its opening: `bodies` and `necks` are where each tank's middle and its neck's are, across, and the
+   * tank's own x0 and x1 are its inlet's, a little funnel `inlet.h` deep with its mouth at height `inlet.y`, which is
+   * where fluid goes in. What no longer fits spills from the neck's top.
    */
-  neck?: { w: number; h: number; lip: number };
+  neck?: { w: number; h: number; body: number; bodies: number[]; necks: number[]; inlet: { h: number; y: number } };
   /** Whether the tool has no valves to turn. */
   noValve?: boolean;
   /** Where the valves are, if not one under each tank's center at valveY: then there's one valve per entry. */
@@ -887,24 +893,31 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -15, x1: 15, y0: -6, y1: TUBE_H + 34 },
   },
   dilatometer: {
-    // two swell bulbs (see BULB), a grid cell apart, each draining slowly through its own valve to a spout under it,
-    // with a wire wound round both from a box between them, whose dial sets its heat
+    // two swell bulbs (see BULB) pressed together like "db", necks side by side in the middle; each filled through a
+    // funnel on its far shoulder, a grid cell apart, and draining slowly through its own valve to a spout under that;
+    // one wire wound round both, from a box under them whose dial sets its heat
     tanks: [
-      { name: 'A', x0: -CELL / 2 - BULB.w / 2, x1: -CELL / 2 + BULB.w / 2 },
-      { name: 'B', x0: CELL / 2 - BULB.w / 2, x1: CELL / 2 + BULB.w / 2 },
+      { name: 'A', x0: -CELL / 2 - BULB.inlet.w, x1: -CELL / 2 + BULB.inlet.w },
+      { name: 'B', x0: CELL / 2 - BULB.inlet.w, x1: CELL / 2 + BULB.inlet.w },
     ],
     tankH: BULB.h,
     tankCap: BULB_BODY_CAP + BULB_NECK_CAP,
     round: true,
     sump: BULB.sump,
-    neck: BULB.neck,
-    valves: [{ x: -CELL / 2, y: 38 }, { x: CELL / 2, y: 38 }, { x: 0, y: 17 }],
+    neck: {
+      ...BULB.neck,
+      body: BULB.w,
+      bodies: [-(BULB.gap + BULB.w) / 2, (BULB.gap + BULB.w) / 2],
+      necks: [-(BULB.gap + BULB.neck.w) / 2, (BULB.gap + BULB.neck.w) / 2],
+      inlet: { h: BULB.inlet.h, y: BULB.inlet.y },
+    },
+    valves: [{ x: -CELL / 2, y: 42 }, { x: CELL / 2, y: 42 }, { x: 0, y: 46 }],
     dial: 2,
     maxFlow: PIPETTE_FLOW,
     spouts: [-CELL / 2, CELL / 2],
-    valveY: 38,
-    spoutY: 54,
-    box: { x0: -CELL / 2 - BULB.w / 2 - 4, x1: CELL / 2 + BULB.w / 2 + 4, y0: -BULB.neck.h - 8, y1: 56 },
+    valveY: 42,
+    spoutY: 58,
+    box: { x0: -CELL / 2 - 14, x1: CELL / 2 + 14, y0: -BULB.neck.h - 6, y1: 62 },
   },
   strip: {
     // a little glass cup, the pad, over a strip of paper hanging from it (see STRIP.paper); nothing drains from it
@@ -1240,9 +1253,9 @@ export function separatorShares(): number[][] {
  *   a trickle through its faucet, the second spout, as far as its one valve is open.
  * - A **flow meter** is an inline instrument (see INLINE_TOOLS): its tube drains straight through to one spout, and
  *   it shows what flows out, averaged over the recent past (see INSTRUMENT_TAU, rate and meterText).
- * - **Swell bulbs** are two little round tanks with narrow necks (see BULB), each draining at up to PIPETTE_FLOW,
- *   heated alike by a wire whose temperature a dial sets (see wireTemperature and heatBy), so how much each swells
- *   shows side by side.
+ * - **Swell bulbs** are two little round tanks with narrow necks (see BULB), pressed together so the necks stand
+ *   side by side, each draining at up to PIPETTE_FLOW, heated alike by one wire whose temperature a dial sets (see
+ *   wireTemperature and heatBy), so how much each swells shows side by side.
  * - A **wicking strip** is a little cup, its pad, over a strip of paper, which takes up a little of what lands in the
  *   pad and draws it along itself, leaving each species where it runs to (see wick and stripBands). It's used once.
  * - A **sleeper culture** is a flat glass plate of living cells, filled through a funnel on top. What's in it harms

@@ -7,7 +7,8 @@ import { COOLING } from './cooling';
 import { Vessel, roomFor, volume } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
 import { STATION_POSE } from './presets';
-import { WALL_PANEL } from './space';
+import { CELL, WALL_PANEL } from './space';
+import { tankMouth } from './bodies';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
@@ -479,6 +480,29 @@ describe('swell bulbs', () => {
     expect(BULB_NECK_CAP / BULB_BODY_CAP).toBeGreaterThan(1 / 8);
     expect(BULB_NECK_CAP / BULB_BODY_CAP).toBeLessThan(1 / 4);
     expect(BULB.neck.h / BULB.h).toBeGreaterThan(3);
+  });
+
+  it('stand pressed together, their necks side by side, each filled through a funnel a grid cell from the other', () => {
+    const d = new Tool('dilatometer', 0);
+    const { neck, tanks, spouts } = d.shape;
+    // the necks are a hair apart in the middle, each up from the inner edge of its bulb, and the bulbs don't overlap
+    expect(neck!.necks[1] - neck!.necks[0]).toBeCloseTo(neck!.w + BULB.gap, 9);
+    expect(neck!.necks[0]).toBe(-neck!.necks[1]);
+    neck!.bodies.forEach((bx, k) => {
+      expect(Math.abs(neck!.necks[k] - bx) + neck!.w / 2).toBeCloseTo(neck!.body / 2, 9);
+      expect(Math.abs(neck!.necks[k])).toBeLessThan(Math.abs(bx));
+    });
+    expect(neck!.bodies[1] - neck!.bodies[0]).toBeGreaterThanOrEqual(neck!.body);
+    // its inlets and spouts are a grid cell apart, outside the bulbs, and each spout is under its inlet
+    const inlets = tanks.map((tk) => (tk.x0 + tk.x1) / 2);
+    expect(inlets[1] - inlets[0]).toBe(CELL);
+    expect(spouts).toEqual(inlets);
+    inlets.forEach((x, k) => expect(Math.abs(x)).toBeGreaterThan(Math.abs(neck!.bodies[k]) + neck!.body / 2));
+    // fluid goes in at the inlet, and what no longer fits spills from its neck's top
+    const m = tankMouth(d, 0);
+    expect(m.x).toBeCloseTo(inlets[0], 9);
+    expect(m.rim!.x).toBeCloseTo(neck!.necks[0], 9);
+    expect(m.rim!.y).toBeCloseTo(neck!.h, 9);
   });
 
   it('show how much each holds by how far up its neck it stands', () => {

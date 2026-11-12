@@ -80,7 +80,7 @@ export function tankRect(t: Tool, k: number): { x0: number; x1: number; y0: numb
 
 /**
  * Where fluid goes into a tank, in the tool's flat frame: its open top, or the mouth of the little funnel on top if it
- * has one, or the lip of its neck, or the cryostabilizer station's funnel (see STATION).
+ * has one, or its inlet if it has a neck (see ToolShape.neck), or the cryostabilizer station's funnel (see STATION).
  */
 export function openingOf(t: Tool, k: number): { x0: number; x1: number; y: number; hz: number } {
   const r = tankRect(t, k);
@@ -90,19 +90,21 @@ export function openingOf(t: Tool, k: number): { x0: number; x1: number; y: numb
     return { x0: cx - w, x1: cx + w, y, hz: w };
   }
   const cx = (r.x0 + r.x1) / 2;
+  // a tank with a neck is filled through its inlet, a little funnel as deep front to back as across
   const neck = t.shape.neck;
-  if (neck) return { x0: cx - neck.lip, x1: cx + neck.lip, y: r.y0 - neck.h, hz: neck.lip };
+  if (neck) return { x0: r.x0, x1: r.x1, y: neck.inlet.y, hz: (r.x1 - r.x0) / 2 };
   const cup = t.shape.cup;
   if (!cup) return { x0: r.x0, x1: r.x1, y: r.y0, hz: TOOL_DEPTH[t.kind].tank / 2 };
   return { x0: cx - cup.w, x1: cx + cup.w, y: r.y0 - cup.h, hz: cup.w };
 }
 
-/** The open top of tank k, in the room; it spills over its right lip. */
+/** The open top of tank k, in the room; it spills over its right lip, or, if it has a neck, from the front of its neck's top. */
 export function tankMouth(t: Tool, k: number): Mouth {
   const o = openingOf(t, k);
   const c = onTool(t, (o.x0 + o.x1) / 2, o.y);
   // it spills over its right lip as it stands
-  const rim = toWorld(t.pose, { x: o.x1 + 3, y: -o.y, z: 0 });
+  const neck = t.shape.neck;
+  const rim = neck ? toWorld(t.pose, { x: neck.necks[k], y: neck.h, z: neck.w / 2 + 2 }) : toWorld(t.pose, { x: o.x1 + 3, y: -o.y, z: 0 });
   return { v: t.tanks[k], ...c, hx: (o.x1 - o.x0) / 2, hz: o.hz, yaw: t.pose.yaw, rim };
 }
 
@@ -173,13 +175,14 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
     hz: Math.max(D.tank / 2 + 2, sh.cup ? sh.cup.w + 1 : 0), round: sh.round,
   };
   if (sh.round) tanks.hz = (tanks.x1 - tanks.x0) / 2;
-  // tanks with necks: each on its own, round, with its neck above it
+  // tanks with necks: each bulb on its own, round, where it is; the necks together above them; and each one's inlet
   const neck = sh.neck;
   const upper = neck
-    ? sh.tanks.flatMap((k) => [
-        { x0: k.x0 - 2, x1: k.x1 + 2, y0: -2, y1: bottom, hz: (k.x1 - k.x0) / 2 + 2, round: true },
-        { x0: tankX(k) - neck.lip, x1: tankX(k) + neck.lip, y0: -neck.h - 2, y1: -2, hz: neck.lip, round: true },
-      ])
+    ? [
+        ...neck.bodies.map((x) => ({ x0: x - neck.body / 2 - 2, x1: x + neck.body / 2 + 2, y0: -2, y1: bottom, hz: neck.body / 2 + 2, round: true })),
+        { x0: Math.min(...neck.necks) - neck.w / 2 - 1, x1: Math.max(...neck.necks) + neck.w / 2 + 1, y0: -neck.h - 2, y1: -2, hz: neck.w / 2 + 1 },
+        ...sh.tanks.map((k) => ({ x0: k.x0 - 1, x1: k.x1 + 1, y0: neck.inlet.y - 2, y1: 8, hz: (k.x1 - k.x0) / 2 + 1 })),
+      ]
     : [tanks];
   if (bottom >= b.y1) return upper;
   const valves = sh.noValve ? [] : (sh.valves ?? sh.tanks.map((k) => ({ x: tankX(k), y: sh.valveY })));

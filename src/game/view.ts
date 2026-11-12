@@ -1172,7 +1172,10 @@ class ToolView {
         const x = sh.spouts[1];
         pipes(art, [[b.x1, ANALYZER.wasteY], [x, ANALYZER.wasteY], [x, sh.spoutY - 4]]);
       }
-    } else if (t.kind === 'dilatometer') for (const tk of sh.tanks) pipes(art, [[tankX(tk), floor], [tankX(tk), sh.spoutY - 4]]);
+    } else if (sh.neck) {
+      // from under each bulb, out to its spout, under its inlet
+      sh.neck.bodies.forEach((bx, k) => pipes(art, [[bx, floor], [bx, floor + 4], [sh.spouts[k], floor + 4], [sh.spouts[k], sh.spoutY - 4]]));
+    }
     else if (t.kind === 'strip') this.buildStrip();
     else if (t.kind === 'culture') this.buildCulture();
     else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);
@@ -1192,7 +1195,8 @@ class ToolView {
       const pieces = tankPieces(sh, k, d);
       const bottom = r.y1 + (sh.cup || sh.funnel ? 0 : (sh.sump?.h ?? 0));
       const level = (v: Vessel) => onTool(t, 0, bottom - levelIn(pieces, share(v))).y;
-      if (sh.cup) {
+      if (sh.neck) geoms = this.buildBulb(k, bottom, pieces, share);
+      else if (sh.cup) {
         openBox(art, r.x0, r.x1, r.y0, r.y1, d);
         glassFrom(art, frustum(cx, o.y, r.y0, 2 * sh.cup.w, 2 * sh.cup.w, w, d, true));
         geoms = [
@@ -1210,28 +1214,8 @@ class ToolView {
         glassFrom(art, new THREE.CylinderGeometry(rr, rr, r.y1 - r.y0, 48, 1, true).translate(cx, mid, 0));
         art.add(new THREE.Mesh(new THREE.CircleGeometry(rr, 48).rotateX(Math.PI / 2).translate(cx, -r.y1, 0), glassMat));
         geoms = [new THREE.CylinderGeometry(rr - 0.5, rr - 0.5, r.y1 - r.y0 - 0.5, 48).translate(cx, mid - 0.25, 0)];
-        const neck = sh.neck;
-        if (neck) {
-          // closed over on top, but for a narrow neck up from its middle, flaring to a lip, with marks up its front
-          const nr = neck.w / 2;
-          art.add(new THREE.Mesh(new THREE.RingGeometry(nr, rr, 48).rotateX(-Math.PI / 2).translate(cx, -r.y0, 0), glassMat));
-          glassFrom(art, new THREE.CylinderGeometry(nr, nr, neck.h - 3, 20, 1, true).translate(cx, -r.y0 + (neck.h - 3) / 2, 0));
-          glassFrom(art, new THREE.CylinderGeometry(neck.lip, nr, 3, 20, 1, true).translate(cx, -r.y0 + neck.h - 1.5, 0));
-          geoms.push(new THREE.CylinderGeometry(nr - 0.4, nr - 0.4, neck.h, 16).translate(cx, -r.y0 + neck.h / 2, 0));
-          for (let i = 0; i <= BULB.marks; i++) {
-            const y = r.y0 - (i / BULB.marks) * neck.h;
-            const len = i % 5 === 0 ? neck.w : neck.w / 2;
-            block(art, darkMat, cx + nr - len, cx + nr, y - 0.22, y + 0.22, nr - 0.1, nr + 0.25).castShadow = false;
-          }
-          // a little black float rides the fluid up the neck, so its level is plain whatever its color
-          const float = new THREE.Mesh(new THREE.CylinderGeometry(nr - 0.7, nr - 0.7, 1.6, 16), leverMat);
-          float.position.x = cx;
-          art.add(float);
-          this.floats.push({ m: float, at: (v) => -Math.min(r.y0, bottom - levelIn(pieces, share(v))) + 0.8 });
-        } else {
-          const rim = new THREE.Mesh(new THREE.TorusGeometry(rr + 0.6, 0.8, 6, 48).rotateX(Math.PI / 2).translate(cx, 0, 0), pipeMat);
-          art.add(rim);
-        }
+        const rim = new THREE.Mesh(new THREE.TorusGeometry(rr + 0.6, 0.8, 6, 48).rotateX(Math.PI / 2).translate(cx, 0, 0), pipeMat);
+        art.add(rim);
         const sump = sh.sump;
         if (sump) {
           const sm = -(r.y1 + sump.h / 2);
@@ -1275,10 +1259,10 @@ class ToolView {
       art.add(s);
     }
     if (t.tanks.length > 1 && !sh.wall)
-      sh.tanks.forEach((tk) => {
+      sh.tanks.forEach((tk, k) => {
         const s = textSprite([tk.name], '#e6ece8');
         s.scale.multiplyScalar(0.9);
-        s.position.copy(v3(tankX(tk), 14, D.tank / 2 + 1));
+        s.position.copy(v3(sh.neck ? sh.neck.bodies[k] : tankX(tk), 14, D.tank / 2 + 1));
         art.add(s);
       });
     // a note about the whole tool, centered over it, above its tanks' labels
@@ -1557,27 +1541,86 @@ class ToolView {
   }
 
   /**
-   * The swell bulbs' heating: a box between the bulbs with the dial on its face, and a wire from it wound three times
-   * round each bulb, from copper to white-hot as the dial turns up.
+   * Tank k of a tool whose tanks have necks (see ToolShape.neck), a swell bulb: a closed glass bulb over its sump; its
+   * neck up from where it is on the bulb's top, open on top, with a little black float riding the fluid in it, so its
+   * level is plain whatever its color; and its inlet, a little funnel out on its far shoulder, whose stem runs down
+   * and in through the bulb's side. With the first, the marks across all the necks' fronts, every fifth one longer.
+   * Returns the solids its fluid is drawn from.
+   */
+  private buildBulb(k: number, bottom: number, pieces: Piece[], share: (v: Vessel) => number): THREE.BufferGeometry[] {
+    const { art, t } = this;
+    const sh = t.shape;
+    const neck = sh.neck!;
+    const H = sh.tankH ?? TANK_H;
+    const [bx, nx, ix] = [neck.bodies[k], neck.necks[k], tankX(sh.tanks[k])];
+    const [rr, nr] = [neck.body / 2, neck.w / 2];
+    glassFrom(art, new THREE.CylinderGeometry(rr, rr, H, 48, 1, true).translate(bx, -H / 2, 0));
+    for (const y of [0, H]) art.add(new THREE.Mesh(new THREE.CircleGeometry(rr, 48).rotateX(Math.PI / 2).translate(bx, -y, 0), glassMat));
+    glassFrom(art, new THREE.CylinderGeometry(nr, nr, neck.h, 20, 1, true).translate(nx, neck.h / 2, 0));
+    const geoms = [
+      new THREE.CylinderGeometry(rr - 0.5, rr - 0.5, H - 0.5, 48).translate(bx, -H / 2 - 0.25, 0),
+      new THREE.CylinderGeometry(nr - 0.4, nr - 0.4, neck.h, 16).translate(nx, neck.h / 2, 0),
+    ];
+    const sump = sh.sump;
+    if (sump) {
+      const sm = -(H + sump.h / 2);
+      glassFrom(art, new THREE.CylinderGeometry(sump.w / 2, SUMP_TIP / 2, sump.h, 24, 1, true).translate(bx, sm, 0));
+      geoms.push(new THREE.CylinderGeometry(sump.w / 2 - 0.5, SUMP_TIP / 2 - 0.3, sump.h - 0.3, 24).translate(bx, sm, 0));
+    }
+    // the inlet's funnel, and its stem down and in to the bulb's side
+    const { h: ih, y: iy } = neck.inlet;
+    const iw = sh.tanks[k].x1 - sh.tanks[k].x0;
+    glassFrom(art, frustum(ix, iy, iy + ih, iw, iw, 3, 3, true));
+    const side = bx + Math.sign(ix - bx) * rr;
+    rod(art, glassMat, v3(ix, iy + ih), v3(ix, 6), 1.5);
+    rod(art, glassMat, v3(ix, 6), v3(side, 6), 1.5);
+    const float = new THREE.Mesh(new THREE.CylinderGeometry(nr - 0.7, nr - 0.7, 1.6, 16), leverMat);
+    float.position.x = nx;
+    art.add(float);
+    this.floats.push({ m: float, at: (v) => -Math.min(0, bottom - levelIn(pieces, share(v))) + 0.8 });
+    if (k === 0) {
+      const [x0, x1] = [Math.min(...neck.necks) - nr, Math.max(...neck.necks) + nr];
+      for (let i = 0; i <= BULB.marks; i++) {
+        const y = -(i / BULB.marks) * neck.h;
+        const out = i % 5 === 0 ? 3 : 0;
+        block(art, darkMat, x0 - out, x1 + out, y - 0.22, y + 0.22, nr - 0.1, nr + 0.25).castShadow = false;
+      }
+    }
+    return geoms;
+  }
+
+  /**
+   * The swell bulbs' heating: a box under the bulbs with the dial on its face, and one wire up from it wound three
+   * times round both bulbs together, from copper to white-hot as the dial turns up.
    */
   private buildBulbs(): void {
     const { t } = this;
     const sh = t.shape;
+    const neck = sh.neck!;
     const dial = valveLocal(t, sh.dial!);
     block(this.art, panelMat, dial.x - 14, dial.x + 14, dial.y - 14, dial.y + 14, -10, valveZ(t) - 3, 2.5);
     this.wire = new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.6 });
-    const rr = BULB.w / 2 + 1.3;
-    for (const tk of sh.tanks) {
-      const cx = tankX(tk);
-      // out of the box's side, round the bulb from its top to its floor, the way that starts toward the back
-      const toBox = Math.sign(dial.x - cx);
-      const pts: THREE.Vector3[] = [v3(dial.x - toBox * 13, 6, 0)];
-      for (let i = 0; i <= 3 * 24; i++) {
-        const a = (i / 24) * 2 * Math.PI;
-        pts.push(v3(cx + toBox * rr * Math.cos(a), 3 + (i / 72) * (BULB.h - 6), -rr * Math.sin(a)));
-      }
-      this.art.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), pts.length * 2, 0.7, 5), this.wire));
+    // round both: along the front, round the right bulb's far side, along the back, round the left bulb's, and on
+    const R = neck.body / 2 + 1.3;
+    const a = Math.max(...neck.bodies);
+    const lap = 4 * a + 2 * Math.PI * R;
+    const at = (d: number): [number, number] => {
+      if (d < a) return [d, R];
+      if (d < a + Math.PI * R) return [a + R * Math.sin((d - a) / R), R * Math.cos((d - a) / R)];
+      if (d < 3 * a + Math.PI * R) return [a - (d - a - Math.PI * R), -R];
+      if (d < 3 * a + 2 * Math.PI * R) return [-a - R * Math.sin((d - 3 * a - Math.PI * R) / R), -R * Math.cos((d - 3 * a - Math.PI * R) / R)];
+      return [-a + (d - 3 * a - 2 * Math.PI * R), R];
+    };
+    const H = sh.tankH ?? TANK_H;
+    const [turns, n] = [3, 64];
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i <= turns * n; i++) {
+      const [x, z] = at(((i % n) / n) * lap);
+      pts.push(v3(x, 3 + (i / (turns * n)) * (H - 6), z));
     }
+    // and down from its low end, at the front, into the top of the box
+    pts.push(v3(0, dial.y - 14, R - 1));
+    this.art.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), pts.length * 3, 0.7, 5), this.wire));
   }
 
   /** A dial on the face of a box: a knob on a ring of ticks running clockwise from down-left (off) to down-right (full). */
