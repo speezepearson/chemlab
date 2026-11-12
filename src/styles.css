@@ -84,6 +84,8 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .main{flex:1;display:flex;min-height:0}
 .palette{
   position:absolute;left:50%;bottom:12px;transform:translateX(-50%);display:flex;gap:6px;padding:6px;
+  /* onto a second row, when the window is too narrow for them all in one */
+  flex-wrap:wrap;justify-content:center;width:max-content;max-width:calc(100% - 24px);box-sizing:border-box;
   background:rgba(20,26,24,.55);border:1px solid rgba(255,255,255,.12);border-radius:10px;z-index:2;
   user-select:none;-webkit-user-select:none;backdrop-filter:blur(4px);
   --glass:rgba(227,232,227,.7);--glasshi:rgba(255,255,255,.1);--pipe:#8d9a93;--bench:#2b3230;
@@ -104,6 +106,11 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .palette .valve{fill:var(--bench);stroke:var(--pipe)}
 .palette .lcd{fill:#26302b;stroke:none}
 .palette .digits{stroke:#9fe0b8;stroke-width:1.5}
+/* smaller, in a window too narrow for the hotbar as it is, before it has to wrap */
+@media (max-width:860px){
+  .palette{gap:3px;padding:4px}
+  .palette svg{width:26px;height:26px}
+}
 @media (max-width:560px){
   /* panels span the screen, rather than hanging left off it from their names */
   details{position:static}
@@ -138,8 +145,11 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
   padding:7px 9px;border-radius:7px;background:rgba(12,17,15,.55);color:#dfe6e2;font-size:12px;line-height:1.2;
   max-width:min(340px,calc(50% - 150px));
 }
-/* where the window's too narrow for it beside the hotbar, it sits above it */
-@media (max-width:1240px){.doable{bottom:84px;max-width:340px}}
+/* above the hotbar, wherever the window's too narrow for it to sit beside it: the hotbar's own height up, and
+   more once the hotbar has wrapped onto a second row */
+@media (max-width:1540px){.doable{bottom:84px;max-width:340px}}
+@media (max-width:860px){.doable{bottom:68px}}
+@media (max-width:660px){.doable{bottom:108px}}
 .can{display:flex;align-items:center;gap:8px}
 .can.off{opacity:.45}
 .doable .keys{display:flex;align-items:center;gap:3px;flex:none;min-width:76px}
