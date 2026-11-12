@@ -98,6 +98,13 @@ const ICONS: Record<string, ReactNode> = {
       <circle className="valve" cx="20" cy="13" r="3.5" />
     </>
   ),
+  strip: (
+    <>
+      <path className="glass" d="M12 3 H28 L23 9 H17 Z" />
+      <rect x="14.5" y="10" width="11" height="27" rx="0.8" style={{ fill: '#e6dfc8', stroke: 'var(--pipe)', strokeWidth: 0.8 }} />
+      <path d="M15.5 17 H24.5 M15.5 24 H24.5 M15.5 27.5 H24.5" style={{ stroke: 'var(--pipe)', strokeWidth: 2.2, opacity: 0.75 }} />
+    </>
+  ),
   thermometer: (
     <>
       <path className="pipe" d="M12 16 V37" />

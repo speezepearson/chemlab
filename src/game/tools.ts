@@ -1,6 +1,7 @@
 import { BOND_KEYS, BONDS, type Atom } from '../chem/atoms';
 import { THERMO } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
+import { END_WEIGHT } from '../chem/shape';
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP, DELIVERY, TRACE } from './config';
 import { COOLING } from './cooling';
@@ -510,6 +511,54 @@ export function neckShare(vol: number): number {
   return Math.max(0, Math.min(1, (vol - BULB_BODY_CAP) / BULB_NECK_CAP));
 }
 
+/**
+ * How a wicking strip behaves (see SHAPES.strip and Tool.wick):
+ * - cap: how much its paper takes up, by volume: a hundredth of a flask;
+ * - uptake: how fast it takes that up from its pad, by volume per sim second;
+ * - time: how long the wet front takes to creep the length of the paper, in sim seconds;
+ * - drag: the drag at which a molecule doesn't move at all (see stripRun);
+ * - ink: how strongly a band shows: one of `share` of the sample is 1 − e^(−ink·share) opaque, so a twentieth of the
+ *   sample is already nearly half as dark as it gets, and what's most of it is no darker than what's half;
+ * - faint: the share of `cap` below which the paper holds too little for its bands to come out fully: they're as
+ *   strong as the square root of how near it is;
+ * - width: how wide a band is, as a share of the paper's length (its standard deviation);
+ * - scorch: the temperatures from which what it takes up starts to brown the paper, and at which it's charred through;
+ * - paper: the paper itself, in local units: reaching w either side of the middle, from y0 down to y1.
+ */
+export const STRIP = {
+  cap: CAP / 100, uptake: CAP / 50, time: 20, drag: 34, ink: 12, faint: 0.2, width: 0.012,
+  scorch: { from: 2, to: 6 },
+  paper: { w: 9, y0: 11, y1: 115 },
+};
+
+/**
+ * How far along a wicking strip each species runs, as a share of how far the wet front has: 1 − drag / STRIP.drag,
+ * where a molecule's drag is its weight, plus the weight of its loose ends again (see LOOSE_ENDS), which snag in the
+ * paper. So light single atoms run nearly with the front, a ring runs further than a chain of the same atoms, and a
+ * chain with heavy ends lags one with light ends.
+ */
+export const STRIP_RUN: readonly number[] = SPECIES.map((sp, s) => Math.max(0, 1 - (sp.weight + END_WEIGHT[s]) / STRIP.drag));
+
+/**
+ * The bands a sample leaves on a wicking strip: for each species in it, how far along it runs (see STRIP_RUN) and how
+ * opaque its band is (see STRIP.ink and STRIP.faint), furthest first.
+ */
+export function stripBands(f: Fluid): { s: number; at: number; ink: number }[] {
+  const vol = volume(f);
+  if (vol <= 0) return [];
+  const strength = Math.sqrt(Math.min(1, vol / (STRIP.faint * STRIP.cap)));
+  const out: { s: number; at: number; ink: number }[] = [];
+  for (let s = 0; s < NS; s++)
+    if (f.n[s]) out.push({ s, at: STRIP_RUN[s], ink: strength * (1 - Math.exp((-STRIP.ink * f.n[s] * roomFor(s)) / vol)) });
+  return out.sort((a, b) => b.at - a.at);
+}
+
+/** How scorched fluid at temperature T leaves a wicking strip's paper, from 0 (not at all) to 1 (charred through). */
+export function scorchAt(T: number): number {
+  const { from, to } = STRIP.scorch;
+  return Math.max(0, Math.min(1, (T - from) / (to - from)));
+}
+
 /** How many digits the meter's display has. */
 export const METER_DIGITS = 4;
 
@@ -556,7 +605,7 @@ export function analyzerSector(atom: Atom): (readonly [number, number])[] {
 
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater' | 'analyzer'
-  | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'dilatometer' | 'tank' | 'receptacle';
+  | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'dilatometer' | 'strip' | 'tank' | 'receptacle';
 
 /**
  * Tools there's only ever one of: not in the palette, and never put away. The receptacle is the whole cryostabilizer
@@ -790,6 +839,18 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: 54,
     box: { x0: -CELL / 2 - BULB.w / 2 - 4, x1: CELL / 2 + BULB.w / 2 + 4, y0: -BULB.neck.h - 8, y1: 56 },
   },
+  strip: {
+    // a little glass cup, the pad, over a strip of paper hanging from it (see STRIP.paper); nothing drains from it
+    tanks: [{ name: 'pad', x0: -8, x1: 8 }],
+    tankH: 8,
+    tankCap: 0.016 * CAP,
+    funnel: true,
+    noValve: true,
+    spouts: [],
+    valveY: 8,
+    spoutY: STRIP.paper.y1,
+    box: { x0: -12, x1: 12, y0: -6, y1: STRIP.paper.y1 + 1 },
+  },
   thermometer: {
     // the flow meter's tube and pipe, past the bulb of a thermometer on a card beside them (see THERMOMETER_BODY)
     tanks: [{ name: 'tube', x0: -TUBE_W / 2, x1: TUBE_W / 2 }],
@@ -1011,6 +1072,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   meter: 'Flow meter',
   thermometer: 'Thermometer',
   dilatometer: 'Swell bulbs',
+  strip: 'Wicking strip',
   tank: 'Tank',
   receptacle: 'Cryostabilizer',
   analyzer: 'Composition analyzer',
@@ -1097,6 +1159,8 @@ export function separatorShares(): number[][] {
  * - **Swell bulbs** are two little round tanks with narrow necks (see BULB), each draining at up to PIPETTE_FLOW,
  *   heated alike by a wire whose temperature a dial sets (see wireTemperature and heatBy), so how much each swells
  *   shows side by side.
+ * - A **wicking strip** is a little cup, its pad, over a strip of paper, which takes up a little of what lands in the
+ *   pad and draws it along itself, leaving each species where it runs to (see wick and stripBands). It's used once.
  * - A **thermometer** is an inline instrument too, which lets everything through past its bulb, whose temperature
  *   follows what passes (see warm), with two markers left at the highest and lowest it's read (see shake).
  * - A **composition analyzer** is an inline instrument too, and it draws off ANALYZER_SAMPLE of what passes, out its waste spout, reading that (see
@@ -1150,6 +1214,12 @@ export class Tool {
    * once that's down to less than TRACE a sim second.
    */
   rate = 0;
+  /** What a wicking strip's paper has taken up (see wick), which doesn't react or cool; null for any other tool. */
+  readonly sample: Vessel | null;
+  /** How far along a wicking strip's paper the wet front has crept, from 0 to 1, where it's done, and dry. */
+  wet = 0;
+  /** How scorched a wicking strip's paper is (see scorchAt): by the hottest of what it's taken up. */
+  scorch = 0;
   /** A thermometer's bulb's temperature (see warm), which its column shows; the room's to start with. */
   temp = COOLING.ambient;
   /** A thermometer's markers: the highest and the lowest its bulb has been since it was last shaken (see shake). */
@@ -1194,6 +1264,7 @@ export class Tool {
   ) {
     this.tanks = SHAPES[kind].tanks.map((tk) => new Vessel(tk.cap ?? SHAPES[kind].tankCap ?? TANK_CAP));
     this.tube = Array.from({ length: kind === 'heater' ? HEATER_CELLS : 0 }, () => new Vessel(Infinity));
+    this.sample = kind === 'strip' ? new Vessel(STRIP.cap) : null;
     const nValves = SHAPES[kind].valves?.length ?? this.tanks.length;
     this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' ? 0.5 : 0));
     this.out = this.shape.spouts.map(() => null);
@@ -1213,6 +1284,7 @@ export class Tool {
   step(h: number): (Vessel | null)[] {
     if (this.kind === 'heater') return this.heat(h);
     if (this.kind === 'receptacle') return this.receive(h);
+    if (this.kind === 'strip') return this.wick(h);
     // with nothing in it and its readings faded to nothing, a step would do nothing; an instrument's smoothing starts
     // again from nothing measured, as it would have to within less than TRACE
     if (this.tanks.every((tk) => tk.N <= 0) && this.rate === 0 && !this.reading && !this.links && this.bonds.every((b) => b === 0)) {
@@ -1271,6 +1343,24 @@ export class Tool {
   }
 
   /**
+   * A wicking strip's step: until its wet front has run the paper's length, the paper takes up what it has room for
+   * from the pad (at STRIP.uptake), scorching if that's hot (see scorchAt); and once it holds anything, the front creeps
+   * on, the whole length in STRIP.time. Then it's dry, and done: it takes up no more. Nothing leaves it.
+   */
+  private wick(h: number): (Vessel | null)[] {
+    const pad = this.tanks[0];
+    const paper = this.sample!;
+    if (this.wet < 1) {
+      if (pad.N > 0 && volume(paper) < paper.cap) {
+        const T = temperature(pad);
+        if (transfer(pad, paper, STRIP.uptake * h) > 0) this.scorch = Math.max(this.scorch, scorchAt(T));
+      }
+      if (paper.N > 0) this.wet = Math.min(1, this.wet + h / STRIP.time);
+    }
+    return this.none();
+  }
+
+  /**
    * A thermometer's bulb over a step of h sim seconds in which `f` ran past it (null for nothing): as far as it's in
    * the stream (wholly, from THERMOMETER.flow up), it closes on the stream's temperature over THERMOMETER.tau, and for
    * the rest, on the room's over THERMOMETER.roomTau. Its markers are left at the highest and lowest it reaches.
@@ -1294,9 +1384,11 @@ export class Tool {
 
   /**
    * What a save keeps of an instrument's own state, as numbers, or undefined if it has none: a thermometer's bulb's
-   * temperature and its two markers.
+   * temperature and its two markers; how far a wicking strip's front has run, and how scorched it is (what its paper
+   * took up is saved as a vessel, see sample).
    */
   get memory(): number[] | undefined {
+    if (this.kind === 'strip') return [this.wet, this.scorch];
     return this.kind === 'thermometer' ? [this.temp, this.hi, this.lo] : undefined;
   }
 
@@ -1305,6 +1397,7 @@ export class Tool {
     const want = this.memory?.length;
     if (!Array.isArray(m) || m.length !== want || !m.every((x) => typeof x === 'number' && Number.isFinite(x))) return;
     if (this.kind === 'thermometer') [this.temp, this.hi, this.lo] = m as number[];
+    if (this.kind === 'strip') [this.wet, this.scorch] = (m as number[]).map((x) => Math.max(0, Math.min(1, x)));
   }
 
   /** Scratch fluid i (see scratch), emptied. */
@@ -1379,9 +1472,9 @@ export class Tool {
     return share;
   }
 
-  /** Whether the tanks are lidded, so nothing can be poured or fall in: if they're sealed. */
+  /** Whether the tanks are lidded, so nothing can be poured or fall in: if they're sealed, or it's a wicking strip that's done. */
   get lidded(): boolean {
-    return !!this.shape.sealed;
+    return !!this.shape.sealed || (this.kind === 'strip' && this.wet >= 1);
   }
 
   /** Whether tank k is open on top, to pour into: not if the tool's lidded, or the tank's sealed. */

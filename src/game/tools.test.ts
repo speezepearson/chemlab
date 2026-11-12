@@ -11,7 +11,7 @@ import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, THERMOMETER, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  clockText, needleAt, STRIP, STRIP_RUN, stripBands, scorchAt, THERMOMETER, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -538,6 +538,97 @@ describe('swell bulbs', () => {
     expect(neckShare(volume(pure))).toBe(0);
     expect(volume(mixed)).toBeGreaterThan(BULB_BODY_CAP);
     expect(neckShare(volume(mixed))).toBeGreaterThan(0);
+  });
+});
+
+describe('wicking strip', () => {
+  const chain = (...atoms: ('R' | 'G' | 'B')[]) =>
+    speciesIndex(atoms, bondMask([atoms[0], atoms[1]], [atoms[1], atoms[2]]));
+  const B = singleOf('B');
+  const run = (t: Tool, seconds: number) => {
+    for (let i = 0; i < Math.round(seconds / 0.02); i++) t.step(0.02);
+  };
+
+  it('runs each species some way along it: lighter further, and a ring further than a chain of the same atoms', () => {
+    for (const r of STRIP_RUN) {
+      expect(r).toBeGreaterThan(0);
+      expect(r).toBeLessThan(1);
+    }
+    // single atoms, lightest first, ahead of everything else
+    const singles = SPECIES.filter((sp) => sp.size === 1).sort((a, b) => a.weight - b.weight);
+    for (let i = 1; i < singles.length; i++) expect(STRIP_RUN[singles[i].i]).toBeLessThan(STRIP_RUN[singles[i - 1].i]);
+    for (const sp of SPECIES) if (sp.size > 1) expect(STRIP_RUN[sp.i]).toBeLessThan(STRIP_RUN[singles[singles.length - 1].i]);
+    // the triangle, with no loose ends, ahead of all three chains of its atoms, which are each somewhere of their own
+    const chains = [chain('R', 'G', 'B'), chain('G', 'R', 'B'), chain('R', 'B', 'G')];
+    for (const c of chains) expect(STRIP_RUN[TARGET] - STRIP_RUN[c]).toBeGreaterThan(10 * STRIP.width);
+    const at = chains.map((c) => STRIP_RUN[c]).sort((a, b) => a - b);
+    expect(at[1] - at[0]).toBeGreaterThan(2 * STRIP.width);
+    expect(at[2] - at[1]).toBeGreaterThan(2 * STRIP.width);
+  });
+
+  it('shows a little of something nearly as darkly as a lot of it', () => {
+    const v = new Vessel(Infinity);
+    v.setMolecules(TARGET, 0.95 * STRIP.cap);
+    v.setMolecules(chain('R', 'G', 'B'), 0.05 * STRIP.cap);
+    const bands = stripBands(v);
+    expect(bands.map((b) => b.s)).toEqual([TARGET, chain('R', 'G', 'B')]);
+    expect(bands[0].ink).toBeGreaterThan(0.99);
+    expect(bands[1].ink).toBeGreaterThan(0.4);
+    expect(bands[1].ink).toBeLessThan(bands[0].ink);
+    // too little on the paper, and every band is fainter
+    const drop = new Vessel(Infinity);
+    drop.setMolecules(TARGET, (STRIP.faint * STRIP.cap) / 4);
+    expect(stripBands(drop)[0].ink).toBeCloseTo(0.5, 3);
+    expect(stripBands(new Vessel(Infinity))).toEqual([]);
+  });
+
+  it('takes up a little of what lands in its pad, and draws it along itself once, then is done', () => {
+    const t = new Tool('strip', 0);
+    const [pad] = t.tanks;
+    expect(t.shape.spouts).toEqual([]);
+    expect(t.isOpen(0)).toBe(true);
+    run(t, 5);
+    expect(t.wet).toBe(0);
+    filled(pad, R, pad.cap, 1);
+    run(t, STRIP.time / 2);
+    // the paper has all it can hold, and the rest stays in the pad; the front is halfway
+    expect(volume(t.sample!)).toBe(STRIP.cap);
+    expect(pad.N).toBe(pad.cap - STRIP.cap);
+    expect(t.wet).toBeCloseTo(0.5, 2);
+    expect(t.isOpen(0)).toBe(true);
+    run(t, STRIP.time / 2 + 0.1);
+    expect(t.wet).toBe(1);
+    expect(t.scorch).toBe(0);
+    // dry, it's lidded, and takes up nothing more
+    expect(t.isOpen(0)).toBe(false);
+    const before = [...t.sample!.n];
+    filled(pad, B, pad.cap, 1);
+    run(t, 5);
+    expect([...t.sample!.n]).toEqual(before);
+    expect(t.step(0.02)).toEqual([]);
+  });
+
+  it('is scorched by what it takes up hot', () => {
+    const { from, to } = STRIP.scorch;
+    expect(scorchAt(from)).toBe(0);
+    expect(scorchAt((from + to) / 2)).toBeCloseTo(0.5, 9);
+    expect(scorchAt(2 * to)).toBe(1);
+    const t = new Tool('strip', 0);
+    filled(t.tanks[0], R, STRIP.cap / 2, (from + to) / 2);
+    run(t, 1);
+    expect(t.scorch).toBeCloseTo(0.5, 2);
+    // and stays as scorched as it's been, whatever it takes up after
+    filled(t.tanks[0], R, STRIP.cap / 4, from);
+    run(t, 1);
+    expect(t.scorch).toBeCloseTo(0.5, 2);
+  });
+
+  it('keeps how far it has run and how scorched it is in a save', () => {
+    const t = new Tool('strip', 0);
+    t.remember([0.4, 0.25]);
+    expect(t.memory).toEqual([0.4, 0.25]);
+    t.remember([7, -3]);
+    expect(t.memory).toEqual([1, 0]);
   });
 });
 

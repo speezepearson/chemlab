@@ -72,8 +72,13 @@ export interface SavedTool extends SavedDepth {
   note?: string;
   /** A spectrometer's last reading, if it's been run (see spectrum). */
   reading?: number[];
-  /** An instrument's own state, if it has any (see Tool.memory): a thermometer's reading and markers. */
+  /**
+   * An instrument's own state, if it has any (see Tool.memory): a thermometer's reading and markers; how far a
+   * wicking strip has run, and how scorched it is.
+   */
   memory?: number[];
+  /** What a wicking strip's paper has taken up (see Tool.sample). */
+  sample?: SavedVessel;
 }
 
 export interface SavedScale extends SavedDepth {

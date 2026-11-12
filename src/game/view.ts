@@ -10,7 +10,7 @@ import { glowFalloff } from './appearance';
 import {
   NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
 } from './bodies';
-import { TARGET } from '../chem/species';
+import { SPECIES, TARGET } from '../chem/species';
 import { CAP, DELIVERY, FLASK_L, GOAL_L, GOAL_PURITY, GOAL_TARGET, TRACE } from './config';
 import { Vessel, fluidAlpha, fluidRGB, volume, type Flask } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
@@ -24,7 +24,7 @@ import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
   clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
-  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, TANK_H, THERMOMETER, THERMOMETER_BODY, thermometerAt, chuteY, levelIn, meterText, tankPieces, tankX,
+  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, stripBands, TANK_H, THERMOMETER, THERMOMETER_BODY, thermometerAt, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
 
@@ -209,6 +209,8 @@ const keyMats = {
   hot: new THREE.MeshStandardMaterial({ color: 0xf06358, roughness: 0.45, emissive: 0x401010 }),
   down: new THREE.MeshStandardMaterial({ color: 0x9c2d28, roughness: 0.6 }),
 };
+/** Blotting paper, for the wicking strip. */
+const paperMat = new THREE.MeshStandardMaterial({ color: 0xe6dfc8, roughness: 0.95, metalness: 0 });
 const hidden = new THREE.MeshBasicMaterial({ visible: false });
 const faintMat = new THREE.MeshBasicMaterial({ color: 0xd6ecf2, transparent: true, opacity: 0.3, depthWrite: false });
 const rodMat = new THREE.MeshStandardMaterial({ color: 0xc8cfcd, metalness: 1, roughness: 0.18 });
@@ -580,6 +582,43 @@ function drawDiverter(sc: Screen, gate: 'reservoir' | 'waste', flowing: boolean)
   // the flap: along the branch's lower wall, across the pipe below it; or across the branch's mouth
   ctx.lineCap = 'round';
   stroke(gate === 'reservoir' ? [[x - 3, j + 1.2], [x + 3, j + 7.2]] : [[x + 2.9, j + 7.1], [x + 7.1, j + 2.9]], 1.6, wallColor);
+  sc.tex.needsUpdate = true;
+}
+
+/**
+ * A wicking strip's paper, from its pad's end down: cream, darker where it's wet, down to the wet front while that's
+ * still creeping; each species of what it took up as a soft band of its own color (see stripBands), as far along as
+ * it runs of however far the front has; and browned over, as far as the front has come, by how scorched it is.
+ */
+function drawStrip(sc: Screen, t: Tool): void {
+  const paper = t.sample!;
+  const key = `${t.wet.toFixed(3)} ${paper.N} ${t.scorch.toFixed(2)}`;
+  if (key === sc.key) return;
+  sc.key = key;
+  const { ctx, ppu } = sc;
+  const [W, L] = [2 * STRIP.paper.w, STRIP.paper.y1 - STRIP.paper.y0];
+  ctx.setTransform(ppu, 0, 0, ppu, 0, 0);
+  ctx.fillStyle = '#e6dfc8';
+  ctx.fillRect(0, 0, W, L);
+  const front = t.wet * L;
+  if (paper.N > 0 && t.wet < 1) {
+    ctx.fillStyle = 'rgba(96, 92, 78, 0.28)';
+    ctx.fillRect(0, 0, W, front);
+  }
+  // a band is a Gaussian across the paper's length, narrower while the front has yet to run far
+  const sd = STRIP.width * L * (0.4 + 0.6 * t.wet);
+  for (const b of stripBands(paper)) {
+    const y = b.at * front;
+    const rgb = SPECIES[b.s].color.slice(4, -1);
+    const g = ctx.createLinearGradient(0, y - 3 * sd, 0, y + 3 * sd);
+    for (let k = -6; k <= 6; k++) g.addColorStop((k + 6) / 12, `rgba(${rgb}, ${b.ink * Math.exp(-(k * k) / 8)})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, y - 3 * sd, W, 6 * sd);
+  }
+  if (t.scorch > 0) {
+    ctx.fillStyle = `rgba(46, 28, 14, ${0.92 * t.scorch})`;
+    ctx.fillRect(0, 0, W, front);
+  }
   sc.tex.needsUpdate = true;
 }
 
@@ -1126,6 +1165,7 @@ class ToolView {
         pipes(art, [[b.x1, ANALYZER.wasteY], [x, ANALYZER.wasteY], [x, sh.spoutY - 4]]);
       }
     } else if (t.kind === 'dilatometer') for (const tk of sh.tanks) pipes(art, [[tankX(tk), floor], [tankX(tk), sh.spoutY - 4]]);
+    else if (t.kind === 'strip') this.buildStrip();
     else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);
     sh.spouts.forEach((x, k) => pick(block(art, pipeMat, x - 4, x + 4, sh.spoutY - 6, sh.spoutY, -4, 4), 'spout', k));
 
@@ -1437,6 +1477,18 @@ class ToolView {
   }
 
   /**
+   * A wicking strip: a strip of paper hanging from a clip under its pad, with what it's drawn up shown on its front
+   * (see drawStrip).
+   */
+  private buildStrip(): void {
+    const { w, y0, y1 } = STRIP.paper;
+    const TH = this.t.shape.tankH ?? TANK_H;
+    block(this.art, darkMat, -w - 1, w + 1, TH, y0 + 1.5, -1.6, 1.6, 0.6);
+    block(this.art, paperMat, -w, w, y0, y1, -0.3, 0.3).castShadow = true;
+    this.screen = new Screen(this.art, -w, w, y0, y1, 0.36, 6);
+  }
+
+  /**
    * The swell bulbs' heating: a box between the bulbs with the dial on its face, and a wire from it wound three times
    * round each bulb, from copper to white-hot as the dial turns up.
    */
@@ -1741,6 +1793,7 @@ class ToolView {
       this.spirit.hi.position.y = -y(t.hi);
       this.spirit.lo.position.y = -y(t.lo);
     }
+    if (t.kind === 'strip' && this.screen) drawStrip(this.screen, t);
     if (t.kind === 'meter' && this.screen) {
       const s = this.screen;
       const text = meterText(t.rate);
