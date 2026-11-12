@@ -3,6 +3,7 @@ import { SPECIES, TARGET, bondMask, pairOf, singleOf, speciesIndex } from '../ch
 import { CAP, DELIVERY, GOAL_PURITY, GOAL_TARGET } from './config';
 import { heatAt, temperature } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
+import { COOLING } from './cooling';
 import { Vessel, roomFor, volume } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
 import { STATION_POSE } from './presets';
@@ -10,7 +11,7 @@ import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  clockText, needleAt, THERMOMETER, thermometerAt, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -461,6 +462,80 @@ describe('cryostabilizer station', () => {
     expect((d.x0 + d.x1) / 2).toBe((r.shape.tanks[0].x0 + r.shape.tanks[0].x1) / 2);
     expect(d.y0).toBeGreaterThan(f.y + f.h);
     expect(d.y1).toBeLessThan(r.shape.spoutY);
+  });
+});
+
+describe('thermometer', () => {
+  /** Run `t` for `seconds`, with `flow` (by volume per sim second) of R at temperature T streaming through it. */
+  function stream(t: Tool, seconds: number, flow: number, T: number): void {
+    for (let i = 0; i < Math.round(seconds / 0.02); i++) {
+      if (flow > 0) filled(t.tanks[0], R, flow * 0.02, T);
+      t.step(0.02);
+    }
+  }
+
+  it('is an inline instrument that lets everything through', () => {
+    const t = new Tool('thermometer', 0);
+    expect(INLINE_TOOLS).toContain('thermometer');
+    filled(t.tanks[0], R, 1e7, 3);
+    expect(t.step(0.02)[0]?.N).toBe(1e7);
+    expect(t.tanks[0].N).toBe(0);
+  });
+
+  it('starts at the room\'s temperature, and takes that of what streams past it, with a lag', () => {
+    const t = new Tool('thermometer', 0);
+    expect(t.temp).toBe(COOLING.ambient);
+    const hot = COOLING.ambient + 4;
+    stream(t, THERMOMETER.tau, THERMOMETER.flow, hot);
+    // all but 1/e of the way there after tau
+    expect((t.temp - COOLING.ambient) / (hot - COOLING.ambient)).toBeCloseTo(1 - 1 / Math.E, 2);
+    stream(t, 10 * THERMOMETER.tau, 5 * THERMOMETER.flow, hot);
+    expect(t.temp).toBeCloseTo(hot, 3);
+  });
+
+  it('reads between a trickle and the room', () => {
+    const t = new Tool('thermometer', 0);
+    const hot = COOLING.ambient + 4;
+    stream(t, 60 * THERMOMETER.roomTau, THERMOMETER.flow / 4, hot);
+    expect(t.temp).toBeGreaterThan(COOLING.ambient + 0.5);
+    expect(t.temp).toBeLessThan(hot - 0.5);
+  });
+
+  it('drifts back to the room\'s temperature with nothing passing, leaving its markers at the extremes', () => {
+    const t = new Tool('thermometer', 0);
+    const hot = COOLING.ambient + 4;
+    stream(t, 12 * THERMOMETER.tau, THERMOMETER.flow, hot);
+    stream(t, 40 * THERMOMETER.roomTau, 0, 0);
+    expect(t.temp).toBe(COOLING.ambient);
+    expect(t.hi).toBeCloseTo(hot, 3);
+    expect(t.lo).toBe(COOLING.ambient);
+    const cold = COOLING.ambient / 2;
+    stream(t, 12 * THERMOMETER.tau, THERMOMETER.flow, cold);
+    expect(t.lo).toBeCloseTo(cold, 3);
+    expect(t.hi).toBeCloseTo(hot, 3);
+    // shaking it brings both markers back to what it reads
+    t.shake();
+    expect([t.hi, t.lo]).toEqual([t.temp, t.temp]);
+  });
+
+  it('has a logarithmic scale', () => {
+    const { T0, T1 } = THERMOMETER;
+    expect(thermometerAt(T0)).toBe(0);
+    expect(thermometerAt(T0 / 10)).toBe(0);
+    expect(thermometerAt(T1)).toBeCloseTo(1, 12);
+    expect(thermometerAt(10 * T1)).toBe(1);
+    expect(thermometerAt(Math.sqrt(T0 * T1))).toBeCloseTo(0.5, 12);
+  });
+
+  it('keeps its reading and markers in a save, and ignores a bad one', () => {
+    const t = new Tool('thermometer', 0);
+    t.remember([3, 7, 0.5]);
+    expect(t.memory).toEqual([3, 7, 0.5]);
+    t.remember([1, 2]);
+    t.remember('x');
+    t.remember([1, NaN, 2]);
+    expect(t.memory).toEqual([3, 7, 0.5]);
+    expect(new Tool('dispenser', 1).memory).toBeUndefined();
   });
 });
 

@@ -210,12 +210,19 @@ export interface PaperEdit {
 /** Things that can be made from the hotbar, in its order. */
 export const ITEMS = [
   'flask', 'dispenser', 'pipette', 'exchanger', 'separator', 'splitter', 'sorter', 'heater', 'scale', 'tank', 'meter', 'multiplexer',
+  'thermometer',
 ] as const;
 export type Item = (typeof ITEMS)[number];
-/** The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0, - and =. */
-export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '='] as const;
+/**
+ * The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0, - and =; and then, the number
+ * row being full, along the bottom row of letters, from Z.
+ */
+export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Z'] as const;
 /** The same keys, as KeyboardEvent codes, so they work whatever the keyboard layout's shift state. */
-const HOTKEY_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal'];
+const HOTKEY_CODES = [
+  'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal',
+  'KeyZ',
+];
 
 /** How tipped a flask held to pour is: past the horizontal, mouth down. */
 const POUR_ANG = Math.PI * 0.61;
@@ -648,6 +655,7 @@ export class GameEngine {
         drops: t.drops.map(saveVessel),
         ...(t.tube.length ? { tube: t.tube.map(saveVessel) } : {}),
         ...(t.note ? { note: t.note } : {}),
+        ...(t.memory ? { memory: t.memory } : {}),
       })),
       scales: this.scales.map((sc) => ({
         ...this.frac(sc.pose), ...depth(sc.pose), tare: sc.tare,
@@ -695,6 +703,7 @@ export class GameEngine {
         t.drops.forEach((v, k) => st.drops?.[k] && loadVessel(v, st.drops[k]));
         t.tube.forEach((v, k) => st.tube?.[k] && loadVessel(v, st.tube[k]));
         if (typeof st.note === 'string') t.note = st.note;
+        t.remember(st.memory);
         return t;
       });
     this.nextToolId = Math.max(-1, ...this.tools.map((t) => t.id)) + 1;
@@ -1353,6 +1362,8 @@ export class GameEngine {
         return;
       }
       h = { kind: 'tool', t: p.t, relYaw: 0, dist: 0, from: { pose: { ...p.t.pose } }, made };
+      // picking a thermometer up shakes its markers down
+      p.t.shake();
     }
     else if (p.kind === 'scale') h = { kind: 'scale', sc: p.sc, relYaw: 0, dist: 0, from: { pose: { ...p.sc.pose } } };
     else {
@@ -2784,7 +2795,7 @@ export class GameEngine {
         if (this.hooked(p)) add(['Shift', 'E'], 'pick it up still hooked up');
       }
       if (!this.pencil && this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
-      add(['1–0, -, ='], 'make equipment in your hands');
+      add(['1–0, -, =, Z'], 'make equipment in your hands');
     }
     if (!this.pencil) {
       if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');

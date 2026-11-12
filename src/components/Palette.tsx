@@ -90,11 +90,22 @@ const ICONS: Record<string, ReactNode> = {
       <path className="digits" d="M14.5 24.5 H25.5" style={{ stroke: 'yellowgreen' }} />
     </>
   ),
+  thermometer: (
+    <>
+      <path className="pipe" d="M12 16 V37" />
+      <rect className="glass" x="9" y="3" width="6" height="13" rx="1.5" />
+      <rect className="valve" x="20" y="3" width="12" height="31" rx="1.5" />
+      <path className="pipe" d="M12 28.5 H24" style={{ strokeWidth: 2 }} />
+      <path d="M26 7 V26" style={{ stroke: 'var(--glass)', strokeWidth: 3 }} />
+      <path d="M26 15 V27" style={{ stroke: '#d8443b', strokeWidth: 1.5 }} />
+      <circle cx="26" cy="28.5" r="2.8" style={{ fill: '#d8443b', stroke: 'none' }} />
+    </>
+  ),
 };
 
 /**
- * The equipment that can be made, along the bottom of the view: a key along the number row makes one in the player's
- * hands, if they're empty. Clicking one does the same, when the mouse isn't captured. Last is the pencil, for sticky
+ * The equipment that can be made, along the bottom of the view: a key (along the number row, and then from Z along
+ * the bottom row of letters) makes one in the player's hands, if they're empty. Clicking one does the same, when the mouse isn't captured. Last is the pencil, for sticky
  * notes.
  */
 export function Palette({ engine, pencil }: { engine: GameEngine; pencil: boolean }) {

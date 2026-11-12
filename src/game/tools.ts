@@ -3,6 +3,7 @@ import { THERMO } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP, DELIVERY, TRACE } from './config';
+import { COOLING } from './cooling';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
 import { CELL, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
@@ -384,9 +385,10 @@ export const DIVERTER_HOLD = 0.4;
 /**
  * The inline instruments: each is a vertical glass tube, whose top a hose's nozzle snaps onto (see INLINE_DOCK), draining
  * straight through at FUNNEL_RATE however full it is, down to a spout at its foot, past what reads what goes by: a
- * cabinet beside it (see INSTRUMENT), or the flow meter's little readout (see METER_BODY).
+ * cabinet beside it (see INSTRUMENT), the flow meter's little readout (see METER_BODY), or the thermometer's bulb (see
+ * THERMOMETER_BODY).
  */
-export const INLINE_TOOLS: readonly ToolKind[] = ['analyzer', 'spectroscope', 'visualizer', 'meter'];
+export const INLINE_TOOLS: readonly ToolKind[] = ['analyzer', 'spectroscope', 'visualizer', 'meter', 'thermometer'];
 /** How much an inline instrument's tube holds, by volume: a twentieth of a flask, just a buffer. */
 export const TUBE_CAP = CAP / 20;
 /** How wide an inline instrument's tube is inside, in local units. */
@@ -468,6 +470,23 @@ export function heatBy(f: Fluid, wireT: number, h: number): void {
   f.Q += roundRandom((heatAt(wireT, f.N) - f.Q) * (1 - Math.exp(-HEATER.rate * h)));
 }
 
+/**
+ * How the thermometer behaves:
+ * - tau: how quickly its bulb takes the temperature of what streams past it, in sim seconds: it closes all but 1/e of
+ *   the gap in this;
+ * - flow: the flow, by volume per sim second, from which the bulb is wholly in the stream; in less, it's that much
+ *   less in the stream and that much more in the room's air;
+ * - roomTau: how quickly the bulb drifts to the room's temperature with nothing passing, in sim seconds;
+ * - T0, T1: the bottom and top of its scale, which is logarithmic (see thermometerAt).
+ */
+export const THERMOMETER = { tau: 1, flow: 0.02 * CAP, roomTau: 8, T0: 0.1, T1: 100 };
+
+/** How far up its scale a thermometer's column stands at temperature T, from 0 (T0 or colder) to 1 (T1 or hotter): by the log of T. */
+export function thermometerAt(T: number): number {
+  const { T0, T1 } = THERMOMETER;
+  return Math.max(0, Math.min(1, Math.log(Math.max(T, 1e-9) / T0) / Math.log(T1 / T0)));
+}
+
 /** How many digits the meter's display has. */
 export const METER_DIGITS = 4;
 
@@ -514,7 +533,7 @@ export function analyzerSector(atom: Atom): (readonly [number, number])[] {
 
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater' | 'analyzer'
-  | 'spectroscope' | 'visualizer' | 'meter' | 'tank' | 'receptacle';
+  | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'tank' | 'receptacle';
 
 /**
  * Tools there's only ever one of: not in the palette, and never put away. The receptacle is the whole cryostabilizer
@@ -722,6 +741,18 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: TUBE_H + 32,
     box: { x0: -15, x1: 15, y0: -6, y1: TUBE_H + 34 },
   },
+  thermometer: {
+    // the flow meter's tube and pipe, past the bulb of a thermometer on a card beside them (see THERMOMETER_BODY)
+    tanks: [{ name: 'tube', x0: -TUBE_W / 2, x1: TUBE_W / 2 }],
+    tankH: TUBE_H,
+    tankCap: TUBE_CAP,
+    round: true,
+    noValve: true,
+    spouts: [0],
+    valveY: TUBE_H,
+    spoutY: TUBE_H + 46,
+    box: { x0: -15, x1: 33, y0: -6, y1: TUBE_H + 48 },
+  },
   analyzer: {
     // a glass tube straight down to a spout, and a cabinet beside it with a screen (see ANALYZER), which takes its
     // sample from the tube's foot and lets it out a waste spout on its far side, two grid cells along
@@ -897,6 +928,17 @@ export const METER_BODY = {
   display: { x0: -12, x1: 12, y0: TUBE_H + 7, y1: TUBE_H + 17 },
 };
 
+/**
+ * The thermometer's card, beside its tube, reaching `hz` either side of it front to back, in local units; the glass
+ * capillary on its front, whose column of spirit stands between `bottom` (THERMOMETER.T0) and `top` (T1) of the way
+ * up; and its bulb, at the capillary's foot, level with a stub off the pipe under the tube, which what passes runs over.
+ */
+export const THERMOMETER_BODY = {
+  x0: 9, x1: 31, y0: -4, y1: TUBE_H + 36, hz: 1.5,
+  column: { x: 21, top: 2, bottom: TUBE_H + 22 },
+  bulb: { x: 21, y: TUBE_H + 28, r: 3.2 },
+};
+
 /** Horizontal center of a tank, which is also where its valve is. */
 export const tankX = (tk: { x0: number; x1: number }) => (tk.x0 + tk.x1) / 2;
 
@@ -918,6 +960,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   sorter: 'Size sorter',
   heater: 'Resistive heater',
   meter: 'Flow meter',
+  thermometer: 'Thermometer',
   tank: 'Tank',
   receptacle: 'Cryostabilizer',
   analyzer: 'Composition analyzer',
@@ -1001,6 +1044,8 @@ export function separatorShares(): number[][] {
  *   a trickle through its faucet, the second spout, as far as its one valve is open.
  * - A **flow meter** is an inline instrument (see INLINE_TOOLS): its tube drains straight through to one spout, and
  *   it shows what flows out, averaged over the recent past (see INSTRUMENT_TAU, rate and meterText).
+ * - A **thermometer** is an inline instrument too, which lets everything through past its bulb, whose temperature
+ *   follows what passes (see warm), with two markers left at the highest and lowest it's read (see shake).
  * - A **composition analyzer** is an inline instrument too, and it draws off ANALYZER_SAMPLE of what passes, out its waste spout, reading that (see
  *   composition) onto a screen, averaged over the recent past (see INSTRUMENT_TAU).
  * - A **spectroscope** is an inline instrument too, which lets everything through, counting the bonds that pass over
@@ -1052,6 +1097,11 @@ export class Tool {
    * once that's down to less than TRACE a sim second.
    */
   rate = 0;
+  /** A thermometer's bulb's temperature (see warm), which its column shows; the room's to start with. */
+  temp = COOLING.ambient;
+  /** A thermometer's markers: the highest and the lowest its bulb has been since it was last shaken (see shake). */
+  hi = COOLING.ambient;
+  lo = COOLING.ambient;
   /** An inline instrument's exponentially weighted average of what it's measured, per sim second (see smooth). */
   private smoothed: number[] | null = null;
   /**
@@ -1114,6 +1164,7 @@ export class Tool {
     // again from nothing measured, as it would have to within less than TRACE
     if (this.tanks.every((tk) => tk.N <= 0) && this.rate === 0 && !this.reading && !this.links && this.bonds.every((b) => b === 0)) {
       this.smoothed = null;
+      if (this.kind === 'thermometer') this.warm(h, null);
       return this.none();
     }
     const T = this.tanks.length;
@@ -1146,6 +1197,7 @@ export class Tool {
       const [v] = this.smooth(h, [volume(packets[0])]);
       this.rate = v >= TRACE ? v : 0;
     }
+    if (this.kind === 'thermometer') this.warm(h, packets[0]);
     if (this.kind === 'analyzer') {
       const [v, ...spec] = this.smooth(h, [volume(packets[1]), ...composition(packets[1], 1)]);
       this.reading = v >= TRACE ? spec.map((x) => x / v) : null;
@@ -1159,6 +1211,43 @@ export class Tool {
       this.links = v >= TRACE ? shares.map((x) => x / v) : null;
     }
     return this.out;
+  }
+
+  /**
+   * A thermometer's bulb over a step of h sim seconds in which `f` ran past it (null for nothing): as far as it's in
+   * the stream (wholly, from THERMOMETER.flow up), it closes on the stream's temperature over THERMOMETER.tau, and for
+   * the rest, on the room's over THERMOMETER.roomTau. Its markers are left at the highest and lowest it reaches.
+   */
+  private warm(h: number, f: Fluid | null): void {
+    const wet = f && f.N > 0 ? Math.min(1, volume(f) / (THERMOMETER.flow * h)) : 0;
+    if (wet > 0) this.temp += (temperature(f!) - this.temp) * (1 - Math.exp((-wet * h) / THERMOMETER.tau));
+    if (wet < 1 && this.temp !== COOLING.ambient) {
+      this.temp += (COOLING.ambient - this.temp) * (1 - Math.exp((-(1 - wet) * h) / THERMOMETER.roomTau));
+      // once it's as good as there, it's there, so an idle thermometer comes to rest
+      if (Math.abs(this.temp - COOLING.ambient) < 1e-6) this.temp = COOLING.ambient;
+    }
+    this.hi = Math.max(this.hi, this.temp);
+    this.lo = Math.min(this.lo, this.temp);
+  }
+
+  /** Shake a thermometer's markers back down onto its column, as picking it up does: both go to what it reads now. */
+  shake(): void {
+    this.hi = this.lo = this.temp;
+  }
+
+  /**
+   * What a save keeps of an instrument's own state, as numbers, or undefined if it has none: a thermometer's bulb's
+   * temperature and its two markers.
+   */
+  get memory(): number[] | undefined {
+    return this.kind === 'thermometer' ? [this.temp, this.hi, this.lo] : undefined;
+  }
+
+  /** Put back what a save kept (see memory), wherever it's the right length and all finite numbers. */
+  remember(m: unknown): void {
+    const want = this.memory?.length;
+    if (!Array.isArray(m) || m.length !== want || !m.every((x) => typeof x === 'number' && Number.isFinite(x))) return;
+    if (this.kind === 'thermometer') [this.temp, this.hi, this.lo] = m as number[];
   }
 
   /** Scratch fluid i (see scratch), emptied. */

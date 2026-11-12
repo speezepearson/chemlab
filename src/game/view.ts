@@ -24,7 +24,7 @@ import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
   clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
-  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
+  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, TANK_H, THERMOMETER, THERMOMETER_BODY, thermometerAt, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
 
@@ -583,6 +583,39 @@ function drawDiverter(sc: Screen, gate: 'reservoir' | 'waste', flowing: boolean)
   sc.tex.needsUpdate = true;
 }
 
+/**
+ * A thermometer's card: cream enamel, with ticks down the right of where the capillary runs, as on log paper: at 1 to
+ * 9 times each power of ten from THERMOMETER.T0 to T1, those at the powers of ten longer, and numbered on the
+ * capillary's left. It's drawn once.
+ */
+function drawThermometerCard(sc: Screen): void {
+  const { ctx, ppu } = sc;
+  const { column: c, ...b } = THERMOMETER_BODY;
+  // the screen covers the card but for a margin of 1 all round
+  ctx.setTransform(ppu, 0, 0, ppu, -(b.x0 + 1) * ppu, -(b.y0 + 1) * ppu);
+  ctx.fillStyle = '#d6d1be';
+  ctx.fillRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
+  ctx.strokeStyle = ctx.fillStyle = '#2a2925';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = '600 3.1px "Schibsted Grotesk", sans-serif';
+  const { T0, T1 } = THERMOMETER;
+  const y = (T: number) => c.bottom + (c.top - c.bottom) * thermometerAt(T);
+  for (let p = Math.round(Math.log10(T0)); 10 ** p <= T1 * 1.0001; p++)
+    for (let m = 1; m <= 9; m++) {
+      const T = m * 10 ** p;
+      if (T > T1 * 1.0001) break;
+      const len = m === 1 ? 4 : m === 5 ? 2.6 : 1.6;
+      ctx.lineWidth = m === 1 ? 0.45 : 0.3;
+      ctx.beginPath();
+      ctx.moveTo(c.x + 2.2, y(T));
+      ctx.lineTo(c.x + 2.2 + len, y(T));
+      ctx.stroke();
+      if (m === 1) ctx.fillText(String(Number(T.toPrecision(1))), c.x - 7.3, y(T));
+    }
+  sc.tex.needsUpdate = true;
+}
+
 /** How far the station's needle swings, from its left stop to its right, in radians, about straight up. */
 const NEEDLE_SWEEP = (140 * Math.PI) / 180;
 
@@ -1021,6 +1054,8 @@ class ToolView {
   private filmMats: THREE.MeshBasicMaterial[] = [];
   private cells: { m: THREE.Mesh; mat: THREE.MeshBasicMaterial }[] = [];
   private wire?: THREE.MeshStandardMaterial;
+  /** A thermometer's column of spirit, and its two markers (see buildThermometer). */
+  private spirit?: { column: THREE.Mesh; hi: THREE.Mesh; lo: THREE.Mesh };
   /** The cryostabilizer station's gauge's segments, bottom up. */
   private segments: THREE.MeshStandardMaterial[] = [];
 
@@ -1080,7 +1115,10 @@ class ToolView {
       // out of the cabinet's far side to its waste spout
       const { body: b, inY } = INSTRUMENT;
       pipes(art, [[0, TH], [0, sh.spoutY - 4]]);
-      if (t.kind !== 'meter') pipes(art, [[0, inY], [b.x0, inY]], 1.3);
+      // a thermometer's bulb sits on a stub off the pipe
+      const bulb = THERMOMETER_BODY.bulb;
+      if (t.kind === 'thermometer') pipes(art, [[0, bulb.y], [bulb.x, bulb.y]], 1.6, THERMOMETER_BODY.hz + 1.6);
+      else if (t.kind !== 'meter') pipes(art, [[0, inY], [b.x0, inY]], 1.3);
       if (t.kind === 'analyzer') {
         const x = sh.spouts[1];
         pipes(art, [[b.x1, ANALYZER.wasteY], [x, ANALYZER.wasteY], [x, sh.spoutY - 4]]);
@@ -1179,6 +1217,7 @@ class ToolView {
     if (t.kind === 'sorter') this.buildChute();
     if (INLINE_TOOLS.includes(t.kind)) {
       if (t.kind === 'meter') this.buildMeter();
+      else if (t.kind === 'thermometer') this.buildThermometer();
       else this.buildInstrument();
       this.buildThread(TH);
     }
@@ -1409,6 +1448,31 @@ class ToolView {
   }
 
   /**
+   * A thermometer: an enamel card beside the tube, its scale printed on it (see drawThermometerCard), with a glass
+   * capillary up its front from a bulb of red spirit at its foot, which sits on a stub off the pipe; the column of
+   * spirit in it, as long as its reading (see thermometerAt); and two little black markers, one either side of the
+   * capillary, at the highest and lowest it's read.
+   */
+  private buildThermometer(): void {
+    const { column: c, bulb, hz, ...b } = THERMOMETER_BODY;
+    block(this.art, panelMat, b.x0, b.x1, b.y0, b.y1, -hz, hz, 1);
+    this.screen = new Screen(this.art, b.x0 + 1, b.x1 - 1, b.y0 + 1, b.y1 - 1, hz + 0.06, 14);
+    drawThermometerCard(this.screen);
+    const z = hz + 1.6;
+    rod(this.art, glassMat, v3(c.x, c.top - 3, z), v3(c.x, bulb.y, z), 1.4);
+    const spirit = new THREE.MeshStandardMaterial({ color: 0xc92f27, roughness: 0.3, emissive: 0x300806 });
+    const ball = new THREE.Mesh(unitSphere, spirit);
+    ball.scale.setScalar(bulb.r);
+    ball.position.copy(v3(bulb.x, bulb.y, z));
+    this.art.add(ball);
+    const column = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.65, 1, 8).translate(0, 0.5, 0), spirit);
+    column.position.copy(v3(c.x, bulb.y, z));
+    this.art.add(column);
+    const marker = (dx: number) => block(this.art, leverMat, c.x + dx - 1.7, c.x + dx + 1.7, -0.45, 0.45, hz, hz + 1.2);
+    this.spirit = { column, hi: marker(3.4), lo: marker(-3.4) };
+  }
+
+  /**
    * The cryostabilizer station (see STATION): a steel plate, a block of the wall in a rubber seam, with a narrow glass
    * pane for the reservoir's column, its fluid behind it filling it from the bottom as the column fills, and its name
    * printed above; a glass funnel low beside it, whose stem runs down and back into the plate, over the diverter's LCD
@@ -1617,6 +1681,14 @@ class ToolView {
       const rgb = through.N > 0 ? fluidRGB(through) : null;
       this.thread.m.visible = !!rgb;
       if (rgb) setRGB(this.thread.mat.color, rgb);
+    }
+    if (this.spirit) {
+      // the column runs from the bulb up to its reading on the scale, and each marker sits at its own
+      const { column: c, bulb } = THERMOMETER_BODY;
+      const y = (T: number) => c.bottom + (c.top - c.bottom) * thermometerAt(T);
+      this.spirit.column.scale.y = Math.max(0.01, bulb.y - y(t.temp));
+      this.spirit.hi.position.y = -y(t.hi);
+      this.spirit.lo.position.y = -y(t.lo);
     }
     if (t.kind === 'meter' && this.screen) {
       const s = this.screen;

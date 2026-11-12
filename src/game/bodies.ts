@@ -4,7 +4,7 @@ import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { CELL, groundAt, toCardinal, toCell, toWorld, type Pose, type Vec3 } from './space';
 import {
-  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, TANK_H, tankDepth, tankX, overMouth, type Hose, type Mouth, type Tool,
+  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, TANK_H, THERMOMETER_BODY, tankDepth, tankX, overMouth, type Hose, type Mouth, type Tool,
   type ToolKind,
 } from './tools';
 
@@ -121,8 +121,8 @@ export function tankNoteY(t: Tool, k: number): number {
  * under them the pipes, valves and spouts there, across only as far as they reach. The cryostabilizer station's are
  * its funnel, the plate in the wall, and its spouts' pipes out from it. An inline instrument's are its
  * tube and the pipe down from it, and the cabinet beside them, and any pipe on to a spout past the cabinet, or the
- * flow meter's readout round the pipe; the tube's top is flush with its opening, for a nozzle to snap onto (see
- * INLINE_DOCK).
+ * flow meter's readout round the pipe, or the thermometer's card beside it; the tube's top is flush with its opening,
+ * for a nozzle to snap onto (see INLINE_DOCK).
  */
 export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean }[] {
   const sh = t.shape;
@@ -151,6 +151,11 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
     if (t.kind === 'meter') {
       const m = METER_BODY;
       return [...tube, { x0: m.x0, x1: m.x1, y0: m.y0, y1: m.y1, hz: m.hz }];
+    }
+    if (t.kind === 'thermometer') {
+      // its card, and the capillary and bulb on its front
+      const m = THERMOMETER_BODY;
+      return [...tube, { x0: m.x0, x1: m.x1, y0: m.y0, y1: m.y1, hz: m.hz + 2, z: 2 }];
     }
     const past = sh.spouts.filter((x) => x > c.x1);
     return [

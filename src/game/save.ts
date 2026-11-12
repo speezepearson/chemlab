@@ -72,6 +72,8 @@ export interface SavedTool extends SavedDepth {
   note?: string;
   /** A spectrometer's last reading, if it's been run (see spectrum). */
   reading?: number[];
+  /** An instrument's own state, if it has any (see Tool.memory): a thermometer's reading and markers. */
+  memory?: number[];
 }
 
 export interface SavedScale extends SavedDepth {
