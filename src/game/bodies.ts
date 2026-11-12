@@ -166,8 +166,8 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
       ...past.map((x) => ({ x0: c.x1, x1: x + 6, y0: ANALYZER.wasteY - 6, y1: b.y1, hz: 6 })),
     ];
   }
-  const x0s = sh.tanks.map((k) => (sh.cup ? tankX(k) - sh.cup.w : k.x0));
-  const x1s = sh.tanks.map((k) => (sh.cup ? tankX(k) + sh.cup.w : k.x1));
+  const x0s = sh.tanks.map((k) => (sh.cup ? Math.min(k.x0, tankX(k) - sh.cup.w) : k.x0));
+  const x1s = sh.tanks.map((k) => (sh.cup ? Math.max(k.x1, tankX(k) + sh.cup.w) : k.x1));
   const tanks = {
     x0: Math.min(...x0s) - 2, x1: Math.max(...x1s) + 2, y0: (sh.cup ? -sh.cup.h : 0) - 6, y1: bottom,
     hz: Math.max(D.tank / 2 + 2, sh.cup ? sh.cup.w + 1 : 0), round: sh.round,

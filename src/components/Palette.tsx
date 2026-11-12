@@ -105,6 +105,15 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M15.5 17 H24.5 M15.5 24 H24.5 M15.5 27.5 H24.5" style={{ stroke: 'var(--pipe)', strokeWidth: 2.2, opacity: 0.75 }} />
     </>
   ),
+  culture: (
+    <>
+      <path className="glass" d="M14 3 H26 L32 10 V35 H8 V10 Z" />
+      <g style={{ fill: '#96d6ff', stroke: 'none' }}>
+        {[14, 20, 26].flatMap((x) => [15, 22, 29].map((y) => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.7" />))}
+      </g>
+      <circle cx="20" cy="22" r="1.7" style={{ fill: '#8a5a36', stroke: 'none' }} />
+    </>
+  ),
   thermometer: (
     <>
       <path className="pipe" d="M12 16 V37" />

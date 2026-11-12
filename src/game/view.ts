@@ -24,7 +24,7 @@ import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
   clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
-  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, stripBands, TANK_H, THERMOMETER, THERMOMETER_BODY, thermometerAt, chuteY, levelIn, meterText, tankPieces, tankX,
+  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, stripBands, cultureCells, cultureDead, TANK_H, THERMOMETER, THERMOMETER_BODY, thermometerAt, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
 
@@ -655,6 +655,9 @@ function drawThermometerCard(sc: Screen): void {
   sc.tex.needsUpdate = true;
 }
 
+/** How long a sleeper culture's cell is shown dying, swollen and amber, in sim seconds. */
+const DYING = 1.2;
+
 /** How far the station's needle swings, from its left stop to its right, in radians, about straight up. */
 const NEEDLE_SWEEP = (140 * Math.PI) / 180;
 
@@ -1095,6 +1098,11 @@ class ToolView {
   private wire?: THREE.MeshStandardMaterial;
   /** The floats in the swell bulbs' necks, and how high each rides, in the tool's own frame, for what its tank holds. */
   private floats: { m: THREE.Mesh; at: (v: Vessel) => number }[] = [];
+  /**
+   * A sleeper culture's cells (see cultureCells), and the sim time each was first seen dead, so it can be shown dying;
+   * those dead when the plate was first drawn (as when a save loads) are just dead.
+   */
+  private culture?: { cells: ReturnType<typeof cultureCells>; died: number[]; seen: boolean };
   /** A thermometer's column of spirit, and its two markers (see buildThermometer). */
   private spirit?: { column: THREE.Mesh; hi: THREE.Mesh; lo: THREE.Mesh };
   /** The cryostabilizer station's gauge's segments, bottom up. */
@@ -1166,6 +1174,7 @@ class ToolView {
       }
     } else if (t.kind === 'dilatometer') for (const tk of sh.tanks) pipes(art, [[tankX(tk), floor], [tankX(tk), sh.spoutY - 4]]);
     else if (t.kind === 'strip') this.buildStrip();
+    else if (t.kind === 'culture') this.buildCulture();
     else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);
     sh.spouts.forEach((x, k) => pick(block(art, pipeMat, x - 4, x + 4, sh.spoutY - 6, sh.spoutY, -4, 4), 'spout', k));
 
@@ -1190,7 +1199,7 @@ class ToolView {
           new THREE.BoxGeometry(w - 1, r.y1 - r.y0, d - 1).translate(cx, -(r.y0 + r.y1) / 2, 0),
           frustum(cx, o.y, r.y0, 2 * sh.cup.w - 1, 2 * sh.cup.w - 1, w - 1, d - 1, false),
         ];
-        this.graduations(r, o, sh.cup, d, pieces);
+        if (t.kind === 'pipette') this.graduations(r, o, sh.cup, d, pieces);
       } else if (sh.funnel) {
         glassFrom(art, frustum(cx, r.y0, r.y1, w, d, FUNNEL_TIP, FUNNEL_TIP, true));
         geoms = [frustum(cx, r.y0 + 0.5, r.y1 - 0.5, w - 1.5, d - 1.5, FUNNEL_TIP - 1, FUNNEL_TIP - 1, false)];
@@ -1486,6 +1495,65 @@ class ToolView {
     block(this.art, darkMat, -w - 1, w + 1, TH, y0 + 1.5, -1.6, 1.6, 0.6);
     block(this.art, paperMat, -w, w, y0, y1, -0.3, 0.3).castShadow = true;
     this.screen = new Screen(this.art, -w, w, y0, y1, 0.36, 6);
+  }
+
+  /**
+   * A sleeper culture's plate: a dark backing behind the glass, in a frame, and the cells drawn over its front (see
+   * drawCulture), so they show against the dark through whatever's in with them.
+   */
+  private buildCulture(): void {
+    const r = tankRect(this.t, 0);
+    const d = TOOL_DEPTH[this.t.kind].tank;
+    block(this.art, darkMat, r.x0 - 2.5, r.x1 + 2.5, r.y0, r.y1 + 2.5, -d / 2 - 1.6, -d / 2 - 0.3, 0.6);
+    for (const x of [r.x0 - 2.5, r.x1 + 0.5]) block(this.art, darkMat, x, x + 2, r.y0, r.y1 + 2.5, -d / 2 - 0.3, d / 2 + 0.8, 0.6);
+    block(this.art, darkMat, r.x0 - 2.5, r.x1 + 2.5, r.y1 + 0.5, r.y1 + 2.5, -d / 2 - 0.3, d / 2 + 0.8, 0.6);
+    this.screen = new Screen(this.art, r.x0, r.x1, r.y0, r.y1, d / 2 + 0.3, 10, true);
+    this.culture = { cells: cultureCells(), died: [], seen: false };
+  }
+
+  /**
+   * A sleeper culture's cells: each a pale blue dot with a bright middle while it's alive; swollen and amber for
+   * DYING sim seconds from when it dies; and a small brown dot from then on.
+   */
+  private drawCulture(clock: number): void {
+    const { t } = this;
+    const sc = this.screen!;
+    const cu = this.culture!;
+    const dead = cultureDead(t.worst);
+    let dying = false;
+    let count = 0;
+    cu.cells.forEach((c, i) => {
+      if (c.q >= dead) return;
+      count++;
+      cu.died[i] ??= cu.seen ? clock : -Infinity;
+      if (clock - cu.died[i] < DYING) dying = true;
+    });
+    cu.seen = true;
+    const key = dying ? `dying ${clock.toFixed(2)}` : `${count}`;
+    if (key === sc.key) return;
+    sc.key = key;
+    const { ctx, ppu } = sc;
+    const r = tankRect(t, 0);
+    ctx.setTransform(ppu, 0, 0, ppu, -r.x0 * ppu, -r.y0 * ppu);
+    ctx.clearRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
+    const dot = (x: number, y: number, rad: number, color: string) => {
+      ctx.beginPath();
+      ctx.arc(x, y, rad, 0, 2 * Math.PI);
+      ctx.fillStyle = color;
+      ctx.fill();
+    };
+    cu.cells.forEach((c, i) => {
+      const since = c.q < dead ? clock - cu.died[i] : -1;
+      if (since < 0) {
+        dot(c.x, c.y, 1.15, 'rgba(150, 214, 255, 0.92)');
+        dot(c.x - 0.3, c.y - 0.3, 0.42, 'rgba(240, 250, 255, 0.95)');
+      } else if (since < DYING) {
+        // it swells, amber, then shrinks to what's left of it
+        const u = since / DYING;
+        dot(c.x, c.y, 1.15 + 0.75 * Math.sin(Math.PI * Math.min(1, 1.4 * u)), `rgba(242, 176, 58, ${0.95 - 0.3 * u})`);
+      } else dot(c.x, c.y, 0.8, 'rgba(92, 58, 34, 0.95)');
+    });
+    sc.tex.needsUpdate = true;
   }
 
   /**
@@ -1794,6 +1862,7 @@ class ToolView {
       this.spirit.lo.position.y = -y(t.lo);
     }
     if (t.kind === 'strip' && this.screen) drawStrip(this.screen, t);
+    if (t.kind === 'culture') this.drawCulture(clock);
     if (t.kind === 'meter' && this.screen) {
       const s = this.screen;
       const text = meterText(t.rate);

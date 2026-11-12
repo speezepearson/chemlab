@@ -1,7 +1,7 @@
 import { BOND_KEYS, BONDS, type Atom } from '../chem/atoms';
 import { THERMO } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
-import { END_WEIGHT } from '../chem/shape';
+import { END_WEIGHT, LOOSE_ENDS } from '../chem/shape';
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP, DELIVERY, TRACE } from './config';
 import { COOLING } from './cooling';
@@ -559,6 +559,80 @@ export function scorchAt(T: number): number {
   return Math.max(0, Math.min(1, (T - from) / (to - from)));
 }
 
+/**
+ * How a sleeper culture behaves (see SHAPES.culture and Tool.dose):
+ * - tau: how quickly the cells' dose follows what's in the plate, in sim seconds;
+ * - median, spread: the cells' tolerances, which are lognormal: half of them die at a dose of `median`, and `spread` is
+ *   the standard deviation of the log of the dose a cell dies at;
+ * - heat: fluid hotter than `from` harms them too, as `per` of a loose end per molecule for each unit of temperature
+ *   above it;
+ * - pitch: how far apart the cells are, in local units, in rows half a step out of line with each other.
+ */
+export const CULTURE = { tau: 5, median: 0.15, spread: 0.6, heat: { from: 2, per: 0.2 }, pitch: 3.2 };
+
+/** How loose a molecule of each species is, to a sleeper culture: its loose ends (see LOOSE_ENDS), or 1 for a lone atom. */
+const LOOSENESS: readonly number[] = SPECIES.map((sp, s) => (sp.size === 1 ? 1 : LOOSE_ENDS[s].length));
+
+/**
+ * What a fluid does to a sleeper culture: its loose ends per molecule (a lone atom counting as one), plus, if it's
+ * hotter than CULTURE.heat.from, CULTURE.heat.per for each unit of temperature above that. Nothing, if there's none.
+ */
+export function harm(f: Fluid): number {
+  let ends = 0;
+  let molecules = 0;
+  for (let s = 0; s < NS; s++) {
+    if (!f.n[s]) continue;
+    ends += f.n[s] * LOOSENESS[s];
+    molecules += f.n[s];
+  }
+  if (molecules <= 0) return 0;
+  return ends / molecules + CULTURE.heat.per * Math.max(0, temperature(f) - CULTURE.heat.from);
+}
+
+/** The share of a sleeper culture's cells that the worst dose it's had, `worst`, has killed: the lognormal's cumulative share (see CULTURE). */
+export function cultureDead(worst: number): number {
+  if (!(worst > 0)) return 0;
+  const z = Math.log(worst / CULTURE.median) / CULTURE.spread;
+  // the normal distribution's cumulative share at z, by Abramowitz and Stegun's 7.1.26 for erf, good to 1.5e-7
+  const x = Math.abs(z) / Math.SQRT2;
+  const t = 1 / (1 + 0.3275911 * x);
+  const erf = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+  return 0.5 * (1 + Math.sign(z) * erf);
+}
+
+/**
+ * A sleeper culture's cells, on its plate: where each is, in local units, and `q`, how hardy it is, as its place among
+ * them all from 0 (the first to die) to 1: a cell is dead once the share killed (see cultureDead) passes its q. They
+ * stand in rows CULTURE.pitch apart, each row half a step out of line with the last, and which is hardy is scattered
+ * among them, the same way on every plate.
+ */
+export function cultureCells(): { x: number; y: number; q: number }[] {
+  const tk = SHAPES.culture.tanks[0];
+  const H = SHAPES.culture.tankH ?? TANK_H;
+  const p = CULTURE.pitch;
+  const cells: { x: number; y: number; q: number }[] = [];
+  const dy = (p * Math.sqrt(3)) / 2;
+  const rows = Math.floor((H - p) / dy) + 1;
+  const y0 = (H - (rows - 1) * dy) / 2;
+  const across = Math.floor((tk.x1 - tk.x0 - p) / p) + 1;
+  for (let r = 0; r < rows; r++) {
+    // every other row has one fewer, so, centered, it's half a step out of line
+    const cols = across - (r % 2);
+    const x0 = (tk.x0 + tk.x1) / 2 - ((cols - 1) * p) / 2;
+    for (let c = 0; c < cols; c++) cells.push({ x: x0 + c * p, y: y0 + r * dy, q: 0 });
+  }
+  // a fixed shuffle (a small linear congruential generator) of who goes first
+  const order = cells.map((_, i) => i);
+  let seed = 12345;
+  for (let i = order.length - 1; i > 0; i--) {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    const j = seed % (i + 1);
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  order.forEach((cell, rank) => (cells[cell].q = (rank + 0.5) / cells.length));
+  return cells;
+}
+
 /** How many digits the meter's display has. */
 export const METER_DIGITS = 4;
 
@@ -605,7 +679,7 @@ export function analyzerSector(atom: Atom): (readonly [number, number])[] {
 
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater' | 'analyzer'
-  | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'dilatometer' | 'strip' | 'tank' | 'receptacle';
+  | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'dilatometer' | 'strip' | 'culture' | 'tank' | 'receptacle';
 
 /**
  * Tools there's only ever one of: not in the palette, and never put away. The receptacle is the whole cryostabilizer
@@ -851,6 +925,19 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: STRIP.paper.y1,
     box: { x0: -12, x1: 12, y0: -6, y1: STRIP.paper.y1 + 1 },
   },
+  culture: {
+    // a flat glass cell, the plate, filled through a funnel on top; the cells stand on the inside of its front (see
+    // cultureCells); nothing drains from it
+    tanks: [{ name: 'plate', x0: -20, x1: 20 }],
+    tankH: 46,
+    tankCap: CAP / 10,
+    cup: { w: 10, h: 8 },
+    noValve: true,
+    spouts: [],
+    valveY: 46,
+    spoutY: 50,
+    box: { x0: -24, x1: 24, y0: -14, y1: 52 },
+  },
   thermometer: {
     // the flow meter's tube and pipe, past the bulb of a thermometer on a card beside them (see THERMOMETER_BODY)
     tanks: [{ name: 'tube', x0: -TUBE_W / 2, x1: TUBE_W / 2 }],
@@ -1073,6 +1160,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   thermometer: 'Thermometer',
   dilatometer: 'Swell bulbs',
   strip: 'Wicking strip',
+  culture: 'Sleeper culture',
   tank: 'Tank',
   receptacle: 'Cryostabilizer',
   analyzer: 'Composition analyzer',
@@ -1161,6 +1249,9 @@ export function separatorShares(): number[][] {
  *   shows side by side.
  * - A **wicking strip** is a little cup, its pad, over a strip of paper, which takes up a little of what lands in the
  *   pad and draws it along itself, leaving each species where it runs to (see wick and stripBands). It's used once.
+ * - A **sleeper culture** is a flat glass plate of living cells, filled through a funnel on top. What's in it harms
+ *   them by its loose ends, and its heat (see harm); each cell has its own tolerance, and dies for good once the dose
+ *   passes it (see dose and cultureDead). It's used once.
  * - A **thermometer** is an inline instrument too, which lets everything through past its bulb, whose temperature
  *   follows what passes (see warm), with two markers left at the highest and lowest it's read (see shake).
  * - A **composition analyzer** is an inline instrument too, and it draws off ANALYZER_SAMPLE of what passes, out its waste spout, reading that (see
@@ -1220,6 +1311,12 @@ export class Tool {
   wet = 0;
   /** How scorched a wicking strip's paper is (see scorchAt): by the hottest of what it's taken up. */
   scorch = 0;
+  /**
+   * A sleeper culture's cells' dose: what's in its plate does to them (see harm), followed over CULTURE.tau; and the
+   * worst it's been, which is what has killed those of them that are dead (see cultureDead).
+   */
+  dose = 0;
+  worst = 0;
   /** A thermometer's bulb's temperature (see warm), which its column shows; the room's to start with. */
   temp = COOLING.ambient;
   /** A thermometer's markers: the highest and the lowest its bulb has been since it was last shaken (see shake). */
@@ -1285,6 +1382,14 @@ export class Tool {
     if (this.kind === 'heater') return this.heat(h);
     if (this.kind === 'receptacle') return this.receive(h);
     if (this.kind === 'strip') return this.wick(h);
+    if (this.kind === 'culture') {
+      // the cells' dose closes on what's in the plate with them, and the worst of it stays with them
+      const to = harm(this.tanks[0]);
+      if (to !== this.dose) this.dose += (to - this.dose) * (1 - Math.exp(-h / CULTURE.tau));
+      if (Math.abs(to - this.dose) < 1e-9) this.dose = to;
+      this.worst = Math.max(this.worst, this.dose);
+      return this.none();
+    }
     // with nothing in it and its readings faded to nothing, a step would do nothing; an instrument's smoothing starts
     // again from nothing measured, as it would have to within less than TRACE
     if (this.tanks.every((tk) => tk.N <= 0) && this.rate === 0 && !this.reading && !this.links && this.bonds.every((b) => b === 0)) {
@@ -1385,10 +1490,11 @@ export class Tool {
   /**
    * What a save keeps of an instrument's own state, as numbers, or undefined if it has none: a thermometer's bulb's
    * temperature and its two markers; how far a wicking strip's front has run, and how scorched it is (what its paper
-   * took up is saved as a vessel, see sample).
+   * took up is saved as a vessel, see sample); a sleeper culture's dose, and the worst it's been.
    */
   get memory(): number[] | undefined {
     if (this.kind === 'strip') return [this.wet, this.scorch];
+    if (this.kind === 'culture') return [this.dose, this.worst];
     return this.kind === 'thermometer' ? [this.temp, this.hi, this.lo] : undefined;
   }
 
@@ -1398,6 +1504,7 @@ export class Tool {
     if (!Array.isArray(m) || m.length !== want || !m.every((x) => typeof x === 'number' && Number.isFinite(x))) return;
     if (this.kind === 'thermometer') [this.temp, this.hi, this.lo] = m as number[];
     if (this.kind === 'strip') [this.wet, this.scorch] = (m as number[]).map((x) => Math.max(0, Math.min(1, x)));
+    if (this.kind === 'culture') [this.dose, this.worst] = (m as number[]).map((x) => Math.max(0, x));
   }
 
   /** Scratch fluid i (see scratch), emptied. */
