@@ -4,15 +4,15 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { temperature, type Fluid } from '../chem/reactions';
+import type { Fluid } from '../chem/reactions';
 import { OUTLINE } from './outline';
-import { LOOK, coronaAlpha, coronaRadius, glowFalloff, haloAlpha, haloRadius } from './appearance';
+import { glowFalloff } from './appearance';
 import {
   NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
 } from './bodies';
 import { TARGET } from '../chem/species';
 import { CAP, DELIVERY, FLASK_L, GOAL_L, GOAL_TARGET, TRACE } from './config';
-import { Vessel, fluidAlpha, fluidRGB, glowColor, volume, type Flask } from './flask';
+import { Vessel, fluidAlpha, fluidRGB, volume, type Flask } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { COUNTERS, LIFT, PAPER_Z, ROOM, groundAt, toWorld, type Vec3 } from './space';
@@ -865,49 +865,6 @@ function glowTexture(sharpness: number): THREE.Texture {
   return t;
 }
 
-/** The light a hot vessel gives off: a wide halo and a tight corona, washing out whatever's around it. */
-/**
- * How much the glows of hot fluid show: not at all while the cryopod is shut, since they're the lab's light (see
- * AirlockLook.dark), and they're drawn over everything, so its front wouldn't hide them.
- */
-const GLOWS = { lit: 1 };
-
-class Glow {
-  private halo = new THREE.Sprite(new THREE.SpriteMaterial({ blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, transparent: true }));
-  private corona = new THREE.Sprite(new THREE.SpriteMaterial({ blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, transparent: true }));
-
-  constructor(parent: THREE.Object3D) {
-    this.halo.renderOrder = this.corona.renderOrder = 10;
-    parent.add(this.halo, this.corona);
-  }
-
-  update(f: Fluid, cap: number, at: THREE.Vector3): void {
-    const color = glowColor(f);
-    const T = temperature(f);
-    // a trace of hot fluid shouldn't blaze like a full flask
-    const amount = Math.sqrt(Math.min(1, (4 * volume(f)) / cap));
-    const set = (s: THREE.Sprite, R: number, alpha: number, sharpness: number) => {
-      alpha *= GLOWS.lit;
-      s.visible = !!color && alpha * amount >= 0.002;
-      if (!s.visible) return;
-      s.position.copy(at);
-      s.scale.set(2 * R, 2 * R, 1);
-      s.material.map = glowTexture(sharpness);
-      s.material.color.setRGB(color![0] / 255, color![1] / 255, color![2] / 255, THREE.SRGBColorSpace);
-      s.material.opacity = Math.min(1, alpha * amount);
-    };
-    set(this.halo, haloRadius(T), haloAlpha(T), LOOK.haloSharpness);
-    set(this.corona, coronaRadius(T), coronaAlpha(T), LOOK.coronaSharpness);
-  }
-
-  dispose(): void {
-    this.halo.removeFromParent();
-    this.corona.removeFromParent();
-    this.halo.material.dispose();
-    this.corona.material.dispose();
-  }
-}
-
 /* ---------------- flasks ---------------- */
 
 /** The flask's glass and inside, turned about its axis, mouth at the origin. */
@@ -926,7 +883,6 @@ class FlaskView {
   private fluid: FluidMesh;
   private label: Label;
   private flash: THREE.Mesh;
-  readonly glow: Glow;
 
   constructor(
     readonly f: Flask,
@@ -939,7 +895,6 @@ class FlaskView {
     this.fluid = new FluidMesh([flaskFluidGeom], this.tilt);
     this.root.add(this.tilt);
     this.label = new Label(this.root, new THREE.Vector3(0, NOTE_Y, 0));
-    this.glow = new Glow(scene);
     scene.add(this.root);
     pickables.set(glass, { kind: 'flask', f });
   }
@@ -953,15 +908,11 @@ class FlaskView {
     this.tilt.rotation.z = -f.tilt;
     this.fluid.update(f, f.pose.y + fillLevel(f.tilt, volume(f) / f.cap));
     this.label.set(f.label);
-    // centered on its bulb, following any tilt
-    const bulb = toWorld(f.pose, { x: -50 * Math.sin(f.tilt), y: -50 * Math.cos(f.tilt), z: 0 });
-    this.glow.update(f, f.cap, new THREE.Vector3(bulb.x, bulb.y, bulb.z));
   }
 
   dispose(): void {
     this.root.removeFromParent();
     this.fluid.dispose();
-    this.glow.dispose();
   }
 }
 
@@ -1000,7 +951,6 @@ class ToolView {
   private lids: THREE.Mesh[] = [];
   private labels: Label[] = [];
   private note: Label;
-  private glows: Glow[] = [];
   private screen?: Screen;
   /** The station's screen showing how long it's been delivering steadily. */
   private steadyScreen?: Screen;
@@ -1031,7 +981,7 @@ class ToolView {
     // drain pipes and spouts, from the bottom of the tanks (and their sumps)
     const TH = sh.tankH ?? TANK_H;
     const floor = TH + (sh.sump?.h ?? 0);
-    if (sh.wall) this.buildStation(scene, pick);
+    if (sh.wall) this.buildStation(pick);
     else if (t.kind === 'exchanger')
       sh.tanks.forEach((tk, k) => {
         pipes(art, [[tankX(tk), floor], [tankX(tk), HELIX.y - HELIX.r]]);
@@ -1149,7 +1099,6 @@ class ToolView {
       lid.visible = false;
       this.lids.push(lid);
       this.labels.push(new Label(art, v3(tankX(sh.tanks[k]), tankNoteY(t, k))));
-      this.glows.push(new Glow(scene));
       this.flashFrom(art, built, k);
     });
     if (sh.label) {
@@ -1410,7 +1359,7 @@ class ToolView {
    * reservoir (see gaugeSegments); and a green-on-black screen under its label showing the litres of cryostabilizer in
    * it of the litres needed.
    */
-  private buildStation(scene: THREE.Object3D, pick: (m: THREE.Object3D, part: 'body' | 'tank', k?: number) => void): void {
+  private buildStation(pick: (m: THREE.Object3D, part: 'body' | 'tank', k?: number) => void): void {
     const { t, art } = this;
     const sh = t.shape;
     const { paneW, paneH: H, out, plate, funnel: f, block: bk, gauge: g, display: dp } = STATION;
@@ -1469,7 +1418,6 @@ class ToolView {
     this.fluids.push({ fm, level: (v) => onTool(t, 0, f.y + f.h - levelIn(STATION_FUNNEL, Math.min(1, volume(v) / v.cap))).y });
     noLid();
     this.labels.push(new Label(art, v3(fx, tankNoteY(t, 0))));
-    this.glows.push(new Glow(scene));
     // its stem, down and back into the plate, above the diverter's LCD
     const stem = f.y + f.h + 6;
     rod(art, glassMat, v3(fx, f.y + f.h, 0), v3(fx, stem, 0), FUNNEL_TIP / 2);
@@ -1500,7 +1448,6 @@ class ToolView {
     const label = sh.tanks[1].label;
     if (label) printed(art, label.join(' '), x, STATION.labelY, face + 0.1, 11);
     this.labels.push(new Label(art, v3(x, tankNoteY(t, 1))));
-    this.glows.push(new Glow(scene));
     // the gauge beside the reservoir: an LCD stack of segments, as tall as the pane, on a dark strip
     block(art, darkMat, g.x0 - 2, g.x1 + 2, -2, H + 2, face, face + 1);
     const seg = H / g.segments;
@@ -1541,14 +1488,6 @@ class ToolView {
       fit?.(v);
       this.lids[k].visible = t.lidded;
       this.labels[k].set(v.label);
-      const r = tankRect(t, k);
-      // the station's funnel is out in front, and its reservoir behind a pane in the wall
-      const f = STATION.funnel;
-      const c =
-        !t.shape.wall ? onTool(t, tankX(t.shape.tanks[k]), (r.y0 + r.y1) / 2)
-        : k === 0 ? onTool(t, tankX(t.shape.tanks[k]), f.y + f.h / 2)
-        : onTool(t, tankX(t.shape.tanks[k]), (r.y0 + r.y1) / 2, -STATION.out);
-      this.glows[k].update(v, v.cap, new THREE.Vector3(c.x, c.y, c.z));
     });
     this.note.set(t.note);
     for (const [k, pv] of this.levers)
@@ -1654,7 +1593,6 @@ class ToolView {
     this.root.removeFromParent();
     disposeGeometry(this.root);
     for (const { fm } of this.fluids) fm.dispose();
-    for (const g of this.glows) g.dispose();
     this.screen?.tex.dispose();
     this.steadyScreen?.tex.dispose();
   }
@@ -3128,7 +3066,6 @@ export class View {
   }
 
   render(fr: Frame): void {
-    GLOWS.lit = 1 - fr.airlock.dark;
     this.clock += fr.dt;
     const { scene, pickables } = this;
     this.look(fr.eye, fr.yaw, fr.pitch);

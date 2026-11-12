@@ -77,8 +77,7 @@ Each vessel's chemistry is stepped by explicit Euler along with everything else,
 - **Color:** by default, a fluid looks like the atom-weighted mix of its colors, and the bond structure is invisible. This is lossy on purpose: R and G together average to a dull olive, for example, whether bonded or not. (The Appearance panel can try out colors that depend on bonds; see below.)
 - **Temperature:** each effect is a smooth function of T, with no cutoff where one effect takes over from another (see `src/game/appearance.ts`).
   - **Cold** fluids fade toward black. The color's brightness is scaled by `1 − e^(−3T)`: black at T = 0 and almost full brightness by T = 1.
-  - **Hot** fluids glow. The glow's strength is `ln(1+T) / ln(101)`, and it drives the size and opacity of a corona and a wider halo around the flask. At high T it also bleaches the fluid itself toward white.
-  - The glow is subtle but visible at T = 1, obvious at T = 10 and nearly blinding at T = 100.
+  - **Hot** fluids wash out toward white, by `min(1, ln(1+T) / ln(101))²`: barely at T = 1, about a quarter of the way at T = 10, and fully at T = 100. That's the only sign of heat: nothing glows around a hot vessel.
   - God mode shows the actual number.
   - The **Appearance** debug panel tunes every constant in these curves live. *Copy values* puts the current settings on the clipboard as JSON, and *Restore defaults* undoes your changes.
 - **Composition, experimentally:** the Appearance panel can also make color depend on bonds, so reactions show. A fluid is then the atom-weighted average of its molecules' colors, and each molecule's color comes from one of three models:
