@@ -73,10 +73,12 @@ export interface SavedTool extends SavedDepth {
   reading?: number[];
   /**
    * An instrument's own state, if it has any (see Tool.memory): a thermometer's reading and markers; how far a
-   * wicking strip has run, and how scorched it is; which of a sleeper culture's cells are dead.
+   * wicking strip's front has climbed, how dry it is and how scorched; which of a sleeper culture's cells are dead.
    */
   memory?: number[];
-  /** What a wicking strip's paper has taken up (see Tool.sample). */
+  /** What's on a wicking strip's paper, stretch by stretch from its foot (see Tool.paper). */
+  paper?: SavedVessel[];
+  /** From when a wicking strip's paper took up a sample from a pad on top of it, as one vessel; ignored now. */
   sample?: SavedVessel;
 }
 

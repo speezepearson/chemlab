@@ -517,25 +517,38 @@ export function neckShare(vol: number): number {
 }
 
 /**
- * How a wicking strip behaves (see SHAPES.strip and Tool.wick):
- * - cap: how much its paper takes up, by volume: a hundredth of a flask;
- * - uptake: how fast it takes that up from its pad, by volume per sim second;
- * - time: how long the wet front takes to creep the length of the paper, in sim seconds: quickly at first and ever
- *   more slowly, as paper wicks, as the square root of the time (see Tool.wick);
- * - drag: the drag at which a molecule doesn't move at all (see stripRun);
- * - ink: how strongly a band shows: one of `share` of the sample is 1 − e^(−ink·share) opaque, so a twentieth of the
- *   sample is already nearly half as dark as it gets, and what's most of it is no darker than what's half;
- * - faint: the share of `cap` below which the paper holds too little for its bands to come out fully: they're as
- *   strong as the square root of how near it is;
- * - width: how wide a band is, as a share of the paper's length (its standard deviation);
+ * How a wicking strip behaves (see SHAPES.strip and Tool.wick). Its paper stands up in a shallow glass tray; a spot of
+ * a sample is dabbed onto it at its origin (see Tool.dab), and what's in the tray, the carrier, is drawn up the paper,
+ * carrying what's on it along at each species' own pace (see STRIP_RUN):
+ * - cap: how much the paper holds wet from end to end, by volume: a hundredth of a flask. The front climbing a share d
+ *   of the length draws d times this from the tray;
+ * - spot: the most a dab puts on it, by volume: a tenth of cap;
+ * - time: how long the wet front takes to climb the length of the paper, in sim seconds, with carrier enough: quickly
+ *   at first and ever more slowly, as paper wicks, as the square root of the time;
+ * - drag: the drag at which a molecule doesn't move at all (see STRIP_RUN);
+ * - dry: how long the paper takes to dry once the front reaches its top, in sim seconds;
+ * - cells: how many stretches the paper is modelled as, from its foot to its top, one local unit each (see Tool.paper);
+ * - origin: which of them the spot goes on: the one about 0.12 of the way up (see STRIP_ORIGIN), above the tray's rim;
+ * - spread: the share of a species on each stretch that's left behind each time it moves on a stretch (see Tool.wick),
+ *   which is all that widens a band: after n moves it's about √(n · spread · (1 − spread)) stretches wide;
+ * - ink: how strongly what's on it shows (see stripInk), and tint, how much less strongly single atoms do;
  * - scorch: the temperatures from which what it takes up starts to brown the paper, and at which it's charred through;
- * - paper: the paper itself, in local units: reaching w either side of the middle, from y0 down to y1.
+ * - paper: the paper itself, in local units: reaching w either side of the middle, from its foot, just above the
+ *   tray's floor, `len` up, at z, toward the back of the tray;
+ * - tray: the tray, reaching w either side of the middle, h deep and d front to back inside.
  */
 export const STRIP = {
-  cap: CAP / 100, uptake: CAP / 50, time: 20, drag: 34, ink: 12, faint: 0.2, width: 0.012,
+  cap: CAP / 100, spot: CAP / 1000, time: 20, drag: 34, dry: 3, cells: 108, origin: 12, spread: 0.05, ink: 33, tint: 0.4,
   scorch: { from: 2, to: 6 },
-  paper: { w: 9, y0: 11, y1: 115 },
+  paper: { w: 9, foot: 4, len: 108, z: -4.5 },
+  tray: { w: 20, h: 5, d: 16 },
 };
+
+/** Where on a wicking strip's paper the spot goes, as a share of its length from its foot: its origin cell's middle. */
+export const STRIP_ORIGIN = (STRIP.origin + 0.5) / STRIP.cells;
+
+/** How much a wicking strip's tray holds, by volume: as much as it's drawn to hold (see SPACE_PER_ATOM), about 0.02 flask. */
+export const TRAY_CAP = Math.round((2 * STRIP.tray.w * STRIP.tray.d * STRIP.tray.h) / SPACE_PER_ATOM);
 
 /**
  * How far along a wicking strip each species runs, as a share of how far the wet front has: 1 − drag / STRIP.drag,
@@ -546,17 +559,15 @@ export const STRIP = {
 export const STRIP_RUN: readonly number[] = SPECIES.map((sp, s) => Math.max(0, 1 - (sp.weight + END_WEIGHT[s]) / STRIP.drag));
 
 /**
- * The bands a sample leaves on a wicking strip: for each species in it, how far along it runs (see STRIP_RUN) and how
- * opaque its band is (see STRIP.ink and STRIP.faint), furthest first.
+ * How opaque n molecules of species s make one cell of a wicking strip's paper (see STRIP.cells) in that species' own
+ * color: 1 − e^(−ink · v / spot), for their volume v. So a band of what's a twentieth of a full spot shows clearly at
+ * its peak after a full run, while what's most of the spot is as dark as it gets: the paper shows what's there more
+ * than how much. Single atoms, the carrier, only tint it, at STRIP.tint of that; and they dry off the paper, so their
+ * tint fades as it dries, from 0 (wet) to 1 (dry).
  */
-export function stripBands(f: Fluid): { s: number; at: number; ink: number }[] {
-  const vol = volume(f);
-  if (vol <= 0) return [];
-  const strength = Math.sqrt(Math.min(1, vol / (STRIP.faint * STRIP.cap)));
-  const out: { s: number; at: number; ink: number }[] = [];
-  for (let s = 0; s < NS; s++)
-    if (f.n[s]) out.push({ s, at: STRIP_RUN[s], ink: strength * (1 - Math.exp((-STRIP.ink * f.n[s] * roomFor(s)) / vol)) });
-  return out.sort((a, b) => b.at - a.at);
+export function stripInk(s: number, n: number, dryness: number): number {
+  const ink = 1 - Math.exp((-STRIP.ink * n * roomFor(s)) / STRIP.spot);
+  return SPECIES[s].size === 1 ? ink * STRIP.tint * (1 - dryness) : ink;
 }
 
 /** How scorched fluid at temperature T leaves a wicking strip's paper, from 0 (not at all) to 1 (charred through). */
@@ -925,16 +936,17 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -CELL / 2 - 14, x1: CELL / 2 + 14, y0: -(BULB.neck.h + BULB.inlet.rise + BULB.inlet.h) - 6, y1: 62 },
   },
   strip: {
-    // a little glass cup, the pad, over a strip of paper hanging from it (see STRIP.paper); nothing drains from it
-    tanks: [{ name: 'pad', x0: -8, x1: 8 }],
-    tankH: 8,
-    tankCap: 0.016 * CAP,
-    funnel: true,
+    // a shallow glass tray, with a strip of paper standing up in it toward its back (see STRIP.paper), held at its top
+    // by a clip on a thin rod up from the tray's floor, and a little base under it for its stand to clamp; nothing
+    // drains from it
+    tanks: [{ name: 'tray', x0: -STRIP.tray.w, x1: STRIP.tray.w }],
+    tankH: STRIP.tray.h,
+    tankCap: TRAY_CAP,
     noValve: true,
     spouts: [],
-    valveY: 8,
-    spoutY: STRIP.paper.y1,
-    box: { x0: -12, x1: 12, y0: -6, y1: STRIP.paper.y1 + 1 },
+    valveY: STRIP.tray.h,
+    spoutY: STRIP.tray.h + 13,
+    box: { x0: -STRIP.tray.w - 2, x1: STRIP.tray.w + 2, y0: STRIP.paper.foot - STRIP.paper.len - 6, y1: STRIP.tray.h + 13 },
   },
   culture: {
     // a flat glass cell, the plate, filled through a funnel on top and drained through a valve under it; the cells
@@ -1261,8 +1273,9 @@ export function separatorShares(): number[][] {
  * - **Swell bulbs** are two little round tanks with narrow necks (see BULB), pressed together so the necks stand
  *   side by side, each draining at up to PIPETTE_FLOW, heated alike by one wire whose temperature a dial sets (see
  *   wireTemperature and heatBy), so how much each swells shows side by side.
- * - A **wicking strip** is a little cup, its pad, over a strip of paper, which takes up a little of what lands in the
- *   pad and draws it along itself, leaving each species where it runs to (see wick and stripBands). It's used once.
+ * - A **wicking strip** is a strip of paper standing in a shallow tray. A spot of a sample is dabbed onto it (see
+ *   dab), and what's in the tray is drawn up it, carrying each species of the spot along at its own pace (see wick
+ *   and STRIP_RUN), to leave it as a band once the paper's dry. It's used once.
  * - A **sleeper culture** is a flat glass plate of living cells, filled through a funnel on top. What's in it harms
  *   those of them it covers, by its loose ends and its heat (see harm): each dies at random, for good, the sooner the
  *   more harmful the fluid (see sicken). It drains through a valve under it, leaving its cells as they are, as a
@@ -1320,10 +1333,21 @@ export class Tool {
    * once that's down to less than TRACE a sim second.
    */
   rate = 0;
-  /** What a wicking strip's paper has taken up (see wick), which doesn't react or cool; null for any other tool. */
-  readonly sample: Vessel | null;
-  /** How far along a wicking strip's paper the wet front has crept, from 0 to 1, where it's done, and dry. */
-  wet = 0;
+  /**
+   * A wicking strip's paper, stretch by stretch from its foot to its top (see STRIP.cells), each holding what's on
+   * that stretch; it doesn't react or cool, and it takes the heat of what it takes up (see scorch). Empty for any
+   * other tool.
+   */
+  readonly paper: Vessel[];
+  /** How far up a wicking strip's paper the wet front has climbed, as a share of its length, from 0 to 1, its top. */
+  front = 0;
+  /** How far a wicking strip's paper has dried since its front reached the top, from 0 to 1, where it's done. */
+  dryness = 0;
+  /**
+   * Per species, how far it has travelled up a wicking strip's paper, in stretches, since it last moved on one (see
+   * wick). Not saved: a strip loaded mid-run loses less than a stretch of it.
+   */
+  private readonly drift = new Float64Array(NS);
   /** How scorched a wicking strip's paper is (see scorchAt): by the hottest of what it's taken up. */
   scorch = 0;
   /** Which of a sleeper culture's cells are dead, 1 for each that is, in cultureCells' order; null for any other tool. */
@@ -1372,7 +1396,7 @@ export class Tool {
   ) {
     this.tanks = SHAPES[kind].tanks.map((tk) => new Vessel(tk.cap ?? SHAPES[kind].tankCap ?? TANK_CAP));
     this.tube = Array.from({ length: kind === 'heater' ? HEATER_CELLS : 0 }, () => new Vessel(Infinity));
-    this.sample = kind === 'strip' ? new Vessel(STRIP.cap) : null;
+    this.paper = Array.from({ length: kind === 'strip' ? STRIP.cells : 0 }, () => new Vessel(Infinity));
     this.dead = kind === 'culture' ? new Uint8Array(cultureCells().length) : null;
     const nValves = SHAPES[kind].valves?.length ?? this.tanks.length;
     this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' ? 0.5 : 0));
@@ -1479,22 +1503,90 @@ export class Tool {
   }
 
   /**
-   * A wicking strip's step: until its wet front has run the paper's length, the paper takes up what it has room for
-   * from the pad (at STRIP.uptake), scorching if that's hot (see scorchAt); and once it holds anything, the front creeps
-   * on, as the square root of the time since, the whole length in STRIP.time. Then it's dry, and done: it takes up no
-   * more. Nothing leaves it.
+   * Whether a wicking strip's paper would take a spot of v (see dab): while it's unused, its front not yet started,
+   * and its spot isn't full, from anything holding fluid but its own tray.
+   */
+  canDab(v: Vessel): boolean {
+    return this.kind === 'strip' && this.front === 0 && v !== this.tanks[0] && v.N > TRACE && volume(this.paper[STRIP.origin]) < 0.99 * STRIP.spot;
+  }
+
+  /**
+   * Dab a wicking strip's paper on v: it takes a spot of v's fluid at its origin, topping what's there up to
+   * STRIP.spot, scorching if that's hot (see scorchAt). Only unused paper takes a spot (see canDab). Returns the atoms
+   * it took.
+   */
+  dab(v: Vessel): number {
+    if (!this.canDab(v)) return 0;
+    const spot = this.paper[STRIP.origin];
+    const T = temperature(v);
+    const moved = transfer(v, spot, STRIP.spot - volume(spot));
+    if (moved > 0) this.scorch = Math.max(this.scorch, scorchAt(T));
+    spot.Q = 0;
+    return moved;
+  }
+
+  /**
+   * A wicking strip's step. While there's carrier in the tray and the wet front hasn't reached the paper's top, the
+   * paper draws it up: the front climbs as the square root of the time (its distance squared grows steadily), the
+   * whole length in STRIP.time, but only as far as the tray can supply, since climbing a share d of the length takes
+   * d · STRIP.cap from it. What it draws goes into the foot of the paper, scorching it if that's hot (see scorchAt).
+   * As the front climbs a share d, each species travels STRIP_RUN · d · STRIP.cells stretches' worth (see drift), and
+   * for each 1 − STRIP.spread of a stretch it travels, what's on each stretch behind the front moves on into the next
+   * up, all but STRIP.spread of it, which stays behind to move on later: in whole molecules, top down, never past the
+   * front. So what's on the paper runs STRIP_RUN of the way the front does, and a whole stretch at a time, so it
+   * spreads only by what's left behind, into a band √(n · spread · (1 − spread)) stretches wide (its standard
+   * deviation) after n moves. Moving a little of each stretch at every step instead would smear it far wider. Once the front's at
+   * the top, the paper dries over STRIP.dry, and is done: single atoms dry off it, and it takes up nothing more.
+   * Nothing leaves it.
    */
   private wick(h: number): (Vessel | null)[] {
-    const pad = this.tanks[0];
-    const paper = this.sample!;
-    if (this.wet < 1) {
-      if (pad.N > 0 && volume(paper) < paper.cap) {
-        const T = temperature(pad);
-        if (transfer(pad, paper, STRIP.uptake * h) > 0) this.scorch = Math.max(this.scorch, scorchAt(T));
+    const tray = this.tanks[0];
+    const { paper } = this;
+    if (this.front >= 1) {
+      if (this.dryness < 1) {
+        this.dryness = Math.min(1, this.dryness + h / STRIP.dry);
+        if (this.dryness >= 1)
+          for (const v of paper)
+            for (let s = 0; s < NS; s++)
+              if (v.n[s] && SPECIES[s].size === 1) {
+                v.N -= v.n[s];
+                v.n[s] = 0;
+              }
       }
-      // the further the front has to draw the fluid, the slower it goes: its distance squared grows steadily
-      if (paper.N > 0) this.wet = Math.min(1, Math.sqrt(this.wet ** 2 + h / STRIP.time));
+      return this.none();
     }
+    if (tray.N <= 0) return this.none();
+    const C = STRIP.cells;
+    const d = Math.min(Math.min(1, Math.sqrt(this.front ** 2 + h / STRIP.time)) - this.front, volume(tray) / STRIP.cap);
+    if (d <= 0) return this.none();
+    this.scorch = Math.max(this.scorch, scorchAt(temperature(tray)));
+    const passes = Math.ceil(2 * d * C);
+    const from = this.front;
+    for (let k = 1; k <= passes; k++) {
+      transfer(tray, paper[0], (d / passes) * STRIP.cap);
+      paper[0].Q = 0;
+      this.front = Math.min(1, from + (d * k) / passes);
+      const top = Math.min(C, Math.ceil(this.front * C)) - 2;
+      for (let s = 0; s < NS; s++) {
+        this.drift[s] += STRIP_RUN[s] * (d / passes) * C;
+        // what's left behind makes it lag, so it moves on a stretch for each 1 − spread it travels
+        if (this.drift[s] < 1 - STRIP.spread) continue;
+        this.drift[s] -= 1 - STRIP.spread;
+        // all but a little of what's on each stretch behind the front moves on up: top down, so nothing moves twice,
+        // and from the stretch under the front's at most into the front's
+        const size = SPECIES[s].size;
+        for (let c = top; c >= 0; c--) {
+          const [a, b] = [paper[c], paper[c + 1]];
+          const m = a.n[s] && a.n[s] - roundRandom(a.n[s] * STRIP.spread);
+          if (!m) continue;
+          a.n[s] -= m;
+          b.n[s] += m;
+          a.N -= m * size;
+          b.N += m * size;
+        }
+      }
+    }
+    if (this.front > 1 - 1e-9) this.front = 1;
     return this.none();
   }
 
@@ -1522,11 +1614,11 @@ export class Tool {
 
   /**
    * What a save keeps of an instrument's own state, as numbers, or undefined if it has none: a thermometer's bulb's
-   * temperature and its two markers; how far a wicking strip's front has run, and how scorched it is (what its paper
-   * took up is saved as a vessel, see sample); which of a sleeper culture's cells are dead (see dead).
+   * temperature and its two markers; how far a wicking strip's front has climbed, how dry it is and how scorched (what's
+   * on its paper is saved as vessels, see paper); which of a sleeper culture's cells are dead (see dead).
    */
   get memory(): number[] | undefined {
-    if (this.kind === 'strip') return [this.wet, this.scorch];
+    if (this.kind === 'strip') return [this.front, this.dryness, this.scorch];
     if (this.kind === 'culture') return Array.from(this.dead!);
     return this.kind === 'thermometer' ? [this.temp, this.hi, this.lo] : undefined;
   }
@@ -1536,7 +1628,7 @@ export class Tool {
     const want = this.memory?.length;
     if (!Array.isArray(m) || m.length !== want || !m.every((x) => typeof x === 'number' && Number.isFinite(x))) return;
     if (this.kind === 'thermometer') [this.temp, this.hi, this.lo] = m as number[];
-    if (this.kind === 'strip') [this.wet, this.scorch] = (m as number[]).map((x) => Math.max(0, Math.min(1, x)));
+    if (this.kind === 'strip') [this.front, this.dryness, this.scorch] = (m as number[]).map((x) => Math.max(0, Math.min(1, x)));
     if (this.kind === 'culture') this.dead!.set((m as number[]).map((x) => +(x > 0)));
   }
 
@@ -1613,9 +1705,9 @@ export class Tool {
     return share;
   }
 
-  /** Whether the tanks are lidded, so nothing can be poured or fall in: if they're sealed, or it's a wicking strip that's done. */
+  /** Whether the tanks are lidded, so nothing can be poured or fall in: if they're sealed. */
   get lidded(): boolean {
-    return !!this.shape.sealed || (this.kind === 'strip' && this.wet >= 1);
+    return !!this.shape.sealed;
   }
 
   /** Whether tank k is open on top, to pour into: not if the tool's lidded, or the tank's sealed. */

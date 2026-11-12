@@ -102,9 +102,10 @@ const ICONS: Record<string, ReactNode> = {
   ),
   strip: (
     <>
-      <path className="glass" d="M12 3 H28 L23 9 H17 Z" />
-      <rect x="14.5" y="10" width="11" height="27" rx="0.8" style={{ fill: '#e6dfc8', stroke: 'var(--pipe)', strokeWidth: 0.8 }} />
-      <path d="M15.5 17 H24.5 M15.5 24 H24.5 M15.5 27.5 H24.5" style={{ stroke: 'var(--pipe)', strokeWidth: 2.2, opacity: 0.75 }} />
+      <rect x="14.5" y="4" width="11" height="30" rx="0.8" style={{ fill: '#e6dfc8', stroke: 'var(--pipe)', strokeWidth: 0.8 }} />
+      <path d="M15.5 11 H24.5 M15.5 19 H24.5 M15.5 22.5 H24.5" style={{ stroke: 'var(--pipe)', strokeWidth: 2.2, opacity: 0.75 }} />
+      <rect x="17.5" y="2" width="5" height="4" rx="0.6" style={{ fill: 'var(--pipe)', stroke: 'none' }} />
+      <path className="glass" d="M5 29 V35 H35 V29" />
     </>
   ),
   culture: (

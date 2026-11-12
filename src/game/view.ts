@@ -23,7 +23,7 @@ import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import {
   clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
-  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, stripBands, cultureCells, TANK_H, THERMOMETER, THERMOMETER_BODY, thermometerAt, chuteY, levelIn, meterText, tankPieces, tankX,
+  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, STRIP_ORIGIN, stripInk, cultureCells, TANK_H, THERMOMETER, THERMOMETER_BODY, thermometerAt, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
 
@@ -576,38 +576,59 @@ function drawDiverter(sc: Screen, gate: 'reservoir' | 'waste', flowing: boolean)
 }
 
 /**
- * A wicking strip's paper, from its pad's end down: cream, darker where it's wet, down to the wet front while that's
- * still creeping; each species of what it took up as a soft band of its own color (see stripBands), as far along as
- * it runs of however far the front has; and browned over, as far as the front has come, by how scorched it is.
+ * A wicking strip's paper, foot at the bottom: cream, darker where it's wet, below the front, until it's dry; a faint
+ * pencil line across its origin; each species on each stretch of it (see Tool.paper) as ink of its own color, as
+ * opaque as stripInk says, single atoms first, so what's left in bands lies over the carrier's tint; blended smoothly
+ * from one stretch's middle to the next, except for a spot the front has yet to reach, a round blot on the line; and
+ * browned over, as far as it's wet, by how scorched it is.
  */
 function drawStrip(sc: Screen, t: Tool): void {
-  const paper = t.sample!;
-  const key = `${t.wet.toFixed(3)} ${paper.N} ${t.scorch.toFixed(2)}`;
+  const { paper } = t;
+  const key = `${t.front.toFixed(4)} ${t.dryness.toFixed(2)} ${t.scorch.toFixed(2)} ${paper[STRIP.origin].N}`;
   if (key === sc.key) return;
   sc.key = key;
   const { ctx, ppu } = sc;
-  const [W, L] = [2 * STRIP.paper.w, STRIP.paper.y1 - STRIP.paper.y0];
+  const [W, L] = [2 * STRIP.paper.w, STRIP.paper.len];
+  const C = paper.length;
+  // the canvas's y down from the paper's top, of a share of the way up from its foot
+  const y = (up: number) => L * (1 - up);
   ctx.setTransform(ppu, 0, 0, ppu, 0, 0);
   ctx.fillStyle = '#e6dfc8';
   ctx.fillRect(0, 0, W, L);
-  const front = t.wet * L;
-  if (paper.N > 0 && t.wet < 1) {
-    ctx.fillStyle = 'rgba(96, 92, 78, 0.28)';
-    ctx.fillRect(0, 0, W, front);
+  const wet = y(t.front);
+  if (t.front > 0 && t.dryness < 1) {
+    ctx.fillStyle = `rgba(96, 92, 78, ${0.28 * (1 - t.dryness)})`;
+    ctx.fillRect(0, wet, W, L - wet);
   }
-  // a band is a Gaussian across the paper's length, narrower while the front has yet to run far
-  const sd = STRIP.width * L * (0.4 + 0.6 * t.wet);
-  for (const b of stripBands(paper)) {
-    const y = b.at * front;
-    const rgb = SPECIES[b.s].color.slice(4, -1);
-    const g = ctx.createLinearGradient(0, y - 3 * sd, 0, y + 3 * sd);
-    for (let k = -6; k <= 6; k++) g.addColorStop((k + 6) / 12, `rgba(${rgb}, ${b.ink * Math.exp(-(k * k) / 8)})`);
+  ctx.fillStyle = 'rgba(70, 70, 76, 0.35)';
+  ctx.fillRect(1, y(STRIP_ORIGIN) - 0.12, W - 2, 0.24);
+  const here = SPECIES.map((_, s) => s).filter((s) => paper.some((v) => v.n[s] > 0));
+  here.sort((a, b) => SPECIES[a].size - SPECIES[b].size);
+  const blot = t.front * C < STRIP.origin + 1;
+  for (const s of here) {
+    const rgb = SPECIES[s].color.slice(4, -1);
+    if (blot) {
+      const a = stripInk(s, paper[STRIP.origin].n[s], t.dryness);
+      ctx.fillStyle = `rgba(${rgb}, ${a})`;
+      ctx.beginPath();
+      ctx.ellipse(W / 2, y(STRIP_ORIGIN), W / 4, W / 5, 0, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+    const g = ctx.createLinearGradient(0, 0, 0, L);
+    // bottom up is top down on the canvas: stops at each stretch's middle, and its ends held out to the paper's
+    for (let c = C - 1; c >= 0; c--) {
+      const a = blot && c === STRIP.origin ? 0 : stripInk(s, paper[c].n[s], t.dryness);
+      const at = 1 - (c + 0.5) / C;
+      if (c === C - 1) g.addColorStop(0, `rgba(${rgb}, ${a})`);
+      g.addColorStop(at, `rgba(${rgb}, ${a})`);
+      if (c === 0) g.addColorStop(1, `rgba(${rgb}, ${a})`);
+    }
     ctx.fillStyle = g;
-    ctx.fillRect(0, y - 3 * sd, W, 6 * sd);
+    ctx.fillRect(0, 0, W, L);
   }
   if (t.scorch > 0) {
     ctx.fillStyle = `rgba(46, 28, 14, ${0.92 * t.scorch})`;
-    ctx.fillRect(0, 0, W, front);
+    ctx.fillRect(0, wet, W, L - wet);
   }
   sc.tex.needsUpdate = true;
 }
@@ -1464,15 +1485,20 @@ class ToolView {
   }
 
   /**
-   * A wicking strip: a strip of paper hanging from a clip under its pad, with what it's drawn up shown on its front
-   * (see drawStrip).
+   * A wicking strip: its paper standing up toward the back of its tray, from just above the tray's floor, held at its
+   * top by a little clip on a thin rod up from the floor behind it, with what's on it shown on its front (see
+   * drawStrip); and a little base under the tray, for its stand to clamp.
    */
   private buildStrip(): void {
-    const { w, y0, y1 } = STRIP.paper;
-    const TH = this.t.shape.tankH ?? TANK_H;
-    block(this.art, darkMat, -w - 1, w + 1, TH, y0 + 1.5, -1.6, 1.6, 0.6);
-    block(this.art, paperMat, -w, w, y0, y1, -0.3, 0.3).castShadow = true;
-    this.screen = new Screen(this.art, -w, w, y0, y1, 0.36, 6);
+    const { w, foot, len, z } = STRIP.paper;
+    const H = STRIP.tray.h;
+    const top = foot - len;
+    const body = TOOL_DEPTH.strip.body;
+    block(this.art, darkMat, -12, 12, H + 0.6, this.t.shape.box.y1, -body / 2, body / 2, 1);
+    block(this.art, paperMat, -w, w, top, foot, z - 0.3, z + 0.3).castShadow = true;
+    rod(this.art, rodMat, v3(0, H, z - 2), v3(0, top - 2.5, z - 2), 0.7);
+    block(this.art, darkMat, -3.5, 3.5, top - 3, top + 4, z - 2.8, z + 1, 0.5);
+    this.screen = new Screen(this.art, -w, w, top, foot, z + 0.31, 6);
   }
 
   /**

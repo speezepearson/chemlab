@@ -12,7 +12,7 @@ import { tankMouth } from './bodies';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_RUN, stripBands, scorchAt, THERMOMETER, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_ORIGIN, STRIP_RUN, stripInk, scorchAt, THERMOMETER, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -570,10 +570,31 @@ describe('swell bulbs', () => {
 describe('wicking strip', () => {
   const chain = (...atoms: ('R' | 'G' | 'B')[]) =>
     speciesIndex(atoms, bondMask([atoms[0], atoms[1]], [atoms[1], atoms[2]]));
-  const B = singleOf('B');
   const run = (t: Tool, seconds: number) => {
     for (let i = 0; i < Math.round(seconds / 0.02); i++) t.step(0.02);
   };
+  const C = STRIP.cells;
+  /** A vessel holding `total` molecules, in the given shares, at temperature T. */
+  const mix = (parts: [number, number][], total = 3 * STRIP.spot, T = 1) => {
+    const v = new Vessel(Infinity);
+    for (const [s, share] of parts) v.setMolecules(s, share * total);
+    v.setTemperature(T);
+    return v;
+  };
+  /** A strip dabbed with a spot of `parts`, its tray filled with single green atoms. */
+  const spotted = (parts: [number, number][]) => {
+    const t = new Tool('strip', 0);
+    t.dab(mix(parts));
+    filled(t.tanks[0], G, t.tanks[0].cap, 1);
+    return t;
+  };
+  /** Where species s is on the paper, on average, in stretches from its foot. */
+  const centre = (t: Tool, s: number) => {
+    const total = t.paper.reduce((a, v) => a + v.n[s], 0);
+    return t.paper.reduce((a, v, c) => a + v.n[s] * (c + 0.5), 0) / total;
+  };
+  const peak = (t: Tool, s: number) => Math.max(...t.paper.map((v) => stripInk(s, v.n[s], t.dryness)));
+  const onPaper = (t: Tool) => t.paper.reduce((a, v) => a + atomTotal(v), 0);
 
   it('runs each species some way along it: lighter further, and a ring further than a chain of the same atoms', () => {
     for (const r of STRIP_RUN) {
@@ -584,57 +605,171 @@ describe('wicking strip', () => {
     const singles = SPECIES.filter((sp) => sp.size === 1).sort((a, b) => a.weight - b.weight);
     for (let i = 1; i < singles.length; i++) expect(STRIP_RUN[singles[i].i]).toBeLessThan(STRIP_RUN[singles[i - 1].i]);
     for (const sp of SPECIES) if (sp.size > 1) expect(STRIP_RUN[sp.i]).toBeLessThan(STRIP_RUN[singles[singles.length - 1].i]);
-    // the triangle, with no loose ends, ahead of all three chains of its atoms, which are each somewhere of their own
+    // the triangle, with no loose ends, well ahead of all three chains of its atoms, which each end up somewhere of
+    // their own, more than a stretch of the paper apart after a full run
+    const cells = (r: number) => r * (1 - STRIP_ORIGIN) * C;
     const chains = [chain('R', 'G', 'B'), chain('G', 'R', 'B'), chain('R', 'B', 'G')];
-    for (const c of chains) expect(STRIP_RUN[TARGET] - STRIP_RUN[c]).toBeGreaterThan(10 * STRIP.width);
+    for (const c of chains) expect(cells(STRIP_RUN[TARGET] - STRIP_RUN[c])).toBeGreaterThan(16);
     const at = chains.map((c) => STRIP_RUN[c]).sort((a, b) => a - b);
-    expect(at[1] - at[0]).toBeGreaterThan(2 * STRIP.width);
-    expect(at[2] - at[1]).toBeGreaterThan(2 * STRIP.width);
+    expect(cells(at[1] - at[0])).toBeGreaterThan(2);
+    expect(cells(at[2] - at[1])).toBeGreaterThan(2);
   });
 
-  it('shows a little of something nearly as darkly as a lot of it', () => {
-    const v = new Vessel(Infinity);
-    v.setMolecules(TARGET, 0.95 * STRIP.cap);
-    v.setMolecules(chain('R', 'G', 'B'), 0.05 * STRIP.cap);
-    const bands = stripBands(v);
-    expect(bands.map((b) => b.s)).toEqual([TARGET, chain('R', 'G', 'B')]);
-    expect(bands[0].ink).toBeGreaterThan(0.99);
-    expect(bands[1].ink).toBeGreaterThan(0.4);
-    expect(bands[1].ink).toBeLessThan(bands[0].ink);
-    // too little on the paper, and every band is fainter
-    const drop = new Vessel(Infinity);
-    drop.setMolecules(TARGET, (STRIP.faint * STRIP.cap) / 4);
-    expect(stripBands(drop)[0].ink).toBeCloseTo(0.5, 3);
-    expect(stripBands(new Vessel(Infinity))).toEqual([]);
-  });
-
-  it('takes up a little of what lands in its pad, and draws it along itself once, then is done', () => {
+  it('takes a spot of what it is dabbed on, onto unused paper only', () => {
     const t = new Tool('strip', 0);
-    const [pad] = t.tanks;
     expect(t.shape.spouts).toEqual([]);
     expect(t.isOpen(0)).toBe(true);
+    expect(STRIP_ORIGIN).toBeGreaterThan(0.08);
+    expect(STRIP_ORIGIN).toBeLessThan(0.15);
+    // a little vessel gives what it has
+    const small = mix([[TARGET, 1]], STRIP.spot / 2);
+    expect(t.canDab(small)).toBe(true);
+    t.dab(small);
+    expect(small.N).toBe(0);
+    expect(volume(t.paper[STRIP.origin])).toBe(STRIP.spot / 2);
+    // and a later dab only tops the spot up
+    const big = mix([[TARGET, 1]]);
+    t.dab(big);
+    const spot = volume(t.paper[STRIP.origin]);
+    expect(spot).toBeGreaterThan(0.99 * STRIP.spot);
+    expect(spot).toBeLessThanOrEqual(STRIP.spot + 10);
+    expect(volume(big)).toBe(3 * STRIP.spot - (spot - STRIP.spot / 2));
+    expect(t.canDab(big)).toBe(false);
+    t.paper.forEach((v, c) => c !== STRIP.origin && expect(v.N).toBe(0));
+    // never from its own tray
+    filled(t.tanks[0], G, STRIP.spot, 1);
+    expect(t.canDab(t.tanks[0])).toBe(false);
+    // and once the carrier's started up the paper, not at all
+    const u = new Tool('strip', 0);
+    filled(u.tanks[0], G, u.tanks[0].cap, 1);
+    run(u, 0.1);
+    expect(u.front).toBeGreaterThan(0);
+    expect(u.canDab(big)).toBe(false);
+    expect(u.dab(big)).toBe(0);
+  });
+
+  it('carries nothing without a carrier in its tray', () => {
+    const t = new Tool('strip', 0);
+    t.dab(mix([[TARGET, 1]]));
+    const before = [...t.paper[STRIP.origin].n];
     run(t, 5);
-    expect(t.wet).toBe(0);
-    filled(pad, R, pad.cap, 1);
+    expect(t.front).toBe(0);
+    expect([...t.paper[STRIP.origin].n]).toEqual(before);
+  });
+
+  it('draws its carrier up as the square root of the time, as far as the tray supplies it', () => {
+    const t = new Tool('strip', 0);
+    const [tray] = t.tanks;
+    expect(tray.cap).toBeGreaterThan(STRIP.cap);
+    filled(tray, G, tray.cap, 1);
+    const atoms = tray.N;
     run(t, STRIP.time / 4);
-    // the paper has all it can hold, and the rest stays in the pad; the front is halfway in a quarter of the time,
-    // since it goes as the square root of it
-    expect(volume(t.sample!)).toBe(STRIP.cap);
-    expect(pad.N).toBe(pad.cap - STRIP.cap);
-    expect(t.wet).toBeCloseTo(0.5, 2);
+    expect(t.front).toBeCloseTo(0.5, 2);
+    // what it's drawn is what the front's climbed, all on the paper, and none lost
+    expect(volume(tray)).toBeCloseTo(tray.cap - 0.5 * STRIP.cap, -4);
+    expect(Math.abs(tray.N + onPaper(t) - atoms)).toBeLessThanOrEqual(TRACE);
+    run(t, STRIP.time / 4);
+    expect(t.front).toBeCloseTo(Math.SQRT1_2, 2);
+  });
+
+  it('stops where it is when the tray runs dry, and goes on when there is more', () => {
+    const t = new Tool('strip', 0);
+    const [tray] = t.tanks;
+    filled(tray, G, 0.3 * STRIP.cap, 1);
+    run(t, 5);
+    expect(tray.N).toBe(0);
+    expect(t.front).toBeCloseTo(0.3, 3);
+    const atoms = onPaper(t);
+    expect(Math.abs(atoms - 0.3 * STRIP.cap)).toBeLessThanOrEqual(TRACE);
+    run(t, 5);
+    expect(t.front).toBeCloseTo(0.3, 3);
+    filled(tray, G, tray.cap, 1);
+    run(t, STRIP.time);
+    expect(t.front).toBe(1);
+    run(t, STRIP.dry + 0.1);
+    expect(t.dryness).toBe(1);
+  });
+
+  it('separates what a spot holds into bands, each where its species runs to', () => {
+    const chainRGB = chain('R', 'G', 'B');
+    const t = spotted([[TARGET, 0.5], [chainRGB, 0.5]]);
+    const atoms = t.tanks[0].N + onPaper(t);
+    run(t, STRIP.time + 1);
+    expect(t.front).toBe(1);
+    expect(Math.abs(t.tanks[0].N + onPaper(t) - atoms)).toBeLessThanOrEqual(TRACE);
+    const want = (s: number) => (STRIP_ORIGIN + STRIP_RUN[s] * (1 - STRIP_ORIGIN)) * C;
+    for (const s of [TARGET, chainRGB]) expect(Math.abs(centre(t, s) - want(s))).toBeLessThan(1.5);
+    expect(centre(t, TARGET) - centre(t, chainRGB)).toBeGreaterThan(16);
+    // as bands, nearly all of each within eight stretches of its middle
+    for (const s of [TARGET, chainRGB]) {
+      const m = Math.floor(centre(t, s));
+      const near = t.paper.slice(m - 8, m + 9).reduce((a, v) => a + v.n[s], 0);
+      expect(near / t.paper.reduce((a, v) => a + v.n[s], 0)).toBeGreaterThan(0.95);
+    }
+  });
+
+  it('shows a twentieth of the spot clearly, as bands apart on clean paper, and most of it dark only near its middle', () => {
+    const minor = [chain('R', 'G', 'B'), chain('G', 'R', 'B'), pairOf('R', 'G')];
+    const t = spotted([[TARGET, 0.85], ...minor.map((s): [number, number] => [s, 0.05])]);
+    run(t, STRIP.time + STRIP.dry + 1);
+    expect(t.dryness).toBe(1);
+    const want = (s: number) => (STRIP_ORIGIN + STRIP_RUN[s] * (1 - STRIP_ORIGIN)) * C;
+    for (const s of [TARGET, ...minor]) expect(Math.abs(centre(t, s) - want(s))).toBeLessThan(1.5);
+    // each of the others shows clearly at its peak
+    for (const s of minor) {
+      expect(peak(t, s)).toBeGreaterThan(0.3);
+      expect(peak(t, s)).toBeLessThan(0.6);
+    }
+    // the triangle is as dark as it gets, but only over a few stretches round its middle
+    expect(peak(t, TARGET)).toBeGreaterThan(0.99);
+    expect(t.paper.filter((v) => stripInk(TARGET, v.n[TARGET], 1) > 0.9).length).toBeLessThan(8);
+    // and midway between its band and the nearest below it, the paper's clean
+    const below = Math.max(...minor.map((s) => centre(t, s)));
+    expect(below).toBeLessThan(centre(t, TARGET));
+    const mid = t.paper[Math.floor((below + centre(t, TARGET)) / 2)];
+    expect(stripInk(TARGET, mid.n[TARGET], 1)).toBeLessThan(0.05);
+    const clear = SPECIES.reduce((a, sp) => a * (1 - stripInk(sp.i, mid.n[sp.i], 1)), 1);
+    expect(1 - clear).toBeLessThan(0.1);
+    expect(stripInk(TARGET, 0, 0)).toBe(0);
+  });
+
+  it('dries clean of its carrier: single atoms leave no ink', () => {
+    const t = spotted([[TARGET, 1]]);
+    run(t, STRIP.time / 2);
+    // wet, the carrier tints it
+    const tint = peak(t, G);
+    expect(tint).toBeGreaterThan(0.5 * STRIP.tint);
+    expect(tint).toBeLessThanOrEqual(STRIP.tint);
+    run(t, STRIP.time);
+    // drying, its tint fades
+    run(t, STRIP.dry / 2);
+    expect(peak(t, G)).toBeLessThanOrEqual(0.5 * STRIP.tint + 0.01);
+    run(t, STRIP.dry);
+    expect(t.dryness).toBe(1);
+    for (const v of t.paper) for (const sp of SPECIES) if (sp.size === 1) expect(v.n[sp.i]).toBe(0);
+    expect(peak(t, G)).toBe(0);
+    expect(stripInk(G, STRIP.spot, 1)).toBe(0);
+    // and done, it takes up nothing more
+    const before = t.paper.map((v) => [...v.n]);
+    filled(t.tanks[0], R, t.tanks[0].cap, 1);
+    run(t, 5);
+    expect(t.paper.map((v) => [...v.n])).toEqual(before);
     expect(t.isOpen(0)).toBe(true);
-    run(t, STRIP.time / 4);
-    expect(t.wet).toBeCloseTo(Math.SQRT1_2, 2);
-    run(t, STRIP.time / 2 + 0.1);
-    expect(t.wet).toBe(1);
-    expect(t.scorch).toBe(0);
-    // dry, it's lidded, and takes up nothing more
-    expect(t.isOpen(0)).toBe(false);
-    const before = [...t.sample!.n];
-    filled(pad, B, pad.cap, 1);
-    run(t, 5);
-    expect([...t.sample!.n]).toEqual(before);
     expect(t.step(0.02)).toEqual([]);
+  });
+
+  it('gives a staircase of fronts, not bands, with the sample itself in its tray', () => {
+    const chainRGB = chain('R', 'G', 'B');
+    const t = new Tool('strip', 0);
+    const [tray] = t.tanks;
+    tray.setMolecules(TARGET, tray.cap / 2);
+    tray.setMolecules(chainRGB, tray.cap / 2);
+    run(t, STRIP.time + 1);
+    expect(t.front).toBe(1);
+    for (const s of [TARGET, chainRGB]) {
+      const reach = Math.floor(STRIP_RUN[s] * C) - 3;
+      for (let c = 0; c < reach; c++) expect(t.paper[c].n[s]).toBeGreaterThan(0);
+    }
   });
 
   it('is scorched by what it takes up hot', () => {
@@ -642,22 +777,30 @@ describe('wicking strip', () => {
     expect(scorchAt(from)).toBe(0);
     expect(scorchAt((from + to) / 2)).toBeCloseTo(0.5, 9);
     expect(scorchAt(2 * to)).toBe(1);
+    // by a hot spot
     const t = new Tool('strip', 0);
-    filled(t.tanks[0], R, STRIP.cap / 2, (from + to) / 2);
-    run(t, 1);
+    t.dab(mix([[TARGET, 1]], STRIP.spot, (from + to) / 2));
     expect(t.scorch).toBeCloseTo(0.5, 2);
     // and stays as scorched as it's been, whatever it takes up after
     filled(t.tanks[0], R, STRIP.cap / 4, from);
     run(t, 1);
     expect(t.scorch).toBeCloseTo(0.5, 2);
+    // or by a hot carrier
+    const u = new Tool('strip', 0);
+    filled(u.tanks[0], R, STRIP.cap / 4, to);
+    run(u, 1);
+    expect(u.scorch).toBe(1);
   });
 
-  it('keeps how far it has run and how scorched it is in a save', () => {
+  it('keeps how far it has run, how dry it is and how scorched in a save', () => {
     const t = new Tool('strip', 0);
-    t.remember([0.4, 0.25]);
-    expect(t.memory).toEqual([0.4, 0.25]);
-    t.remember([7, -3]);
-    expect(t.memory).toEqual([1, 0]);
+    t.remember([0.4, 0.2, 0.25]);
+    expect(t.memory).toEqual([0.4, 0.2, 0.25]);
+    t.remember([7, -3, 0.5]);
+    expect(t.memory).toEqual([1, 0, 0.5]);
+    // what was saved before, of the pad's paper, isn't
+    t.remember([0.3, 0.1]);
+    expect(t.memory).toEqual([1, 0, 0.5]);
   });
 });
 

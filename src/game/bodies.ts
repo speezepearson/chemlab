@@ -4,7 +4,7 @@ import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { CELL, groundAt, toCardinal, toCell, toWorld, type Pose, type Vec3 } from './space';
 import {
-  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, TANK_H, THERMOMETER_BODY, tankDepth, tankX, overMouth, type Hose, type Mouth, type Tool,
+  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, STRIP, TANK_H, THERMOMETER_BODY, tankDepth, tankX, overMouth, type Hose, type Mouth, type Tool,
   type ToolKind,
 } from './tools';
 
@@ -115,7 +115,9 @@ export function tankMouth(t: Tool, k: number): Mouth {
 export function tankNoteY(t: Tool, k: number): number {
   const lines = Math.max(t.shape.label?.length ?? 0, ...t.shape.tanks.map((tk) => tk.label?.length ?? 0));
   if (t.shape.wall) return STATION.block.y0 - 14;
-  return openingOf(t, k).y - (lines ? 11 * lines + 10 : 9);
+  // over a wicking strip's paper, not across it
+  const y = t.kind === 'strip' ? t.shape.box.y0 : openingOf(t, k).y;
+  return y - (lines ? 11 * lines + 10 : 9);
 }
 
 /**
@@ -177,13 +179,15 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
   // tanks with necks: each bulb on its own, round, where it is; the necks together above them; and each one's inlet,
   // above its neck (the thin tubes leaning in from them are too slight to bump into)
   const neck = sh.neck;
-  const upper = neck
+  const upper: { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean }[] = neck
     ? [
         ...neck.bodies.map((x) => ({ x0: x - neck.body / 2 - 2, x1: x + neck.body / 2 + 2, y0: -2, y1: bottom, hz: neck.body / 2 + 2, round: true })),
         { x0: Math.min(...neck.necks) - neck.w / 2 - 1, x1: Math.max(...neck.necks) + neck.w / 2 + 1, y0: -neck.h - 2, y1: -2, hz: neck.w / 2 + 1 },
         ...sh.tanks.map((k) => ({ x0: k.x0 - 1, x1: k.x1 + 1, y0: neck.inlet.y - 2, y1: neck.inlet.y + neck.inlet.h + 2, hz: (k.x1 - k.x0) / 2 + 1 })),
       ]
     : [tanks];
+  // a wicking strip's paper, standing up out of its tray, and the clip at its top
+  if (t.kind === 'strip') upper.push({ x0: -STRIP.paper.w - 1, x1: STRIP.paper.w + 1, y0: b.y0, y1: tanks.y0, hz: 3, z: STRIP.paper.z });
   if (bottom >= b.y1) return upper;
   const valves = sh.noValve ? [] : (sh.valves ?? sh.tanks.map((k) => ({ x: tankX(k), y: sh.valveY })));
   const xs = [...sh.spouts, ...valves.map((v) => v.x), ...sh.tanks.map(tankX)];

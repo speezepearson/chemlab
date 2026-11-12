@@ -74,14 +74,17 @@ export interface Hud {
    * or set down what's held or pick up what's looked at.
    */
   press: boolean;
-  /** Whether the right button would do something: turn the valve looked at, or let fluid out of what's held. */
+  /**
+   * Whether the right button would do something: turn the valve looked at, let fluid out of what's held, or dab a held
+   * wicking strip on what's looked at.
+   */
   right: boolean;
   /** While a valve is being turned, where the pointer that aims its lever is, in CSS pixels. */
   aim: { x: number; y: number } | null;
   /** Whether N would write a note about what the crosshair is on (see GameEngine.note). */
   label: boolean;
   /** What the right button does now, in a word, for the touch screen's button that stands in for it. */
-  hand: 'Pour' | 'Flow' | 'Turn';
+  hand: 'Pour' | 'Flow' | 'Dab' | 'Turn';
   /** A brief note, like there being no room for something. */
   note: string | null;
   /** Everything the player can do just now besides walking and looking, with how (see Action), for a reminder. */
@@ -619,7 +622,7 @@ export class GameEngine {
         ...(t.tube.length ? { tube: t.tube.map(saveVessel) } : {}),
         ...(t.note ? { note: t.note } : {}),
         ...(t.memory ? { memory: t.memory } : {}),
-        ...(t.sample ? { sample: saveVessel(t.sample) } : {}),
+        ...(t.paper.length ? { paper: t.paper.map(saveVessel) } : {}),
       })),
       scales: this.scales.map((sc) => ({
         ...this.frac(sc.pose), ...depth(sc.pose), tare: sc.tare,
@@ -667,7 +670,7 @@ export class GameEngine {
         t.tube.forEach((v, k) => st.tube?.[k] && loadVessel(v, st.tube[k]));
         if (typeof st.note === 'string') t.note = st.note;
         t.remember(st.memory);
-        if (t.sample && st.sample) loadVessel(t.sample, st.sample);
+        t.paper.forEach((v, k) => st.paper?.[k] && loadVessel(v, st.paper[k]));
         return t;
       });
     this.nextToolId = Math.max(-1, ...this.tools.map((t) => t.id)) + 1;
@@ -1068,7 +1071,7 @@ export class GameEngine {
     if (this.locked) this.putAway();
   }
 
-  /** The right button, pressed or let go: it pours, lets fluid out, or turns the valve looked at. */
+  /** The right button, pressed or let go: it pours, lets fluid out, dabs a wicking strip, or turns the valve looked at. */
   hand(down: boolean): void {
     if (!down) {
       this.rightHeld = false;
@@ -1681,6 +1684,11 @@ export class GameEngine {
         this.placeHeld(h, this.pinned);
         this.faceFlask(h.f);
       }
+    }
+    // a wicking strip takes a spot of what's in the vessel looked at
+    if (h?.kind === 'tool' && h.t.kind === 'strip') {
+      const m = this.mouthAimed();
+      if (m) h.t.dab(m.v);
     }
     if (h) return;
     const k = this.valveAimed();
@@ -2503,7 +2511,13 @@ export class GameEngine {
       // a button looked at takes the click
       if (!this.onButton()) add(['LMB'], ok ? how : `${how}: not here`, !ok);
       if (this.rightWouldDo())
-        add(['RMB'], h.kind !== 'flask' ? 'hold to let it flow' : this.mouthAimed() ? 'hold to pour into it' : 'hold to pour');
+        add(
+          ['RMB'],
+          h.kind === 'tool' ? 'dab a spot of it onto the paper'
+          : h.kind !== 'flask' ? 'hold to let it flow'
+          : this.mouthAimed() ? 'hold to pour into it'
+          : 'hold to pour',
+        );
       if (h.kind === 'hose') {
         add(['Shift', '←→'], 'swing its stand round');
         add(['Shift', '↑↓'], 'slide its stand out or in');
@@ -2816,6 +2830,10 @@ export class GameEngine {
     if (this.rightHeld) return false;
     const h = this.held;
     if (h?.kind === 'flask') return h.f.N > TRACE;
+    if (h?.kind === 'tool' && h.t.kind === 'strip') {
+      const m = this.mouthAimed();
+      return !!m && h.t.canDab(m.v);
+    }
     // a held tool runs anyway
     if (h?.kind === 'tool') return false;
     // a faucet always runs
@@ -2845,7 +2863,7 @@ export class GameEngine {
       right: this.rightWouldDo(),
       aim: this.turning ? { ...this.turning.aim } : null,
       label: !inPod(this.wake) && !!this.targetNote(),
-      hand: h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : 'Turn',
+      hand: h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : h?.kind === 'tool' && h.t.kind === 'strip' ? 'Dab' : 'Turn',
       note: this.flash?.text ?? null,
       actions: this.actions(),
       black: this.black(),
