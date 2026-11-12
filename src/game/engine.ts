@@ -2734,7 +2734,8 @@ export class GameEngine {
    * (see ringOf), from where it is. The lab's sounds go by sim time, so nothing rings while it's paused.
    */
   private tap(): void {
-    if (this.speed === 0 || inPod(this.wake) || this.previewing) return;
+    // not with the pencil in hand, which has the crosshair to itself
+    if (this.speed === 0 || inPod(this.wake) || this.previewing || this.pencil) return;
     const v = this.inspectTarget();
     if (!v) return;
     const h = this.held;
