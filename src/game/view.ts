@@ -223,7 +223,7 @@ const rubberMat = new THREE.MeshStandardMaterial({ color: 0x1a1d1c, roughness: 0
  * far its inner edge is from the block's edge, across and up, at each corner (bottom left, bottom right, top right, top
  * left), uneven as if laid on by hand.
  */
-const TAPE = { w: 10, period: 14, gaps: [[5, 6.5], [7, 4.5], [5.5, 7.5], [4.5, 5.5]] as const };
+const TAPE = { w: 10, period: 14, gaps: [[2.5, 3.5], [4, 2], [3, 4.5], [2, 3]] as const };
 
 /**
  * Hazard tape: yellow and black diagonal stripes, as round the alarms' silence button, as a texture that tiles both
