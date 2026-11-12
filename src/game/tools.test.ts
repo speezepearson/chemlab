@@ -9,7 +9,7 @@ import { STATION_POSE } from './presets';
 import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, INSTRUMENT_TAU, TUBE_CAP,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
   clockText, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
@@ -765,18 +765,59 @@ describe('spectroscope', () => {
     expect(c.reduce((a, b) => a + b, 0)).toBe(25);
   });
 
-  it("draws each bond as a Gaussian peak as tall as its count over the full scale, at the log of its energy's size", () => {
-    const { width: w, full } = SPECTROSCOPE;
+  it("draws each bond as a Gaussian at the log of its energy's size, up if it's stable and down if it's uphill", () => {
+    const { width: w } = SPECTROSCOPE;
     const energies = BOND_KEYS.map((_, i) => (i === 0 ? 8 : i === 1 ? -3 : 0));
-    const counts = BOND_KEYS.map((_, i) => (i === 0 ? full : i === 1 ? full / 3 : i === 2 ? 1e6 * full : 0));
-    expect(spectroscopeAt(Math.log(8), counts, energies)).toBeCloseTo(1, 6);
-    expect(spectroscopeAt(Math.log(3), counts, energies)).toBeCloseTo(1 / 3, 6);
-    expect(spectroscopeAt(Math.log(8) + w, counts, energies)).toBeCloseTo(Math.exp(-0.5), 6);
+    const counts = BOND_KEYS.map((_, i) => (i === 0 ? 1000 : i === 1 ? 300 : i === 2 ? 1e9 : 0));
+    expect(spectroscopeAt(Math.log(8), counts, energies).up).toBeCloseTo(1000, 6);
+    expect(spectroscopeAt(Math.log(3), counts, energies)).toEqual({ up: expect.closeTo(0, 6), down: expect.closeTo(300, 6) });
+    expect(spectroscopeAt(Math.log(8) + w, counts, energies).up).toBeCloseTo(1000 * Math.exp(-0.5), 6);
     // far from both, nothing; and the bond with no energy shows nowhere
-    expect(spectroscopeAt(Math.log(5), counts, energies)).toBeLessThan(1e-6);
+    const far = spectroscopeAt(Math.log(5), counts, energies);
+    expect(far.up + far.down).toBeLessThan(1e-6);
     // two bonds at one energy add up
-    const same = BOND_KEYS.map(() => 2);
-    expect(spectroscopeAt(Math.log(2), BOND_KEYS.map(() => full / 100), same)).toBeCloseTo(BOND_KEYS.length / 100, 6);
+    expect(spectroscopeAt(Math.log(2), BOND_KEYS.map(() => 5), BOND_KEYS.map(() => 2)).up).toBeCloseTo(5 * BOND_KEYS.length, 6);
+  });
+
+  it('ranges its f axis to the tallest line, on a log scale', () => {
+    const { decades, headroom } = SPECTROSCOPE;
+    expect(spectroscopeTop(0)).toBe(0);
+    expect(spectroscopeY(5, 0)).toBe(0);
+    for (const tallest of [1e3, 1e6, 1e9]) {
+      const top = spectroscopeTop(tallest);
+      expect(top).toBeCloseTo(tallest * headroom, 6);
+      expect(spectroscopeY(top, top)).toBeCloseTo(1, 9);
+      expect(spectroscopeY(0, top)).toBe(0);
+      // the tallest line stands at the same height whatever the flow, so the scale, not the line, moves
+      expect(spectroscopeY(tallest, top)).toBeCloseTo(spectroscopeY(1, spectroscopeTop(1)), 9);
+      // well above the floor, each tenfold stands the same step taller
+      const step = (f: number) => spectroscopeY(10 * f, top) - spectroscopeY(f, top);
+      expect(step(top / 100)).toBeCloseTo(step(top / 10), 2);
+      expect(step(top / 100)).toBeCloseTo(1 / decades, 2);
+      // and it rises the whole way up
+      expect(spectroscopeY(top / 10 ** decades, top)).toBeGreaterThan(0);
+      expect(spectroscopeY(top / 10 ** decades, top)).toBeLessThan(spectroscopeY(top / 10 ** (decades - 1), top));
+    }
+  });
+
+  it('numbers its f axis in S with the SI prefix that keeps the numbers short', () => {
+    const { perS, decades, headroom } = SPECTROSCOPE;
+    expect(spectroscopeUnit(0)).toEqual({ name: 'S', exp: 0 });
+    for (let d = -6; d <= 6; d++) {
+      const top = spectroscopeTop(10 ** d * perS);
+      const { name, exp } = spectroscopeUnit(top);
+      expect(Math.abs(exp % 3)).toBe(0);
+      expect(name).toMatch(/^[num]?S$|^[kMG]S$/);
+      // every power of ten the axis shows is numbered within a thousandfold of 1 in that unit
+      const hi = Math.floor(Math.log10(top / perS));
+      const lo = Math.ceil(Math.log10(top / perS) - decades);
+      expect(hi - exp).toBeLessThanOrEqual(3);
+      expect(lo - exp).toBeGreaterThanOrEqual(-3);
+      // ten times the flow never moves the prefix down
+      expect(spectroscopeUnit(top * 10).exp).toBeGreaterThanOrEqual(exp);
+    }
+    // the prefix follows the flow: a thousandfold more, one prefix up
+    expect(spectroscopeUnit(1e3 * headroom * perS).exp).toBe(spectroscopeUnit(headroom * perS).exp + 3);
   });
 
   it('lets everything through, reading the bonds passing lately, per sim second, rising and falling smoothly', () => {
