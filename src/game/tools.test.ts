@@ -12,7 +12,7 @@ import { tankMouth } from './bodies';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_ORIGIN, STRIP_RUN, stripInk, scorchAt, sieve, THERMOMETER, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_RUN, STRIP_ORIGIN, stripInk, scorchAt, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -971,76 +971,129 @@ describe('sleeper culture', () => {
   });
 });
 
-describe('thermometer', () => {
-  /** Run `t` for `seconds`, with `flow` (by volume per sim second) of R at temperature T streaming through it. */
-  function stream(t: Tool, seconds: number, flow: number, T: number): void {
-    for (let i = 0; i < Math.round(seconds / 0.02); i++) {
-      if (flow > 0) filled(t.tanks[0], R, flow * 0.02, T);
-      t.step(0.02);
-    }
+describe('thermometers', () => {
+  const KINDS = Object.keys(THERMOMETERS) as ThermometerKind[];
+  /** Run `t` for `seconds` with its bulb in `bath` (null for the air). */
+  function soak(t: Tool, seconds: number, bath: Vessel | null): void {
+    t.bath = bath;
+    for (let i = 0; i < Math.round(seconds / 0.02); i++) t.step(0.02);
   }
+  const bath = (T: number) => filled(new Vessel(CAP), R, CAP / 2, T);
 
-  it('is an inline instrument that lets everything through', () => {
-    const t = new Tool('thermometer', 0);
-    expect(INLINE_TOOLS).toContain('thermometer');
-    filled(t.tanks[0], R, 1e7, 3);
-    expect(t.step(0.02)[0]?.N).toBe(1e7);
-    expect(t.tanks[0].N).toBe(0);
+  it('are glass rods, with no tanks, spouts or valves', () => {
+    for (const kind of KINDS) {
+      const t = new Tool(kind, 0);
+      expect(isThermometer(kind)).toBe(true);
+      expect([t.tanks.length, t.shape.spouts.length, t.valves.length]).toEqual([0, 0, 0]);
+      expect(INLINE_TOOLS).not.toContain(kind);
+      expect(t.step(0.02)).toEqual([]);
+    }
+    expect(isThermometer('meter')).toBe(false);
   });
 
-  it('starts at the room\'s temperature, and takes that of what streams past it, with a lag', () => {
-    const t = new Tool('thermometer', 0);
+  it("start at the room's temperature, and take that of the fluid their bulb is in, with a lag", () => {
+    for (const kind of KINDS) {
+      const t = new Tool(kind, 0);
+      expect(t.temp).toBe(COOLING.ambient);
+      expect(t.reads).toBe(COOLING.ambient);
+      const b = bath(0.8 * THERMOMETERS[kind].top);
+      const T = temperature(b);
+      soak(t, THERMOMETER.tau, b);
+      // all but 1/e of the way there after tau
+      expect((t.temp - COOLING.ambient) / (T - COOLING.ambient)).toBeCloseTo(1 - 1 / Math.E, 3);
+      soak(t, 20 * THERMOMETER.tau, b);
+      expect(t.temp).toBeCloseTo(T, 6);
+      expect(t.reads).toBe(t.temp);
+    }
+  });
+
+  it("drift back to the room's temperature in the air, or in an empty vessel, more slowly", () => {
+    const t = new Tool('thermometerWide', 0);
+    const T = temperature(bath(0.8 * THERMOMETERS.thermometerWide.top));
+    soak(t, 30 * THERMOMETER.tau, bath(T));
+    soak(t, THERMOMETER.roomTau, null);
+    expect((t.temp - COOLING.ambient) / (T - COOLING.ambient)).toBeCloseTo(1 / Math.E, 3);
+    soak(t, 40 * THERMOMETER.roomTau, new Vessel(CAP));
     expect(t.temp).toBe(COOLING.ambient);
-    const hot = COOLING.ambient + 4;
-    stream(t, THERMOMETER.tau, THERMOMETER.flow, hot);
-    // all but 1/e of the way there after tau
-    expect((t.temp - COOLING.ambient) / (hot - COOLING.ambient)).toBeCloseTo(1 - 1 / Math.E, 2);
-    stream(t, 10 * THERMOMETER.tau, 5 * THERMOMETER.flow, hot);
-    expect(t.temp).toBeCloseTo(hot, 3);
   });
 
-  it('reads between a trickle and the room', () => {
-    const t = new Tool('thermometer', 0);
-    const hot = COOLING.ambient + 4;
-    stream(t, 60 * THERMOMETER.roomTau, THERMOMETER.flow / 4, hot);
-    expect(t.temp).toBeGreaterThan(COOLING.ambient + 0.5);
-    expect(t.temp).toBeLessThan(hot - 0.5);
+  it('have linear scales, from 0 at the foot to their top, the column stopping at the top of the capillary', () => {
+    for (const kind of KINDS) {
+      const { top } = THERMOMETERS[kind];
+      expect(thermometerAt(kind, 0)).toBe(0);
+      expect(thermometerAt(kind, -1)).toBe(0);
+      expect(thermometerAt(kind, top / 4)).toBeCloseTo(0.25, 12);
+      expect(thermometerAt(kind, top / 2)).toBeCloseTo(0.5, 12);
+      expect(thermometerAt(kind, top)).toBeCloseTo(1, 12);
+      expect(thermometerAt(kind, 10 * top)).toBe(THERMOMETER.burst);
+    }
+    // the wide one's scale is the wider
+    expect(THERMOMETERS.thermometerWide.top).toBeGreaterThan(THERMOMETERS.thermometer.top);
   });
 
-  it('drifts back to the room\'s temperature with nothing passing, leaving its markers at the extremes', () => {
-    const t = new Tool('thermometer', 0);
-    const hot = COOLING.ambient + 4;
-    stream(t, 12 * THERMOMETER.tau, THERMOMETER.flow, hot);
-    stream(t, 40 * THERMOMETER.roomTau, 0, 0);
-    expect(t.temp).toBe(COOLING.ambient);
-    expect(t.hi).toBeCloseTo(hot, 3);
-    expect(t.lo).toBe(COOLING.ambient);
-    const cold = COOLING.ambient / 2;
-    stream(t, 12 * THERMOMETER.tau, THERMOMETER.flow, cold);
-    expect(t.lo).toBeCloseTo(cold, 3);
-    expect(t.hi).toBeCloseTo(hot, 3);
-    // shaking it brings both markers back to what it reads
-    t.shake();
-    expect([t.hi, t.lo]).toEqual([t.temp, t.temp]);
+  it('shatter for good once the bulb passes THERMOMETER.burst times their top, and read nothing after', () => {
+    for (const kind of KINDS) {
+      const { top } = THERMOMETERS[kind];
+      const t = new Tool(kind, 0);
+      const hot = bath(2 * top);
+      t.bath = hot;
+      while (!t.broken) {
+        const before = t.temp;
+        t.step(0.02);
+        // whole, it never read more than the burst
+        if (!t.broken) expect(t.temp).toBeLessThanOrEqual(THERMOMETER.burst * top);
+        else expect(before).toBeLessThanOrEqual(THERMOMETER.burst * top);
+      }
+      expect(t.temp).toBeGreaterThan(THERMOMETER.burst * top);
+      expect(t.reads).toBeNull();
+      const at = t.temp;
+      soak(t, 20 * THERMOMETER.tau, bath(top / 2));
+      soak(t, 20 * THERMOMETER.roomTau, null);
+      expect(t.broken).toBe(true);
+      expect(t.reads).toBeNull();
+      expect(t.temp).toBe(at);
+    }
   });
 
-  it('has a logarithmic scale', () => {
-    const { T0, T1 } = THERMOMETER;
-    expect(thermometerAt(T0)).toBe(0);
-    expect(thermometerAt(T0 / 10)).toBe(0);
-    expect(thermometerAt(T1)).toBeCloseTo(1, 12);
-    expect(thermometerAt(10 * T1)).toBe(1);
-    expect(thermometerAt(Math.sqrt(T0 * T1))).toBeCloseTo(0.5, 12);
+  it('survive a dip in something too hot for them, shorter than their bulb takes to get that hot', () => {
+    for (const kind of KINDS) {
+      const { top } = THERMOMETERS[kind];
+      const hot = bath(2 * top);
+      const T = temperature(hot);
+      // how long the bulb takes to pass the burst, from the room's temperature
+      const burst = THERMOMETER.tau * Math.log((T - COOLING.ambient) / (T - THERMOMETER.burst * top));
+      const t = new Tool(kind, 0);
+      soak(t, burst / 2, hot);
+      soak(t, 30 * THERMOMETER.roomTau, null);
+      expect(t.broken).toBe(false);
+      expect(t.reads).toBe(COOLING.ambient);
+      // but not one twice as long
+      const u = new Tool(kind, 1);
+      soak(u, 2 * burst, hot);
+      expect(u.broken).toBe(true);
+    }
   });
 
-  it('keeps its reading and markers in a save, and ignores a bad one', () => {
-    const t = new Tool('thermometer', 0);
-    t.remember([3, 7, 0.5]);
-    expect(t.memory).toEqual([3, 7, 0.5]);
-    t.remember([1, 2]);
-    t.remember('x');
-    t.remember([1, NaN, 2]);
-    expect(t.memory).toEqual([3, 7, 0.5]);
+  it('keep their bulb\'s temperature and whether they\'re broken in a save, and ignore a bad one', () => {
+    for (const kind of KINDS) {
+      const t = new Tool(kind, 0);
+      expect(t.memory).toEqual([COOLING.ambient, 0]);
+      t.remember([3, 0]);
+      expect(t.memory).toEqual([3, 0]);
+      expect(t.reads).toBe(3);
+      const u = new Tool(kind, 1);
+      u.remember(t.memory);
+      expect(u.memory).toEqual([3, 0]);
+      t.remember([2.5, 1]);
+      expect(t.broken).toBe(true);
+      expect(t.reads).toBeNull();
+      expect(t.memory).toEqual([2.5, 1]);
+      // the wrong length (as an old inline thermometer's reading and markers), not a list, or not all numbers
+      t.remember([1, 2, 3]);
+      t.remember('x');
+      t.remember([1, NaN]);
+      expect(t.memory).toEqual([2.5, 1]);
+    }
     expect(new Tool('dispenser', 1).memory).toBeUndefined();
   });
 });

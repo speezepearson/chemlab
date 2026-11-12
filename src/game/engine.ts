@@ -4,8 +4,8 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
-  FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, nozzleBox,
-  docked, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
+  FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, bulbAt, flaskBox, flaskFluid,
+  flaskLip, flaskMouth, nozzleBox, tankFluid, docked, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
 import { chime } from './chime';
@@ -20,6 +20,7 @@ import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
 import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
+import { shatter } from './shatter';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
 import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
@@ -28,8 +29,8 @@ import {
   type Pose, type Vec3,
 } from './space';
 import {
-  ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, SUMP_TIP, TANK_H,
-  TOOL_NAMES, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
+  ANALYZER_HUM, BOND_KEYS, BULB_Y, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, SUMP_TIP,
+  TANK_H, TOOL_NAMES, isThermometer, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
   type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
@@ -192,18 +193,18 @@ type Held = (
 /** Things that can be made from the hotbar, in its order. */
 export const ITEMS = [
   'flask', 'dispenser', 'pipette', 'exchanger', 'separator', 'splitter', 'sorter', 'heater', 'scale', 'tank', 'meter', 'multiplexer',
-  'thermometer', 'dilatometer', 'strip', 'culture',
+  'thermometer', 'thermometerWide', 'dilatometer', 'strip', 'culture',
 ] as const;
 export type Item = (typeof ITEMS)[number];
 /**
  * The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0, - and =; and then, the number
  * row being full, along the bottom row of letters, from Z.
  */
-export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Z', 'X', 'C', 'V'] as const;
+export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Z', 'X', 'C', 'V', 'B'] as const;
 /** The same keys, as KeyboardEvent codes, so they work whatever the keyboard layout's shift state. */
 const HOTKEY_CODES = [
   'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal',
-  'KeyZ', 'KeyX', 'KeyC', 'KeyV',
+  'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB',
 ];
 
 /** How tipped a flask held to pour is: past the horizontal, mouth down. */
@@ -218,6 +219,8 @@ const POUR_GAP = 20;
 const POUR_RISE = 300;
 /** How far above a mouth, at least, a held nozzle goes with the crosshair on it (see nozzleOver), up to POUR_RISE. */
 const NOZZLE_GAP = 15;
+/** How far above an empty vessel's floor a thermometer held over it has its bulb (see dipOver). */
+const BULB_DIP = 4;
 /** How fast a falling drop speeds up, in world units per sim second squared: a 500-unit fall takes 0.7 s. */
 const GRAVITY = 2000;
 /** The player's eyes, and their body's radius. */
@@ -458,7 +461,7 @@ export class GameEngine {
 
   /**
    * The note an id names, to read and change: a flask's label (`f3`, by index), a tank's (`t2.0`, by tool id and
-   * tank), a tool's own note (`t2`; only a tool with more than one tank has one), a scale's (`s1`) or a faucet's
+   * tank), a tool's own note (`t2`; only a tool with no tank, or more than one, has one), a scale's (`s1`) or a faucet's
    * (`F5`), by index. Things are replaced on reset and load, so look this up each time.
    */
   note(id: string): { text: string; set(text: string): void } | null {
@@ -471,7 +474,7 @@ export class GameEngine {
     const i = +m[2];
     const found =
       m[1] === 'f' ? label(this.flasks[i])
-      : m[1] === 't' ? note(this.tools.find((t) => t.id === i && t.tanks.length > 1))
+      : m[1] === 't' ? note(this.tools.find((t) => t.id === i && t.tanks.length !== 1))
       : m[1] === 's' ? note(this.scales[i])
       : note(this.faucets[i]);
     return found ?? null;
@@ -1266,8 +1269,6 @@ export class GameEngine {
         return;
       }
       h = { kind: 'tool', t: p.t, relYaw: 0, dist: 0, from: { pose: { ...p.t.pose } }, made };
-      // picking a thermometer up shakes its markers down
-      p.t.shake();
     }
     else if (p.kind === 'scale') h = { kind: 'scale', sc: p.sc, relYaw: 0, dist: 0, from: { pose: { ...p.sc.pose } } };
     else {
@@ -1656,7 +1657,7 @@ export class GameEngine {
 
   /**
    * The id of the note (see note) for what the crosshair is on: a tool, by the tank looked at, or the one tank it has,
-   * or else its own note; a flask; a scale; or a faucet. A hose has none.
+   * or else (with no tank, or more than one) its own note; a flask; a scale; or a faucet. A hose has none.
    */
   private targetNote(): string | null {
     const p = this.target;
@@ -1739,6 +1740,23 @@ export class GameEngine {
       if (typeof r !== 'string') return mouthBelow(this.open, r.pose) === m ? p : null;
     }
     return null;
+  }
+
+  /**
+   * Where a held thermometer goes with the crosshair on an open top (see mouthAimed): upright, facing as it's held,
+   * straight over the middle of the mouth, on the grid, with its bulb lowered to the middle of the fluid's depth, or
+   * to BULB_DIP above the floor if it's empty, so a click sets it down there, dipped in. Null if it can't be set down
+   * there (see rest), or the crosshair is on no open top.
+   */
+  private dipOver(h: Held & { kind: 'tool' }): Pose | null {
+    const p = this.target;
+    const m = this.mouthAimed();
+    if (!m || (p?.kind !== 'flask' && p?.kind !== 'tool')) return null;
+    const { floor, surface } = p.kind === 'flask' ? flaskFluid(p.f) : tankFluid(p.t, p.k);
+    const y = surface > floor ? (floor + surface) / 2 : floor + BULB_DIP;
+    const pose = onGrid({ x: m.x, y: y + BULB_Y, z: m.z, yaw: toCardinal(this.player.yaw + h.relYaw) }, toolAnchor(h.t));
+    const r = this.rest(h, pose, this.obstacles(h), this.obstacles(h, false));
+    return typeof r === 'string' ? null : r.pose;
   }
 
   /**
@@ -1960,8 +1978,9 @@ export class GameEngine {
     }
     if (h?.kind !== 'flask' || !this.rightHeld) this.pinned = null;
     if (!h) return;
-    // a nozzle held with the crosshair on an open top goes straight over it, where it would be set down to pour in
-    const over = h.kind === 'hose' ? this.nozzleOver(h) : null;
+    // a nozzle held with the crosshair on an open top goes straight over it, where it would be set down to pour in,
+    // and a thermometer down into it, where it would be set down dipped in it
+    const over = h.kind === 'hose' ? this.nozzleOver(h) : h.kind === 'tool' && isThermometer(h.t.kind) ? this.dipOver(h) : null;
     if (over) {
       this.placeHeld(h, over);
       return;
@@ -2050,6 +2069,10 @@ export class GameEngine {
     const vessels = this.vessels();
     // how exposed each one's fluid is to the room, from how it stands now; it hardly changes in a frame
     const exposures = simDt > 0 ? this.exposures() : [];
+    // what each thermometer's bulb is in, from where it is now, whether it's held or set down; nor does that change much
+    // in a frame
+    const whole = this.tools.map((t) => !t.broken);
+    for (const t of this.tools) if (isThermometer(t.kind)) t.bath = bathAt(bulbAt(t), this.flasks, this.tools);
     if (simDt > 0) {
       const sub = Math.ceil(simDt / 0.02);
       const step = simDt / sub;
@@ -2166,6 +2189,10 @@ export class GameEngine {
         d.stop(); // quiet a while, or the lab was replaced
         this.diverters.delete(t);
       }
+    // a thermometer whose bulb got too hot shatters, with a crack of glass, on sim time like what broke it
+    this.tools.forEach((t, j) => {
+      if (t.broken && whole[j]) shatter(this.hear(bulbAt(t)));
+    });
     // and it chimes as it's been delivering steadily for long enough to open the airlock
     const st = this.station();
     if (steadyFrom < DELIVERY.streak && st.steady >= DELIVERY.streak) chime(this.hear(this.machineAt(st)));
@@ -2285,9 +2312,10 @@ export class GameEngine {
       const tops = stands.map((st) => counterUnder(standBase(st, 0)));
       if (tops.some((t) => t === null)) return 'Its stand needs a counter under it';
       let dy = -Math.max(0, ...stands.map((st, i) => st.clampY - tops[i]! - STAND_MAX));
-      // held sunk into a counter, it comes up to stand on it
+      // held sunk into a counter, it comes up to stand on it: all of a thermometer, though its rod bumps into nothing else
       const sunk = LIFT - (box.y + dy - box.hy);
-      if (sunk > 0 && COUNTER_BOXES.some((c) => boxesOverlap({ ...box, y: box.y + dy }, c))) dy += sunk;
+      const solidBox = h.kind === 'tool' && isThermometer(h.t.kind) ? { ...box, parts: undefined } : box;
+      if (sunk > 0 && COUNTER_BOXES.some((c) => boxesOverlap({ ...solidBox, y: box.y + dy }, c))) dy += sunk;
       const to = { ...box, y: box.y + dy };
       if (blocked(to)) return 'No room';
       if (stands.some((st, i) => solid.some((o) => boxesOverlap(standBase(st, tops[i]!), o)))) return 'No room for its stand';
@@ -2528,7 +2556,7 @@ export class GameEngine {
       add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it away') : 'put it back');
     } else {
       if (this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
-      add(['1–0, -, =, Z–V'], 'make equipment in your hands');
+      add(['1–0, -, =, Z–B'], 'make equipment in your hands');
     }
     if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
     else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');

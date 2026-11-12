@@ -1,11 +1,11 @@
-import type { Flask } from './flask';
-import { FLASK_H } from './flaskShape';
+import { volume, type Flask, type Vessel } from './flask';
+import { FLASK_H, fillLevel, flaskRadius } from './flaskShape';
 import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
-import { CELL, groundAt, toCardinal, toCell, toWorld, type Pose, type Vec3 } from './space';
+import { CELL, groundAt, toCardinal, toCell, toLocal, toWorld, type Pose, type Vec3 } from './space';
 import {
-  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, STRIP, TANK_H, THERMOMETER_BODY, tankDepth, tankX, overMouth, type Hose, type Mouth, type Tool,
-  type ToolKind,
+  ANALYZER, BULB_Y, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, STRIP, TANK_H, THERMOMETER_ROD, isThermometer, levelIn,
+  tankDepth, tankPieces, tankX, overMouth, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
 } from './tools';
 
 /**
@@ -44,10 +44,11 @@ export function onGrid(p: Pose, anchor: Vec3 = { x: 0, y: 0, z: 0 }): Pose {
 }
 
 /**
- * The point of a tool that goes over the middle of a grid cell: the middle of its first tank's mouth. Its other mouths
- * and its spouts are a whole number of cells from it along the tool, so once it's on the grid, they are too.
+ * The point of a tool that goes over the middle of a grid cell: the middle of its first tank's mouth, or for a tool
+ * with no tanks (a thermometer), its middle. Its other mouths and its spouts are a whole number of cells from it along
+ * the tool, so once it's on the grid, they are too.
  */
-export const toolAnchor = (t: Tool): Vec3 => ({ x: tankX(t.shape.tanks[0]), y: 0, z: 0 });
+export const toolAnchor = (t: Tool): Vec3 => ({ x: t.shape.tanks.length ? tankX(t.shape.tanks[0]) : 0, y: 0, z: 0 });
 
 
 /** A point in a tool's flat frame (x right, y down from its top center), `z` toward its front, in the room. */
@@ -126,8 +127,9 @@ export function tankNoteY(t: Tool, k: number): number {
  * under them the pipes, valves and spouts there, across only as far as they reach. The cryostabilizer station's are
  * its funnel, the plate in the wall, and its spouts' pipes out from it. An inline instrument's are its
  * tube and the pipe down from it, and the cabinet beside them, and any pipe on to a spout past the cabinet, or the
- * flow meter's readout round the pipe, or the thermometer's card beside it; the tube's top is flush with its opening,
- * for a nozzle to snap onto (see INLINE_DOCK).
+ * flow meter's readout round the pipe; the tube's top is flush with its opening, for a nozzle to snap onto (see
+ * INLINE_DOCK). A thermometer's is only the top of its rod, where its stand's clamp holds it: the rest of it bumps
+ * into nothing, so it can stand down in a flask or a tank.
  */
 export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean }[] {
   const sh = t.shape;
@@ -144,6 +146,10 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
       ...sh.spouts.map((x) => ({ x0: x - 8, x1: x + 8, y0: H + 10, y1: sh.spoutY, hz: (out + 8) / 2, z: (8 - out) / 2 })),
     ];
   }
+  if (isThermometer(t.kind)) {
+    const r = THERMOMETER_ROD.r;
+    return [{ x0: -r, x1: r, y0: b.y0, y1: 24, hz: r, round: true }];
+  }
   const D = TOOL_DEPTH[t.kind];
   const bottom = (sh.tankH ?? TANK_H) + (sh.sump?.h ?? 0);
   if (INLINE_TOOLS.includes(t.kind)) {
@@ -156,11 +162,6 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
     if (t.kind === 'meter') {
       const m = METER_BODY;
       return [...tube, { x0: m.x0, x1: m.x1, y0: m.y0, y1: m.y1, hz: m.hz }];
-    }
-    if (t.kind === 'thermometer') {
-      // its card, and the capillary and bulb on its front
-      const m = THERMOMETER_BODY;
-      return [...tube, { x0: m.x0, x1: m.x1, y0: m.y0, y1: m.y1, hz: m.hz + 2, z: 2 }];
     }
     const past = sh.spouts.filter((x) => x > c.x1);
     return [
@@ -217,6 +218,76 @@ export function toolCenter(t: Tool): Vec3 {
   return { x: (b.x0 + b.x1) / 2, y: -(b.y0 + b.y1) / 2, z: 0 };
 }
 
+/**
+ * Tank k's inside as it's drawn (see tankPieces): its pieces, bottom up from `bottom` in the tool's flat frame (y
+ * down), and the middle across of each (a swell bulb's neck isn't over its bulb, see ToolShape.neck).
+ */
+export function tankInside(t: Tool, k: number): { pieces: Piece[]; bottom: number; xs: number[] } {
+  const sh = t.shape;
+  const pieces = tankPieces(sh, k, TOOL_DEPTH[t.kind].tank);
+  const bottom = (sh.tankH ?? TANK_H) + (sh.cup || sh.funnel ? 0 : (sh.sump?.h ?? 0));
+  const n = sh.neck;
+  const xs = pieces.map((_, i) => (!n ? tankX(sh.tanks[k]) : i === pieces.length - 1 ? n.necks[k] : n.bodies[k]));
+  return { pieces, bottom, xs };
+}
+
+/** How full a vessel is, by volume, from 0 to 1. */
+const fullness = (v: Vessel) => Math.min(1, volume(v) / v.cap);
+
+/** How high tank k's floor is in the room, and its fluid's surface as it's drawn (its floor, if it's empty). */
+export function tankFluid(t: Tool, k: number): { floor: number; surface: number } {
+  const { pieces, bottom } = tankInside(t, k);
+  const v = t.tanks[k];
+  const up = v.N > 0 ? levelIn(pieces, fullness(v)) : 0;
+  return { floor: onTool(t, 0, bottom).y, surface: onTool(t, 0, bottom - up).y };
+}
+
+/** Whether p is in the fluid in tank k: within its walls as drawn, and below its fluid's surface. */
+function inTank(t: Tool, k: number, p: Vec3): boolean {
+  const v = t.tanks[k];
+  if (v.N <= 0) return false;
+  const { pieces, bottom, xs } = tankInside(t, k);
+  const l = toLocal(t.pose, p);
+  const up = bottom + l.y;
+  if (up < 0 || up > levelIn(pieces, fullness(v))) return false;
+  let base = 0;
+  for (let i = 0; i < pieces.length; i++) {
+    const pc = pieces[i];
+    if (up <= base + pc.h) {
+      const f = (up - base) / pc.h;
+      const w = pc.w0 + (pc.w1 - pc.w0) * f;
+      const d = pc.d0 + (pc.d1 - pc.d0) * f;
+      const dx = l.x - xs[i];
+      return pc.round ? Math.hypot(dx, l.z) <= w / 2 : Math.abs(dx) <= w / 2 && Math.abs(l.z) <= d / 2;
+    }
+    base += pc.h;
+  }
+  return false;
+}
+
+/** Where a thermometer's bulb is, in the room (see BULB_Y). */
+export const bulbAt = (t: Tool): Vec3 => onTool(t, 0, BULB_Y);
+
+/**
+ * The vessel whose fluid p is in, if any, for a thermometer's bulb: an upright flask (not one tipped to pour), if p is
+ * inside its outline and below its fluid's surface as drawn; or a tool's tank, if it's within its walls and below its
+ * fluid's surface as drawn. The cryostabilizer station's are in the wall, out of reach. Null if it's in none: in the
+ * air, or in a falling stream, which doesn't count.
+ */
+export function bathAt(p: Vec3, flasks: readonly Flask[], tools: readonly Tool[]): Vessel | null {
+  for (const f of flasks) {
+    if (f.N <= 0 || f.tilt !== 0) continue;
+    const l = toLocal(f.pose, p);
+    if (-l.y < 0 || -l.y > FLASK_H || Math.hypot(l.x, l.z) > flaskRadius(-l.y)) continue;
+    if (l.y <= fillLevel(0, fullness(f))) return f;
+  }
+  for (const t of tools) {
+    if (t.shape.wall) continue;
+    for (let k = 0; k < t.tanks.length; k++) if (inTank(t, k, p)) return t.tanks[k];
+  }
+  return null;
+}
+
 /* ---------------- flasks ---------------- */
 
 /** Half-width of the part of a flask's mouth that catches what falls on it. */
@@ -232,6 +303,15 @@ export const FLASK_CENTER: Vec3 = { x: 0, y: -FLASK_H / 2, z: 0 };
 /** A flask's lip on its right, where it pours from, tipped by its tilt (or `tilt`) about its mouth (see Flask.tilt). */
 export function flaskLip(f: Flask, tilt = f.tilt): Vec3 {
   return toWorld(f.pose, { x: FLASK_LIP * Math.cos(tilt), y: -FLASK_LIP * Math.sin(tilt), z: 0 });
+}
+
+/**
+ * How high a flask's floor is in the room, and its fluid's surface as it's drawn, standing upright (its floor, if it's
+ * empty).
+ */
+export function flaskFluid(f: Flask): { floor: number; surface: number } {
+  const floor = f.pose.y - FLASK_H;
+  return { floor, surface: f.N > 0 ? f.pose.y + fillLevel(0, fullness(f)) : floor };
 }
 
 /** A flask's mouth, in the room, unless it's tipped (when it pours instead). */

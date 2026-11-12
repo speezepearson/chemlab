@@ -1,6 +1,20 @@
 import type { ReactNode } from 'react';
 import { HOTKEYS, ITEMS, type GameEngine } from '../game/engine';
 
+/** A thermometer's icon: ticks every `gap` up its backing, every fifth longer, and its column of spirit up to `top`. */
+function thermometerIcon(gap: number, top: number): ReactNode {
+  const ticks = Array.from({ length: Math.floor(20 / gap) + 1 }, (_, i) => `M19.6 ${27 - i * gap} H${i % 5 ? 21.4 : 22.6}`).join(' ');
+  return (
+    <>
+      <rect className="glass" x="15.5" y="2" width="9" height="36" rx="4.5" />
+      <rect x="17.5" y="5" width="5.5" height="24" style={{ fill: '#f1efe6', stroke: 'none' }} />
+      <path d={ticks} style={{ stroke: '#2a2925', strokeWidth: 0.6 }} />
+      <path d={`M18.6 32 V${top}`} style={{ stroke: '#d8443b', strokeWidth: 1.3 }} />
+      <rect x="17.2" y="30" width="5.6" height="6" rx="2.8" style={{ fill: '#d8443b', stroke: 'none' }} />
+    </>
+  );
+}
+
 /** Small drawings of each item, echoing how the bench draws it, in a 40 × 40 box. */
 const ICONS: Record<string, ReactNode> = {
   flask: <path className="glass" d="M16 6 H24 L23 15 L31 32 Q32 35 29 35 H11 Q8 35 9 32 L17 15 Z" />,
@@ -119,17 +133,10 @@ const ICONS: Record<string, ReactNode> = {
       <circle className="valve" cx="20" cy="34" r="2.5" />
     </>
   ),
-  thermometer: (
-    <>
-      <path className="pipe" d="M12 16 V37" />
-      <rect className="glass" x="9" y="3" width="6" height="13" rx="1.5" />
-      <rect className="valve" x="20" y="3" width="12" height="31" rx="1.5" />
-      <path className="pipe" d="M12 28.5 H24" style={{ strokeWidth: 2 }} />
-      <path d="M26 7 V26" style={{ stroke: 'var(--glass)', strokeWidth: 3 }} />
-      <path d="M26 15 V27" style={{ stroke: '#d8443b', strokeWidth: 1.5 }} />
-      <circle cx="26" cy="28.5" r="2.8" style={{ fill: '#d8443b', stroke: 'none' }} />
-    </>
-  ),
+  // the thermometers: a glass rod with a white backing, a scale on it, and a column of red spirit up from its bulb;
+  // the fine one's ticks close together, the wide one's further apart
+  thermometer: thermometerIcon(2, 21),
+  thermometerWide: thermometerIcon(5, 14),
 };
 
 /**

@@ -23,7 +23,7 @@ import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import {
   clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
-  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, STRIP_ORIGIN, stripInk, cultureCells, TANK_H, THERMOMETER, THERMOMETER_BODY, thermometerAt, chuteY, levelIn, meterText, tankPieces, tankX,
+  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, STRIP_ORIGIN, stripInk, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
 
@@ -194,6 +194,8 @@ const pipeMat = new THREE.MeshStandardMaterial({ color: 0xa4adac, metalness: 0.9
 const darkMat = new THREE.MeshStandardMaterial({ color: 0x30373a, metalness: 0.6, roughness: 0.42 });
 const panelMat = new THREE.MeshPhysicalMaterial({ color: 0xc4cbc7, metalness: 0.1, roughness: 0.5, clearcoat: 0.4, clearcoatRoughness: 0.35 });
 const leverMat = new THREE.MeshPhysicalMaterial({ color: 0x15191a, metalness: 0, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.2 });
+/** A thermometer's white enamel backing (see THERMOMETER_ROD). */
+const enamelMat = new THREE.MeshStandardMaterial({ color: 0xf1efe6, roughness: 0.4 });
 const keyMats = {
   up: new THREE.MeshStandardMaterial({ color: 0xd8443b, roughness: 0.45 }),
   hot: new THREE.MeshStandardMaterial({ color: 0xf06358, roughness: 0.45, emissive: 0x401010 }),
@@ -660,36 +662,39 @@ function drawStrip(sc: Screen, t: Tool): void {
   sc.tex.needsUpdate = true;
 }
 
+/** Where a thermometer's capillary runs across its rod, in its own frame, left of the middle, with its scale's ticks right of it. */
+const CAPILLARY_X = -1.4;
+
 /**
- * A thermometer's card: cream enamel, with ticks down the right of where the capillary runs, as on log paper: at 1 to
- * 9 times each power of ten from THERMOMETER.T0 to T1, those at the powers of ten longer, and numbered on the
- * capillary's left. It's drawn once.
+ * A thermometer's scale, on the white enamel backing inside its rod (see THERMOMETER_ROD): from 0 at its foot to the
+ * kind's top at its top, evenly (see thermometerAt), a tick every `tick` right of where the capillary runs, those at
+ * every `long` longer, and those at every `num` numbered at the backing's right edge (see THERMOMETERS). It's drawn
+ * once.
  */
-function drawThermometerCard(sc: Screen): void {
+function drawThermometerScale(sc: Screen, kind: ThermometerKind): void {
   const { ctx, ppu } = sc;
-  const { column: c, ...b } = THERMOMETER_BODY;
-  // the screen covers the card but for a margin of 1 all round
-  ctx.setTransform(ppu, 0, 0, ppu, -(b.x0 + 1) * ppu, -(b.y0 + 1) * ppu);
-  ctx.fillStyle = '#d6d1be';
-  ctx.fillRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
-  ctx.strokeStyle = ctx.fillStyle = '#2a2925';
-  ctx.textAlign = 'center';
+  const { backing: b, foot, top: y1 } = THERMOMETER_ROD;
+  const { top, tick, long, num } = THERMOMETERS[kind];
+  // the screen covers the backing, in the rod's own frame
+  ctx.setTransform(ppu, 0, 0, ppu, (b.w / 2) * ppu, -b.y0 * ppu);
+  ctx.fillStyle = '#f1efe6';
+  ctx.fillRect(-b.w / 2, b.y0, b.w, b.y1 - b.y0);
+  ctx.strokeStyle = ctx.fillStyle = '#1e201f';
+  ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
-  ctx.font = '600 3.1px "Schibsted Grotesk", sans-serif';
-  const { T0, T1 } = THERMOMETER;
-  const y = (T: number) => c.bottom + (c.top - c.bottom) * thermometerAt(T);
-  for (let p = Math.round(Math.log10(T0)); 10 ** p <= T1 * 1.0001; p++)
-    for (let m = 1; m <= 9; m++) {
-      const T = m * 10 ** p;
-      if (T > T1 * 1.0001) break;
-      const len = m === 1 ? 4 : m === 5 ? 2.6 : 1.6;
-      ctx.lineWidth = m === 1 ? 0.45 : 0.3;
-      ctx.beginPath();
-      ctx.moveTo(c.x + 2.2, y(T));
-      ctx.lineTo(c.x + 2.2 + len, y(T));
-      ctx.stroke();
-      if (m === 1) ctx.fillText(String(Number(T.toPrecision(1))), c.x - 7.3, y(T));
-    }
+  ctx.font = '700 3.2px "Schibsted Grotesk", sans-serif';
+  const x = CAPILLARY_X + 0.45;
+  const [L, M] = [Math.round(long / tick), Math.round(num / tick)];
+  for (let i = 0; i <= Math.round(top / tick); i++) {
+    const y = foot - ((i * tick) / top) * (foot - y1);
+    ctx.lineWidth = i % L ? 0.2 : 0.3;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + (i % L ? 0.55 : 1.1), y);
+    ctx.stroke();
+    // squeezed to fit beside the ticks, if it has to be
+    if (i % M === 0) ctx.fillText(String(Math.round(i * tick)), b.w / 2 - 0.05, y + 0.15, b.w / 2 - 0.05 - (x + 1.3));
+  }
   sc.tex.needsUpdate = true;
 }
 
@@ -1155,8 +1160,11 @@ class ToolView {
    * those dead when the plate was first drawn (as when a save loads) are just dead.
    */
   private culture?: { cells: ReturnType<typeof cultureCells>; died: number[]; seen: boolean };
-  /** A thermometer's column of spirit, and its two markers (see buildThermometer). */
-  private spirit?: { column: THREE.Mesh; hi: THREE.Mesh; lo: THREE.Mesh };
+  /**
+   * A thermometer's column of spirit, what's drawn of it only while it's whole (its rod below where it snaps, its bulb
+   * and its column), and the jagged end it's left with once it's shattered (see buildThermometer).
+   */
+  private spirit?: { column: THREE.Mesh; whole: THREE.Group; stump: THREE.Group };
   /** The cryostabilizer station's gauge's segments, bottom up. */
   private segments: THREE.MeshStandardMaterial[] = [];
 
@@ -1216,10 +1224,7 @@ class ToolView {
       // out of the cabinet's far side to its waste spout
       const { body: b, inY } = INSTRUMENT;
       pipes(art, [[0, TH], [0, sh.spoutY - 4]]);
-      // a thermometer's bulb sits on a stub off the pipe
-      const bulb = THERMOMETER_BODY.bulb;
-      if (t.kind === 'thermometer') pipes(art, [[0, bulb.y], [bulb.x, bulb.y]], 1.6, THERMOMETER_BODY.hz + 1.6);
-      else if (t.kind !== 'meter') pipes(art, [[0, inY], [b.x0, inY]], 1.3);
+      if (t.kind !== 'meter') pipes(art, [[0, inY], [b.x0, inY]], 1.3);
       if (t.kind === 'analyzer') {
         const x = sh.spouts[1];
         pipes(art, [[b.x1, ANALYZER.wasteY], [x, ANALYZER.wasteY], [x, sh.spoutY - 4]]);
@@ -1229,6 +1234,7 @@ class ToolView {
       sh.neck.bodies.forEach((bx, k) => pipes(art, [[bx, floor], [bx, floor + 4], [sh.spouts[k], floor + 4], [sh.spouts[k], sh.spoutY - 4]]));
     }
     else if (t.kind === 'strip') this.buildStrip();
+    else if (isThermometer(t.kind)) this.buildThermometer(t.kind);
     else if (t.kind === 'culture') {
       this.buildCulture();
       // its drain, down from under the plate's frame
@@ -1329,7 +1335,6 @@ class ToolView {
     if (t.kind === 'sorter') this.buildChute();
     if (INLINE_TOOLS.includes(t.kind)) {
       if (t.kind === 'meter') this.buildMeter();
-      else if (t.kind === 'thermometer') this.buildThermometer();
       else this.buildInstrument();
       this.buildThread(TH);
     }
@@ -1718,28 +1723,52 @@ class ToolView {
   }
 
   /**
-   * A thermometer: an enamel card beside the tube, its scale printed on it (see drawThermometerCard), with a glass
-   * capillary up its front from a bulb of red spirit at its foot, which sits on a stub off the pipe; the column of
-   * spirit in it, as long as its reading (see thermometerAt); and two little black markers, one either side of the
-   * capillary, at the highest and lowest it's read.
+   * A thermometer: an upright glass rod with rounded ends (see THERMOMETER_ROD), a white enamel backing inside it
+   * along its upper part with its scale printed on it (see drawThermometerScale), a fine glass capillary up it in front
+   * of the backing, from a bulb of red spirit at its foot, and the column of spirit in the capillary, as long as its
+   * reading (see thermometerAt). Shattered, it's the rod snapped off short, a little way up from its foot, its end
+   * jagged, with no bulb and no column.
    */
-  private buildThermometer(): void {
-    const { column: c, bulb, hz, ...b } = THERMOMETER_BODY;
-    block(this.art, panelMat, b.x0, b.x1, b.y0, b.y1, -hz, hz, 1);
-    this.screen = new Screen(this.art, b.x0 + 1, b.x1 - 1, b.y0 + 1, b.y1 - 1, hz + 0.06, 14);
-    drawThermometerCard(this.screen);
-    const z = hz + 1.6;
-    rod(this.art, glassMat, v3(c.x, c.top - 3, z), v3(c.x, bulb.y, z), 1.4);
-    const spirit = new THREE.MeshStandardMaterial({ color: 0xc92f27, roughness: 0.3, emissive: 0x300806 });
-    const ball = new THREE.Mesh(unitSphere, spirit);
-    ball.scale.setScalar(bulb.r);
-    ball.position.copy(v3(bulb.x, bulb.y, z));
-    this.art.add(ball);
-    const column = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.65, 1, 8).translate(0, 0.5, 0), spirit);
-    column.position.copy(v3(c.x, bulb.y, z));
-    this.art.add(column);
-    const marker = (dx: number) => block(this.art, leverMat, c.x + dx - 1.7, c.x + dx + 1.7, -0.45, 0.45, hz, hz + 1.2);
-    this.spirit = { column, hi: marker(3.4), lo: marker(-3.4) };
+  private buildThermometer(kind: ThermometerKind): void {
+    const { h, r, bulb, backing: b, foot, top, snap } = THERMOMETER_ROD;
+    const art = this.art;
+    const whole = new THREE.Group();
+    const stump = new THREE.Group();
+    art.add(whole, stump);
+    const cap = (y: number, up: boolean) =>
+      new THREE.SphereGeometry(r, 20, 6, 0, 2 * Math.PI, up ? 0 : Math.PI / 2, Math.PI / 2).translate(0, -y, 0);
+    const tube = (y0: number, y1: number) => new THREE.CylinderGeometry(r, r, y1 - y0, 20, 1, true).translate(0, -(y0 + y1) / 2, 0);
+    glassFrom(art, tube(r, snap));
+    art.add(new THREE.Mesh(cap(r, true), glassMat));
+    glassFrom(whole, tube(snap, h - r));
+    whole.add(new THREE.Mesh(cap(h - r, false), glassMat));
+    // the backing, white enamel all round behind its printed face
+    block(art, enamelMat, -b.w / 2, b.w / 2, b.y0, b.y1, -0.75, -0.35).castShadow = false;
+    const sc = new Screen(art, -b.w / 2, b.w / 2, b.y0, b.y1, -0.3, 28);
+    drawThermometerScale(sc, kind);
+    // the capillary, up to the burst point above the scale's top (see THERMOMETER.burst), and its spirit
+    const capTop = foot - THERMOMETER.burst * (foot - top);
+    const z = 0.25;
+    rod(art, glassMat, v3(CAPILLARY_X, capTop, z), v3(CAPILLARY_X, snap, z), 0.55);
+    rod(whole, glassMat, v3(CAPILLARY_X, snap, z), v3(CAPILLARY_X, bulb.y0 + 1, z), 0.55);
+    const spiritMat = new THREE.MeshStandardMaterial({ color: 0xc92f27, roughness: 0.3, emissive: 0x300806 });
+    const ball = new THREE.Mesh(new THREE.CapsuleGeometry(bulb.r, bulb.y1 - bulb.y0 - 2 * bulb.r, 4, 12), spiritMat);
+    ball.position.copy(v3(0, (bulb.y0 + bulb.y1) / 2));
+    whole.add(ball);
+    const column = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 1, 8).translate(0, 0.5, 0), spiritMat);
+    column.position.copy(v3(CAPILLARY_X, bulb.y0 + 1, z));
+    whole.add(column);
+    // the jagged end it snaps to: shards of the glass round where it broke, of uneven lengths
+    for (let i = 0; i < 7; i++) {
+      const a = (2 * Math.PI * i) / 7;
+      const len = 1.5 + 2.5 * Math.abs(Math.sin(i * 2.3 + 1));
+      const shard = new THREE.Mesh(new THREE.ConeGeometry(1.1, len, 3).rotateX(Math.PI).translate(0, -len / 2, 0), glassMat);
+      shard.position.copy(v3(r * 0.85 * Math.cos(a), snap, r * 0.85 * Math.sin(a)));
+      shard.rotation.y = -a;
+      stump.add(shard);
+    }
+    stump.visible = false;
+    this.spirit = { column, whole, stump };
   }
 
   /**
@@ -1963,12 +1992,17 @@ class ToolView {
     }
     this.floats.forEach((f, k) => (f.m.position.y = f.at(t.tanks[k])));
     if (this.spirit) {
-      // the column runs from the bulb up to its reading on the scale, and each marker sits at its own
-      const { column: c, bulb } = THERMOMETER_BODY;
-      const y = (T: number) => c.bottom + (c.top - c.bottom) * thermometerAt(T);
-      this.spirit.column.scale.y = Math.max(0.01, bulb.y - y(t.temp));
-      this.spirit.hi.position.y = -y(t.hi);
-      this.spirit.lo.position.y = -y(t.lo);
+      const { column, whole, stump } = this.spirit;
+      if (t.broken && whole.visible) {
+        // shattered: only the stump is left, and what's gone can't be looked at
+        whole.visible = false;
+        whole.traverse((m) => (m.raycast = () => {}));
+        stump.visible = true;
+      }
+      // the column runs from the bulb up to its reading on the scale
+      const { bulb, foot, top } = THERMOMETER_ROD;
+      const T = t.reads;
+      if (T !== null) column.scale.y = bulb.y0 + 1 - foot + (foot - top) * thermometerAt(t.kind as ThermometerKind, T);
     }
     if (t.kind === 'strip' && this.screen) drawStrip(this.screen, t);
     if (t.kind === 'culture') this.drawCulture(clock);
