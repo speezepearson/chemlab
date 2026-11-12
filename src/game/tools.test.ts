@@ -10,7 +10,7 @@ import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  clockText, needleAt, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -324,6 +324,43 @@ describe('cryostabilizer station', () => {
     r.step(0.02);
     expect(r.gate).toBe('waste');
     expect(r.sinceFlow).toBeCloseTo(0.02, 9);
+  });
+
+  it('reads how much of what went through lately was the target on its needle, which stays there afterwards', () => {
+    const r = new Tool('receptacle', 0);
+    const [funnel] = r.tanks;
+    expect(r.purity).toBeNull();
+    // 80% target by atoms: turned away, but the needle says how near it was
+    funnel.setMolecules(TARGET, 0.08 * CAP);
+    funnel.setMolecules(R, 0.06 * CAP);
+    for (let t = 0; funnel.N > 0 && t < 5; t += 0.02) r.step(0.02);
+    expect(r.gate).toBe('waste');
+    expect(r.purity).toBeCloseTo(0.8, 3);
+    // with nothing going through, it stays where it was, and the needle has swung there from its left stop
+    for (let t = 0; t < 30; t += 0.02) r.step(0.02);
+    expect(r.purity).toBeCloseTo(0.8, 3);
+    expect(r.needle).toBeCloseTo(needleAt(0.8), 3);
+    // and the needle swings on to what goes through next, not all at once
+    funnel.setMolecules(TARGET, 0.2 * CAP);
+    r.step(0.02);
+    expect(r.purity).toBe(1);
+    expect(r.needle).toBeGreaterThan(needleAt(0.8));
+    expect(r.needle).toBeLessThan(0.7);
+    for (let t = 0; t < 5; t += 0.02) r.step(0.02);
+    expect(r.needle).toBeCloseTo(1, 3);
+  });
+
+  it('swings its needle from its left stop to its right, furthest for the last few percent', () => {
+    expect(needleAt(0)).toBe(0);
+    expect(needleAt(1)).toBe(1);
+    expect(needleAt(0.75)).toBeCloseTo(0.5);
+    for (let p = 0; p < 1; p += 0.05) expect(needleAt(p + 0.05)).toBeGreaterThan(needleAt(p));
+    // the last five percent swing it further than the first thirty
+    expect(1 - needleAt(0.95)).toBeGreaterThan(needleAt(0.3));
+    // the dial is on the plate, clear of the diverter's display and the funnel
+    const { needle: n, display: d, block } = STATION;
+    expect(n.x1).toBeLessThan(d.x0);
+    expect(n.x0).toBeGreaterThan(block.x0);
   });
 
   it(`keeps time it's been delivering steadily, at least every ${DELIVERY.gap} sim s`, () => {

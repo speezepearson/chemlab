@@ -1,7 +1,7 @@
 import { BOND_KEYS, BONDS, type Atom } from '../chem/atoms';
 import { THERMO } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
-import { NS, SPECIES } from '../chem/species';
+import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP, DELIVERY, TRACE } from './config';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
@@ -298,7 +298,20 @@ export const STATION = {
   screen: { x0: 2 * CELL - 50, x1: 2 * CELL + 50, y0: -19, y1: -4 },
   /** The screen showing how long it's been delivering steadily (see Tool.steady), left of the reservoir's. */
   steadyScreen: { x0: 2 * CELL - 160, x1: 2 * CELL - 60, y0: -19, y1: -4 },
+  /** The purity needle's dial (see needleAt), on the plate left of the diverter's LCD. */
+  needle: { x0: CELL - 90, x1: CELL - 38, y0: 222, y1: 262 },
 };
+
+/**
+ * How far along its dial the station's needle stands, from 0 (its left stop) to 1, for fluid that's `purity` target by
+ * atoms: 1 − √(1 − purity), so it moves all the way up from nothing, and moves furthest for the last few percent, where
+ * the diverter's line is. Half target is 0.29 of the way, 90% is 0.68, and 99% is 0.9.
+ */
+export function needleAt(purity: number): number {
+  return 1 - Math.sqrt(1 - Math.max(0, Math.min(1, purity)));
+}
+/** How quickly the station's needle swings to its reading, in sim seconds: it closes all but 1/e of the gap in this. */
+export const NEEDLE_TAU = 0.25;
 
 /** The station's funnel's inside, as drawn (see Piece): a square funnel narrowing from its mouth to its stem. */
 export const STATION_FUNNEL: Piece[] = [
@@ -1060,6 +1073,13 @@ export class Tool {
    * DELIVERY.gap sim seconds; 0 while it isn't. Shown on its screen (see clockText), and it opens the airlock.
    */
   steady = 0;
+  /**
+   * A receptacle's needle's reading: the share, by atoms, of what went through its diverter in the recent past (see
+   * INSTRUMENT_TAU) that was the target. It stays where it was once nothing's going through; null until anything has.
+   */
+  purity: number | null = null;
+  /** Where a receptacle's needle stands on its dial, from 0 to 1: it swings toward its reading (see needleAt) over NEEDLE_TAU. */
+  needle = 0;
 
   constructor(
     readonly kind: ToolKind,
@@ -1221,7 +1241,8 @@ export class Tool {
    * A receptacle's step. Its reservoir's faucet lets out as far as its valve is open, at REFERENCE_FLOW. Its funnel
    * drains straight through at FUNNEL_RATE, however full it is, into the diverter, which judges what comes through: more
    * than GOAL_PURITY target (see sustenance), and it goes into the reservoir (as much as fits), else out the waste
-   * spigot. The reservoir's filter takes out what has a black atom in it (see filter).
+   * spigot. Its needle reads how much of what's come through lately was the target (see purity). The reservoir's
+   * filter takes out what has a black atom in it (see filter).
    */
   private receive(h: number): (Vessel | null)[] {
     const [funnel, ref] = this.tanks;
@@ -1233,6 +1254,10 @@ export class Tool {
     transfer(funnel, p, FUNNEL_RATE * h);
     this.sinceFlow += h;
     this.sinceDelivery += h;
+    // the needle reads what the diverter is judging, before it goes either way
+    const [passed, target] = this.smooth(h, [p.N, p.n[TARGET] * SPECIES[TARGET].size]);
+    if (passed >= TRACE) this.purity = target / passed;
+    this.needle += (needleAt(this.purity ?? 0) - this.needle) * (1 - Math.exp(-h / NEEDLE_TAU));
     if (p.N > 0) {
       this.sinceFlow = 0;
       this.gate = sustenance(p) > 0 ? 'reservoir' : 'waste';

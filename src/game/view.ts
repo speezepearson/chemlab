@@ -11,7 +11,7 @@ import {
   NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
 } from './bodies';
 import { TARGET } from '../chem/species';
-import { CAP, DELIVERY, FLASK_L, GOAL_L, GOAL_TARGET, TRACE } from './config';
+import { CAP, DELIVERY, FLASK_L, GOAL_L, GOAL_PURITY, GOAL_TARGET, TRACE } from './config';
 import { Vessel, fluidAlpha, fluidRGB, volume, type Flask } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, type Scale } from './scale';
@@ -24,7 +24,7 @@ import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
   clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
-  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
+  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
 
@@ -583,6 +583,62 @@ function drawDiverter(sc: Screen, gate: 'reservoir' | 'waste', flowing: boolean)
   sc.tex.needsUpdate = true;
 }
 
+/** How far the station's needle swings, from its left stop to its right, in radians, about straight up. */
+const NEEDLE_SWEEP = (140 * Math.PI) / 180;
+
+/**
+ * The cryostabilizer station's needle: an enamel dial with no words or numbers, a needle swinging across it from its
+ * left stop (see needleAt), evenly spaced ticks, and a red line where the diverter's line is, with a green band from
+ * there to the right stop. `u` is how far across the needle stands, from 0 to 1 (see Tool.needle).
+ */
+function drawNeedle(sc: Screen, u: number): void {
+  const key = u.toFixed(3);
+  if (key === sc.key) return;
+  sc.key = key;
+  const { ctx, ppu } = sc;
+  const d = STATION.needle;
+  const [w, h] = [d.x1 - d.x0, d.y1 - d.y0];
+  ctx.setTransform(ppu, 0, 0, ppu, 0, 0);
+  ctx.fillStyle = '#d6d1be';
+  ctx.fillRect(0, 0, w, h);
+  const [cx, cy] = [w / 2, h - 7];
+  const r = Math.min(w / 2 - 4, cy - 5);
+  // where on the dial u is, at radius q: from the pivot, swung (u − ½) of the sweep from straight up
+  const at = (v: number, q: number): [number, number] => {
+    const a = (v - 0.5) * NEEDLE_SWEEP;
+    return [cx + q * Math.sin(a), cy - q * Math.cos(a)];
+  };
+  const arc = (from: number, to: number, q: number, width: number, color: string) => {
+    ctx.beginPath();
+    ctx.arc(cx, cy, q, -Math.PI / 2 + (from - 0.5) * NEEDLE_SWEEP, -Math.PI / 2 + (to - 0.5) * NEEDLE_SWEEP);
+    ctx.lineWidth = width;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+  };
+  const line = (a: [number, number], b: [number, number], width: number, color: string) => {
+    ctx.beginPath();
+    ctx.moveTo(...a);
+    ctx.lineTo(...b);
+    ctx.lineWidth = width;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+  };
+  ctx.lineCap = 'butt';
+  const pass = needleAt(GOAL_PURITY);
+  arc(0, 1, r, 0.5, '#3b3a34');
+  arc(pass, 1, r - 2, 3, '#3f9a55');
+  for (let i = 0; i <= 10; i++) line(at(i / 10, r), at(i / 10, r - (i % 5 ? 2.5 : 4)), 0.5, '#3b3a34');
+  line(at(pass, r + 1.5), at(pass, r - 5.5), 1.1, '#c8372d');
+  // the needle, over a little round cap on its pivot
+  ctx.lineCap = 'round';
+  line(at(u, -3), at(u, r - 1), 0.9, '#17161a');
+  ctx.beginPath();
+  ctx.arc(cx, cy, 2.2, 0, 2 * Math.PI);
+  ctx.fillStyle = '#17161a';
+  ctx.fill();
+  sc.tex.needsUpdate = true;
+}
+
 /**
  * A composition analyzer's screen: a triangle per molecule size (1 to 4 atoms), each cut into four smaller ones, one
  * per color (see analyzerSector): its three corners, and the upside-down one in the middle. Each glows as bright as its
@@ -956,6 +1012,8 @@ class ToolView {
   private steadyScreen?: Screen;
   /** The cryostabilizer station's diverter's LCD (see drawDiverter). */
   private diverter?: Screen;
+  /** The cryostabilizer station's purity needle's dial (see drawNeedle). */
+  private needle?: Screen;
   /** What's running down an inline instrument's tube, shown as a thin thread of its color. */
   private thread?: { m: THREE.Mesh; mat: THREE.MeshBasicMaterial };
   private helix?: { geom: THREE.TubeGeometry; colors: THREE.BufferAttribute; k: number }[];
@@ -1424,6 +1482,10 @@ class ToolView {
     rod(art, glassMat, v3(fx, stem, 0), v3(fx, stem, face), FUNNEL_TIP / 2);
     block(art, pipeMat, fx - 5, fx + 5, stem - 5, stem + 5, face, face + 1.5);
     this.diverter = new Screen(art, dp.x0, dp.x1, dp.y0, dp.y1, face + 0.3, 8, true);
+    // the purity needle's dial, beside it: an enamel face in a dark bezel
+    const nd = STATION.needle;
+    block(art, darkMat, nd.x0 - 2, nd.x1 + 2, nd.y0 - 2, nd.y1 + 2, face, face + 0.8, 1.5);
+    this.needle = new Screen(art, nd.x0, nd.x1, nd.y0, nd.y1, face + 0.9, 10);
 
     // the reservoir's column: its back, its fluid, and the glass in front
     block(art, darkMat, x - paneW / 2, x + paneW / 2, 0, H, wall, wall + 0.5);
@@ -1587,6 +1649,7 @@ class ToolView {
       this.segments[i].emissive.set(lit ? color : 0x000000);
     });
     drawDiverter(this.diverter!, t.gate, t.sinceFlow < DIVERTER_HOLD);
+    drawNeedle(this.needle!, t.needle);
     // the screens: the cryostabilizer in the reservoir / what's needed, in litres; and how long it's been delivering
     // steadily
     phosphor(this.screen!, STATION.screen, `${((t.tanks[1].n[TARGET] / CAP) * FLASK_L).toFixed(2)} L / ${GOAL_L.toFixed(2)} L`);
@@ -1599,6 +1662,7 @@ class ToolView {
     for (const { fm } of this.fluids) fm.dispose();
     this.screen?.tex.dispose();
     this.steadyScreen?.tex.dispose();
+    this.needle?.tex.dispose();
   }
 }
 
