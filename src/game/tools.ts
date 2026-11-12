@@ -515,7 +515,8 @@ export function neckShare(vol: number): number {
  * How a wicking strip behaves (see SHAPES.strip and Tool.wick):
  * - cap: how much its paper takes up, by volume: a hundredth of a flask;
  * - uptake: how fast it takes that up from its pad, by volume per sim second;
- * - time: how long the wet front takes to creep the length of the paper, in sim seconds;
+ * - time: how long the wet front takes to creep the length of the paper, in sim seconds: quickly at first and ever
+ *   more slowly, as paper wicks, as the square root of the time (see Tool.wick);
  * - drag: the drag at which a molecule doesn't move at all (see stripRun);
  * - ink: how strongly a band shows: one of `share` of the sample is 1 − e^(−ink·share) opaque, so a twentieth of the
  *   sample is already nearly half as dark as it gets, and what's most of it is no darker than what's half;
@@ -1453,7 +1454,8 @@ export class Tool {
   /**
    * A wicking strip's step: until its wet front has run the paper's length, the paper takes up what it has room for
    * from the pad (at STRIP.uptake), scorching if that's hot (see scorchAt); and once it holds anything, the front creeps
-   * on, the whole length in STRIP.time. Then it's dry, and done: it takes up no more. Nothing leaves it.
+   * on, as the square root of the time since, the whole length in STRIP.time. Then it's dry, and done: it takes up no
+   * more. Nothing leaves it.
    */
   private wick(h: number): (Vessel | null)[] {
     const pad = this.tanks[0];
@@ -1463,7 +1465,8 @@ export class Tool {
         const T = temperature(pad);
         if (transfer(pad, paper, STRIP.uptake * h) > 0) this.scorch = Math.max(this.scorch, scorchAt(T));
       }
-      if (paper.N > 0) this.wet = Math.min(1, this.wet + h / STRIP.time);
+      // the further the front has to draw the fluid, the slower it goes: its distance squared grows steadily
+      if (paper.N > 0) this.wet = Math.min(1, Math.sqrt(this.wet ** 2 + h / STRIP.time));
     }
     return this.none();
   }

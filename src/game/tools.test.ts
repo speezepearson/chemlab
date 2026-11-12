@@ -590,12 +590,15 @@ describe('wicking strip', () => {
     run(t, 5);
     expect(t.wet).toBe(0);
     filled(pad, R, pad.cap, 1);
-    run(t, STRIP.time / 2);
-    // the paper has all it can hold, and the rest stays in the pad; the front is halfway
+    run(t, STRIP.time / 4);
+    // the paper has all it can hold, and the rest stays in the pad; the front is halfway in a quarter of the time,
+    // since it goes as the square root of it
     expect(volume(t.sample!)).toBe(STRIP.cap);
     expect(pad.N).toBe(pad.cap - STRIP.cap);
     expect(t.wet).toBeCloseTo(0.5, 2);
     expect(t.isOpen(0)).toBe(true);
+    run(t, STRIP.time / 4);
+    expect(t.wet).toBeCloseTo(Math.SQRT1_2, 2);
     run(t, STRIP.time / 2 + 0.1);
     expect(t.wet).toBe(1);
     expect(t.scorch).toBe(0);
