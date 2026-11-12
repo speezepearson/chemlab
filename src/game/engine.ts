@@ -1091,7 +1091,7 @@ export class GameEngine {
 
   /** E: pick up what the crosshair is on, or let go of what's held. */
   touchGrab(): void {
-    if (this.locked) this.grabOrRelease();
+    if (this.locked) this.grabOrRelease(false);
   }
 
   /** N: write a note about what the crosshair is on. */
@@ -1199,7 +1199,7 @@ export class GameEngine {
         if (at) this.pencilDown(at, e.button);
         return;
       }
-      if (e.button === 0) this.leftDown();
+      if (e.button === 0) this.leftDown(e.shiftKey);
       if (e.button === 2) this.rightDown();
     });
     on(window, 'mouseup', (e) => {
@@ -1243,7 +1243,7 @@ export class GameEngine {
       if (!this.locked) return;
       this.keys.add(e.code);
       if (e.repeat || inPod(this.wake) || this.previewing) return;
-      if (e.code === 'KeyE') this.grabOrRelease();
+      if (e.code === 'KeyE') this.grabOrRelease(e.shiftKey);
       if (e.code === 'KeyQ') this.putBack();
       if (e.code === 'KeyP') this.setPencil(!this.pencil);
       if (e.code === 'KeyN') {
@@ -1321,7 +1321,11 @@ export class GameEngine {
     aimValve(t, k, l.x, -l.y);
   }
 
-  private grabOrRelease(): void {
+  /**
+   * Pick up what the crosshair is on, or let go of what's held. Picked up `linked` (with Shift), it stays hooked up to
+   * what it pours into and what pours into it (see keepPouring and gather); otherwise it's moved alone.
+   */
+  private grabOrRelease(linked: boolean): void {
     if (inPod(this.wake)) return;
     if (this.held) {
       this.release();
@@ -1343,7 +1347,7 @@ export class GameEngine {
       for (const s of this.scales) s.remove(p.f);
       h = { kind: 'flask', f: p.f, relYaw: 0, dist: 0, from: { pose: { ...p.f.pose }, ...(scale ? { scale } : {}) } };
     } else if (p.kind === 'tool') {
-      const made = this.keepPouring(p.t);
+      const made = linked ? this.keepPouring(p.t) : [];
       if (typeof made === 'string') {
         this.say(made);
         return;
@@ -1356,7 +1360,7 @@ export class GameEngine {
       return;
     }
     h.relYaw = h.kind === 'flask' ? 0 : wrapAngle(this.heldPose(h).yaw - this.player.yaw);
-    h.follow = this.gather(h);
+    h.follow = linked ? this.gather(h) : [];
     this.holdInPlace(h);
     this.held = h;
   }
@@ -1368,11 +1372,8 @@ export class GameEngine {
    */
   private keepPouring(t: Tool): Hose[] | string {
     const made: Hose[] = [];
-    for (let j = 0; j < t.shape.spouts.length; j++) {
-      if (this.hoseOn({ tool: t, spout: j }) || !this.flowing(t, j)) continue;
+    for (const j of this.pouringOut(t)) {
       const sp = spoutAt(t, j);
-      const m = mouthBelow(this.open, sp);
-      if (!m || t.tanks.includes(m.v)) continue;
       const hose = new Hose({ tool: t, spout: j }, sp, NOZZLE_REACH.min);
       hose.turn = toCardinal(this.player.yaw);
       const r = this.standFor(hose, t);
@@ -1389,6 +1390,28 @@ export class GameEngine {
     return made;
   }
 
+  /** The spouts of tool t that keepPouring would pull hoses out of: with none out, letting something out into an open top not its own. */
+  private pouringOut(t: Tool): number[] {
+    const out: number[] = [];
+    for (let j = 0; j < t.shape.spouts.length; j++) {
+      if (this.hoseOn({ tool: t, spout: j }) || !this.flowing(t, j)) continue;
+      const m = mouthBelow(this.open, spoutAt(t, j));
+      if (m && !t.tanks.includes(m.v)) out.push(j);
+    }
+    return out;
+  }
+
+  /** Whether picking up p with Shift would keep anything hooked up to it (see keepPouring and gather). */
+  private hooked(p: Pick): boolean {
+    if (p.kind === 'tool' && this.pouringOut(p.t).length) return true;
+    const h: Held | null =
+      p.kind === 'flask' ? { kind: 'flask', f: p.f, relYaw: 0, dist: 0 }
+      : p.kind === 'tool' ? { kind: 'tool', t: p.t, relYaw: 0, dist: 0 }
+      : p.kind === 'scale' ? { kind: 'scale', sc: p.sc, relYaw: 0, dist: 0 }
+      : null;
+    return !!h && this.feeders(h).length > 0;
+  }
+
   /**
    * Whatever pours into what's about to be carried keeps pouring into it: each faucet, nozzle, or spout letting
    * something out (see flowing), whose stream lands in it (a flask, a tool's open tanks, or the flasks on a scale), has
@@ -1396,21 +1419,28 @@ export class GameEngine {
    * too (see followRests). An idle spout that happens to be over it is left be.
    */
   private gather(h: Held): Follower[] {
-    const vs = new Set<Vessel>(h.kind === 'flask' ? [h.f] : h.kind === 'tool' ? h.t.tanks : h.kind === 'scale' ? h.sc.load.map((l) => l.f) : []);
     const frame = this.carryFrame(h, this.heldPose(h));
-    const out: Follower[] = [];
-    const add = (m: HoseMount, at: Vec3) => {
-      const mouth = mouthBelow(this.open, at);
-      if (!mouth || !vs.has(mouth.v)) return;
+    return this.feeders(h).map(({ m, at, into }) => {
       let hose = this.hoseOn(m);
-      if (!hose && 'tool' in m && !this.flowing(m.tool, m.spout)) return;
       const was = hose ? { outlet: { ...hose.outlet }, turn: hose.turn, reach: hose.reach } : null;
       if (!hose) {
         hose = new Hose(m, at, NOZZLE_REACH.min);
         hose.turn = toCardinal(this.player.yaw);
         this.hoses.push(hose);
       }
-      out.push({ hose, into: mouth.v, off: toLocal(frame, hose.outlet), turn: wrapAngle(hose.turn - frame.yaw), was });
+      return { hose, into, off: toLocal(frame, hose.outlet), turn: wrapAngle(hose.turn - frame.yaw), was };
+    });
+  }
+
+  /** What gather would bring along with h: each faucet or spout (at its outlet) whose stream lands in it, and in which of its vessels. */
+  private feeders(h: Held): { m: HoseMount; at: Vec3; into: Vessel }[] {
+    const vs = new Set<Vessel>(h.kind === 'flask' ? [h.f] : h.kind === 'tool' ? h.t.tanks : h.kind === 'scale' ? h.sc.load.map((l) => l.f) : []);
+    const out: { m: HoseMount; at: Vec3; into: Vessel }[] = [];
+    const add = (m: HoseMount, at: Vec3) => {
+      const mouth = mouthBelow(this.open, at);
+      if (!mouth || !vs.has(mouth.v)) return;
+      if (!this.hoseOn(m) && 'tool' in m && !this.flowing(m.tool, m.spout)) return;
+      out.push({ m, at, into: mouth.v });
     };
     this.faucets.forEach((_, i) => add({ faucet: i }, this.faucetOutlet(i)));
     for (const t of this.tools)
@@ -1662,7 +1692,7 @@ export class GameEngine {
     this.commit();
   }
 
-  private leftDown(): void {
+  private leftDown(shift: boolean): void {
     const p = this.target;
     if (p?.kind === 'wake') {
       this.pressOk();
@@ -1695,7 +1725,7 @@ export class GameEngine {
     }
     // anywhere else, what's held is set down, or with empty hands, what's looked at picked up
     if (this.held) this.release();
-    else if (p && this.grabbable(p)) this.grabOrRelease();
+    else if (p && this.grabbable(p)) this.grabOrRelease(shift);
   }
 
   /**
@@ -2749,7 +2779,10 @@ export class GameEngine {
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it away');
       if (!this.pencil) add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it away') : 'put it back');
     } else {
-      if (this.pencil && p && this.grabbable(p)) add(['E'], 'pick it up');
+      if (this.pencil && p && this.grabbable(p)) {
+        add(['E'], 'pick it up');
+        if (this.hooked(p)) add(['Shift', 'E'], 'pick it up still hooked up');
+      }
       if (!this.pencil && this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
       add(['1–0, -, ='], 'make equipment in your hands');
     }
@@ -2760,7 +2793,10 @@ export class GameEngine {
       const m = h ? null : this.mountAimed();
       if (m) add(['LMB'], this.hoseOn(m) ? 'take hold of its hose' : 'pull out its hose');
       else if (!h && p?.kind === 'hose') add(['LMB'], 'take hold of it');
-      else if (!h && p && this.grabbable(p) && !this.onButton()) add(['LMB'], 'pick it up');
+      else if (!h && p && this.grabbable(p) && !this.onButton()) {
+        add(['LMB'], 'pick it up');
+        if (this.hooked(p)) add(['Shift', 'LMB'], 'pick it up still hooked up');
+      }
       const id = this.targetNote();
       if (id) add(['N'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
       add(['P'], 'pick up the pencil');
