@@ -14,7 +14,7 @@ interface Group {
 
 const MODELS: [model: ColorModel, label: string, formula: string, mix?: NumKey][] = [
   ['atoms', 'current', 'a molecule is the average of its atoms, so reactions never change a fluid\'s color'],
-  ['paint', '1: paint', 'atoms multiply like paints, rescaled to the average\'s brightness; C–Y green, M–Y red', 'paintMix'],
+  ['paint', '1: paint', 'atoms multiply like paints, rescaled to the average\'s brightness; R–G olive, R–B purple', 'paintMix'],
   ['light', '2: light', 'atoms add like spotlights, clipped; R–G yellow, △RGB white', 'lightMix'],
 ];
 
@@ -130,7 +130,7 @@ export function AppearancePanel() {
               <>
                 {numRow('α single', 'alpha1')}
                 {numRow('α pair', 'alpha2')}
-                {numRow('α triple', 'alpha3')}
+                {numRow('α 3 or 4', 'alpha3')}
               </>
             )}
             <tr className="group">
@@ -175,8 +175,7 @@ export function AppearancePanel() {
           </tbody>
         </table>
         <p>
-          Drag a number sideways to scale it. Try the Temperature range preset to see every temperature at once, and
-          the Wash route preset to see color change as it reacts. Mix runs from 0 (current) to 1 (full model).
+          Drag a number sideways to scale it. Try the Temperature range preset to see every temperature at once. Mix runs from 0 (current) to 1 (full model).
         </p>
         <div className="actions">
           <button

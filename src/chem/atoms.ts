@@ -1,46 +1,48 @@
 /*
- * Six atom colors in three complementary pairs. Each pair is a "group", and a
- * molecule holds at most one atom from each group, so it has three slots.
+ * Four atom colors: red, green, blue and black. A molecule holds at most one atom of each, so at most four atoms, and
+ * any two of them can bond.
  */
-export const ATOMS = ['R', 'C', 'G', 'M', 'B', 'Y'] as const;
+export const ATOMS = ['R', 'G', 'B', 'K'] as const;
 export type Atom = (typeof ATOMS)[number];
-export type Group = 0 | 1 | 2;
-
-export const GROUP: Record<Atom, Group> = { R: 0, C: 0, G: 1, M: 1, B: 2, Y: 2 };
-export const OPPOSITE: Record<Atom, Atom> = { R: 'C', C: 'R', G: 'M', M: 'G', B: 'Y', Y: 'B' };
-export const GROUP_PRIMARY: readonly Atom[] = ['R', 'G', 'B'];
 
 export type RGBTriple = readonly [number, number, number];
+/** Black is a near-black, a little blue, so it isn't quite the black of an empty or frozen vessel. */
 export const ATOM_RGB: Record<Atom, RGBTriple> = {
   R: [228, 58, 52],
   G: [58, 186, 96],
   B: [58, 112, 236],
-  C: [42, 200, 214],
-  M: [210, 64, 196],
-  Y: [240, 202, 48],
+  K: [44, 42, 54],
 };
 
 /** How much each atom weighs, in µg (see GRAMS_PER_WEIGHT in scale.ts), so a billion of weight w weigh w kg. No two weigh the same. */
-export const ATOM_WEIGHT: Record<Atom, number> = { R: 6, G: 3, B: 4, C: 2, M: 1, Y: 5 };
+export const ATOM_WEIGHT: Record<Atom, number> = { R: 6, G: 3, B: 4, K: 5 };
 
-/** Bit k of a bond mask is the bond between the two groups BIT_PAIRS[k]. */
-export const BIT_PAIRS: readonly (readonly [Group, Group])[] = [
+/** Bit k of a bond mask is the bond between the two atoms BONDS[k], as indices into ATOMS. */
+export const BONDS: readonly (readonly [number, number])[] = [
   [0, 1],
   [0, 2],
   [1, 2],
+  [0, 3],
+  [1, 3],
+  [2, 3],
 ];
 
-export function bitOf(g1: Group, g2: Group): number {
-  const a = Math.min(g1, g2);
-  const b = Math.max(g1, g2);
-  return a === 0 ? (b === 1 ? 1 : 2) : 4;
+/** The index in BONDS of the bond between atoms i and j (indices into ATOMS). */
+export function bondIndex(i: number, j: number): number {
+  const k = BONDS.findIndex(([a, b]) => (a === i && b === j) || (a === j && b === i));
+  if (k < 0) throw new Error(`no bond ${i}-${j}`);
+  return k;
 }
 
-export function popcount3(m: number): number {
-  return (m & 1) + ((m >> 1) & 1) + ((m >> 2) & 1);
+/** The bit, in a bond mask, of the bond between atoms i and j (indices into ATOMS). */
+export function bondBit(i: number, j: number): number {
+  return 1 << bondIndex(i, j);
 }
 
-/** Bond key: the two colors in group order (R/C first, then G/M, then B/Y). */
+/** Bond key: the two colors in ATOMS order, e.g. "RG", "BK". */
 export function pairKey(a: Atom, b: Atom): string {
-  return GROUP[a] < GROUP[b] ? a + b : b + a;
+  return ATOMS.indexOf(a) < ATOMS.indexOf(b) ? a + b : b + a;
 }
+
+/** Every bond's key (see pairKey), in BONDS order: RG, RB, GB, RK, GK, BK. */
+export const BOND_KEYS: readonly string[] = BONDS.map(([i, j]) => ATOMS[i] + ATOMS[j]);
