@@ -299,11 +299,64 @@ const v3 = (x: number, y: number, z = 0) => new THREE.Vector3(x, -y, z);
  */
 const FLUID_EDGE = { edge: 0.7, line: 1.2, lineAlpha: 0.8 };
 
+/**
+ * How what's seen through a see-through fluid is bent, as through water in glass (see FluidMesh's `bent`): at most
+ * `shift` world units sideways at the fluid's own distance, where the fluid's far side is seen edge on, and less as it
+ * faces the eye, so a round flask acts as a lens; at full strength from opacity 1 − `fade` down, and fading to nothing
+ * as the fluid turns opaque. What's behind is drawn again for it, at `scale` of the screen's resolution each way, once
+ * a frame and only while some see-through fluid is in view.
+ */
+export const REFRACT = { shift: 14, fade: 0.3, scale: 0.5 };
+/** The layer the bent views behind see-through fluids are on, drawn only in the frame itself (see View.render). */
+const REFRACT_LAYER = 6;
+/** The drawing buffer's size in pixels, shared by every `bent` material, set each frame (see View.render). */
+const refractScreen = { value: new THREE.Vector2(1, 1) };
+
+/**
+ * What's behind a see-through fluid, bent: each pixel of the fluid's far side (its back faces, which cover all of it
+ * from any side, the open top included) shows what's behind the fluid a little toward the fluid's middle, by how far
+ * its surface there turns away from the eye. It uses three.js's transmission, which draws everything opaque to a
+ * texture once a frame whenever something transmissive is in view; this then replaces what's behind with that
+ * texture, shifted, and the fluid itself is blended over it as ever. Glass and other see-through things are drawn
+ * after it, so they're seen straight.
+ */
+function bentMat(plane: THREE.Plane): THREE.MeshPhysicalMaterial {
+  const mat = new THREE.MeshPhysicalMaterial({ transmission: 1, side: THREE.BackSide, depthWrite: false, clippingPlanes: [plane] });
+  const shift = { value: 0 };
+  mat.userData.shift = shift;
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.refractScreen = refractScreen;
+    sh.uniforms.refractShift = shift;
+    sh.fragmentShader = /* glsl */ `
+      uniform sampler2D transmissionSamplerMap;
+      uniform mat4 projectionMatrix;
+      uniform vec2 refractScreen;
+      uniform float refractShift;
+      varying vec3 vViewPosition;
+      varying vec3 vNormal;
+      #include <clipping_planes_pars_fragment>
+      void main() {
+        #include <clipping_planes_fragment>
+        // the far side's normal, turned to face the eye (three.js flips it for a back side): toward the fluid's middle
+        vec3 n = normalize( vNormal );
+        vec2 perUnit = 0.5 * vec2( projectionMatrix[ 0 ][ 0 ], projectionMatrix[ 1 ][ 1 ] ) / max( vViewPosition.z, 1.0 );
+        vec2 uv = gl_FragCoord.xy / refractScreen + n.xy * refractShift * perUnit;
+        gl_FragColor = vec4( textureLod( transmissionSamplerMap, uv, 0.0 ).rgb, 1.0 );
+        #include <colorspace_fragment>
+      }`;
+  };
+  mat.customProgramCacheKey = () => 'bent';
+  return mat;
+}
+
 /** The fluid in a vessel: drawn from a solid the shape of its inside, cut off at the fluid's level. */
 class FluidMesh {
   readonly mat: THREE.MeshLambertMaterial;
   readonly plane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
   readonly meshes: THREE.Mesh[] = [];
+  /** What's behind it, bent, while it's see-through (see bentMat). */
+  private bent: THREE.MeshPhysicalMaterial;
+  private bents: THREE.Mesh[] = [];
   private key = '';
 
   constructor(geoms: THREE.BufferGeometry[], parent: THREE.Object3D) {
@@ -327,11 +380,20 @@ class FluidMesh {
       );
     };
     this.mat.customProgramCacheKey = () => 'fluid';
+    this.bent = bentMat(this.plane);
     for (const g of geoms) {
       const m = new THREE.Mesh(g, this.mat);
       m.castShadow = true;
       parent.add(m);
       this.meshes.push(m);
+      // drawn only in the frame itself: never hit, outlined, reflected or in the end's white void
+      const b = new THREE.Mesh(g, this.bent);
+      b.layers.set(REFRACT_LAYER);
+      b.raycast = () => {};
+      b.userData.bent = true;
+      b.visible = false;
+      parent.add(b);
+      this.bents.push(b);
     }
   }
 
@@ -339,9 +401,13 @@ class FluidMesh {
   update(f: Fluid, level: number): void {
     const rgb = f.N > TRACE ? fluidRGB(f) : null;
     for (const m of this.meshes) m.visible = !!rgb;
+    const a = rgb ? fluidAlpha(f) : 1;
+    // bent as far as it's clear (see REFRACT), and not at all, nor drawn, once it's all but opaque
+    const shift = REFRACT.shift * Math.min(1, (1 - a) / REFRACT.fade);
+    (this.bent.userData.shift as { value: number }).value = shift;
+    for (const b of this.bents) b.visible = shift > 0.01;
     if (!rgb) return;
     this.plane.constant = level;
-    const a = fluidAlpha(f);
     const key = `${rgb.map(Math.round)}:${a.toFixed(2)}`;
     if (key === this.key) return;
     this.key = key;
@@ -360,6 +426,7 @@ class FluidMesh {
 
   dispose(): void {
     this.mat.dispose();
+    this.bent.dispose();
   }
 }
 
@@ -1416,7 +1483,7 @@ class ToolView {
 
     // everything else that's drawn is the tool's body, to grab it by
     this.body.traverse((m) => {
-      if (m instanceof THREE.Mesh && !pickables.has(m)) pick(m, 'body');
+      if (m instanceof THREE.Mesh && !pickables.has(m) && !m.userData.bent) pick(m, 'body');
     });
     scene.add(this.root);
   }
@@ -3562,7 +3629,12 @@ export class View {
       this.renderArrival(fr.airlock.front);
       return;
     }
+    // the views behind see-through fluids, bent (see bentMat), are on a layer of their own, drawn only here
+    this.renderer.getDrawingBufferSize(refractScreen.value);
+    this.renderer.transmissionResolutionScale = REFRACT.scale;
+    this.camera.layers.enable(REFRACT_LAYER);
     this.renderer.render(scene, this.camera);
+    this.camera.layers.disable(REFRACT_LAYER);
     this.renderGuides();
     this.renderOutline(fr.hot);
   }

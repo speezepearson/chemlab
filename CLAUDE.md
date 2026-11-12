@@ -133,7 +133,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   `outletAt` and `faucetOutlet`, not `spoutAt` or `fa.spout`.
 - **What's drawn is what's hit.** Every mesh a `ToolView` builds is registered as part of the tool for the crosshair's
   raycast, so empty space around it isn't. Register a mesh yourself only to make it a specific part (a tank, valve
-  or button); sprites (labels) aren't hit.
+  or button); sprites (labels) aren't hit. The one exception is each `FluidMesh`'s bent copy of what's behind a clear
+  fluid (`bentMat` in `view.ts`), on a layer of its own (`REFRACT_LAYER`) drawn only in the frame's main render. It's
+  the only thing using three.js's `transmission`, whose extra pass runs whenever anything transmissive is in view, so
+  don't give other materials `transmission` lightly.
 - **Adding a tool kind** touches all of these:
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially.
