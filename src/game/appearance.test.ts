@@ -1,13 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { ATOM_RGB } from '../chem/atoms';
-import { singleOf, speciesIndex } from '../chem/species';
+import { pairOf, singleOf } from '../chem/species';
 import { Vessel, fluidAlpha, fluidHue } from './flask';
 import {
-  LOOK, coronaAlpha, coronaRadius, defaultLook, glowFalloff, glowStrength, glowWhiteHeat, haloAlpha, haloRadius,
-  heatValue, resetLook, whiteHeat,
+  LOOK, defaultLook, glowFalloff, heatValue, resetLook, whiteHeat,
 } from './appearance';
 
-const FNS = { heatValue, glowStrength, whiteHeat, glowWhiteHeat, coronaAlpha, coronaRadius, haloAlpha, haloRadius };
+const FNS = { heatValue, whiteHeat };
 
 function expectContinuousNonDecreasing(name: string, fn: (T: number) => number) {
   // Consecutive samples on a gap-free grid, so a jump anywhere in [0, 200]
@@ -35,14 +34,7 @@ describe('temperature appearance', () => {
     expect(heatValue(1)).toBeGreaterThan(0.9);
   });
 
-  it('glows subtly at T = 1, strongly at 10, blindingly at 100', () => {
-    expect(coronaAlpha(0)).toBe(0);
-    expect(haloAlpha(0)).toBe(0);
-    expect(coronaAlpha(1)).toBeGreaterThan(0.1);
-    expect(coronaAlpha(1)).toBeLessThan(0.3);
-    expect(haloAlpha(10)).toBeGreaterThan(0.25);
-    expect(haloRadius(10)).toBeGreaterThan(2 * haloRadius(1));
-    expect(haloAlpha(100)).toBeGreaterThan(0.9);
+  it('washes hot fluids out to white: barely at T = 1, fully by 100', () => {
     expect(whiteHeat(1)).toBeLessThan(0.05);
     expect(whiteHeat(100)).toBeGreaterThan(0.95);
   });
@@ -67,11 +59,10 @@ describe('temperature appearance', () => {
   it('stays continuous with tuned (non-default) parameters', () => {
     // (a pow below 1 is still continuous but starts infinitely steep at T = 0,
     // which this finite-step jump detector can't tell from a jump)
-    Object.assign(LOOK, { coldRate: 0.7, glowRef: 12, whiteRef: 5, whitePow: 1.3, fluidWhite: 0.3, glowWhite: 2.5, haloPow: 1.2 });
+    Object.assign(LOOK, { coldRate: 0.7, whiteRef: 5, whitePow: 1.3, fluidWhite: 0.3 });
     try {
       for (const [name, fn] of Object.entries(FNS)) expectContinuousNonDecreasing(name, fn);
       expect(whiteHeat(1000)).toBeCloseTo(0.3);
-      expect(glowWhiteHeat(1000)).toBe(1);
     } finally {
       resetLook();
     }
@@ -82,7 +73,7 @@ describe('temperature appearance', () => {
 describe('composition', () => {
   const R = singleOf('R');
   const G = singleOf('G');
-  const RG = speciesIndex(['R', 'G', null], 1);
+  const RG = pairOf('R', 'G');
   const fluid = (contents: [number, number][]) => {
     const v = new Vessel(Infinity);
     for (const [s, m] of contents) v.setMolecules(s, m);
@@ -106,10 +97,10 @@ describe('composition', () => {
     expect(fluidHue(fluid([[R, 1]]))).toEqual([...ATOM_RGB.R]);
   });
 
-  it('under the paint model, bonding C and Y turns it green', () => {
+  it('under the paint model, bonding R and B turns it purple, red and blue over green', () => {
     LOOK.colorModel = 'paint';
-    const cy = fluidHue(fluid([[speciesIndex(['C', null, 'Y'], 2), 100]]))!;
-    expect(cy[1]).toBeGreaterThan(3 * Math.max(cy[0], cy[2]));
+    const rb = fluidHue(fluid([[pairOf('R', 'B'), 100]]))!;
+    expect(Math.min(rb[0], rb[2])).toBeGreaterThan(1.5 * rb[1]);
   });
 
   it('with mix 0, any model is the default', () => {

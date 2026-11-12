@@ -61,7 +61,7 @@ function Contents({ info }: { info: Inspection }) {
       pc.stroke();
       return;
     }
-    // a fixed order (singles, then pairs, then triples, counterclockwise from north), so sectors
+    // a fixed order (by size, singles first, counterclockwise from north), so sectors
     // don't jump around as amounts shift; the list beside it is what's sorted by amount
     const order = [...info.rows].sort((x, y) => SPECIES[x.species].size - SPECIES[y.species].size || x.species - y.species);
     let a0 = -Math.PI / 2;

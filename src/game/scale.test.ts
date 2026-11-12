@@ -27,8 +27,8 @@ describe('flask weights', () => {
 
   it("weigh a molecule as its atoms' weights together", () => {
     const f = flask(0);
-    f.setMolecules(pairOf('C', 'Y'), CAP / 2);
-    expect(flaskGrams(f) - f.glass).toBeCloseTo(500 * (ATOM_WEIGHT.C + ATOM_WEIGHT.Y));
+    f.setMolecules(pairOf('G', 'K'), CAP / 2);
+    expect(flaskGrams(f) - f.glass).toBeCloseTo(500 * (ATOM_WEIGHT.G + ATOM_WEIGHT.K));
   });
 });
 

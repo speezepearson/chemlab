@@ -4,7 +4,7 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { GOAL_PURITY, TRACE } from './config';
 import { GLASS_GRAMS } from './scale';
 import { ORIGIN, type Pose } from './space';
-import { LOOK, css, glowWhiteHeat, heatValue, whiteHeat, whiten, type RGB } from './appearance';
+import { LOOK, css, heatValue, whiteHeat, whiten, type RGB } from './appearance';
 
 export interface Point {
   x: number;
@@ -184,12 +184,12 @@ export function fluidHue(f: Fluid): RGB | null {
   return col;
 }
 
-/** How opaque the fluid looks: 1 unless LOOK.cloudy, then the atom-weighted average of alpha1..3 by molecule size. */
+/** How opaque the fluid looks: 1 unless LOOK.cloudy, then the atom-weighted average of alpha1..3 by molecule size (alpha3 for three atoms or four). */
 export function fluidAlpha(f: Fluid): number {
   if (!LOOK.cloudy || f.N <= 0) return 1;
   const alpha = [0, LOOK.alpha1, LOOK.alpha2, LOOK.alpha3];
   let a = 0;
-  for (let s = 0; s < NS; s++) if (f.n[s] > 0) a += ((f.n[s] * SPECIES[s].size) / f.N) * alpha[SPECIES[s].size];
+  for (let s = 0; s < NS; s++) if (f.n[s] > 0) a += ((f.n[s] * SPECIES[s].size) / f.N) * alpha[Math.min(SPECIES[s].size, 3)];
   return Math.max(0, Math.min(1, a));
 }
 
@@ -206,10 +206,4 @@ export function fluidRGB(f: Fluid): RGB | null {
 export function fluidColor(f: Fluid): string {
   const c = fluidRGB(f);
   return c ? css(c, fluidAlpha(f)) : 'transparent';
-}
-
-/** Color of the light a hot fluid gives off. */
-export function glowColor(f: Fluid): RGB | null {
-  const hue = fluidHue(f);
-  return hue && whiten(hue, glowWhiteHeat(temperature(f)));
 }

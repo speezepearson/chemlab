@@ -49,8 +49,8 @@ const ICONS: Record<string, ReactNode> = {
   ),
   sorter: (
     <>
-      <path className="pipe" d="M7 12 V16 M15 20 V37 M26 24 V37 M36 27 V37" />
-      <path className="pipe" d="M3 15 L36 27" />
+      <path className="pipe" d="M7 12 V16 M13 19 V37 M21 22 V37 M29 25 V37 M37 28 V37" />
+      <path className="pipe" d="M3 15 L37 28" />
       <path className="glass" d="M1 3 H13 L8 11 H6 Z" />
     </>
   ),

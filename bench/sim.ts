@@ -85,8 +85,8 @@ function mixFill(atoms: Partial<Record<Atom, number>>, flasks: number, Teq: numb
 function freshFill(atoms: Partial<Record<Atom, number>>, flasks: number, T: number): FlaskFill {
   return { contents: ATOMS.filter((x) => atoms[x]).map((x) => ({ species: singleOf(x), molecules: atoms[x]! * flasks * CAP })), T };
 }
-const EVEN: Partial<Record<Atom, number>> = { R: 1 / 6, Y: 1 / 6, G: 1 / 6, C: 1 / 6, B: 1 / 6, M: 1 / 6 };
-const COLORS: Atom[] = ['R', 'Y', 'G', 'C', 'B', 'M', 'R', 'G'];
+const EVEN: Partial<Record<Atom, number>> = { R: 1 / 4, G: 1 / 4, B: 1 / 4, K: 1 / 4 };
+const COLORS: Atom[] = ['R', 'G', 'B', 'K', 'R', 'G', 'B', 'K'];
 
 /** The engine with its private parts reachable, as the bench pokes at them. */
 type Engine = Record<string, any>;
@@ -111,11 +111,11 @@ const SCENES: Record<string, Scene> = {
     preset: base(COLORS.map((c) => ({ contents: [{ species: singleOf(c), molecules: (2 / 3) * CAP }], T: T_ROOM })), 'quiet8'),
   },
   room8: {
-    about: '8 flasks 2/3 full of an equilibrated even mix of all six atoms at T=1',
+    about: '8 flasks 2/3 full of an equilibrated even mix of all four atoms at T=1',
     preset: base(COLORS.map(() => mixFill(EVEN, 2 / 3, 1, 1)), 'room8'),
   },
   fresh8: {
-    about: '8 flasks 2/3 full of all six atoms just mixed (unreacted singles) at T=1',
+    about: '8 flasks 2/3 full of all four atoms just mixed (unreacted singles) at T=1',
     preset: base(COLORS.map(() => freshFill(EVEN, 2 / 3, 1)), 'fresh8'),
   },
   hot8: {
@@ -124,8 +124,8 @@ const SCENES: Record<string, Scene> = {
   },
   busy: {
     about:
-      'hot8 + 6 faucets running through hoses into a heater -> separator (looped) -> analyzer/spectroscope/splitter -> exchanger, ' +
-      'sorter, meter, dispenser -> pipette, big tank, two flasks overflowing under faucets',
+      'hot8 + 4 faucets running through hoses into a heater -> separator (looped) -> analyzer/spectroscope/splitter -> exchanger, ' +
+      'sorter, meter, dispenser -> pipette, big tank',
     preset: {
       ...base(COLORS.map(() => mixFill(EVEN, 2 / 3, 1, 4)), 'busy'),
       tools: [
@@ -146,7 +146,7 @@ const SCENES: Record<string, Scene> = {
       const analyzer = T('analyzer');
       const spectro = T('spectroscope');
       hose(e, { faucet: 0 }, tankMouth(heater, 0));
-      hose(e, { faucet: 2 }, tankMouth(heater, 0), 44);
+      hose(e, { faucet: 1 }, tankMouth(heater, 0), 44);
       hose(e, { tool: heater, spout: 3 }, tankMouth(sep, 0), 64);
       hose(e, { tool: sep, spout: 0 }, tankMouth(sep, 0));
       hose(e, { tool: sep, spout: 1 }, tankMouth(sep, 0), 44);
@@ -156,17 +156,15 @@ const SCENES: Record<string, Scene> = {
       hose(e, { tool: split, spout: 0 }, tankMouth(exch, 0));
       hose(e, { tool: split, spout: 1 }, tankMouth(exch, 1));
       hose(e, { faucet: 3 }, tankMouth(sorter, 0));
-      hose(e, { faucet: 4 }, tankMouth(meter, 0));
+      hose(e, { faucet: 2 }, tankMouth(meter, 0));
       hose(e, { tool: disp, spout: 0 }, tankMouth(pip, 0));
-      hose(e, { faucet: 1 }, flaskMouth(e.flasks[0]));
-      hose(e, { faucet: 5 }, flaskMouth(e.flasks[1]));
     },
   },
   prod: {
     about:
       'a steady-state production line into the station, as left running while asleep: faucets R+G -> heater 1 -> holding ' +
       'tank (hot) -> separator looped on itself (wash), faucet B -> heater 2 -> separator; separator 2,3,4 -> sorter; ' +
-      'sorter triples -> exchanger (cooled by faucet C) -> analyzer -> station receptacle; 4 flasks of hot intermediates on the side',
+      'sorter triples -> exchanger (cooled by faucet K) -> analyzer -> station receptacle; 4 flasks of hot intermediates on the side',
     preset: {
       ...base([...COLORS.slice(0, 4).map(() => mixFill(EVEN, 2 / 3, 1, 3)), null, null, null, null], 'prod'),
       tools: [
@@ -184,10 +182,10 @@ const SCENES: Record<string, Scene> = {
       const analyzer = e.tools.find((t: Tool) => t.kind === 'analyzer') as Tool;
       const station = e.tools.find((t: Tool) => t.kind === 'receptacle') as Tool;
       hose(e, { faucet: 0 }, tankMouth(h1, 0));
-      hose(e, { faucet: 2 }, tankMouth(h1, 0), 44);
+      hose(e, { faucet: 1 }, tankMouth(h1, 0), 44);
       hose(e, { tool: h1, spout: 3 }, tankMouth(hold, 0));
       hose(e, { tool: hold, spout: 0 }, tankMouth(sep, 0), 64);
-      hose(e, { faucet: 4 }, tankMouth(h2, 0));
+      hose(e, { faucet: 2 }, tankMouth(h2, 0));
       hose(e, { tool: h2, spout: 3 }, tankMouth(sep, 0), 84);
       hose(e, { tool: sep, spout: 0 }, tankMouth(sep, 0));
       hose(e, { tool: sep, spout: 1 }, tankMouth(sep, 0), 44);
@@ -449,7 +447,7 @@ function microStep(): void {
     ['even mix, equilibrium, T=1', mixFill(EVEN, 2 / 3, 1, 1)],
     ['even mix, equilibrium at T=1, heated to T=4', mixFill(EVEN, 2 / 3, 1, 4)],
     ['even mix, equilibrium at T=4', mixFill(EVEN, 2 / 3, 4, 4)],
-    ['six singles just mixed, T=1', freshFill(EVEN, 2 / 3, 1)],
+    ['four singles just mixed, T=1', freshFill(EVEN, 2 / 3, 1)],
   ];
   for (const [label, fill] of cases) {
     Math.random = mulberry32(7);

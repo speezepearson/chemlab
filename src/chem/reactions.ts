@@ -1,6 +1,6 @@
-import { ATOMS, BIT_PAIRS, GROUP_PRIMARY, OPPOSITE, bitOf, popcount3, type Atom, type Group } from './atoms';
+import { ATOMS, BONDS, bondBit, bondIndex } from './atoms';
 import { THERMO, T_ROOM, type ChemParams } from './params';
-import { NS, SPECIES, bondParam, singleOf, speciesEnergies, speciesIndex } from './species';
+import { NS, SINGLE, SPECIES, bondParam, reach, speciesEnergies, speciesIndex, within } from './species';
 
 /**
  * A well-mixed packet of fluid: species counts plus its heat. In a vessel the
@@ -45,6 +45,9 @@ export interface NetReaction {
   rate: number;
 }
 
+/** Black's index in ATOMS: every displacement has it on one side or the other. */
+const BLACK = ATOMS.indexOf('K');
+
 interface Reaction {
   ra: number;
   rb: number; // -1 if unimolecular
@@ -57,7 +60,7 @@ interface Reaction {
 }
 
 /**
- * Every reaction between the 50 species, stored as parallel typed arrays.
+ * Every reaction between the 64 species, stored as parallel typed arrays.
  * Rebuild after changing ChemParams.
  */
 export class ReactionNetwork {
@@ -99,76 +102,53 @@ export class ReactionNetwork {
     const rx: Reaction[] = [];
     const add = (ra: number, rb: number, p1: number, p2: number, A: number, Ea: number, dU: number) =>
       rx.push({ ra, rb, p1, p2, A, bar: Ea + Math.max(0, dU), dU });
-    const G = [0, 1, 2] as const;
 
-    // bond formation (bimolecular): A + B -> AB with one new bond
+    // bond formation (bimolecular): A + B -> AB with one new bond, between two molecules with no color in common
     for (const A of SPECIES)
       for (const B of SPECIES) {
-        if (A.i >= B.i) continue;
-        if (A.size + B.size > 3) continue;
-        if (G.some((g) => A.atoms[g] && B.atoms[g])) continue;
-        const atoms = G.map((g) => A.atoms[g] ?? B.atoms[g]);
-        for (const ga of G) {
-          const a = A.atoms[ga];
-          if (!a) continue;
-          for (const gb of G) {
-            const b = B.atoms[gb];
-            if (!b) continue;
-            const bp = bondParam(p, a, b);
-            const prod = speciesIndex(atoms, A.mask | B.mask | bitOf(ga, gb));
-            add(A.i, B.i, prod, -1, bp.A, bp.Ea, -bp.E);
+        if (A.i >= B.i || A.has & B.has) continue;
+        for (const i of A.atomIdx)
+          for (const j of B.atomIdx) {
+            const k = bondIndex(i, j);
+            const bp = bondParam(p, k);
+            add(A.i, B.i, speciesIndex(A.has | B.has, A.mask | B.mask | (1 << k)), -1, bp.A, bp.Ea, -bp.E);
           }
-        }
       }
 
-    // ring closure (unimolecular): path -> triangle
+    // ring closure (unimolecular): a bond forms between two atoms of the same molecule
     for (const sp of SPECIES)
-      if (sp.size === 3 && popcount3(sp.mask) === 2) {
-        const k = [0, 1, 2].find((k) => !(sp.mask & (1 << k)))!;
-        const [g1, g2] = BIT_PAIRS[k];
-        const bp = bondParam(p, sp.atoms[g1]!, sp.atoms[g2]!);
-        add(sp.i, -1, speciesIndex(sp.atoms, 7), -1, bp.A, bp.Ea, -bp.E);
-      }
+      BONDS.forEach(([i, j], k) => {
+        if (!((sp.has >> i) & 1 && (sp.has >> j) & 1) || sp.mask & (1 << k)) return;
+        const bp = bondParam(p, k);
+        add(sp.i, -1, speciesIndex(sp.has, sp.mask | (1 << k)), -1, bp.A, bp.Ea, -bp.E);
+      });
 
-    // bond breaking (unimolecular)
+    // bond breaking (unimolecular), the reverse of both: the molecule stays whole, or splits in two
     for (const sp of SPECIES)
-      for (let k = 0; k < 3; k++) {
-        if (!(sp.mask & (1 << k))) continue;
-        const [g1, g2] = BIT_PAIRS[k];
-        const bp = bondParam(p, sp.atoms[g1]!, sp.atoms[g2]!);
+      BONDS.forEach(([i], k) => {
+        if (!(sp.mask & (1 << k))) return;
+        const bp = bondParam(p, k);
         const nm = sp.mask & ~(1 << k);
-        if (sp.size === 3 && popcount3(nm) === 2) {
-          // triangle -> path
-          add(sp.i, -1, speciesIndex(sp.atoms, nm), -1, bp.A, bp.Ea, bp.E);
-        } else if (sp.size === 2) {
-          add(sp.i, -1, singleOf(sp.atoms[g1]!), singleOf(sp.atoms[g2]!), bp.A, bp.Ea, bp.E);
-        } else {
-          // size 3, one bond left: a pair + a single
-          const [h1, h2] = BIT_PAIRS[[0, 1, 2].find((kk) => nm & (1 << kk))!];
-          const pairAtoms = G.map((g) => (g === h1 || g === h2 ? sp.atoms[g] : null));
-          const lone = G.find((g) => g !== h1 && g !== h2)!;
-          add(sp.i, -1, speciesIndex(pairAtoms, nm), singleOf(sp.atoms[lone]!), bp.A, bp.Ea, bp.E);
+        const side = reach(i, nm);
+        if (side === sp.has) add(sp.i, -1, speciesIndex(sp.has, nm), -1, bp.A, bp.Ea, bp.E);
+        else {
+          const other = sp.has & ~side;
+          add(sp.i, -1, speciesIndex(side, nm & within(side)), speciesIndex(other, nm & within(other)), bp.A, bp.Ea, bp.E);
         }
-      }
+      });
 
-    // swaps (bimolecular, Ea=0): opposite colors trade places, bond topology unchanged
-    for (let g = 0 as Group; g < 3; g++) {
-      const X = GROUP_PRIMARY[g];
-      const Xo: Atom = OPPOSITE[X];
-      for (const A of SPECIES) {
-        if (A.atoms[g] !== X) continue;
-        for (const B of SPECIES) {
-          if (B.atoms[g] !== Xo) continue;
-          const a2 = A.atoms.slice();
-          a2[g] = Xo;
-          const b2 = B.atoms.slice();
-          b2[g] = X;
-          const A2 = speciesIndex(a2, A.mask);
-          const B2 = speciesIndex(b2, B.mask);
-          if (A2 === B.i && B2 === A.i) continue; // null reaction
-          add(A.i, B.i, A2, B2, p.swapA, 0, U[A2] + U[B2] - U[A.i] - U[B.i]);
-        }
-      }
+    // displacement (bimolecular, Ea = 0): a free atom trades places with a bound one, black on one side of the
+    // trade, keeping the bond topology, e.g. R–K + G -> R–G + K, or the reverse; never two bound atoms
+    for (const M of SPECIES) {
+      if (M.size < 2) continue;
+      for (const c of M.atomIdx)
+        ATOMS.forEach((_, x) => {
+          if ((M.has >> x) & 1 || (c === BLACK) === (x === BLACK)) return;
+          const relabel = (a: number) => (a === c ? x : a);
+          const mask = BONDS.reduce((m, [a, b], k) => (M.mask & (1 << k) ? m | bondBit(relabel(a), relabel(b)) : m), 0);
+          const M2 = speciesIndex((M.has & ~(1 << c)) | (1 << x), mask);
+          add(M.i, SINGLE[x], M2, SINGLE[c], p.swapA, 0, U[M2] - U[M.i]);
+        });
     }
 
     this.store(rx);

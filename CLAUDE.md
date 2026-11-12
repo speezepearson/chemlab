@@ -10,8 +10,6 @@ same commit as any behavior change. This file holds what README doesn't: how to 
   - No test may depend on the default chemistry (`defaultChemParams`, `THERMO`) or on the default values of the panel's
     tunables (`DRIP` aside: heater, cooling). They're all in flux. A test that needs reactions uses the fixed chemistry
     in `src/chem/testChem.ts`, and one that touches a tunable reads its current value rather than a literal.
-- `npm run route`: the synthesis-route harness (`src/game/route.ts`). It prints a report; `--silent=false` is already
-  in the script.
 - `npm run bench`: the headless sim benchmark (`bench/sim.ts`): the real engine in Node with the view and audio
   stubbed out, on fixed seeds. `npm run bench -- prod --mode=tight --load=bench/saves/line.json --tightstats` runs
   the user's production line as fast as it goes, as while asleep. Its header lists the modes and scenes.
@@ -45,10 +43,11 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 ## Architecture
 
 - `src/chem/`: the chemistry.
-  - `species.ts` defines the 50 species.
+  - `atoms.ts` is the four atoms (R, G, B, K) and the six bonds between them; `species.ts` defines the 64 species
+    (every connected graph on a set of distinct colors) and their names, which saves store.
   - `params.ts` holds the bond parameters.
   - `reactions.ts` is Arrhenius kinetics on whole molecules. The engine steps vessels through `tick`, never `step`.
-  - `equilibrium.ts` is the exact full-equilibrium solver, for the presets' and the route's settled mixes. Faucets
+  - `equilibrium.ts` is the exact full-equilibrium solver, for the editor's Equilibrate button and the bench's settled mixes. Faucets
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
 - `src/game/`: everything else in the game.
   - `engine.ts` owns the lab: what's in it, the player, input, carrying, the pencil and the sim loop.
@@ -157,10 +156,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 ## Design preferences
 
 - Don't give away the chemistry. The player is meant to work it out. The composition analyzer has no text and no
-  sextant divider lines, nor the bond visualizer, whose points are unlabeled, the size sorter's screens look plain, the hotbar has no names, and the faucets aren't labeled (they're the six pure
-  atoms, which the user chose). The spectroscope's axes are labeled E and f, at the user's request: E on a log scale with
-  base-10 log-paper ticks, only the powers of ten numbered, and no peak labeled. It plots each bond at the size of its
-  energy, so uphill and downhill bonds look alike, which the user chose to keep. Ask before adding any visual cue that reveals how a tool or reaction works.
+  divider lines between its sectors, nor the bond visualizer, whose points are unlabeled, the size sorter's screens look plain, the hotbar has no names, and the faucets aren't labeled (they're the four pure
+  atoms, which the user chose). The spectroscope's axes are labeled E (uB) and f (in S, with an SI prefix to suit the range, as mS), at the user's request: both on log scales with
+  base-10 log-paper ticks, only the powers of ten numbered, f's ranging itself to the tallest line, and no peak labeled. It plots each bond at the size of its
+  energy, a stable one as a peak above the baseline and an uphill one as a dip below it, at the user's request. Ask before adding any visual cue that reveals how a tool or reaction works.
 - The game's text matches the intro's premise. The player is Nadia Hassan, the target species is the cryostabilizer,
   and the ship belongs to Celestia Starlines.
 - Commits are small, one behavior per commit, with a message explaining why. The README changes in the same commit.

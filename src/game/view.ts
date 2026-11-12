@@ -4,15 +4,15 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { temperature, type Fluid } from '../chem/reactions';
+import type { Fluid } from '../chem/reactions';
 import { OUTLINE } from './outline';
-import { LOOK, coronaAlpha, coronaRadius, glowFalloff, haloAlpha, haloRadius } from './appearance';
+import { glowFalloff } from './appearance';
 import {
   NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
 } from './bodies';
 import { TARGET } from '../chem/species';
 import { CAP, DELIVERY, FLASK_L, GOAL_L, GOAL_TARGET, TRACE } from './config';
-import { Vessel, fluidAlpha, fluidRGB, glowColor, volume, type Flask } from './flask';
+import { Vessel, fluidAlpha, fluidRGB, volume, type Flask } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { COUNTERS, LIFT, PAPER_Z, ROOM, groundAt, toWorld, type Vec3 } from './space';
@@ -23,7 +23,7 @@ import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
-  clockText, ANALYZER, BOND_ENDS, bondCorner, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
+  clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
@@ -139,6 +139,11 @@ const GUIDE_DASH = { on: 9, off: 7 };
 const GUIDE_LAYER = 3;
 /** The layer of what's seen at Mu Ceti (see View.renderArrival): the pod, and the white light round it. */
 const VOID_LAYER = 4;
+/**
+ * The layer what's outlined is put on, for the moment its silhouette is drawn (see Outliner). Nothing else may be on
+ * it, or it's outlined too.
+ */
+const OUTLINE_LAYER = 5;
 
 /**
  * How the light of Mu Ceti looks as the pod opens on it at the end (see AirlockLook.arrival): a white void, `void` times
@@ -579,9 +584,10 @@ function drawDiverter(sc: Screen, gate: 'reservoir' | 'waste', flowing: boolean)
 }
 
 /**
- * A composition analyzer's screen: a hexagon per molecule size (1, 2, 3 atoms), each cut into sextants by color (see
- * SEXTANT_ATOMS) that glow as bright as their share of what it's reading, and dark while it has nothing to read. No
- * words, no lines between the sextants: reading it is part of the game.
+ * A composition analyzer's screen: a triangle per molecule size (1 to 4 atoms), each cut into four smaller ones, one
+ * per color (see analyzerSector): its three corners, and the upside-down one in the middle. Each glows as bright as its
+ * share of what it's reading, and is dark while it has nothing to read. No words, no lines between the sectors: reading
+ * it is part of the game.
  */
 function drawAnalysis(sc: Screen, t: Tool): void {
   const key = t.reading?.map((x) => x.toFixed(2)).join(',') ?? '';
@@ -589,38 +595,35 @@ function drawAnalysis(sc: Screen, t: Tool): void {
   sc.key = key;
   const { ctx, ppu } = sc;
   const { screen: s } = INSTRUMENT;
-  const { hexes } = ANALYZER;
+  const { triangles } = ANALYZER;
+  const n = SECTOR_ATOMS.length;
+  const sectors = SECTOR_ATOMS.map(analyzerSector);
+  const outline = (['G', 'B', 'R'] as const).map((a) => analyzerSector(a)[0]);
   const green = (a: number) => `rgba(${PHOSPHOR}, ${a})`;
   ctx.setTransform(ppu, 0, 0, ppu, -s.x0 * ppu, -s.y0 * ppu);
   ctx.fillStyle = '#040a06';
   ctx.fillRect(s.x0, s.y0, s.x1 - s.x0, s.y1 - s.y0);
-  hexes.xs.forEach((cx, w) => {
-    const { y: cy, r } = hexes;
-    // flat-topped, so sextant j runs clockwise from the corner at −120° + 60j°
-    const corner = (j: number) => {
-      const a = ((-120 + 60 * j) * Math.PI) / 180;
-      return [cx + r * Math.cos(a), cy + r * Math.sin(a)] as const;
+  triangles.xs.forEach((cx, w) => {
+    const { y: cy, r } = triangles;
+    const path = (ps: readonly (readonly [number, number])[]) => {
+      ctx.beginPath();
+      for (const [dx, dy] of ps) ctx.lineTo(cx + r * dx, cy + r * dy);
+      ctx.closePath();
     };
     if (t.reading)
-      for (let j = 0; j < 6; j++) {
-        const b = Math.min(1, t.reading[w * 6 + j]);
+      for (let j = 0; j < n; j++) {
+        const b = Math.min(1, t.reading[w * n + j]);
         if (b <= 0) continue;
         ctx.fillStyle = ctx.shadowColor = green(b);
         ctx.shadowBlur = 5 * ppu;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(...corner(j));
-        ctx.lineTo(...corner(j + 1));
-        ctx.closePath();
+        path(sectors[j]);
         ctx.fill();
       }
     ctx.shadowColor = green(0.85);
     ctx.shadowBlur = 2 * ppu;
     ctx.strokeStyle = green(0.85);
     ctx.lineWidth = 0.9;
-    ctx.beginPath();
-    for (let j = 0; j < 6; j++) ctx.lineTo(...corner(j));
-    ctx.closePath();
+    path(outline);
     ctx.stroke();
   });
   ctx.shadowBlur = 0;
@@ -630,7 +633,7 @@ function drawAnalysis(sc: Screen, t: Tool): void {
 }
 
 /**
- * A bond visualizer's screen: six points round a hexagon, one per atom (see bondCorner), and a line between two of them
+ * A bond visualizer's screen: four points, one per atom, at the corners and the middle of a triangle (see bondPoint), and a line between two of them
  * for each bond between those atoms going by, glowing as bright as the share of what's passing that has that bond (see
  * bondShares); just the points while it has nothing to read. No words: reading it is part of the game.
  */
@@ -650,7 +653,7 @@ function drawBonds(sc: Screen, t: Tool): void {
     BOND_ENDS.forEach(([i, j], b) => {
       const a = Math.min(1, t.links![b]);
       if (a <= 0) return;
-      const [p, q] = [bondCorner(i), bondCorner(j)];
+      const [p, q] = [bondPoint(i), bondPoint(j)];
       ctx.strokeStyle = ctx.shadowColor = green(a);
       ctx.shadowBlur = 4 * ppu;
       ctx.beginPath();
@@ -660,8 +663,8 @@ function drawBonds(sc: Screen, t: Tool): void {
     });
   ctx.fillStyle = ctx.shadowColor = green(0.85);
   ctx.shadowBlur = 2 * ppu;
-  for (let i = 0; i < 6; i++) {
-    const p = bondCorner(i);
+  for (let i = 0; i < SECTOR_ATOMS.length; i++) {
+    const p = bondPoint(i);
     ctx.beginPath();
     ctx.arc(p.x, p.y, 1.8, 0, 2 * Math.PI);
     ctx.fill();
@@ -672,10 +675,18 @@ function drawBonds(sc: Screen, t: Tool): void {
   sc.tex.needsUpdate = true;
 }
 
+/** The spectroscope's number for 10^k of its f axis's unit: 1, 10, 100, ..., and under 1, .1, .01, .... */
+function fLabel(k: number): string {
+  return k < 0 ? '.' + '0'.repeat(-k - 1) + '1' : String(10 ** k);
+}
+
 /**
- * A spectroscope's screen: a graph of the bonds passing through it lately, by energy (see spectroscopeAt): E across on
- * a log scale, with ticks as on log paper (at 1 to 9 times each power of ten, the powers of ten longer and numbered),
- * and f up, on a fixed scale (see SPECTROSCOPE.full), clipped at the top, with no numbers.
+ * A spectroscope's screen: a graph of the bonds passing through it lately, by energy (see spectroscopeAt). E, in uB,
+ * runs across on a log scale, along a baseline halfway up, with ticks as on log paper (at 1 to 9 times each power of
+ * ten, the powers of ten longer, and numbered along the screen's foot). f, in S with a prefix to suit the range (see spectroscopeUnit), runs up from the baseline for stable
+ * bonds and down from it for uphill ones, on a log scale that ranges itself to the tallest line (see spectroscopeTop
+ * and spectroscopeY), with log-paper ticks both ways along the left, the powers of ten numbered, so they slide as the
+ * flow changes; clipped at the plot's top and bottom.
  */
 function drawSpectroscope(sc: Screen, t: Tool, energies: readonly number[]): void {
   const key = `${t.bonds.map((c) => c.toPrecision(3)).join(',')}|${energies.join(',')}`;
@@ -687,22 +698,29 @@ function drawSpectroscope(sc: Screen, t: Tool, energies: readonly number[]): voi
   ctx.setTransform(ppu, 0, 0, ppu, -s.x0 * ppu, -s.y0 * ppu);
   ctx.fillStyle = '#040a06';
   ctx.fillRect(s.x0, s.y0, s.x1 - s.x0, s.y1 - s.y0);
-  // the plot, inside a margin for the labels
-  const p = { x0: s.x0 + 10, x1: s.x1 - 5, y0: s.y0 + 6, y1: s.y1 - 13 };
-  const { lnE0, lnE1 } = SPECTROSCOPE;
+  // the plot, inside margins for the labels: f's title above, its numbers left, E's numbers and title below
+  const p = { x0: s.x0 + 13, x1: s.x1 - 5, y0: s.y0 + 8, y1: s.y1 - 8 };
+  const base = (p.y0 + p.y1) / 2;
+  const half = base - p.y0;
+  const { lnE0, lnE1, perS } = SPECTROSCOPE;
   const X = (l: number) => p.x0 + ((l - lnE0) / (lnE1 - lnE0)) * (p.x1 - p.x0);
   const n = Math.round((p.x1 - p.x0) * ppu);
-  const ys = Array.from({ length: n + 1 }, (_, i) => spectroscopeAt(lnE0 + (i / n) * (lnE1 - lnE0), t.bonds, energies));
-  const Y = (v: number) => p.y1 - Math.min(1, v) * (p.y1 - p.y0);
+  const lines = Array.from({ length: n + 1 }, (_, i) => spectroscopeAt(lnE0 + (i / n) * (lnE1 - lnE0), t.bonds, energies));
+  const top = spectroscopeTop(Math.max(0, ...lines.map((l) => Math.max(l.up, l.down))));
+  const unit = spectroscopeUnit(top);
+  const Y = (v: number) => base - Math.max(-1, Math.min(1, v)) * half;
   ctx.strokeStyle = ctx.fillStyle = ctx.shadowColor = green(0.75);
   ctx.shadowBlur = 1.5 * ppu;
   ctx.lineWidth = 0.6;
   ctx.beginPath();
   ctx.moveTo(p.x0, p.y0);
   ctx.lineTo(p.x0, p.y1);
-  ctx.lineTo(p.x1, p.y1);
+  ctx.moveTo(p.x0, base);
+  ctx.lineTo(p.x1, base);
   ctx.stroke();
-  ctx.font = '5px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace';
+  const mono = (px: number) => `${px}px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace`;
+  // the ticks' numbers smaller than the axes' titles
+  ctx.font = mono(3.5);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   for (let d = Math.floor(lnE0 / Math.LN10); d <= Math.ceil(lnE1 / Math.LN10); d++)
@@ -710,21 +728,50 @@ function drawSpectroscope(sc: Screen, t: Tool, energies: readonly number[]): voi
       const e = m * 10 ** d;
       const l = Math.log(e);
       if (l < lnE0 || l > lnE1) continue;
+      const tick = m === 1 ? 2 : 1;
       ctx.beginPath();
-      ctx.moveTo(X(l), p.y1);
-      ctx.lineTo(X(l), p.y1 + (m === 1 ? 2 : 1));
+      ctx.moveTo(X(l), base - tick / 2);
+      ctx.lineTo(X(l), base + tick / 2);
       ctx.stroke();
-      if (m === 1) ctx.fillText(String(+e.toPrecision(1)), X(l), p.y1 + 2.5);
+      if (m === 1) ctx.fillText(String(+e.toPrecision(1)), X(l), p.y1 + 1.5);
     }
+  ctx.font = mono(5);
   ctx.textAlign = 'right';
-  ctx.fillText('E', p.x1, p.y1 + 2.5);
-  ctx.textAlign = 'center';
-  ctx.fillText('f', (s.x0 + p.x0) / 2, p.y0);
-  // the curve, glowing, over a faint fill
+  ctx.fillText('E (uB)', p.x1, p.y1 + 1.5);
+  ctx.textAlign = 'left';
+  ctx.fillText(`f (${unit.name})`, s.x0 + 2, s.y0 + 1.5);
+  ctx.font = mono(3.5);
+  // f's ticks, the same both ways from the baseline, numbered at the powers of ten that have room
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('0', p.x0 - 2.5, base);
+  if (top > 0) {
+    const floor = top / 10 ** SPECTROSCOPE.decades;
+    let last = 0;
+    for (let d = Math.floor(Math.log10(floor / perS)); d <= Math.ceil(Math.log10(top / perS)); d++)
+      for (let m = 1; m <= 9; m++) {
+        const f = m * 10 ** d * perS;
+        if (f < floor || f > top) continue;
+        const h = spectroscopeY(f, top) * half;
+        const tick = m === 1 ? 2 : 1;
+        ctx.beginPath();
+        for (const y of [base - h, base + h]) {
+          ctx.moveTo(p.x0 - tick, y);
+          ctx.lineTo(p.x0, y);
+        }
+        ctx.stroke();
+        if (m === 1 && h >= 3 && h - last >= 3.8) {
+          last = h;
+          ctx.fillText(fLabel(d - unit.exp), p.x0 - 2.5, base - h);
+          ctx.fillText(fLabel(d - unit.exp), p.x0 - 2.5, base + h);
+        }
+      }
+  }
+  // the curve, glowing, over a faint fill back to the baseline
   ctx.beginPath();
-  ctx.moveTo(p.x0, p.y1);
-  ys.forEach((v, i) => ctx.lineTo(p.x0 + i / ppu, Y(v)));
-  ctx.lineTo(p.x1, p.y1);
+  ctx.moveTo(p.x0, base);
+  lines.forEach((l, i) => ctx.lineTo(p.x0 + i / ppu, Y(spectroscopeY(l.up, top) - spectroscopeY(l.down, top))));
+  ctx.lineTo(p.x1, base);
   ctx.fillStyle = green(0.12);
   ctx.fill();
   ctx.strokeStyle = ctx.shadowColor = green(0.95);
@@ -818,49 +865,6 @@ function glowTexture(sharpness: number): THREE.Texture {
   return t;
 }
 
-/** The light a hot vessel gives off: a wide halo and a tight corona, washing out whatever's around it. */
-/**
- * How much the glows of hot fluid show: not at all while the cryopod is shut, since they're the lab's light (see
- * AirlockLook.dark), and they're drawn over everything, so its front wouldn't hide them.
- */
-const GLOWS = { lit: 1 };
-
-class Glow {
-  private halo = new THREE.Sprite(new THREE.SpriteMaterial({ blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, transparent: true }));
-  private corona = new THREE.Sprite(new THREE.SpriteMaterial({ blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, transparent: true }));
-
-  constructor(parent: THREE.Object3D) {
-    this.halo.renderOrder = this.corona.renderOrder = 10;
-    parent.add(this.halo, this.corona);
-  }
-
-  update(f: Fluid, cap: number, at: THREE.Vector3): void {
-    const color = glowColor(f);
-    const T = temperature(f);
-    // a trace of hot fluid shouldn't blaze like a full flask
-    const amount = Math.sqrt(Math.min(1, (4 * volume(f)) / cap));
-    const set = (s: THREE.Sprite, R: number, alpha: number, sharpness: number) => {
-      alpha *= GLOWS.lit;
-      s.visible = !!color && alpha * amount >= 0.002;
-      if (!s.visible) return;
-      s.position.copy(at);
-      s.scale.set(2 * R, 2 * R, 1);
-      s.material.map = glowTexture(sharpness);
-      s.material.color.setRGB(color![0] / 255, color![1] / 255, color![2] / 255, THREE.SRGBColorSpace);
-      s.material.opacity = Math.min(1, alpha * amount);
-    };
-    set(this.halo, haloRadius(T), haloAlpha(T), LOOK.haloSharpness);
-    set(this.corona, coronaRadius(T), coronaAlpha(T), LOOK.coronaSharpness);
-  }
-
-  dispose(): void {
-    this.halo.removeFromParent();
-    this.corona.removeFromParent();
-    this.halo.material.dispose();
-    this.corona.material.dispose();
-  }
-}
-
 /* ---------------- flasks ---------------- */
 
 /** The flask's glass and inside, turned about its axis, mouth at the origin. */
@@ -879,7 +883,6 @@ class FlaskView {
   private fluid: FluidMesh;
   private label: Label;
   private flash: THREE.Mesh;
-  readonly glow: Glow;
 
   constructor(
     readonly f: Flask,
@@ -892,7 +895,6 @@ class FlaskView {
     this.fluid = new FluidMesh([flaskFluidGeom], this.tilt);
     this.root.add(this.tilt);
     this.label = new Label(this.root, new THREE.Vector3(0, NOTE_Y, 0));
-    this.glow = new Glow(scene);
     scene.add(this.root);
     pickables.set(glass, { kind: 'flask', f });
   }
@@ -906,15 +908,11 @@ class FlaskView {
     this.tilt.rotation.z = -f.tilt;
     this.fluid.update(f, f.pose.y + fillLevel(f.tilt, volume(f) / f.cap));
     this.label.set(f.label);
-    // centered on its bulb, following any tilt
-    const bulb = toWorld(f.pose, { x: -50 * Math.sin(f.tilt), y: -50 * Math.cos(f.tilt), z: 0 });
-    this.glow.update(f, f.cap, new THREE.Vector3(bulb.x, bulb.y, bulb.z));
   }
 
   dispose(): void {
     this.root.removeFromParent();
     this.fluid.dispose();
-    this.glow.dispose();
   }
 }
 
@@ -953,7 +951,6 @@ class ToolView {
   private lids: THREE.Mesh[] = [];
   private labels: Label[] = [];
   private note: Label;
-  private glows: Glow[] = [];
   private screen?: Screen;
   /** The station's screen showing how long it's been delivering steadily. */
   private steadyScreen?: Screen;
@@ -987,7 +984,7 @@ class ToolView {
     // drain pipes and spouts, from the bottom of the tanks (and their sumps)
     const TH = sh.tankH ?? TANK_H;
     const floor = TH + (sh.sump?.h ?? 0);
-    if (sh.wall) this.buildStation(scene, pick);
+    if (sh.wall) this.buildStation(pick);
     else if (t.kind === 'exchanger')
       sh.tanks.forEach((tk, k) => {
         pipes(art, [[tankX(tk), floor], [tankX(tk), HELIX.y - HELIX.r]]);
@@ -1105,7 +1102,6 @@ class ToolView {
       lid.visible = false;
       this.lids.push(lid);
       this.labels.push(new Label(art, v3(tankX(sh.tanks[k]), tankNoteY(t, k))));
-      this.glows.push(new Glow(scene));
       this.flashFrom(art, built, k);
     });
     if (sh.label) {
@@ -1366,7 +1362,7 @@ class ToolView {
    * reservoir (see gaugeSegments); and a green-on-black screen under its label showing the litres of cryostabilizer in
    * it of the litres needed.
    */
-  private buildStation(scene: THREE.Object3D, pick: (m: THREE.Object3D, part: 'body' | 'tank', k?: number) => void): void {
+  private buildStation(pick: (m: THREE.Object3D, part: 'body' | 'tank', k?: number) => void): void {
     const { t, art } = this;
     const sh = t.shape;
     const { paneW, paneH: H, out, plate, funnel: f, block: bk, gauge: g, display: dp } = STATION;
@@ -1435,7 +1431,6 @@ class ToolView {
     this.fluids.push({ fm, level: (v) => onTool(t, 0, f.y + f.h - levelIn(STATION_FUNNEL, Math.min(1, volume(v) / v.cap))).y });
     noLid();
     this.labels.push(new Label(art, v3(fx, tankNoteY(t, 0))));
-    this.glows.push(new Glow(scene));
     // its stem, down and back into the plate, above the diverter's LCD
     const stem = f.y + f.h + 6;
     rod(art, glassMat, v3(fx, f.y + f.h, 0), v3(fx, stem, 0), FUNNEL_TIP / 2);
@@ -1466,7 +1461,6 @@ class ToolView {
     const label = sh.tanks[1].label;
     if (label) printed(art, label.join(' '), x, STATION.labelY, face + 0.1, 11);
     this.labels.push(new Label(art, v3(x, tankNoteY(t, 1))));
-    this.glows.push(new Glow(scene));
     // the gauge beside the reservoir: an LCD stack of segments, as tall as the pane, on a dark strip
     block(art, darkMat, g.x0 - 2, g.x1 + 2, -2, H + 2, face, face + 1);
     const seg = H / g.segments;
@@ -1507,14 +1501,6 @@ class ToolView {
       fit?.(v);
       this.lids[k].visible = t.lidded;
       this.labels[k].set(v.label);
-      const r = tankRect(t, k);
-      // the station's funnel is out in front, and its reservoir behind a pane in the wall
-      const f = STATION.funnel;
-      const c =
-        !t.shape.wall ? onTool(t, tankX(t.shape.tanks[k]), (r.y0 + r.y1) / 2)
-        : k === 0 ? onTool(t, tankX(t.shape.tanks[k]), f.y + f.h / 2)
-        : onTool(t, tankX(t.shape.tanks[k]), (r.y0 + r.y1) / 2, -STATION.out);
-      this.glows[k].update(v, v.cap, new THREE.Vector3(c.x, c.y, c.z));
     });
     this.note.set(t.note);
     for (const [k, pv] of this.levers)
@@ -1621,7 +1607,6 @@ class ToolView {
     this.root.removeFromParent();
     disposeGeometry(this.root);
     for (const { fm } of this.fluids) fm.dispose();
-    for (const g of this.glows) g.dispose();
     this.screen?.tex.dispose();
     this.steadyScreen?.tex.dispose();
   }
@@ -2843,9 +2828,6 @@ function thingOf(p: Pick): unknown {
   }
 }
 
-/** The layer what's outlined is put on, for the moment its silhouette is drawn (see Outliner). */
-const OUTLINE_LAYER = 4;
-
 const quadVertex = /* glsl */ `
 varying vec2 vUv;
 void main() {
@@ -3098,7 +3080,6 @@ export class View {
   }
 
   render(fr: Frame): void {
-    GLOWS.lit = 1 - fr.airlock.dark;
     this.clock += fr.dt;
     const { scene, pickables } = this;
     this.look(fr.eye, fr.yaw, fr.pitch);

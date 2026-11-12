@@ -16,27 +16,27 @@ export interface Faucet {
 /** A faucet of one atom, pure. */
 const pure = (a: Atom): Faucet => ({ start: singleOf(a) });
 
-/**
- * One faucet for each of the six atoms, pure, at room temperature, left to right round the color wheel. Every pair
- * has to be made by mixing.
- */
-export const FAUCETS: readonly Faucet[] = [pure('R'), pure('Y'), pure('G'), pure('C'), pure('B'), pure('M')];
+/** One faucet for each of the four atoms, pure, at room temperature, left to right. Every pair has to be made by mixing. */
+export const FAUCETS: readonly Faucet[] = [pure('R'), pure('G'), pure('B'), pure('K')];
 
 /**
- * Saves from when there were also faucets of the twelve pairs that can bond had 18, in this order, and the atoms'
- * were at these places among them (see faucetIndex).
+ * Older saves' faucets, by how many there were, as places among the new ones (null for one that's gone): from when
+ * there were six atoms, R, Y, G, C, B and M; and from before that, when the twelve pairs that could bond had faucets
+ * too, 18, with the six atoms' at 3, 5, 7, 9, 11 and 13 (see faucetIndex).
  */
-const OLD_COUNT = 18;
-const OLD_PLACES = [3, 5, 7, 9, 11, 13];
+const OLD: Record<number, readonly (number | null)[]> = {
+  6: [0, null, 1, null, 2, null],
+  18: Array.from({ length: 18 }, (_, i) => ({ 3: 0, 7: 1, 11: 2 } as Record<number, number>)[i] ?? null),
+};
 
 /**
  * Which faucet a save's faucet `i` is, out of the `count` it had, as their notes and hoses refer to them: the same
- * one, or for an old save with the pairs' faucets too, the same atom's. Null for a pair's, which is gone, or out of
- * any other number, whose order isn't known.
+ * one, or for an older save (see OLD), the same atom's. Null for one that's gone (an atom that's no more, or a pair's),
+ * or out of any other number, whose order isn't known.
  */
 export function faucetIndex(i: number, count: number): number | null {
-  const j = count === OLD_COUNT ? OLD_PLACES.indexOf(i) : count === FAUCETS.length ? i : -1;
-  return Number.isInteger(j) && j >= 0 && j < FAUCETS.length ? j : null;
+  const j = count === FAUCETS.length ? i : (OLD[count]?.[i] ?? null);
+  return Number.isInteger(j) && j !== null && j >= 0 && j < FAUCETS.length ? j : null;
 }
 
 /** A faucet as text, e.g. "R", or "B at T = 0.2". */
