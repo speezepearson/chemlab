@@ -204,6 +204,8 @@ const paperMat = new THREE.MeshStandardMaterial({ color: 0xe6dfc8, roughness: 0.
 const hidden = new THREE.MeshBasicMaterial({ visible: false });
 const faintMat = new THREE.MeshBasicMaterial({ color: 0xd6ecf2, transparent: true, opacity: 0.3, depthWrite: false });
 const rodMat = new THREE.MeshStandardMaterial({ color: 0xc8cfcd, metalness: 1, roughness: 0.18 });
+/** How see-through a faucet's knob is at the most, for a clear fluid's (the solvent's). */
+const KNOB_ALPHA = 0.6;
 /** Polished chrome, for the faucets. */
 const chromeMat = new THREE.MeshStandardMaterial({ color: 0xe2e7e8, metalness: 1, roughness: 0.08 });
 /** The steel plate the cryostabilizer station's panes are set in, and the lines marked on it. */
@@ -289,6 +291,12 @@ function printed(parent: THREE.Object3D, text: string, x: number, y: number, z: 
 /** Points in a flat frame (x right, y down), placed at depth z, as a vector in an object's own frame (y up). */
 const v3 = (x: number, y: number, z = 0) => new THREE.Vector3(x, -y, z);
 
+/**
+ * How a see-through fluid shows its body and surface (see FluidMesh): how much it thickens toward opaque where it's
+ * seen edge on; and the line along its surface, how far down it fades (by 1/e), in world units, and how opaque it is.
+ */
+const FLUID_EDGE = { edge: 0.7, line: 1.2, lineAlpha: 0.8 };
+
 /** The fluid in a vessel: drawn from a solid the shape of its inside, cut off at the fluid's level. */
 class FluidMesh {
   readonly mat: THREE.MeshLambertMaterial;
@@ -298,6 +306,25 @@ class FluidMesh {
 
   constructor(geoms: THREE.BufferGeometry[], parent: THREE.Object3D) {
     this.mat = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide, clippingPlanes: [this.plane] });
+    // a see-through fluid (one thinned by the solvent) thickens toward its edges, seen edge on, and shows a bright
+    // line where its surface meets the glass, as clear liquid in glass does, so even pure solvent reads as a body of
+    // liquid with a surface rather than nothing; an opaque one is unchanged
+    this.mat.onBeforeCompile = (sh) => {
+      sh.fragmentShader = sh.fragmentShader.replace(
+        '#include <opaque_fragment>',
+        `float edgeOn = 1.0 - abs(dot(normalize(normal), normalize(vViewPosition)));
+        float clear = 1.0 - diffuseColor.a;
+        diffuseColor.a += clear * ${FLUID_EDGE.edge.toFixed(2)} * edgeOn * edgeOn * edgeOn;
+        #if NUM_CLIPPING_PLANES > 0
+          float under = clippingPlanes[ 0 ].w - dot( vClipPosition, clippingPlanes[ 0 ].xyz );
+          float line = exp( -max( under, 0.0 ) / ${FLUID_EDGE.line.toFixed(2)} );
+          diffuseColor.a += clear * ${FLUID_EDGE.lineAlpha.toFixed(2)} * line;
+          outgoingLight = mix( outgoingLight, vec3( 1.0 ), clear * 0.5 * line );
+        #endif
+        #include <opaque_fragment>`,
+      );
+    };
+    this.mat.customProgramCacheKey = () => 'fluid';
     for (const g of geoms) {
       const m = new THREE.Mesh(g, this.mat);
       m.castShadow = true;
@@ -1071,6 +1098,20 @@ function wireColor(d: number): number[] {
 }
 
 const setRGB = (c: THREE.Color, rgb: readonly number[]) => c.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+
+/**
+ * Make a material as see-through as fluid f looks (see fluidAlpha: the solvent thins it), turning it transparent only
+ * while it needs to be, since that rebuilds its shader.
+ */
+function fluidOpacity(mat: THREE.Material, f: Fluid): void {
+  const a = fluidAlpha(f);
+  mat.opacity = a;
+  if (mat.transparent !== a < 1) {
+    mat.transparent = a < 1;
+    mat.depthWrite = a >= 1;
+    mat.needsUpdate = true;
+  }
+}
 
 /**
  * A tool, built from its flat outline with depth, in `art`. Every mesh of it can be hit, glass included, but not the
@@ -1866,6 +1907,7 @@ class ToolView {
         const tank = t.tanks[k];
         const ca = setRGB(new THREE.Color(), fluidRGB(tank.N > TRACE ? tank : out)!);
         const cb = setRGB(new THREE.Color(), fluidRGB(out)!);
+        fluidOpacity((m as THREE.Mesh).material as THREE.Material, out);
         // the tube's vertices run ring by ring along it, from the inlet
         const rings = geom.parameters.tubularSegments + 1;
         const per = colors.count / rings;
@@ -1881,7 +1923,9 @@ class ToolView {
       for (const v of t.out.slice(k)) if (v) on.addFrom(v, volume(v));
       const rgb = on.N > 0 ? fluidRGB(on) : null;
       m.visible = !!rgb;
-      if (rgb) setRGB(this.filmMats[k].color, rgb);
+      if (!rgb) return;
+      setRGB(this.filmMats[k].color, rgb);
+      fluidOpacity(this.filmMats[k], on);
     });
     if (this.cells.length) {
       const full = (HEATER.feed * HEATER.transit) / HEATER_CELLS;
@@ -1892,6 +1936,7 @@ class ToolView {
         m.visible = !!rgb;
         if (!rgb) return;
         setRGB(mat.color, rgb);
+        fluidOpacity(mat, v);
         const d = Math.max(0.3, 2 * r * Math.min(1, volume(v) / full));
         m.scale.y = d;
         m.position.y = -(y + r);
@@ -1911,7 +1956,10 @@ class ToolView {
       for (const v of t.out) if (v) through.addFrom(v, volume(v));
       const rgb = through.N > 0 ? fluidRGB(through) : null;
       this.thread.m.visible = !!rgb;
-      if (rgb) setRGB(this.thread.mat.color, rgb);
+      if (rgb) {
+        setRGB(this.thread.mat.color, rgb);
+        fluidOpacity(this.thread.mat, through);
+      }
     }
     this.floats.forEach((f, k) => (f.m.position.y = f.at(t.tanks[k])));
     if (this.spirit) {
@@ -2096,7 +2144,10 @@ class HoseView {
     }
     const rgb = fluid && fluid.N > 0 ? fluidRGB(fluid) : null;
     this.core.visible = !!rgb;
-    if (rgb) this.coreMat.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+    if (rgb && fluid) {
+      this.coreMat.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+      fluidOpacity(this.coreMat, fluid);
+    }
   }
 
   dispose(): void {
@@ -3025,7 +3076,10 @@ class BlindsButton {
   }
 }
 
-/** The faucets: a manifold along a wall, and each faucet a pipe out over the counter, a knob of its color, and a spout. */
+/**
+ * The faucets: a manifold along a wall, and each faucet a pipe out over the counter, a knob of its color (the
+ * solvent's clear, see View.update), and a spout.
+ */
 function buildFaucets(
   scene: THREE.Scene,
   faucets: readonly FaucetSpot[],
@@ -3369,7 +3423,16 @@ export class View {
     for (const { h, from, fluid } of fr.hoses) this.hoses.get(h)!.update(from, fluid);
     fr.faucets.forEach((fa, i) => {
       const rgb = fluidRGB(fa.output);
-      if (rgb && this.faucetMats[i]) setRGB(this.faucetMats[i].color, rgb);
+      const mat = this.faucetMats[i];
+      if (rgb && mat) {
+        setRGB(mat.color, rgb);
+        // a knob for a clear fluid is clear too, like glossy acrylic, but never so clear it's hard to see
+        mat.opacity = Math.max(KNOB_ALPHA, fluidAlpha(fa.output));
+        if (mat.transparent !== mat.opacity < 1) {
+          mat.transparent = mat.opacity < 1;
+          mat.needsUpdate = true;
+        }
+      }
       this.faucetNotes[i]?.set(fa.note);
     });
 

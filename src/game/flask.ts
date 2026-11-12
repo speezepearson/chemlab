@@ -1,10 +1,10 @@
 import { ATOMS, ATOM_RGB } from '../chem/atoms';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
-import { NS, SPECIES, TARGET } from '../chem/species';
+import { NS, SOLVENT_SPECIES, SPECIES, TARGET } from '../chem/species';
 import { GOAL_PURITY, TRACE } from './config';
 import { GLASS_GRAMS } from './scale';
 import { ORIGIN, type Pose } from './space';
-import { LOOK, css, heatValue, whiteHeat, whiten, type RGB } from './appearance';
+import { LOOK, SOLVENT_TINT, css, heatValue, solventAlpha, whiteHeat, whiten, type RGB } from './appearance';
 
 export interface Point {
   x: number;
@@ -168,29 +168,45 @@ function speciesColors(): RGB[] {
   return colorCache.colors;
 }
 
+/** The share of a fluid's atoms that are the solvent, S; 0 if it's empty. */
+export function solventShare(f: Fluid): number {
+  return f.N > 0 ? Math.max(0, f.n[SOLVENT_SPECIES]) / f.N : 0;
+}
+
 /**
- * Atom-weighted mix of the fluid's molecules' colors; null if empty. Under the default 'atoms' model this is
- * just the mix of its atoms' colors, so bond structure is invisible; the other models show some of it.
+ * Atom-weighted mix of the fluid's colored molecules' colors; null if empty. Under the default 'atoms' model this is
+ * just the mix of its colored atoms' colors, so bond structure is invisible; the other models show some of it. The
+ * solvent adds no color (it makes the fluid clearer instead, see fluidAlpha), and a fluid that's all solvent has its
+ * faint tint, SOLVENT_TINT.
  */
 export function fluidHue(f: Fluid): RGB | null {
   if (f.N <= 0) return null;
+  const colored = f.N - Math.max(0, f.n[SOLVENT_SPECIES]);
+  if (colored <= 0) return [...SOLVENT_TINT];
   const colors = speciesColors();
   const col: RGB = [0, 0, 0];
   for (let s = 0; s < NS; s++) {
-    if (!(f.n[s] > 0)) continue;
-    const w = (f.n[s] * SPECIES[s].size) / f.N;
+    if (!(f.n[s] > 0) || s === SOLVENT_SPECIES) continue;
+    const w = (f.n[s] * SPECIES[s].size) / colored;
     for (let k = 0; k < 3; k++) col[k] += w * colors[s][k];
   }
   return col;
 }
 
-/** How opaque the fluid looks: 1 unless LOOK.cloudy, then the atom-weighted average of alpha1..3 by molecule size (alpha3 for three atoms or four). */
+/**
+ * How opaque the fluid looks: thinned by its solvent (see solventAlpha), and, if LOOK.cloudy, times the atom-weighted
+ * average over its colored atoms of alpha1..3 by molecule size (alpha3 for three atoms or four).
+ */
 export function fluidAlpha(f: Fluid): number {
-  if (!LOOK.cloudy || f.N <= 0) return 1;
+  if (f.N <= 0) return 1;
+  const thin = solventAlpha(solventShare(f));
+  const colored = f.N - Math.max(0, f.n[SOLVENT_SPECIES]);
+  if (!LOOK.cloudy || colored <= 0) return thin;
   const alpha = [0, LOOK.alpha1, LOOK.alpha2, LOOK.alpha3];
   let a = 0;
-  for (let s = 0; s < NS; s++) if (f.n[s] > 0) a += ((f.n[s] * SPECIES[s].size) / f.N) * alpha[Math.min(SPECIES[s].size, 3)];
-  return Math.max(0, Math.min(1, a));
+  for (let s = 0; s < NS; s++)
+    if (f.n[s] > 0 && s !== SOLVENT_SPECIES) a += ((f.n[s] * SPECIES[s].size) / colored) * alpha[Math.min(SPECIES[s].size, 3)];
+  return thin * Math.max(0, Math.min(1, a));
 }
 
 /** The fluid's own color, 0–255 per channel: its hue, darkened when cold and washed toward white when very hot; null if it's empty. */

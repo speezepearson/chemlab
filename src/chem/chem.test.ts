@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { testChemParams } from './testChem';
 import { Lag, QUIET, ReactionNetwork, atomCounts, heatAt, temperature, type Fluid } from './reactions';
-import { NS, SPECIES, TARGET, bondMask, pairOf, singleOf, speciesIndex } from './species';
-import { ATOMS, BONDS, type Atom } from './atoms';
+import { NS, SOLVENT_SPECIES, SPECIES, TARGET, bondMask, pairOf, singleOf, speciesIndex } from './species';
+import { ATOMS, ATOM_WEIGHT, BONDS, SOLVENT_INDEX, type Atom } from './atoms';
 import { equilibrate, equilibrium } from './equilibrium';
 
 /** Counts in these tests are in millions of molecules, so the whole-number dynamics are smooth. */
@@ -30,15 +30,34 @@ const sp = (...bonds: [Atom, Atom][]) => speciesIndex([...new Set(bonds.flat())]
 const tri = (a: Atom, b: Atom, c: Atom) => sp([a, b], [a, c], [b, c]);
 
 describe('species', () => {
-  it('enumerates 4 singles, 6 pairs, 4 × 4 triples and 38 connected graphs on all four atoms', () => {
-    expect(NS).toBe(64);
-    expect(SPECIES.filter((s) => s.size === 1)).toHaveLength(4);
+  it('enumerates 4 singles, 6 pairs, 4 × 4 triples and 38 connected graphs on the four colors, then the solvent', () => {
+    expect(NS).toBe(65);
+    expect(SPECIES.filter((s) => s.size === 1)).toHaveLength(5);
     expect(SPECIES.filter((s) => s.size === 2)).toHaveLength(6);
     expect(SPECIES.filter((s) => s.size === 3)).toHaveLength(16);
     expect(SPECIES.filter((s) => s.size === 4)).toHaveLength(38);
     // the four-atom graphs: 16 trees, 15 with four bonds, 6 with five, and the one with all six
     const fours = SPECIES.filter((s) => s.size === 4).map((s) => BONDS.filter((_, k) => s.mask & (1 << k)).length);
     expect([3, 4, 5, 6].map((b) => fours.filter((x) => x === b).length)).toEqual([16, 15, 6, 1]);
+  });
+
+  it('has the solvent last, a lone S atom, in no bond, weighing 2', () => {
+    expect(ATOMS).toEqual(['R', 'G', 'B', 'K', 'S']);
+    expect(SOLVENT_SPECIES).toBe(64);
+    const S = SPECIES[SOLVENT_SPECIES];
+    expect(S).toMatchObject({ name: 'S', size: 1, mask: 0, atoms: ['S'], weight: 2 });
+    expect(singleOf('S')).toBe(SOLVENT_SPECIES);
+    expect(BONDS.some(([i, j]) => i === SOLVENT_INDEX || j === SOLVENT_INDEX)).toBe(false);
+    expect(SPECIES.filter((s) => s.atoms.includes('S'))).toEqual([S]);
+    expect(new Set(Object.values(ATOM_WEIGHT)).size).toBe(ATOMS.length);
+  });
+
+  it('keeps every other species where it was, by index and name', () => {
+    const known: [number, string][] = [
+      [0, 'R'], [3, 'B'], [4, 'R–B'], [9, '△RGB'], [10, 'K'], [25, '△GBK'], [26, 'R(G,B,K)'], [40, 'G–R–B–K'], [63, '⊠RGBK'],
+    ];
+    for (const [i, name] of known) expect(SPECIES[i].name).toBe(name);
+    expect(TARGET).toBe(9);
   });
 
   it('holds at most one atom of each color', () => {
@@ -65,8 +84,38 @@ describe('reactions', () => {
   const RK = pairOf('R', 'K');
   const RG = pairOf('R', 'G');
 
-  it('builds the full network', () => {
+  it('builds the full network, with the solvent in none of it', () => {
     expect(net.count).toBe(408);
+    const f = fluid([[SOLVENT_SPECIES, 10], ...SPECIES.slice(0, -1).map((s) => [s.i, 1] as [number, number])], 30);
+    for (const r of net.netRates(f)) expect([...r.from, ...r.to]).not.toContain(SOLVENT_SPECIES);
+  });
+
+  it('keeps the solvent exactly as it is', () => {
+    const f = fluid([single('R', 60), single('G', 60), single('K', 40), [RK, 10], single('S', 100)], 3);
+    run(net, f, 10);
+    expect(f.n[SOLVENT_SPECIES]).toBe(100 * M);
+    expect(atomCounts(f)[SOLVENT_INDEX]).toBe(100 * M);
+  });
+
+  it('slows what two molecules do by diluting them, and leaves what one does alone', () => {
+    // the same reactants, at the same temperature, with and without as many atoms again of solvent
+    const rate = (f: Fluid, from: number[]) =>
+      net.netRates(f).find((r) => r.from.join() === [...from].sort((a, b) => a - b).join())!.rate;
+    const R = singleOf('R');
+    const G = singleOf('G');
+    const pairs = fluid([single('R', 50), single('G', 50)]);
+    const thinned = fluid([single('R', 50), single('G', 50), single('S', 100)]);
+    expect(temperature(thinned)).toBeCloseTo(temperature(pairs), 9);
+    expect(rate(thinned, [R, G]) / rate(pairs, [R, G])).toBeCloseTo(0.5, 9);
+    // R–G breaking, hot enough to go
+    const hot = fluid([[RG, 50]], 200);
+    const hotThinned = fluid([[RG, 50], single('S', 100)], 200);
+    expect(rate(hotThinned, [RG]) / rate(hot, [RG])).toBeCloseTo(1, 9);
+    // and so with steps, too: R and G bond more slowly among the solvent
+    const [a, b] = [fluid([single('R', 50), single('G', 50)], 0.3), fluid([single('R', 50), single('G', 50), single('S', 100)], 0.3)];
+    net.step(a, 0.001);
+    net.step(b, 0.001);
+    expect(b.n[RG] / a.n[RG]).toBeCloseTo(0.5, 2);
   });
 
   it('conserves atoms of every color', () => {
@@ -280,6 +329,29 @@ describe('equilibrium', () => {
     const want = atoms({ R: 2, G: 1, K: 3 });
     const n = equilibrium(want, net.U, 2);
     expect(atomCounts({ n, N: 6, Q: 0 })).toEqual(want.map((v) => expect.closeTo(v, 10)));
+  });
+
+  it('carries the solvent through, conserved and alone, and dilutes the rest by it', () => {
+    const T = 3;
+    const want = atoms({ R: 1, G: 1, S: 2 });
+    const n = equilibrium(want, net.U, T);
+    expect(n[SOLVENT_SPECIES]).toBeCloseTo(2, 10);
+    expect(atomCounts({ n, N: 4, Q: 0 })).toEqual(want.map((v) => expect.closeTo(v, 10)));
+    // R + G ⇌ R–G balances with mole fractions over every atom, the solvent's included: n_R·n_G/N = n_RG·e^(−E/T)
+    const [R, G, RG] = [singleOf('R'), singleOf('G'), pairOf('R', 'G')];
+    const E = net.params.bonds.RG.E;
+    expect((n[R] * n[G]) / 4 / (n[RG] * Math.exp(-E / T))).toBeCloseTo(1, 6);
+    // so diluting shifts it toward the free atoms
+    const neat = equilibrium(atoms({ R: 1, G: 1 }), net.U, T);
+    expect(n[RG]).toBeLessThan(neat[RG]);
+  });
+
+  it('equilibrates a fluid with solvent in it, keeping every atom', () => {
+    const f = fluid([single('R', 3), single('G', 2), single('K', 1), single('S', 4)], 0.7);
+    const before = atomCounts(f);
+    equilibrate(f, net.U, 0.7);
+    expect(atomCounts(f)).toEqual(before);
+    expect(f.n[SOLVENT_SPECIES]).toBe(4 * M);
   });
 
   it('converges when traces bind into one dominant species in the cold', () => {

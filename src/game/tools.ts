@@ -1,4 +1,4 @@
-import { BOND_KEYS, BONDS, type Atom } from '../chem/atoms';
+import { BOND_KEYS, BONDS, SOLVENT, type ColorAtom } from '../chem/atoms';
 import { THERMO } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
 import { END_WEIGHT, LOOSE_ENDS } from '../chem/shape';
@@ -589,8 +589,13 @@ export function scorchAt(T: number): number {
  */
 export const CULTURE = { rate: Math.LN2 / 3, heat: { from: 2, per: 0.2 }, pitch: 3.2, drain: CAP / 5 };
 
-/** How loose a molecule of each species is, to a sleeper culture: its loose ends (see LOOSE_ENDS), or 1 for a lone atom. */
-const LOOSENESS: readonly number[] = SPECIES.map((sp, s) => (sp.size === 1 ? 1 : LOOSE_ENDS[s].length));
+/**
+ * How loose a molecule of each species is, to a sleeper culture: its loose ends (see LOOSE_ENDS), or 1 for a lone atom,
+ * but none for the solvent, which does the cells no harm.
+ */
+const LOOSENESS: readonly number[] = SPECIES.map((sp, s) =>
+  sp.size === 1 ? +(sp.atoms[0] !== SOLVENT) : LOOSE_ENDS[s].length,
+);
 
 /**
  * What a fluid does to a sleeper culture: its loose ends per molecule (a lone atom counting as one), plus, if it's
@@ -660,15 +665,18 @@ export function meterText(rate: number): string {
   return '9'.repeat(METER_DIGITS);
 }
 
-/** The order of an analyzer triangle's sectors in its reading, and of the bond visualizer's points. */
-export const SECTOR_ATOMS: readonly Atom[] = ['R', 'G', 'B', 'K'];
+/**
+ * The order of an analyzer triangle's sectors in its reading, and of the bond visualizer's points: the four colors.
+ * There's none for the solvent, which the instruments are blind to.
+ */
+export const SECTOR_ATOMS: readonly ColorAtom[] = ['R', 'G', 'B', 'K'];
 
 /**
  * Where each atom is on the instruments' screens, the composition analyzer's and the bond visualizer's alike: a
  * triangle standing on its base, G at the top, R at the bottom left, B at the bottom right, and K in the middle. As
  * offsets from the triangle's middle, x right and y down, its corners 1 away.
  */
-export const ATOM_PLACE: Record<Atom, readonly [number, number]> = {
+export const ATOM_PLACE: Record<ColorAtom, readonly [number, number]> = {
   G: [0, -1],
   R: [-Math.sqrt(3) / 2, 0.5],
   B: [Math.sqrt(3) / 2, 0.5],
@@ -680,7 +688,7 @@ export const ATOM_PLACE: Record<Atom, readonly [number, number]> = {
  * four through the middles of its sides, so each corner's atom has the small triangle at that corner, and K the
  * upside-down one in the middle.
  */
-export function analyzerSector(atom: Atom): (readonly [number, number])[] {
+export function analyzerSector(atom: ColorAtom): (readonly [number, number])[] {
   const corners = (['G', 'B', 'R'] as const).map((a) => ATOM_PLACE[a]);
   const mid = (p: readonly [number, number], q: readonly [number, number]) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2] as const;
   if (atom === 'K') return corners.map((p, i) => mid(p, corners[(i + 1) % 3]));
@@ -1124,7 +1132,7 @@ export function bondPoint(i: number): { x: number; y: number } {
 
 /** For each bond (in BOND_KEYS order), its two atoms' places in SECTOR_ATOMS, the ends of the line it lights. */
 export const BOND_ENDS: readonly (readonly [number, number])[] = BOND_KEYS.map(
-  (k) => [SECTOR_ATOMS.indexOf(k[0] as Atom), SECTOR_ATOMS.indexOf(k[1] as Atom)] as const,
+  (k) => [SECTOR_ATOMS.indexOf(k[0] as ColorAtom), SECTOR_ATOMS.indexOf(k[1] as ColorAtom)] as const,
 );
 
 /**
@@ -1754,7 +1762,8 @@ export class Tool {
  * What an analyzer shows for a sample, against `cap`: for each molecule size w (1–4 atoms) and atom color c, in
  * SECTOR_ATOMS order, at index (w − 1)·4 + c, how much of `cap` molecules of size w with a c atom in them make up
  * (by volume, see VOLUME). So against the sample's own volume, R lights 1R fully, and R–G both 2R and 2G fully; and
- * half R, half G lights 1R and 1G half as bright.
+ * half R, half G lights 1R and 1G half as bright. It has no sector for the solvent, which lights nothing, but takes up
+ * room all the same, so half R, half S lights 1R half as bright too.
  */
 export function composition(f: Fluid, cap: number): number[] {
   const n = SECTOR_ATOMS.length;
@@ -1762,7 +1771,10 @@ export function composition(f: Fluid, cap: number): number[] {
   for (let s = 0; s < NS; s++) {
     if (!f.n[s]) continue;
     const sp = SPECIES[s];
-    for (const a of sp.atoms) out[(sp.size - 1) * n + SECTOR_ATOMS.indexOf(a)] += (f.n[s] * roomFor(s)) / cap;
+    for (const a of sp.atoms) {
+      const c = SECTOR_ATOMS.indexOf(a as ColorAtom);
+      if (c >= 0) out[(sp.size - 1) * n + c] += (f.n[s] * roomFor(s)) / cap;
+    }
   }
   return out;
 }

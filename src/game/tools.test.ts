@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SPECIES, TARGET, bondMask, pairOf, singleOf, speciesIndex } from '../chem/species';
+import { SOLVENT_SPECIES, SPECIES, TARGET, bondMask, pairOf, singleOf, speciesIndex } from '../chem/species';
 import { CAP, DELIVERY, GOAL_PURITY, GOAL_TARGET, TRACE } from './config';
 import { ReactionNetwork, heatAt, temperature } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
@@ -12,7 +12,7 @@ import { tankMouth } from './bodies';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_ORIGIN, STRIP_RUN, stripInk, scorchAt, THERMOMETER, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_ORIGIN, STRIP_RUN, stripInk, scorchAt, sieve, THERMOMETER, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -838,6 +838,16 @@ describe('sleeper culture', () => {
     expect(harm(atoms)).toBe(1);
   });
 
+  it('is not harmed by the solvent, which dilutes what does harm it', () => {
+    const v = new Vessel(Infinity);
+    v.setMolecules(SOLVENT_SPECIES, 1000);
+    v.setTemperature(1);
+    expect(harm(v)).toBe(0);
+    // a pair's two loose ends, among as many molecules again of solvent, are one per molecule
+    v.setMolecules(pairOf('R', 'G'), 1000);
+    expect(harm(v)).toBe(1);
+  });
+
   it('is harmed by heat too', () => {
     const v = new Vessel(Infinity);
     v.setMolecules(TARGET, 1000);
@@ -1194,6 +1204,14 @@ describe('multiplexer', () => {
 describe('size sorter', () => {
   const RG = pairOf('R', 'G');
 
+  it('sorts the solvent as it does any single atom', () => {
+    const f = new Vessel(Infinity);
+    f.setMolecules(R, 1e9);
+    f.setMolecules(SOLVENT_SPECIES, 1e9);
+    f.setTemperature(1);
+    for (const v of sieve(f)) expect(v.n[SOLVENT_SPECIES] / 1e9).toBeCloseTo(v.n[R] / 1e9, 3);
+  });
+
   const withStrength = (k: number, fn: () => void) => {
     const before = SORTER.strength;
     SORTER.strength = k;
@@ -1307,6 +1325,15 @@ describe('composition analyzer', () => {
     for (const a of ['R', 'G', 'B'] as const) expect(t[at(3, a)]).toBeCloseTo(1, 6);
     const four = read([[speciesIndex(['R', 'G', 'B', 'K'], 63), CUP]]);
     for (const a of ['R', 'G', 'B', 'K'] as const) expect(four[at(4, a)]).toBeCloseTo(1, 6);
+  });
+
+  it('has no sector for the solvent, but counts the room it takes', () => {
+    const S = SOLVENT_SPECIES;
+    expect(read([[S, CUP]]).every((x) => x === 0)).toBe(true);
+    // half R, half S: R's sector half lit, against the whole sample, as for half R, half G
+    const r = read([[R, 0.5 * CUP], [S, 0.5 * CUP]]);
+    expect(r[at(1, 'R')]).toBeCloseTo(0.5, 9);
+    expect(r.reduce((t, x) => t + x, 0)).toBeCloseTo(0.5, 9);
   });
 
   it('reads a half share half as bright, and nothing dark', () => {
@@ -1654,6 +1681,7 @@ describe('separator', () => {
 
   it('gives each molecule its own outlet by its share of black atoms: none, ¼, ⅓, ½, all', () => {
     expect(SEPARATOR_OUTLET[R]).toBe(0);
+    expect(SEPARATOR_OUTLET[SOLVENT_SPECIES]).toBe(0);
     expect(SEPARATOR_OUTLET[tri('△RGB')]).toBe(0);
     expect(SEPARATOR_OUTLET[pair('R–G')]).toBe(0);
     expect(SEPARATOR_OUTLET[tri('⊠RGBK')]).toBe(1);

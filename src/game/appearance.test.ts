@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { ATOM_RGB } from '../chem/atoms';
-import { pairOf, singleOf } from '../chem/species';
+import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
 import { Vessel, fluidAlpha, fluidHue } from './flask';
 import {
-  LOOK, defaultLook, glowFalloff, heatValue, resetLook, whiteHeat,
+  LOOK, SOLVENT_TINT, defaultLook, glowFalloff, heatValue, resetLook, solventAlpha, whiteHeat,
 } from './appearance';
 
 const FNS = { heatValue, whiteHeat };
@@ -114,5 +114,43 @@ describe('composition', () => {
     expect(fluidAlpha(free)).toBeCloseTo(LOOK.alpha1);
     expect(fluidAlpha(bonded)).toBeCloseTo(LOOK.alpha2);
     expect(fluidAlpha(fluid([[R, 100], [RG, 50]]))).toBeCloseTo((LOOK.alpha1 + LOOK.alpha2) / 2);
+  });
+});
+
+describe('the solvent', () => {
+  const R = singleOf('R');
+  const S = SOLVENT_SPECIES;
+  const fluid = (contents: [number, number][], T = 1) => {
+    const v = new Vessel(Infinity);
+    for (const [s, m] of contents) v.setMolecules(s, m);
+    v.setTemperature(T);
+    return v;
+  };
+  afterEach(resetLook);
+
+  it('thins a fluid, from opaque with none to faint but there when pure, falling ever faster', () => {
+    expect(solventAlpha(0)).toBe(1);
+    expect(solventAlpha(1)).toBeCloseTo(0.12, 12);
+    expect(solventAlpha(0.5)).toBeCloseTo(0.70, 2);
+    expect(solventAlpha(0.9)).toBeCloseTo(0.34, 2);
+    // decreasing, and concave: strong dilutions still show their color
+    for (let x = 0.01; x < 0.99; x += 0.01) {
+      expect(solventAlpha(x + 0.01)).toBeLessThan(solventAlpha(x));
+      expect(solventAlpha(x) - solventAlpha(x - 0.01)).toBeGreaterThan(solventAlpha(x + 0.01) - solventAlpha(x));
+    }
+    expect([solventAlpha(-1), solventAlpha(2)]).toEqual([1, solventAlpha(1)]);
+  });
+
+  it('adds no color, only clearness, and pure, is its faint tint', () => {
+    expect(fluidHue(fluid([[R, 100], [S, 900]]))).toEqual([...ATOM_RGB.R]);
+    expect(fluidAlpha(fluid([[R, 100], [S, 100]]))).toBeCloseTo(solventAlpha(0.5), 12);
+    expect(fluidHue(fluid([[S, 100]]))).toEqual([...SOLVENT_TINT]);
+    expect(fluidAlpha(fluid([[S, 100]]))).toBeCloseTo(solventAlpha(1), 12);
+    expect(fluidAlpha(fluid([[R, 100]]))).toBe(1);
+  });
+
+  it('thins a cloudy fluid too, its cloudiness going by its colored atoms', () => {
+    LOOK.cloudy = true;
+    expect(fluidAlpha(fluid([[R, 100], [S, 100]]))).toBeCloseTo(LOOK.alpha1 * solventAlpha(0.5), 12);
   });
 });

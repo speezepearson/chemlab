@@ -1,4 +1,4 @@
-import { ATOMS, ATOM_RGB, ATOM_WEIGHT, BONDS, BOND_KEYS, bondBit, type Atom } from './atoms';
+import { ATOMS, ATOM_RGB, ATOM_WEIGHT, BONDS, BOND_KEYS, SOLVENT_INDEX, bondBit, type Atom } from './atoms';
 import type { ChemParams } from './params';
 
 export interface Species {
@@ -56,7 +56,7 @@ export function keyOf(has: number, mask: number): string {
 /**
  * A species' name, which saves store, so it must be unique and stable. The forms, with atoms always in ATOMS order
  * (R, G, B, K) where nothing else sets the order:
- * - one atom: `R`;
+ * - one atom: `R`, or `S` for the solvent;
  * - two: `R–G`;
  * - three in a chain: `R–G–B`, the middle atom in the middle;
  * - three in a ring: `△RGB`;
@@ -148,8 +148,9 @@ function enumerate(): Species[] {
 }
 
 /**
- * All 64 species: 4 singles, 6 pairs, 4 color-triples × 4 connected shapes (3 chains and a ring), and the 38
- * connected graphs on all four colors.
+ * All 65 species: the 64 of the four colors, 4 singles, 6 pairs, 4 color-triples × 4 connected shapes (3 chains and a
+ * ring), and the 38 connected graphs on all four colors; then the solvent, S, alone, last, since it bonds with
+ * nothing (it's the highest bit of `has`, so it comes last and every other species' index is as before).
  */
 export const SPECIES: readonly Species[] = enumerate();
 export const NS = SPECIES.length;
@@ -179,6 +180,9 @@ export const SINGLE: readonly number[] = ATOMS.map((_, i) => speciesIndex(1 << i
 export function singleOf(atom: Atom): number {
   return SINGLE[ATOMS.indexOf(atom)];
 }
+
+/** The solvent's species: a lone S atom, the last species. */
+export const SOLVENT_SPECIES = SINGLE[SOLVENT_INDEX];
 
 /** The species of a and b bonded to each other. */
 export function pairOf(a: Atom, b: Atom): number {

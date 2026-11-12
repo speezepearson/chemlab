@@ -1,4 +1,4 @@
-import { ATOMS, BONDS, bondBit, bondIndex } from './atoms';
+import { ATOMS, BONDS, bondBit, bondIndex, canBond } from './atoms';
 import { THERMO, T_ROOM, type ChemParams } from './params';
 import { NS, SINGLE, SPECIES, bondParam, reach, speciesEnergies, speciesIndex, within } from './species';
 
@@ -60,7 +60,7 @@ interface Reaction {
 }
 
 /**
- * Every reaction between the 64 species, stored as parallel typed arrays.
+ * Every reaction between the species, stored as parallel typed arrays. The solvent, S, is in none of them.
  * Rebuild after changing ChemParams.
  */
 export class ReactionNetwork {
@@ -104,11 +104,13 @@ export class ReactionNetwork {
       rx.push({ ra, rb, p1, p2, A, bar: Ea + Math.max(0, dU), dU });
 
     // bond formation (bimolecular): A + B -> AB with one new bond, between two molecules with no color in common
+    // (the solvent bonds with nothing, so it's in none of these, nor in anything below)
     for (const A of SPECIES)
       for (const B of SPECIES) {
         if (A.i >= B.i || A.has & B.has) continue;
         for (const i of A.atomIdx)
           for (const j of B.atomIdx) {
+            if (!canBond(i) || !canBond(j)) continue;
             const k = bondIndex(i, j);
             const bp = bondParam(p, k);
             add(A.i, B.i, speciesIndex(A.has | B.has, A.mask | B.mask | (1 << k)), -1, bp.A, bp.Ea, -bp.E);
@@ -143,7 +145,7 @@ export class ReactionNetwork {
       if (M.size < 2) continue;
       for (const c of M.atomIdx)
         ATOMS.forEach((_, x) => {
-          if ((M.has >> x) & 1 || (c === BLACK) === (x === BLACK)) return;
+          if (!canBond(x) || (M.has >> x) & 1 || (c === BLACK) === (x === BLACK)) return;
           const relabel = (a: number) => (a === c ? x : a);
           const mask = BONDS.reduce((m, [a, b], k) => (M.mask & (1 << k) ? m | bondBit(relabel(a), relabel(b)) : m), 0);
           const M2 = speciesIndex((M.has & ~(1 << c)) | (1 << x), mask);
