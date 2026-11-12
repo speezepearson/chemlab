@@ -9,6 +9,8 @@ import {
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
 import { chime } from './chime';
+import { ring } from './ring';
+import { ringOf } from '../chem/modes';
 import { diverter, type Diverter } from './diverter';
 import { CAP, DELIVERY, FILL_RATE, FLASK_L, GOAL_TARGET, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
@@ -86,6 +88,8 @@ export interface Hud {
   pencil: boolean;
   /** Whether N would write a note about what the crosshair is on (see GameEngine.note). */
   label: boolean;
+  /** Whether F would tap a vessel, to hear it ring: the flask in hand, or the flask or tank the crosshair is on. */
+  tap: boolean;
   /** What the right button does now, in a word, for the touch screen's button that stands in for it. */
   hand: 'Pour' | 'Flow' | 'Turn' | 'Erase';
   /** A brief note, like there being no room for something. */
@@ -1110,6 +1114,11 @@ export class GameEngine {
     if (this.locked) this.writeNote();
   }
 
+  /** F: tap the flask or tank the crosshair is on, or the flask in hand. */
+  touchTap(): void {
+    if (this.locked) this.tap();
+  }
+
   /** Backspace: put away what's held. */
   touchPutAway(): void {
     if (this.locked) this.putAway();
@@ -1256,6 +1265,7 @@ export class GameEngine {
       if (e.repeat || inPod(this.wake) || this.previewing) return;
       if (e.code === 'KeyE') this.grabOrRelease(e.shiftKey);
       if (e.code === 'KeyQ') this.putBack();
+      if (e.code === 'KeyF') this.tap();
       if (e.code === 'KeyP') this.setPencil(!this.pencil);
       if (e.code === 'KeyN') {
         // the note's text box opens at once, and N mustn't be typed into it
@@ -2719,6 +2729,24 @@ export class GameEngine {
     });
   }
 
+  /**
+   * Flick the flask in hand, or the flask or tank the crosshair is on, with a fingernail: it rings with what's in it
+   * (see ringOf), from where it is. The lab's sounds go by sim time, so nothing rings while it's paused.
+   */
+  private tap(): void {
+    if (this.speed === 0 || inPod(this.wake) || this.previewing) return;
+    const v = this.inspectTarget();
+    if (!v) return;
+    const h = this.held;
+    const p = this.target;
+    const at =
+      h?.kind === 'flask' ? toWorld(h.f.pose, FLASK_CENTER)
+      : p?.kind === 'flask' ? toWorld(p.f.pose, FLASK_CENTER)
+      : p?.kind === 'tool' ? tankMouth(p.t, p.k)
+      : null;
+    if (at) ring(this.hear(at), ringOf(v, this.chem.params), Math.min(1, volume(v) / v.cap));
+  }
+
   /** The vessel the info panel is showing: what's held, if it's a flask, or else the flask or tank looked at. */
   private inspectTarget(): Vessel | null {
     const h = this.held;
@@ -2815,6 +2843,7 @@ export class GameEngine {
         add(['LMB'], 'pick it up');
         if (this.hooked(p)) add(['Shift', 'LMB'], 'pick it up still hooked up');
       }
+      if (this.inspectTarget()) add(['F'], 'tap it, to hear it ring');
       const id = this.targetNote();
       if (id) add(['N'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
       add(['P'], 'pick up the pencil');
@@ -3138,6 +3167,7 @@ export class GameEngine {
       aim: this.pencil ? { ...this.cursor } : this.turning ? { ...this.turning.aim } : null,
       pencil: this.pencil,
       label: !inPod(this.wake) && !!this.targetNote(),
+      tap: !inPod(this.wake) && !this.pencil && !!this.inspectTarget(),
       hand: this.pencil ? 'Erase' : h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : 'Turn',
       note: this.flash?.text ?? null,
       actions: this.actions(),

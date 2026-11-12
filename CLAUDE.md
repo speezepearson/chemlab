@@ -47,6 +47,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     (every connected graph on a set of distinct colors) and their names, which saves store.
   - `params.ts` holds the bond parameters.
   - `shape.ts` is what follows from a molecule's shape alone: each atom's bonds, and its loose ends.
+  - `modes.ts` is how molecules ring: each species' notes, from its atoms' weights and its bonds' energies.
   - `reactions.ts` is Arrhenius kinetics on whole molecules. The engine steps vessels through `tick`, never `step`.
   - `equilibrium.ts` is the exact full-equilibrium solver, for the editor's Equilibrate button and the bench's settled mixes. Faucets
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
@@ -78,7 +79,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     it over the finished frame, from a mask of the meshes registered as that thing's parts.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
-    `volumes.ts`); `rumble.ts` is the composition analyzer, `diverter.ts` the cryostabilizer station, `ambience.ts` the ship, `water.ts` drips and streams.
+    `volumes.ts`); `rumble.ts` is the composition analyzer, `diverter.ts` the cryostabilizer station, `ambience.ts` the ship, `water.ts` drips and streams, `ring.ts` a tapped vessel.
     New sounds play into a channel's `bus()`, never straight to the destination, so the sliders reach them. A sound
     in the lab goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),
     so it fades and pans with where it is relative to the player's head.

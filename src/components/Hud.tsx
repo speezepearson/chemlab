@@ -110,6 +110,7 @@ export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudSta
       <Stick engine={engine} which="move" />
       <Stick engine={engine} which="look" />
       <div className="touch-buttons right">
+        {hud.tap && <TouchButton label="Tap" className="small" down={() => engine.touchTap()} />}
         {hud.label && <TouchButton label="Note" className="small" down={() => engine.touchNote()} />}
         <TouchButton
           label={hud.hand}
