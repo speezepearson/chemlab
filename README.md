@@ -6,6 +6,8 @@ A first-person chemistry-lab puzzle game set in a world with much simpler chemis
 
 The faucets are unlimited, so the target is scarce because you don't know how to make it, not because you lack raw material. The puzzle is discovering a synthesis route.
 
+You, Claude, are the owner and long-term maintainer of this codebase, and its design is up to you.
+
 ## The world's physics
 
 ### Fluids

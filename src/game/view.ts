@@ -139,6 +139,11 @@ const GUIDE_DASH = { on: 9, off: 7 };
 const GUIDE_LAYER = 3;
 /** The layer of what's seen at Mu Ceti (see View.renderArrival): the pod, and the white light round it. */
 const VOID_LAYER = 4;
+/**
+ * The layer what's outlined is put on, for the moment its silhouette is drawn (see Outliner). Nothing else may be on
+ * it, or it's outlined too.
+ */
+const OUTLINE_LAYER = 5;
 
 /**
  * How the light of Mu Ceti looks as the pod opens on it at the end (see AirlockLook.arrival): a white void, `void` times
@@ -2826,9 +2831,6 @@ function thingOf(p: Pick): unknown {
     default: return p.kind;
   }
 }
-
-/** The layer what's outlined is put on, for the moment its silhouette is drawn (see Outliner). */
-const OUTLINE_LAYER = 4;
 
 const quadVertex = /* glsl */ `
 varying vec2 vUv;
