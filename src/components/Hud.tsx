@@ -114,7 +114,7 @@ export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudSta
         {hud.label && <TouchButton label="Note" className="small" down={() => engine.touchNote()} />}
         <TouchButton
           label={hud.hand}
-          lit={hud.right || hud.pencil}
+          lit={hud.right}
           down={() => engine.hand(true)}
           up={() => engine.hand(false)}
           drag={(dx, dy) => engine.handDrag(dx, dy)}

@@ -15,13 +15,12 @@ import { CAP, DELIVERY, FLASK_L, GOAL_L, GOAL_PURITY, GOAL_TARGET, TRACE } from 
 import { Vessel, fluidAlpha, fluidRGB, volume, type Flask } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, type Scale } from './scale';
-import { COUNTERS, LIFT, PAPER_Z, ROOM, groundAt, toWorld, type Vec3 } from './space';
+import { COUNTERS, LIFT, ROOM, groundAt, toWorld, type Vec3 } from './space';
 import { PORT_FRAC, PORT_WALL, porthole, type Porthole } from './porthole';
 import { AIRLOCK, POD } from './airlock';
 import { arrival, notice, type Block } from '../intro/notice';
 import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
-import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
   clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, stripBands, cultureCells, TANK_H, THERMOMETER, THERMOMETER_BODY, thermometerAt, chuteY, levelIn, meterText, tankPieces, tankX,
@@ -101,15 +100,6 @@ export interface Frame {
   airlock: AirlockLook;
   /** How far the ship has turned, in radians, which turns the stars about the axis straight out of the porthole. */
   spin: number;
-  /**
-   * The sticky notes on the back wall: each sheet with its top left corner, on the old flat bench (x across, y down);
-   * whether the pencil's in hand (so each shows its handles); and a sheet being marked out, if one is.
-   */
-  papers: {
-    sheets: readonly { paper: Paper; at: { x: number; y: number } }[];
-    pencil: boolean;
-    draft: { x0: number; y0: number; x1: number; y1: number } | null;
-  };
 }
 
 export type GuideLook = 'solid' | 'snap';
@@ -2088,97 +2078,6 @@ class HoseView {
   }
 }
 
-/* ---------------- sticky notes ---------------- */
-
-/** Pixels per world unit a sticky note is drawn at, and the most pixels across it can have. */
-const PAPER_PPU = 4;
-const PAPER_MAX_PX = 2048;
-
-/**
- * A sticky note on the back wall: yellow paper with its pencil strokes and text. With the pencil in hand it shows the
- * strip it's moved by, the × that throws it away and the corner it's resized by.
- */
-class PaperView {
-  private canvas = document.createElement('canvas');
-  private tex = new THREE.CanvasTexture(this.canvas);
-  private mesh: THREE.Mesh;
-  private key = '';
-
-  constructor(
-    readonly paper: Paper,
-    scene: THREE.Object3D,
-  ) {
-    this.tex.colorSpace = THREE.SRGBColorSpace;
-    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial({ map: this.tex, roughness: 0.9 }));
-    this.mesh.receiveShadow = true;
-    scene.add(this.mesh);
-  }
-
-  update(at: { x: number; y: number }, pencil: boolean): void {
-    const pa = this.paper;
-    this.mesh.position.set(at.x + pa.w / 2, -(at.y + pa.h / 2), PAPER_Z);
-    this.mesh.scale.set(pa.w, pa.h, 1);
-    const points = pa.strokes.reduce((t, st) => t + st.length, 0);
-    const key = `${pa.w}x${pa.h}|${pa.strokes.length}:${points}|${pa.texts.map((t) => t.text).join('\n')}|${pencil}`;
-    if (key === this.key) return;
-    this.key = key;
-    const ppu = Math.min(PAPER_PPU, PAPER_MAX_PX / Math.max(pa.w, pa.h));
-    const c = this.canvas;
-    c.width = Math.ceil(pa.w * ppu);
-    c.height = Math.ceil(pa.h * ppu);
-    const ctx = c.getContext('2d')!;
-    ctx.setTransform(ppu, 0, 0, ppu, 0, 0);
-    ctx.fillStyle = '#fbf0a2';
-    ctx.fillRect(0, 0, pa.w, pa.h);
-    ctx.strokeStyle = '#3b3a36';
-    ctx.lineWidth = 1.2;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    for (const st of pa.strokes) {
-      ctx.beginPath();
-      ctx.moveTo(st[0], st[1]);
-      // a lone point is a dot
-      if (st.length === 2) ctx.lineTo(st[0] + 0.01, st[1]);
-      for (let i = 2; i < st.length; i += 2) ctx.lineTo(st[i], st[i + 1]);
-      ctx.stroke();
-    }
-    ctx.fillStyle = '#2d2c29';
-    ctx.font = `${PAPER_TEXT}px "Schibsted Grotesk", sans-serif`;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-    for (const t of pa.texts) ctx.fillText(t.text, t.x, t.y);
-    if (pencil) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
-      ctx.fillRect(0, 0, pa.w, PAPER_HEADER);
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
-      ctx.lineWidth = 1;
-      const H = PAPER_HANDLE;
-      ctx.beginPath();
-      ctx.moveTo(pa.w - H + 2.5, 2.5);
-      ctx.lineTo(pa.w - 2.5, H - 2.5);
-      ctx.moveTo(pa.w - 2.5, 2.5);
-      ctx.lineTo(pa.w - H + 2.5, H - 2.5);
-      for (const k of [3, 6]) {
-        ctx.moveTo(pa.w - k, pa.h - 1);
-        ctx.lineTo(pa.w - 1, pa.h - k);
-      }
-      ctx.stroke();
-    }
-    this.tex.dispose();
-    this.tex = new THREE.CanvasTexture(c);
-    this.tex.colorSpace = THREE.SRGBColorSpace;
-    (this.mesh.material as THREE.MeshStandardMaterial).map = this.tex;
-    (this.mesh.material as THREE.MeshStandardMaterial).needsUpdate = true;
-  }
-
-  dispose(): void {
-    this.mesh.removeFromParent();
-    this.mesh.geometry.dispose();
-    (this.mesh.material as THREE.Material).dispose();
-    this.tex.dispose();
-  }
-}
-
 /* ---------------- stands ---------------- */
 
 /** A clamp stand (see Stand): a base plate, a steel rod up from it, and a clamp out to what it holds. */
@@ -3327,9 +3226,6 @@ export class View {
   private tools = new Map<Tool, ToolView>();
   private scales = new Map<Scale, ScaleView>();
   private hoses = new Map<Hose, HoseView>();
-  private papers = new Map<Paper, PaperView>();
-  /** A sticky note being marked out with the pencil. */
-  private draft: THREE.LineLoop;
   private stands: StandView[] = [];
   private faucetMats: THREE.MeshStandardMaterial[] = [];
   private faucetNotes: Label[] = [];
@@ -3393,12 +3289,6 @@ export class View {
     };
     reflect();
     whenSurfaced(reflect);
-    this.draft = new THREE.LineLoop(
-      new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(12), 3)),
-      new THREE.LineDashedMaterial({ color: 0x8ccbb0, dashSize: 4, gapSize: 3 }),
-    );
-    this.draft.visible = false;
-    this.scene.add(this.draft);
     const fs = buildFaucets(this.scene, faucets, this.pickables);
     this.faucetMats = fs.mats;
     this.faucetNotes = fs.notes;
@@ -3454,19 +3344,6 @@ export class View {
       if (rgb && this.faucetMats[i]) setRGB(this.faucetMats[i].color, rgb);
       this.faucetNotes[i]?.set(fa.note);
     });
-
-    this.sync(this.papers, fr.papers.sheets.map((s) => s.paper), (p) => new PaperView(p, scene));
-    fr.papers.sheets.forEach(({ paper, at }) => this.papers.get(paper)!.update(at, fr.papers.pencil));
-    const d = fr.papers.draft;
-    this.draft.visible = !!d;
-    if (d) {
-      const pos = this.draft.geometry.attributes.position as THREE.BufferAttribute;
-      const z = PAPER_Z + 0.4;
-      [[d.x0, d.y0], [d.x1, d.y0], [d.x1, d.y1], [d.x0, d.y1]].forEach(([x, y], i) => pos.setXYZ(i, x, -y, z));
-      pos.needsUpdate = true;
-      this.draft.computeLineDistances();
-      this.draft.geometry.computeBoundingSphere();
-    }
 
     this.updateStands(fr);
     this.updateStreams(fr);

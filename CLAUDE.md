@@ -29,9 +29,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   the click that lets sound play), and the lab stays paused under it, so click `.intro-start` first.
 - Headless Chromium won't capture the mouse, and WebGL needs a software renderer. Launch with
   `args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']`, then in dev builds the engine is
-  `window.lab`: `lab.debug({ locked: true, x, z, yaw, pitch })` acts as if the mouse were captured, so keys (E, F, P,
+  `window.lab`: `lab.debug({ locked: true, x, z, yaw, pitch })` acts as if the mouse were captured, so keys (E, F,
   the number row, WASD) and mouse buttons work, and puts the player somewhere. Yaw 0 faces the back wall; pitch is up,
-  in radians. Its private fields (`held`, `target`, `tools`, `cursor`, ...) are reachable from `page.evaluate`.
+  in radians. Its private fields (`held`, `target`, `tools`, `turning`, ...) are reachable from `page.evaluate`.
 - Software rendering is slow, a few frames a second, so wait longer than you'd think, and remember that a screenshot
   takes real time during which the sim runs on.
 - Pass `ignoreHTTPSErrors: true` to `browser.newContext`, or the Google font (Schibsted Grotesk) fails to load through
@@ -52,7 +52,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `equilibrium.ts` is the exact full-equilibrium solver, for the editor's Equilibrate button and the bench's settled mixes. Faucets
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
 - `src/game/`: everything else in the game.
-  - `engine.ts` owns the lab: what's in it, the player, input, carrying, the pencil and the sim loop.
+  - `engine.ts` owns the lab: what's in it, the player, input, carrying and the sim loop.
   - `view.ts` draws it all with Three.js, and raycasts for what the crosshair is on.
   - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room.
   - `physics.ts` is the collisions: yawed boxes, the player's cylinder and `walk`. What's held collides with nothing; only
@@ -61,9 +61,6 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `tools.ts` holds tool shapes (flat outlines, y down) and per-step logic, plus drips and the instruments' readings (the spectroscope's graph is `spectroscopeAt`).
   - `flask.ts` has `Vessel`, `transfer`, volume and colors.
   - `cooling.ts` is Newtonian cooling to the room; the engine works out each vessel's exposure from its flat outline.
-  - `paper.ts` is sticky notes: the sheets, their strokes and text, in old-bench coordinates. They hang on the back
-    wall. While the pencil is in hand, the mouse moves `cursor` rather than the view, and both buttons go to
-    `pencilDown`, which works where the cursor's ray meets the wall (`wallAt`).
   - `airlock.ts` is the airlock and cryopod where the player wakes: their size, collisions, and the `Wake` states.
     `sleep.ts` is sleeping in the pod: the lab run in windows, measured, and jumped ahead while it's steady.
     `src/intro/notice.ts` is the messages projected inside the pod: the notice she wakes to (its litres as of then),

@@ -2,7 +2,6 @@ import { THERMO, defaultChemParams, type ChemParams } from '../chem/params';
 import { NS, SPECIES } from '../chem/species';
 import { roomFor, volume, type Vessel } from './flask';
 import type { ToolKind } from './tools';
-import type { SavedPaper } from './paper';
 
 /**
  * A saved lab: everything in it, plus the chemistry parameters. Across and up are stored as they were on the old
@@ -29,8 +28,8 @@ export interface SaveState {
   alarmsOff?: boolean;
   /** Whether the porthole's blinds are shut (see GameEngine); not if left out. */
   blindsShut?: boolean;
-  /** The player's sticky notes, the one on top last; none if left out. */
-  papers?: SavedPaper[];
+  /** The sticky notes of saves from when there was a pencil to write them with; no longer written, and ignored. */
+  papers?: unknown;
   /** Where the player stood and looked (see GameEngine); where they start if left out. */
   player?: { x: number; z: number; yaw: number; pitch: number };
 }

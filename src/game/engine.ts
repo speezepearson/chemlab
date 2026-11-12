@@ -16,7 +16,7 @@ import { CAP, DELIVERY, FILL_RATE, FLASK_L, GOAL_TARGET, HOME_H, HOME_W, N_FLASK
 import { cool, exposure, taper } from './cooling';
 import { FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
-import { Flask, Vessel, fluidColor, roomFor, sustenance, transfer, volume, volumeUnit, type Point } from './flask';
+import { Flask, Vessel, fluidColor, roomFor, sustenance, transfer, volume, volumeUnit } from './flask';
 import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
@@ -26,7 +26,7 @@ import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './sa
 import { Scale, glassGrams } from './scale';
 import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
 import {
-  CELL, COUNTERS, LIFT, PAPER_Z, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toCardinal, toFrac, toLocal, toWorld, wrapAngle,
+  CELL, COUNTERS, LIFT, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toCardinal, toFrac, toLocal, toWorld, wrapAngle,
   type Pose, type Vec3,
 } from './space';
 import {
@@ -35,10 +35,6 @@ import {
   type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
-import {
-  PAPER_HANDLE, PAPER_HEADER, PAPER_MIN, PAPER_TEXT, PAPER_TEXT_MAX, Paper, eraseAt, extend, loadPaper, savePaper,
-  textAt,
-} from './paper';
 import { ARRIVAL, View, type AirlockLook, type FaucetSpot, type Frame, type GuideLook, type Pick } from './view';
 import { WaterSounds } from './water';
 
@@ -82,16 +78,14 @@ export interface Hud {
   press: boolean;
   /** Whether the right button would do something: turn the valve looked at, or let fluid out of what's held. */
   right: boolean;
-  /** While a valve is being turned, where the pointer that aims its lever is, in CSS pixels; or with the pencil, where it points. */
+  /** While a valve is being turned, where the pointer that aims its lever is, in CSS pixels. */
   aim: { x: number; y: number } | null;
-  /** Whether the pencil is in hand. */
-  pencil: boolean;
   /** Whether N would write a note about what the crosshair is on (see GameEngine.note). */
   label: boolean;
   /** Whether F would tap a vessel, to hear it ring: the flask in hand, or the flask or tank the crosshair is on. */
   tap: boolean;
   /** What the right button does now, in a word, for the touch screen's button that stands in for it. */
-  hand: 'Pour' | 'Flow' | 'Turn' | 'Erase';
+  hand: 'Pour' | 'Flow' | 'Turn';
   /** A brief note, like there being no room for something. */
   note: string | null;
   /** Everything the player can do just now besides walking and looking, with how (see Action), for a reminder. */
@@ -130,10 +124,6 @@ export interface EngineCallbacks {
   onEdit(id: string): void;
   /** N was pressed on something, to write a note about it: the note's id (see GameEngine.note). */
   onLabel(id: string): void;
-  /** The pencil was picked up or put down (see setPencil). */
-  onPencil(on: boolean): void;
-  /** A line of text on a sticky note is to be typed, or null when there's none to type any more. */
-  onPaperText(edit: PaperEdit | null): void;
   /** Whenever the heads-up display changes. */
   onHud(hud: Hud): void;
   /** OK was pressed on the message inside the cryopod: the player is awake. */
@@ -199,17 +189,6 @@ type Held = (
   /** The hoses pouring into what's carried, which go along with it (see gather). */
   follow?: Follower[];
 };
-
-/**
- * A line of text on a sticky note being typed: a new one (index −1) with the left end of its baseline at (x, y) on
- * the sheet, or an old one, by its index in the sheet's texts.
- */
-export interface PaperEdit {
-  paper: Paper;
-  index: number;
-  x: number;
-  y: number;
-}
 
 /** Things that can be made from the hotbar, in its order. */
 export const ITEMS = [
@@ -317,8 +296,6 @@ export class GameEngine {
   private keys = new Set<string>();
   /** Where the on-screen sticks are pushed (see stick). */
   private sticks = { move: { x: 0, y: 0 }, look: { x: 0, y: 0 } };
-  /** When the pencil last drew by touch, so the mouse events a browser makes up from a touch are ignored. */
-  private lastTouch = -Infinity;
   private held: Held | null = null;
   /** Whether the right button is held: a held flask tips and pours, and a held tool or hose lets fluid out, only while it is. */
   private rightHeld = false;
@@ -380,20 +357,6 @@ export class GameEngine {
   private pumper = new MessageChannel();
   /** The cryostabilizer station's diverter's sounds, while it's swinging or letting into the reservoir. */
   private diverters = new Map<Tool, Diverter>();
-  /** The player's sticky notes, on the back wall, the one on top last (see paper.ts). They're notes, not lab, so Reset keeps them. */
-  papers: Paper[] = [];
-  /** Whether the pencil is in hand: then the mouse moves a pointer (see `cursor`) that draws on sticky notes. */
-  private pencil = false;
-  /** Where the pencil points, on the canvas in CSS pixels, while it's in hand. */
-  private cursor = { x: 0, y: 0 };
-  /** What the pencil is doing while a button's held: marking out a new sheet, drawing, moving or resizing one, or erasing. */
-  private paperDrag:
-    | { kind: 'new'; from: Point }
-    | { kind: 'draw'; paper: Paper; stroke: number[]; from: Point; moved: boolean }
-    | { kind: 'move'; paper: Paper; off: Point }
-    | { kind: 'resize'; paper: Paper }
-    | { kind: 'erase' }
-    | null = null;
   /** Undo and redo, of the lab's arrangement (see history.ts). */
   private history = new History();
   private inspected: Vessel | null = null;
@@ -675,7 +638,6 @@ export class GameEngine {
       faucets: this.faucets.map((fa, i, all) => ({ x: (i + 0.5) / all.length, y: 30 / HOME_H, ...(fa.note ? { note: fa.note } : {}) })),
       ...(this.alarmsOff ? { alarmsOff: true } : {}),
       ...(this.blindsShut ? { blindsShut: true } : {}),
-      ...(this.papers.length ? { papers: this.papers.map(savePaper) } : {}),
       player: { x: this.player.x, z: this.player.z, yaw: this.player.yaw, pitch: this.player.pitch },
       chem: saveChem(this.chem.params),
     };
@@ -748,9 +710,6 @@ export class GameEngine {
     });
     this.setAlarmsOff(!!s.alarmsOff);
     this.blindsShut = !!s.blindsShut;
-    this.papers = (Array.isArray(s.papers) ? s.papers : []).map(loadPaper).filter((p): p is Paper => !!p);
-    this.paperDrag = null;
-    this.cb.onPaperText(null);
     const pl = s.player;
     if (pl && [pl.x, pl.z, pl.yaw, pl.pitch].every(Number.isFinite)) {
       const p = this.inRoom({ x: pl.x, y: 0, z: pl.z, yaw: pl.yaw });
@@ -1098,12 +1057,6 @@ export class GameEngine {
 
   /* On a touch screen, the on-screen buttons stand in for the keys and the right button (see TouchControls). */
 
-  /** Where a pointer event happened on the canvas, in CSS pixels. */
-  private screenPt(e: PointerEvent): { x: number; y: number } {
-    const r = this.canvas.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
-  }
-
   /** E: pick up what the crosshair is on, or let go of what's held. */
   touchGrab(): void {
     if (this.locked) this.grabOrRelease(false);
@@ -1124,16 +1077,12 @@ export class GameEngine {
     if (this.locked) this.putAway();
   }
 
-  /**
-   * The right button, pressed or let go: it pours, lets fluid out, or turns the valve looked at; with the pencil in
-   * hand, touches on the view erase while it's held.
-   */
+  /** The right button, pressed or let go: it pours, lets fluid out, or turns the valve looked at. */
   hand(down: boolean): void {
     if (!down) {
       this.rightHeld = false;
       this.endTurn();
-    } else if (this.pencil) this.rightHeld = true;
-    else if (this.locked) this.rightDown();
+    } else if (this.locked) this.rightDown();
   }
 
   /** A finger dragged (dx, dy) pixels on the right button's stand-in: while a valve turns, it moves the aim. */
@@ -1176,32 +1125,7 @@ export class GameEngine {
     };
     document.addEventListener('pointerlockchange', onLock);
     this.cleanups.push(() => document.removeEventListener('pointerlockchange', onLock));
-    // with the pencil in hand on a touch screen, the finger is the pencil's point, and erases while the right
-    // button's stand-in is held
-    on(c, 'pointerdown', (e) => {
-      if (e.pointerType !== 'touch' || !this.pencil || !this.locked) return;
-      this.lastTouch = performance.now();
-      this.cursor = this.screenPt(e);
-      const at = this.wallAt();
-      if (at) this.pencilDown(at, this.rightHeld ? 2 : 0);
-      c.setPointerCapture(e.pointerId);
-    });
-    on(c, 'pointermove', (e) => {
-      if (e.pointerType !== 'touch' || !this.paperDrag) return;
-      this.lastTouch = performance.now();
-      this.cursor = this.screenPt(e);
-      const at = this.wallAt();
-      if (at) this.pencilMove(at);
-    });
-    const touchUp = (e: PointerEvent) => {
-      if (e.pointerType !== 'touch' || !this.paperDrag) return;
-      this.lastTouch = performance.now();
-      this.pencilUp(this.wallAt());
-    };
-    on(c, 'pointerup', touchUp);
-    on(c, 'pointercancel', touchUp);
     on(c, 'mousedown', (e) => {
-      if (this.pencil && performance.now() - this.lastTouch < 1000) return;
       if (!this.locked) {
         if (e.button !== 0) return;
         // the mouse is free, so it can press OK in the pod where it points, as well as capturing the mouse
@@ -1214,20 +1138,10 @@ export class GameEngine {
         return;
       }
       e.preventDefault();
-      if (this.pencil) {
-        const at = this.wallAt();
-        if (at) this.pencilDown(at, e.button);
-        return;
-      }
       if (e.button === 0) this.leftDown(e.shiftKey);
       if (e.button === 2) this.rightDown();
     });
     on(window, 'mouseup', (e) => {
-      if (this.pencil && performance.now() - this.lastTouch < 1000) return;
-      if (this.paperDrag) {
-        this.pencilUp(this.wallAt());
-        return;
-      }
       if (e.button === 0) this.tarePress = null;
       if (e.button === 2) {
         this.rightHeld = false;
@@ -1266,7 +1180,6 @@ export class GameEngine {
       if (e.code === 'KeyE') this.grabOrRelease(e.shiftKey);
       if (e.code === 'KeyQ') this.putBack();
       if (e.code === 'KeyF') this.tap();
-      if (e.code === 'KeyP') this.setPencil(!this.pencil);
       if (e.code === 'KeyN') {
         // the note's text box opens at once, and N mustn't be typed into it
         e.preventDefault();
@@ -1295,20 +1208,6 @@ export class GameEngine {
 
   /** The mouse moved by (dx, dy) pixels: aim a valve's lever, turn what's held (with Shift), or look around. */
   private look(dx: number, dy: number, shift: boolean): void {
-    if (this.pencil) {
-      // the pointer moves, and pushed past the edge of the view, turns it
-      const c = this.cursor;
-      const x = c.x + dx;
-      const y = c.y + dy;
-      c.x = Math.max(0, Math.min(this.viewW, x));
-      c.y = Math.max(0, Math.min(this.viewH, y));
-      const p = this.player;
-      p.yaw = wrapAngle(p.yaw - (x - c.x) * LOOK_SENS);
-      p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch - (y - c.y) * LOOK_SENS));
-      const at = this.wallAt();
-      if (at) this.pencilMove(at);
-      return;
-    }
     if (this.turning) {
       const a = this.turning.aim;
       a.x = Math.max(0, Math.min(this.viewW, a.x + dx));
@@ -1677,10 +1576,9 @@ export class GameEngine {
 
   /**
    * Q: put back what's held where it was picked up from (see Held.from), as it was, or if it was made in hand, put it
-   * away (see putAway); a hose just pulled out is rolled back up. With the pencil in hand, Q puts that down instead.
+   * away (see putAway); a hose just pulled out is rolled back up.
    */
   private putBack(): void {
-    if (this.pencil) return this.setPencil(false);
     const h = this.held;
     if (!h || inPod(this.wake)) return;
     if (!h.from) return this.putAway();
@@ -1863,180 +1761,6 @@ export class GameEngine {
     const { locked, ...rest } = p;
     Object.assign(this.player, rest);
     if (locked !== undefined) this.locked = locked;
-  }
-
-  /* ---------------- sticky notes ---------------- */
-
-  /** Whether the pencil is in hand (see setPencil). */
-  get pencilOn(): boolean {
-    return this.pencil;
-  }
-
-  /**
-   * Pick the pencil up or put it down. While it's in hand, the mouse moves a pointer instead of the view (turning the
-   * view only when pushed past its edge), and the left button marks out a new sticky note on bare back wall, draws on
-   * a note, moves one by its top strip, resizes one by its bottom right corner, or throws one away by the × at its top
-   * right; a click on a note types a line of text there (or edits the line clicked); and the right button erases.
-   */
-  setPencil(on: boolean): void {
-    if (on === this.pencil || (on && inPod(this.wake))) return;
-    this.pencil = on;
-    this.paperDrag = null;
-    this.endTurn();
-    this.cursor = { x: this.viewW / 2, y: this.viewH / 2 };
-    if (!on) this.cb.onPaperText(null);
-    this.cb.onPencil(on);
-  }
-
-  /**
-   * Where the pencil points on the back wall, where sticky notes go, as a point on the old flat bench (x across, y down
-   * in world units, as paper.ts works in); null if it isn't pointing at the wall.
-   */
-  private wallAt(): Point | null {
-    if (!this.viewW) return null;
-    const { o, d } = this.view.ray((this.cursor.x / this.viewW) * 2 - 1, 1 - (this.cursor.y / this.viewH) * 2);
-    if (d.z >= -1e-6) return null;
-    const s = (PAPER_Z - o.z) / d.z;
-    const x = o.x + d.x * s;
-    const y = o.y + d.y * s;
-    if (x < ROOM.x0 || x > ROOM.x1 || y < 0 || y > ROOM.y1) return null;
-    return { x, y: -y };
-  }
-
-  /** A sticky note's top left corner, on the old flat bench (see wallAt). */
-  private paperXY(pa: Paper): Point {
-    const p = fromFrac({ x: pa.fx, y: pa.fy });
-    return { x: p.x, y: -p.y };
-  }
-
-  /** A point on the old flat bench (see wallAt), as fractions of its home area. */
-  private flatToFrac(p: Point): Point {
-    return toFrac({ x: p.x, y: -p.y, z: 0 });
-  }
-
-  /** A point on the old flat bench, on a sticky note, from its top left corner. */
-  private onPaper(pa: Paper, p: Point): Point {
-    const o = this.paperXY(pa);
-    return { x: p.x - o.x, y: p.y - o.y };
-  }
-
-  /** The sticky note under p, the one on top first. */
-  private paperAt(p: Point): Paper | null {
-    for (let i = this.papers.length - 1; i >= 0; i--) {
-      const q = this.onPaper(this.papers[i], p);
-      if (q.x >= 0 && q.y >= 0 && q.x <= this.papers[i].w && q.y <= this.papers[i].h) return this.papers[i];
-    }
-    return null;
-  }
-
-  private raisePaper(pa: Paper): void {
-    this.papers.splice(this.papers.indexOf(pa), 1);
-    this.papers.push(pa);
-  }
-
-  private pencilDown(p: Point, button: number): void {
-    if (button === 2) {
-      this.paperDrag = { kind: 'erase' };
-      this.pencilMove(p);
-      return;
-    }
-    if (button !== 0) return;
-    const pa = this.paperAt(p);
-    if (!pa) {
-      this.paperDrag = { kind: 'new', from: p };
-      return;
-    }
-    this.raisePaper(pa);
-    const q = this.onPaper(pa, p);
-    const right = q.x >= pa.w - PAPER_HANDLE;
-    if (right && q.y <= PAPER_HANDLE) {
-      this.papers.splice(this.papers.indexOf(pa), 1);
-      this.cb.onPaperText(null);
-    } else if (right && q.y >= pa.h - PAPER_HANDLE) this.paperDrag = { kind: 'resize', paper: pa };
-    else if (q.y <= PAPER_HEADER) this.paperDrag = { kind: 'move', paper: pa, off: q };
-    else {
-      const stroke: number[] = [];
-      extend(pa, stroke, q);
-      pa.strokes.push(stroke);
-      this.paperDrag = { kind: 'draw', paper: pa, stroke, from: p, moved: false };
-    }
-  }
-
-  private pencilMove(p: Point): void {
-    const d = this.paperDrag;
-    if (!d) return;
-    if (d.kind === 'draw') {
-      extend(d.paper, d.stroke, this.onPaper(d.paper, p));
-      if (Math.hypot(p.x - d.from.x, p.y - d.from.y) > 3) d.moved = true;
-    } else if (d.kind === 'move') {
-      const at = this.flatToFrac({ x: p.x - d.off.x, y: p.y - d.off.y });
-      d.paper.fx = at.x;
-      d.paper.fy = at.y;
-    } else if (d.kind === 'resize') {
-      const q = this.onPaper(d.paper, p);
-      d.paper.w = Math.max(PAPER_MIN.w, q.x);
-      d.paper.h = Math.max(PAPER_MIN.h, q.y);
-    } else if (d.kind === 'erase') {
-      const pa = this.paperAt(p);
-      if (pa) eraseAt(pa, this.onPaper(pa, p));
-    }
-  }
-
-  private pencilUp(p: Point | null): void {
-    const d = this.paperDrag;
-    this.paperDrag = null;
-    if (d?.kind === 'draw' && !d.moved) {
-      // a click, not a stroke: type there, or edit the line clicked
-      d.paper.strokes.splice(d.paper.strokes.indexOf(d.stroke), 1);
-      const q = this.onPaper(d.paper, d.from);
-      const i = textAt(d.paper, q);
-      const t = d.paper.texts[i];
-      document.exitPointerLock();
-      this.cb.onPaperText(t ? { paper: d.paper, index: i, x: t.x, y: t.y } : { paper: d.paper, index: -1, x: q.x, y: q.y + PAPER_TEXT / 2 });
-    } else if (d?.kind === 'new' && p) {
-      const x0 = Math.min(d.from.x, p.x);
-      const y0 = Math.min(d.from.y, p.y);
-      const w = Math.abs(p.x - d.from.x);
-      const h = Math.abs(p.y - d.from.y);
-      if (w >= PAPER_MIN.w && h >= PAPER_MIN.h) {
-        const at = this.flatToFrac({ x: x0, y: y0 });
-        this.papers.push(new Paper(at.x, at.y, w, h));
-      }
-    }
-  }
-
-  /** The text a line on a sticky note being typed starts with: what's there already, if it's an old one. */
-  paperText(edit: PaperEdit): string {
-    return edit.index >= 0 ? (edit.paper.texts[edit.index]?.text ?? '') : '';
-  }
-
-  /** Where a line on a sticky note being typed starts (the left end of its baseline), on the canvas in CSS pixels. */
-  paperTextSpot(edit: PaperEdit): { x: number; y: number } | null {
-    if (!this.papers.includes(edit.paper)) return null;
-    const o = this.paperXY(edit.paper);
-    return this.view.project({ x: o.x + edit.x, y: -(o.y + edit.y), z: PAPER_Z }, this.viewW, this.viewH);
-  }
-
-  /** Keep a line typed on a sticky note: a new one is added, an old one changed, and an empty one rubbed out. */
-  writePaperText(edit: PaperEdit, text: string): void {
-    const { paper, index } = edit;
-    if (!this.papers.includes(paper)) return;
-    text = text.trim().slice(0, PAPER_TEXT_MAX);
-    if (index >= 0 && paper.texts[index]) {
-      if (text) paper.texts[index].text = text;
-      else paper.texts.splice(index, 1);
-    } else if (text) paper.texts.push({ x: edit.x, y: edit.y, text });
-  }
-
-  /** The sticky notes as the view draws them: each sheet's top left corner on the back wall, and a sheet being marked out. */
-  private paperFrame(): Frame['papers'] {
-    const d = this.paperDrag;
-    const p = d?.kind === 'new' ? this.wallAt() : null;
-    return {
-      sheets: this.papers.map((paper) => ({ paper, at: this.paperXY(paper) })),
-      pencil: this.pencil,
-      draft: d?.kind === 'new' && p ? { x0: Math.min(d.from.x, p.x), y0: Math.min(d.from.y, p.y), x1: Math.max(d.from.x, p.x), y1: Math.max(d.from.y, p.y) } : null,
-    };
   }
 
   /* ---------------- layout ---------------- */
@@ -2724,7 +2448,6 @@ export class GameEngine {
       tarePress: this.tarePress, hot: this.target, dt, clock: this.clock,
       energies: BOND_KEYS.map((k) => this.chem.params.bonds[k].E), alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
       airlock: this.airlockLook(),
-      papers: this.paperFrame(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(),
     });
   }
@@ -2734,8 +2457,7 @@ export class GameEngine {
    * (see ringOf), from where it is. The lab's sounds go by sim time, so nothing rings while it's paused.
    */
   private tap(): void {
-    // not with the pencil in hand, which has the crosshair to itself
-    if (this.speed === 0 || inPod(this.wake) || this.previewing || this.pencil) return;
+    if (this.speed === 0 || inPod(this.wake) || this.previewing) return;
     const v = this.inspectTarget();
     if (!v) return;
     const h = this.held;
@@ -2803,19 +2525,12 @@ export class GameEngine {
       add(['/'], 'hide this list');
       return out;
     }
-    if (this.pencil) {
-      add(['LMB'], 'drag to draw, or on bare wall to mark out a sheet');
-      add(['LMB'], 'click a sheet to type on it');
-      add(['RMB'], 'drag to erase');
-      add(['P'], 'put the pencil down');
-      add(['Q'], 'put the pencil down');
-    }
     if (h) {
       const ok = !!this.placed && 'rest' in this.placed;
       const how = h.kind === 'hose' ? 'set the hose’s end down' : 'set it down';
-      // the pencil has the mouse, so E sets down; and a button looked at takes the click
-      if (this.pencil || !this.onButton()) add([this.pencil ? 'E' : 'LMB'], ok ? how : `${how}: not here`, !ok);
-      if (!this.pencil && this.rightWouldDo())
+      // a button looked at takes the click
+      if (!this.onButton()) add(['LMB'], ok ? how : `${how}: not here`, !ok);
+      if (this.rightWouldDo())
         add(['RMB'], h.kind !== 'flask' ? 'hold to let it flow' : this.mouthAimed() ? 'hold to pour into it' : 'hold to pour');
       if (h.kind === 'hose') {
         add(['Shift', '←→'], 'swing its stand round');
@@ -2824,31 +2539,24 @@ export class GameEngine {
       add(['Wheel'], 'hold it nearer or further');
       if (h.kind === 'hose') add(['Backspace'], 'roll the hose back up');
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it away');
-      if (!this.pencil) add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it away') : 'put it back');
+      add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it away') : 'put it back');
     } else {
-      if (this.pencil && p && this.grabbable(p)) {
-        add(['E'], 'pick it up');
-        if (this.hooked(p)) add(['Shift', 'E'], 'pick it up still hooked up');
-      }
-      if (!this.pencil && this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
+      if (this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
       add(['1–0, -, =, Z–V'], 'make equipment in your hands');
     }
-    if (!this.pencil) {
-      if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
-      else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
-      else if (this.pressable()) add(['LMB'], 'press it');
-      const m = h ? null : this.mountAimed();
-      if (m) add(['LMB'], this.hoseOn(m) ? 'take hold of its hose' : 'pull out its hose');
-      else if (!h && p?.kind === 'hose') add(['LMB'], 'take hold of it');
-      else if (!h && p && this.grabbable(p) && !this.onButton()) {
-        add(['LMB'], 'pick it up');
-        if (this.hooked(p)) add(['Shift', 'LMB'], 'pick it up still hooked up');
-      }
-      if (this.inspectTarget()) add(['F'], 'tap it, to hear it ring');
-      const id = this.targetNote();
-      if (id) add(['N'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
-      add(['P'], 'pick up the pencil');
+    if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
+    else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
+    else if (this.pressable()) add(['LMB'], 'press it');
+    const m = h ? null : this.mountAimed();
+    if (m) add(['LMB'], this.hoseOn(m) ? 'take hold of its hose' : 'pull out its hose');
+    else if (!h && p?.kind === 'hose') add(['LMB'], 'take hold of it');
+    else if (!h && p && this.grabbable(p) && !this.onButton()) {
+      add(['LMB'], 'pick it up');
+      if (this.hooked(p)) add(['Shift', 'LMB'], 'pick it up still hooked up');
     }
+    if (this.inspectTarget()) add(['F'], 'tap it, to hear it ring');
+    const id = this.targetNote();
+    if (id) add(['N'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
     if (!h && this.history.canUndo) add([MOD, 'Z'], 'undo');
     if (!h && this.history.canRedo) add([MOD, 'Shift', 'Z'], 'redo');
     add(['Esc'], 'let go of the mouse');
@@ -2930,7 +2638,6 @@ export class GameEngine {
     if (this.held) this.release();
     if (this.held && !(this.held.kind === 'tool' && UNIQUE_TOOLS.includes(this.held.t.kind))) this.putAway();
     this.held = null;
-    this.setPencil(false);
     this.endTurn();
     this.rightHeld = false;
   }
@@ -3142,7 +2849,7 @@ export class GameEngine {
     if (h?.kind === 'tool') return false;
     // a faucet always runs
     if (h?.kind === 'hose') return 'tool' in h.h.on ? this.wouldFlow(h.h.on.tool) : true;
-    return !this.pencil && !!this.valveAimed();
+    return !!this.valveAimed();
   }
 
   /** Whether fluid would leave a tool's spouts if it ran. */
@@ -3165,11 +2872,10 @@ export class GameEngine {
       drop: !!this.placed && 'rest' in this.placed,
       press: this.leftWouldDo(),
       right: this.rightWouldDo(),
-      aim: this.pencil ? { ...this.cursor } : this.turning ? { ...this.turning.aim } : null,
-      pencil: this.pencil,
+      aim: this.turning ? { ...this.turning.aim } : null,
       label: !inPod(this.wake) && !!this.targetNote(),
-      tap: !inPod(this.wake) && !this.pencil && !!this.inspectTarget(),
-      hand: this.pencil ? 'Erase' : h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : 'Turn',
+      tap: !inPod(this.wake) && !!this.inspectTarget(),
+      hand: h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : 'Turn',
       note: this.flash?.text ?? null,
       actions: this.actions(),
       black: this.black(),

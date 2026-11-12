@@ -129,10 +129,9 @@ const ICONS: Record<string, ReactNode> = {
 
 /**
  * The equipment that can be made, along the bottom of the view: a key (along the number row, and then from Z along
- * the bottom row of letters) makes one in the player's hands, if they're empty. Clicking one does the same, when the mouse isn't captured. Last is the pencil, for sticky
- * notes.
+ * the bottom row of letters) makes one in the player's hands, if they're empty. Clicking one does the same, when the mouse isn't captured.
  */
-export function Palette({ engine, pencil }: { engine: GameEngine; pencil: boolean }) {
+export function Palette({ engine }: { engine: GameEngine }) {
   return (
     <div className="palette" aria-label="equipment">
       {ITEMS.map((kind, i) => (
@@ -153,28 +152,6 @@ export function Palette({ engine, pencil }: { engine: GameEngine; pencil: boolea
           <kbd>{HOTKEYS[i]}</kbd>
         </button>
       ))}
-      <button
-        className={`pencil${pencil ? ' on' : ''}`}
-        aria-label="Pencil"
-        aria-pressed={pencil}
-        aria-keyshortcuts="P"
-        title={
-          'Pencil (P): the mouse moves a pointer instead of your view. Drag on bare back wall for a sticky note, drag ' +
-          'on one to draw, click one to type, right-drag to erase. Drag a note by its top strip, resize it by its ' +
-          'corner, × throws it away. P puts it down.'
-        }
-        onClick={() => {
-          engine.lock();
-          engine.setPencil(!engine.pencilOn);
-        }}
-      >
-        <svg viewBox="0 0 40 40" aria-hidden="true">
-          <rect x="5" y="20" width="18" height="15" rx="1" style={{ fill: '#fbf0a2', stroke: 'var(--glass)' }} />
-          <path className="pipe" d="M17 30 L33 9" style={{ strokeWidth: 4 }} />
-          <path d="M15.2 32.4 L17 30 L19 31.5 Z" style={{ fill: 'var(--ink)', stroke: 'var(--ink)', strokeWidth: 1 }} />
-        </svg>
-        <kbd>P</kbd>
-      </button>
     </div>
   );
 }

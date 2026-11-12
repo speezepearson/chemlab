@@ -97,8 +97,6 @@ export function counterUnder(f: { x: number; z: number; hx: number; hz: number; 
   const on = COUNTERS.find((k) => corners.every((p) => p.x >= k.x0 && p.x <= k.x1 && p.z >= k.z0 && p.z <= k.z1));
   return on ? LIFT : null;
 }
-/** How far out from the back wall sticky notes are, so they lie on its face. */
-export const PAPER_Z = 0.6;
 /**
  * How far out from the back wall things stand when nothing says otherwise: over the counter, in the middle of its
  * second row of grid cells, so a tool's stand behind it has the first.
