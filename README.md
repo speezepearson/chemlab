@@ -195,6 +195,15 @@ The faucets pour single atoms only, so every molecule, the target included, has 
   - a color trap: an item that binds one free color.
 
   The choice affects what shape the target should be.
+- **More instruments.** The thermometer, swell bulbs, wicking strips, sleeper culture, the station's needle and ringing glass came out of one brainstorm; these from it aren't built:
+  - stain tubes: a tube snapped onto a nozzle, whose stain creeps along in proportion to the loose ends that have passed, in a tint per end color, so a trace adds up over a whole flask;
+  - witness coupons: a slip hung in a tank that lays down a band of tarnish each sim minute by how much free black there was, to read after sleeping;
+  - a frost point: a slow chill in which a pure fluid frosts sharply and a mixture later, and the mixed test (reference, sample, and both together); it needs a chiller (below);
+  - drop size by composition, so two pipettes dripping side by side drift out of step;
+  - a seed crystal that grows in layers, clear when pure and specked by molecules of the same atoms in another shape;
+  - froth whose bubbles are regular only for a single species, and a glow while something's reacting;
+  - a getter cartridge that takes up free black until it's full (it would also purify, which changes the puzzle);
+  - dipping a wicking strip into a vessel, and pinning dried ones to the wall by the sticky notes.
 - **Temperature control.** The resistive heater heats, and everything cools to the room. Nothing chills below room temperature yet except endotherms; an ice bath would. The *Temperature range* preset's flasks now drift to room temperature over a minute or two.
 - **More glassware and tools.** Graduated cylinders and pipettes.
 - **Tool follow-ups.**
