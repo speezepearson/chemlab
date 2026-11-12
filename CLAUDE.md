@@ -157,7 +157,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 
 - Don't give away the chemistry. The player is meant to work it out. The composition analyzer has no text and no
   divider lines between its sectors, nor the bond visualizer, whose points are unlabeled, the size sorter's screens look plain, the hotbar has no names, and the faucets aren't labeled (they're the four pure
-  atoms, which the user chose). The spectroscope's axes are labeled E (uB) and f (mS), at the user's request: both on log scales with
+  atoms, which the user chose). The spectroscope's axes are labeled E (uB) and f (in S, with an SI prefix to suit the range, as mS), at the user's request: both on log scales with
   base-10 log-paper ticks, only the powers of ten numbered, f's ranging itself to the tallest line, and no peak labeled. It plots each bond at the size of its
   energy, a stable one as a peak above the baseline and an uphill one as a dip below it, at the user's request. Ask before adding any visual cue that reveals how a tool or reaction works.
 - The game's text matches the intro's premise. The player is Nadia Hassan, the target species is the cryostabilizer,

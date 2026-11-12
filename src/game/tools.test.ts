@@ -9,7 +9,7 @@ import { STATION_POSE } from './presets';
 import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
   clockText, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
@@ -798,6 +798,26 @@ describe('spectroscope', () => {
       expect(spectroscopeY(top / 10 ** decades, top)).toBeGreaterThan(0);
       expect(spectroscopeY(top / 10 ** decades, top)).toBeLessThan(spectroscopeY(top / 10 ** (decades - 1), top));
     }
+  });
+
+  it('numbers its f axis in S with the SI prefix that keeps the numbers short', () => {
+    const { perS, decades, headroom } = SPECTROSCOPE;
+    expect(spectroscopeUnit(0)).toEqual({ name: 'S', exp: 0 });
+    for (let d = -6; d <= 6; d++) {
+      const top = spectroscopeTop(10 ** d * perS);
+      const { name, exp } = spectroscopeUnit(top);
+      expect(Math.abs(exp % 3)).toBe(0);
+      expect(name).toMatch(/^[num]?S$|^[kMG]S$/);
+      // every power of ten the axis shows is numbered within a thousandfold of 1 in that unit
+      const hi = Math.floor(Math.log10(top / perS));
+      const lo = Math.ceil(Math.log10(top / perS) - decades);
+      expect(hi - exp).toBeLessThanOrEqual(3);
+      expect(lo - exp).toBeGreaterThanOrEqual(-3);
+      // ten times the flow never moves the prefix down
+      expect(spectroscopeUnit(top * 10).exp).toBeGreaterThanOrEqual(exp);
+    }
+    // the prefix follows the flow: a thousandfold more, one prefix up
+    expect(spectroscopeUnit(1e3 * headroom * perS).exp).toBe(spectroscopeUnit(headroom * perS).exp + 3);
   });
 
   it('lets everything through, reading the bonds passing lately, per sim second, rising and falling smoothly', () => {
