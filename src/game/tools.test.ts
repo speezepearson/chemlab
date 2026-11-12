@@ -11,7 +11,7 @@ import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, CULTURE, harm, cultureDead, cultureCells, STRIP, STRIP_RUN, stripBands, scorchAt, THERMOMETER, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_RUN, stripBands, scorchAt, THERMOMETER, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -641,6 +641,14 @@ describe('sleeper culture', () => {
   const run = (t: Tool, seconds: number) => {
     for (let i = 0; i < Math.round(seconds / 0.02); i++) t.step(0.02);
   };
+  const count = (t: Tool) => t.dead!.reduce((n, d) => n + d, 0);
+  /** A plate holding `share` of what it can, all of species `s`, at room temperature. */
+  const plate = (s: number, share = 1) => {
+    const t = new Tool('culture', 0);
+    t.tanks[0].setMolecules(s, share * t.tanks[0].cap);
+    t.tanks[0].setTemperature(1);
+    return t;
+  };
 
   it('is harmed by loose ends and lone atoms, not by rings', () => {
     const v = new Vessel(Infinity);
@@ -671,16 +679,7 @@ describe('sleeper culture', () => {
     expect(harm(v)).toBeCloseTo(3 * per, 6);
   });
 
-  it('loses half its cells at the median dose, and more the worse the dose', () => {
-    expect(cultureDead(0)).toBe(0);
-    expect(cultureDead(CULTURE.median)).toBeCloseTo(0.5, 6);
-    expect(cultureDead(CULTURE.median * Math.exp(CULTURE.spread))).toBeCloseTo(0.8413, 3);
-    expect(cultureDead(CULTURE.median * Math.exp(-CULTURE.spread))).toBeCloseTo(0.1587, 3);
-    expect(cultureDead(1000 * CULTURE.median)).toBeCloseTo(1, 6);
-    for (let d = 0.01; d < 1; d *= 1.5) expect(cultureDead(1.5 * d)).toBeGreaterThan(cultureDead(d));
-  });
-
-  it('has its cells in rows on the plate, each with its own place in the order they die', () => {
+  it('has its cells in rows on the plate, each row half a step out of line with the next', () => {
     const cells = cultureCells();
     const tk = SHAPES.culture.tanks[0];
     expect(cells.length).toBeGreaterThan(100);
@@ -689,48 +688,86 @@ describe('sleeper culture', () => {
       expect(c.x).toBeLessThan(tk.x1);
       expect(c.y).toBeGreaterThan(0);
       expect(c.y).toBeLessThan(SHAPES.culture.tankH!);
-      expect(c.q).toBeGreaterThan(0);
-      expect(c.q).toBeLessThan(1);
     }
-    expect(new Set(cells.map((c) => c.q)).size).toBe(cells.length);
-    // each row half a step out of line with the next
     const rows = [...new Set(cells.map((c) => c.y))].sort((a, b) => a - b);
     const firstX = (y: number) => Math.min(...cells.filter((c) => c.y === y).map((c) => c.x));
     expect(Math.abs(firstX(rows[1]) - firstX(rows[0]))).toBeCloseTo(CULTURE.pitch / 2, 9);
-    // the same on every plate
-    expect(cultureCells()).toEqual(cells);
-    // and scattered: the first tenth to die aren't all in one half of the plate
-    const first = cells.filter((c) => c.q < 0.1);
-    expect(first.some((c) => c.x < 0)).toBe(true);
-    expect(first.some((c) => c.x > 0)).toBe(true);
+    expect(new Tool('culture', 0).dead).toHaveLength(cells.length);
+    expect(new Tool('dispenser', 0).dead).toBeNull();
   });
 
-  it('follows what is in its plate with a lag, and keeps the worst of it for good', () => {
-    const t = new Tool('culture', 0);
-    const [plate] = t.tanks;
+  it('is never harmed by the target, however long it stands in it', () => {
+    const t = plate(TARGET);
     expect(t.shape.spouts).toEqual([]);
-    // the target alone never harms it
-    plate.setMolecules(TARGET, 1000);
-    plate.setTemperature(1);
-    run(t, 10 * CULTURE.tau);
-    expect([t.dose, t.worst]).toEqual([0, 0]);
-    plate.setMolecules(chain, 1000);
-    run(t, CULTURE.tau);
-    expect(t.dose).toBeCloseTo(1 - 1 / Math.E, 2);
-    run(t, 12 * CULTURE.tau);
-    expect(t.dose).toBeCloseTo(1, 4);
-    // with the chains gone the dose falls away, but what it did stays done
-    plate.setMolecules(chain, 0);
-    run(t, 40 * CULTURE.tau);
-    expect(t.dose).toBe(0);
-    expect(t.worst).toBeCloseTo(1, 4);
-    expect(cultureDead(t.worst)).toBeGreaterThan(0.99);
+    run(t, 600);
+    expect(count(t)).toBe(0);
   });
 
-  it('keeps its dose and the worst it has been in a save', () => {
+  it('loses its cells at random, half of them in the time its rate and the harm give', () => {
+    // lone atoms do one unit of harm
+    const halfLife = Math.LN2 / (CULTURE.rate * 1);
+    let dead = 0;
+    let all = 0;
+    for (let i = 0; i < 8; i++) {
+      const t = plate(R);
+      run(t, halfLife);
+      dead += count(t);
+      all += t.dead!.length;
+    }
+    // over a thousand cells: within a few percent of half
+    expect(dead / all).toBeGreaterThan(0.43);
+    expect(dead / all).toBeLessThan(0.57);
+    // and in the end, all of them, for good
+    const t = plate(R);
+    run(t, 40 * halfLife);
+    expect(count(t)).toBe(t.dead!.length);
+    t.tanks[0].setMolecules(R, 0);
+    run(t, 10);
+    expect(count(t)).toBe(t.dead!.length);
+  });
+
+  it('loses them sooner the more harmful the fluid', () => {
+    const after = (s: number, seconds: number) => {
+      let n = 0;
+      for (let i = 0; i < 6; i++) {
+        const t = plate(s);
+        run(t, seconds);
+        n += count(t);
+      }
+      return n;
+    };
+    const seconds = 1 / CULTURE.rate;
+    // a pair has two loose ends to a lone atom's one
+    expect(after(pairOf('R', 'G'), seconds)).toBeGreaterThan(after(R, seconds));
+  });
+
+  it('only loses the cells the fluid covers', () => {
+    // a third full, the fluid stands partway up the plate, and no cell above it dies
+    const t = plate(R, 1 / 3);
+    const H = SHAPES.culture.tankH!;
+    const surface = cultureLevel(1 / 3);
+    expect(surface).toBeGreaterThan(0.2 * H);
+    expect(surface).toBeLessThan(0.8 * H);
+    run(t, 60 / CULTURE.rate);
+    const cells = cultureCells();
+    const under = cells.map((c) => H - c.y < surface);
+    expect(under.some((u) => u)).toBe(true);
+    expect(under.some((u) => !u)).toBe(true);
+    cells.forEach((_, i) => expect(t.dead![i]).toBe(under[i] ? 1 : 0));
+    // and an empty plate loses none
+    const dry = new Tool('culture', 0);
+    run(dry, 60);
+    expect(count(dry)).toBe(0);
+  });
+
+  it('keeps which cells are dead in a save', () => {
     const t = new Tool('culture', 0);
-    t.remember([0.1, 0.3]);
-    expect(t.memory).toEqual([0.1, 0.3]);
+    const m = Array.from(t.dead!, (_, i) => +(i % 3 === 0));
+    t.remember(m);
+    expect(t.memory).toEqual(m);
+    // a list of another length isn't its cells
+    t.remember([1, 1]);
+    expect(t.memory).toEqual(m);
   });
 });
 

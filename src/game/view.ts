@@ -24,7 +24,7 @@ import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
   clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
-  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, stripBands, cultureCells, cultureDead, TANK_H, THERMOMETER, THERMOMETER_BODY, thermometerAt, chuteY, levelIn, meterText, tankPieces, tankX,
+  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, stripBands, cultureCells, TANK_H, THERMOMETER, THERMOMETER_BODY, thermometerAt, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
 
@@ -1519,11 +1519,11 @@ class ToolView {
     const { t } = this;
     const sc = this.screen!;
     const cu = this.culture!;
-    const dead = cultureDead(t.worst);
+    const dead = t.dead!;
     let dying = false;
     let count = 0;
-    cu.cells.forEach((c, i) => {
-      if (c.q >= dead) return;
+    cu.cells.forEach((_, i) => {
+      if (!dead[i]) return;
       count++;
       cu.died[i] ??= cu.seen ? clock : -Infinity;
       if (clock - cu.died[i] < DYING) dying = true;
@@ -1543,7 +1543,7 @@ class ToolView {
       ctx.fill();
     };
     cu.cells.forEach((c, i) => {
-      const since = c.q < dead ? clock - cu.died[i] : -1;
+      const since = dead[i] ? clock - cu.died[i] : -1;
       if (since < 0) {
         dot(c.x, c.y, 1.15, 'rgba(150, 214, 255, 0.92)');
         dot(c.x - 0.3, c.y - 0.3, 0.42, 'rgba(240, 250, 255, 0.95)');
