@@ -111,8 +111,9 @@ describe('reactions', () => {
     const hot = fluid([[RG, 50]], 200);
     const hotThinned = fluid([[RG, 50], single('S', 100)], 200);
     expect(rate(hotThinned, [RG]) / rate(hot, [RG])).toBeCloseTo(1, 9);
-    // and so with steps, too: R and G bond more slowly among the solvent
-    const [a, b] = [fluid([single('R', 50), single('G', 50)], 0.3), fluid([single('R', 50), single('G', 50), single('S', 100)], 0.3)];
+    // and so with steps, too: R and G bond more slowly among the solvent (enough of them bond in a step, at room
+    // temperature, that rounding each to a whole number of molecules doesn't show)
+    const [a, b] = [fluid([single('R', 50), single('G', 50)]), fluid([single('R', 50), single('G', 50), single('S', 100)])];
     net.step(a, 0.001);
     net.step(b, 0.001);
     expect(b.n[RG] / a.n[RG]).toBeCloseTo(0.5, 2);
