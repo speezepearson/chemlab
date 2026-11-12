@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SPECIES, TARGET, bondMask, pairOf, singleOf, speciesIndex } from '../chem/species';
-import { CAP, DELIVERY, GOAL_PURITY, GOAL_TARGET } from './config';
+import { CAP, DELIVERY, GOAL_PURITY, GOAL_TARGET, TRACE } from './config';
 import { ReactionNetwork, heatAt, temperature } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { COOLING } from './cooling';
@@ -724,9 +724,30 @@ describe('sleeper culture', () => {
 
   it('is never harmed by the target, however long it stands in it', () => {
     const t = plate(TARGET);
-    expect(t.shape.spouts).toEqual([]);
     run(t, 600);
     expect(count(t)).toBe(0);
+  });
+
+  it('drains through its valve, keeping its cells as they are, for a record', () => {
+    const t = plate(R);
+    expect(t.shape.spouts).toEqual([0]);
+    // shut, nothing leaves
+    expect(t.step(0.02)[0]).toBeNull();
+    run(t, Math.LN2 / CULTURE.rate);
+    // open, it's empty in a few seconds, and what was in it came out its spout
+    const held = t.tanks[0].N;
+    t.valves[0] = 1;
+    let out = 0;
+    for (let i = 0; i < 1500 && t.tanks[0].N > 0; i++) out += t.step(0.02)[0]?.N ?? 0;
+    expect(t.tanks[0].N).toBe(0);
+    // but for the last trace of it, which counts as nothing
+    expect(held - out).toBeLessThan(TRACE);
+    // some died while it stood and drained, not all; and dry, the plate stays as it is
+    const dead = Array.from(t.dead!);
+    expect(count(t)).toBeGreaterThan(0);
+    expect(count(t)).toBeLessThan(dead.length);
+    run(t, 600);
+    expect(Array.from(t.dead!)).toEqual(dead);
   });
 
   it('loses its cells at random, half of them in the time its rate and the harm give', () => {

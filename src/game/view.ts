@@ -1167,7 +1167,11 @@ class ToolView {
       sh.neck.bodies.forEach((bx, k) => pipes(art, [[bx, floor], [bx, floor + 4], [sh.spouts[k], floor + 4], [sh.spouts[k], sh.spoutY - 4]]));
     }
     else if (t.kind === 'strip') this.buildStrip();
-    else if (t.kind === 'culture') this.buildCulture();
+    else if (t.kind === 'culture') {
+      this.buildCulture();
+      // its drain, down from under the plate's frame
+      pipes(art, [[0, floor + 2.5], [0, sh.spoutY - 4]]);
+    }
     else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);
     sh.spouts.forEach((x, k) => pick(block(art, pipeMat, x - 4, x + 4, sh.spoutY - 6, sh.spoutY, -4, 4), 'spout', k));
 

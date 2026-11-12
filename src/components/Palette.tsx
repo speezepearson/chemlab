@@ -109,11 +109,13 @@ const ICONS: Record<string, ReactNode> = {
   ),
   culture: (
     <>
-      <path className="glass" d="M14 3 H26 L32 10 V35 H8 V10 Z" />
+      <path className="pipe" d="M20 30 V38" />
+      <path className="glass" d="M15 2 H25 L31 7 V30 H9 V7 Z" />
       <g style={{ fill: '#96d6ff', stroke: 'none' }}>
-        {[14, 20, 26].flatMap((x) => [15, 22, 29].map((y) => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.7" />))}
+        {[14.5, 20, 25.5].flatMap((x) => [12, 18.5, 25].map((y) => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.7" />))}
       </g>
-      <circle cx="20" cy="22" r="1.7" style={{ fill: '#8a5a36', stroke: 'none' }} />
+      <circle cx="20" cy="18.5" r="1.7" style={{ fill: '#8a5a36', stroke: 'none' }} />
+      <circle className="valve" cx="20" cy="34" r="2.5" />
     </>
   ),
   thermometer: (

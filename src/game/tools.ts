@@ -572,9 +572,11 @@ export function scorchAt(T: number): number {
  *   harm 0.1 are dead in 30 sim s, and in fluid of harm 1, in 3;
  * - heat: fluid hotter than `from` harms them too, as `per` of a loose end per molecule for each unit of temperature
  *   above it;
- * - pitch: how far apart the cells are, in local units, in rows half a step out of line with each other.
+ * - pitch: how far apart the cells are, in local units, in rows half a step out of line with each other;
+ * - drain: how fast its plate drains, full and with its valve fully open, by volume per sim second: a fifth of a
+ *   flask, so it's empty in a few seconds, leaving its cells as they are.
  */
-export const CULTURE = { rate: Math.LN2 / 3, heat: { from: 2, per: 0.2 }, pitch: 3.2 };
+export const CULTURE = { rate: Math.LN2 / 3, heat: { from: 2, per: 0.2 }, pitch: 3.2, drain: CAP / 5 };
 
 /** How loose a molecule of each species is, to a sleeper culture: its loose ends (see LOOSE_ENDS), or 1 for a lone atom. */
 const LOOSENESS: readonly number[] = SPECIES.map((sp, s) => (sp.size === 1 ? 1 : LOOSE_ENDS[s].length));
@@ -935,17 +937,17 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -12, x1: 12, y0: -6, y1: STRIP.paper.y1 + 1 },
   },
   culture: {
-    // a flat glass cell, the plate, filled through a funnel on top; the cells stand on the inside of its front (see
-    // cultureCells); nothing drains from it
+    // a flat glass cell, the plate, filled through a funnel on top and drained through a valve under it; the cells
+    // stand on the inside of its front (see cultureCells)
     tanks: [{ name: 'plate', x0: -20, x1: 20 }],
     tankH: 46,
     tankCap: CAP / 10,
     cup: { w: 10, h: 8 },
-    noValve: true,
-    spouts: [],
-    valveY: 46,
-    spoutY: 50,
-    box: { x0: -24, x1: 24, y0: -14, y1: 52 },
+    maxFlow: CULTURE.drain,
+    spouts: [0],
+    valveY: 58,
+    spoutY: 74,
+    box: { x0: -24, x1: 24, y0: -14, y1: 76 },
   },
   thermometer: {
     // the flow meter's tube and pipe, past the bulb of a thermometer on a card beside them (see THERMOMETER_BODY)
@@ -1263,7 +1265,8 @@ export function separatorShares(): number[][] {
  *   pad and draws it along itself, leaving each species where it runs to (see wick and stripBands). It's used once.
  * - A **sleeper culture** is a flat glass plate of living cells, filled through a funnel on top. What's in it harms
  *   those of them it covers, by its loose ends and its heat (see harm): each dies at random, for good, the sooner the
- *   more harmful the fluid (see sicken). It's used once.
+ *   more harmful the fluid (see sicken). It drains through a valve under it, leaving its cells as they are, as a
+ *   record of what was tried on them.
  * - A **thermometer** is an inline instrument too, which lets everything through past its bulb, whose temperature
  *   follows what passes (see warm), with two markers left at the highest and lowest it's read (see shake).
  * - A **composition analyzer** is an inline instrument too, and it draws off ANALYZER_SAMPLE of what passes, out its waste spout, reading that (see
@@ -1391,7 +1394,8 @@ export class Tool {
     if (this.kind === 'heater') return this.heat(h);
     if (this.kind === 'receptacle') return this.receive(h);
     if (this.kind === 'strip') return this.wick(h);
-    if (this.kind === 'culture') return this.sicken(h);
+    // a culture's cells sicken in what's in the plate, which then drains like any tank
+    if (this.kind === 'culture') this.sicken(h);
     // with nothing in it and its readings faded to nothing, a step would do nothing; an instrument's smoothing starts
     // again from nothing measured, as it would have to within less than TRACE
     if (this.tanks.every((tk) => tk.N <= 0) && this.rate === 0 && !this.reading && !this.links && this.bonds.every((b) => b === 0)) {
@@ -1454,7 +1458,7 @@ export class Tool {
    * 1 − e^(−CULTURE.rate · harm · h), whatever the others do, and stays dead. How many do in a step is their number
    * times that, rounded at random, and which is drawn evenly from among them. Cells above the fluid are untouched.
    */
-  private sicken(h: number): (Vessel | null)[] {
+  private sicken(h: number): void {
     const plate = this.tanks[0];
     const dead = this.dead!;
     const rate = CULTURE.rate * harm(plate);
@@ -1472,7 +1476,6 @@ export class Tool {
         at.pop();
       }
     }
-    return this.none();
   }
 
   /**
