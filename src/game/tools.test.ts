@@ -498,11 +498,13 @@ describe('swell bulbs', () => {
     expect(inlets[1] - inlets[0]).toBe(CELL);
     expect(spouts).toEqual(inlets);
     inlets.forEach((x, k) => expect(Math.abs(x)).toBeGreaterThan(Math.abs(neck!.bodies[k]) + neck!.body / 2));
-    // fluid goes in at the inlet, and what no longer fits spills from its neck's top
+    // each inlet is at the top of its neck, wholly above it, so nothing stands in a funnel below the fluid's level;
+    // fluid goes in there, and what no longer fits spills over its lip
+    expect(-(neck!.inlet.y + neck!.inlet.h)).toBeGreaterThan(neck!.h);
     const m = tankMouth(d, 0);
     expect(m.x).toBeCloseTo(inlets[0], 9);
-    expect(m.rim!.x).toBeCloseTo(neck!.necks[0], 9);
-    expect(m.rim!.y).toBeCloseTo(neck!.h, 9);
+    expect(m.y).toBeCloseTo(-neck!.inlet.y, 9);
+    expect(m.rim!.y).toBeCloseTo(m.y, 9);
   });
 
   it('show how much each holds by how far up its neck it stands', () => {

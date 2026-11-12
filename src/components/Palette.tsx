@@ -92,10 +92,12 @@ const ICONS: Record<string, ReactNode> = {
   ),
   dilatometer: (
     <>
-      <path className="pipe" d="M11 27 V30 H5 V37 M29 27 V30 H35 V37" />
-      <path className="glass" d="M19.2 3 V27 H5 V17 H16 V3 M20.8 3 V27 H35 V17 H24 V3" />
-      <path d="M5 20 H35 M5 23.5 H35" style={{ stroke: '#b87333', strokeWidth: 1.2 }} />
-      <circle className="valve" cx="20" cy="33" r="3.5" />
+      <path className="pipe" d="M11 30 V32 H5 V38 M29 30 V32 H35 V38" />
+      <path className="glass" d="M2 2 H10 L7 6 H5 Z M30 2 H38 L35 6 H33 Z" />
+      <path className="glass" d="M6 6 L18 12 M34 6 L22 12" />
+      <path className="glass" d="M19.2 11 V30 H5 V22 H16 V11 M20.8 11 V30 H35 V22 H24 V11" />
+      <path d="M5 24.5 H35 M5 27.5 H35" style={{ stroke: '#b87333', strokeWidth: 1.2 }} />
+      <circle className="valve" cx="20" cy="35" r="3" />
     </>
   ),
   strip: (

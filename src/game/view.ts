@@ -1533,8 +1533,8 @@ class ToolView {
   /**
    * Tank k of a tool whose tanks have necks (see ToolShape.neck), a swell bulb: a closed glass bulb over its sump; its
    * neck up from where it is on the bulb's top, open on top, with a little black float riding the fluid in it, so its
-   * level is plain whatever its color; and its inlet, a little funnel out on its far shoulder, whose stem runs down
-   * and in through the bulb's side. With the first, the marks across all the necks' fronts, every fifth one longer.
+   * level is plain whatever its color; and its inlet, a little funnel up and out from the neck's top, on a thin tube
+   * leaning down and in to it. With the first, the marks across all the necks' fronts, every fifth one longer.
    * Returns the solids its fluid is drawn from.
    */
   private buildBulb(k: number, bottom: number, pieces: Piece[], share: (v: Vessel) => number): THREE.BufferGeometry[] {
@@ -1557,13 +1557,11 @@ class ToolView {
       glassFrom(art, new THREE.CylinderGeometry(sump.w / 2, SUMP_TIP / 2, sump.h, 24, 1, true).translate(bx, sm, 0));
       geoms.push(new THREE.CylinderGeometry(sump.w / 2 - 0.5, SUMP_TIP / 2 - 0.3, sump.h - 0.3, 24).translate(bx, sm, 0));
     }
-    // the inlet's funnel, and its stem down and in to the bulb's side
+    // the inlet's funnel, and the tube from it leaning down and in to the neck's top
     const { h: ih, y: iy } = neck.inlet;
     const iw = sh.tanks[k].x1 - sh.tanks[k].x0;
     glassFrom(art, frustum(ix, iy, iy + ih, iw, iw, 3, 3, true));
-    const side = bx + Math.sign(ix - bx) * rr;
-    rod(art, glassMat, v3(ix, iy + ih), v3(ix, 6), 1.5);
-    rod(art, glassMat, v3(ix, 6), v3(side, 6), 1.5);
+    rod(art, glassMat, v3(ix, iy + ih), v3(nx, -neck.h), 1.6);
     const float = new THREE.Mesh(new THREE.CylinderGeometry(nr - 0.7, nr - 0.7, 1.6, 16), leverMat);
     float.position.x = nx;
     art.add(float);

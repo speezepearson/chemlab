@@ -498,10 +498,11 @@ export function thermometerAt(T: number): number {
  * narrow neck (see ToolShape.neck). The neck holds about a fifth of what the bulb does, so fluid that fills the bulb
  * and swells by a twentieth climbs a quarter of the neck. The two bulbs stand pressed together like the letters
  * "db": their necks side by side in the middle, `gap` apart, each up from the inner edge of its bulb, with `marks`
- * graduations across both; and each is filled through a little funnel (`inlet`: reaching w either side of its
- * middle, h deep, its mouth at height y) out on its far shoulder, the two a grid cell apart.
+ * graduations across both. Above the marks the necks part: each carries on as a thin tube leaning out and up,
+ * `inlet.rise` higher, to a little funnel (reaching `inlet.w` either side of its middle, `inlet.h` deep) at its top,
+ * the two funnels a grid cell apart, which is where each bulb is filled.
  */
-export const BULB = { w: 34, h: 20, sump: { w: 10, h: 5 }, neck: { w: 7, h: 90 }, marks: 20, gap: 1, inlet: { w: 7, h: 8, y: -14 } };
+export const BULB = { w: 34, h: 20, sump: { w: 10, h: 5 }, neck: { w: 7, h: 90 }, marks: 20, gap: 1, inlet: { w: 7, h: 8, rise: 32 } };
 const BULB_BODY: Piece[] = [
   { h: BULB.sump.h, w0: SUMP_TIP, d0: SUMP_TIP, w1: BULB.sump.w, d1: BULB.sump.w, round: true },
   { h: BULB.h, w0: BULB.w, d0: BULB.w, w1: BULB.w, d1: BULB.w, round: true },
@@ -718,8 +719,9 @@ export interface ToolShape {
    * A narrow neck on top of each tank (a round one, `body` across), `w` across and `h` tall. The tank fills first,
    * then its neck, so a small change in how much it holds shows as a big change in how high it stands. Such a tank
    * isn't under its opening: `bodies` and `necks` are where each tank's middle and its neck's are, across, and the
-   * tank's own x0 and x1 are its inlet's, a little funnel `inlet.h` deep with its mouth at height `inlet.y`, which is
-   * where fluid goes in. What no longer fits spills from the neck's top.
+   * tank's own x0 and x1 are its inlet's, a little funnel `inlet.h` deep with its mouth at height `inlet.y`, above the
+   * neck's top, which a thin tube leans down and in to: that's where fluid goes in, and where what no longer fits
+   * spills from.
    */
   neck?: { w: number; h: number; body: number; bodies: number[]; necks: number[]; inlet: { h: number; y: number } };
   /** Whether the tool has no valves to turn. */
@@ -894,8 +896,9 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   },
   dilatometer: {
     // two swell bulbs (see BULB) pressed together like "db", necks side by side in the middle; each filled through a
-    // funnel on its far shoulder, a grid cell apart, and draining slowly through its own valve to a spout under that;
-    // one wire wound round both, from a box under them whose dial sets its heat
+    // funnel at the top of its neck, where the necks lean apart, a grid cell from the other, and draining slowly
+    // through its own valve to a spout under that; one wire wound round both, from a box under them whose dial sets
+    // its heat
     tanks: [
       { name: 'A', x0: -CELL / 2 - BULB.inlet.w, x1: -CELL / 2 + BULB.inlet.w },
       { name: 'B', x0: CELL / 2 - BULB.inlet.w, x1: CELL / 2 + BULB.inlet.w },
@@ -909,7 +912,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
       body: BULB.w,
       bodies: [-(BULB.gap + BULB.w) / 2, (BULB.gap + BULB.w) / 2],
       necks: [-(BULB.gap + BULB.neck.w) / 2, (BULB.gap + BULB.neck.w) / 2],
-      inlet: { h: BULB.inlet.h, y: BULB.inlet.y },
+      inlet: { h: BULB.inlet.h, y: -(BULB.neck.h + BULB.inlet.rise + BULB.inlet.h) },
     },
     valves: [{ x: -CELL / 2, y: 42 }, { x: CELL / 2, y: 42 }, { x: 0, y: 46 }],
     dial: 2,
@@ -917,7 +920,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spouts: [-CELL / 2, CELL / 2],
     valveY: 42,
     spoutY: 58,
-    box: { x0: -CELL / 2 - 14, x1: CELL / 2 + 14, y0: -BULB.neck.h - 6, y1: 62 },
+    box: { x0: -CELL / 2 - 14, x1: CELL / 2 + 14, y0: -(BULB.neck.h + BULB.inlet.rise + BULB.inlet.h) - 6, y1: 62 },
   },
   strip: {
     // a little glass cup, the pad, over a strip of paper hanging from it (see STRIP.paper); nothing drains from it

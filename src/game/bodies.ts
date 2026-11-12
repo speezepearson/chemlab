@@ -98,13 +98,12 @@ export function openingOf(t: Tool, k: number): { x0: number; x1: number; y: numb
   return { x0: cx - cup.w, x1: cx + cup.w, y: r.y0 - cup.h, hz: cup.w };
 }
 
-/** The open top of tank k, in the room; it spills over its right lip, or, if it has a neck, from the front of its neck's top. */
+/** The open top of tank k, in the room; it spills over its right lip. */
 export function tankMouth(t: Tool, k: number): Mouth {
   const o = openingOf(t, k);
   const c = onTool(t, (o.x0 + o.x1) / 2, o.y);
   // it spills over its right lip as it stands
-  const neck = t.shape.neck;
-  const rim = neck ? toWorld(t.pose, { x: neck.necks[k], y: neck.h, z: neck.w / 2 + 2 }) : toWorld(t.pose, { x: o.x1 + 3, y: -o.y, z: 0 });
+  const rim = toWorld(t.pose, { x: o.x1 + 3, y: -o.y, z: 0 });
   return { v: t.tanks[k], ...c, hx: (o.x1 - o.x0) / 2, hz: o.hz, yaw: t.pose.yaw, rim };
 }
 
@@ -175,13 +174,14 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
     hz: Math.max(D.tank / 2 + 2, sh.cup ? sh.cup.w + 1 : 0), round: sh.round,
   };
   if (sh.round) tanks.hz = (tanks.x1 - tanks.x0) / 2;
-  // tanks with necks: each bulb on its own, round, where it is; the necks together above them; and each one's inlet
+  // tanks with necks: each bulb on its own, round, where it is; the necks together above them; and each one's inlet,
+  // above its neck (the thin tubes leaning in from them are too slight to bump into)
   const neck = sh.neck;
   const upper = neck
     ? [
         ...neck.bodies.map((x) => ({ x0: x - neck.body / 2 - 2, x1: x + neck.body / 2 + 2, y0: -2, y1: bottom, hz: neck.body / 2 + 2, round: true })),
         { x0: Math.min(...neck.necks) - neck.w / 2 - 1, x1: Math.max(...neck.necks) + neck.w / 2 + 1, y0: -neck.h - 2, y1: -2, hz: neck.w / 2 + 1 },
-        ...sh.tanks.map((k) => ({ x0: k.x0 - 1, x1: k.x1 + 1, y0: neck.inlet.y - 2, y1: 8, hz: (k.x1 - k.x0) / 2 + 1 })),
+        ...sh.tanks.map((k) => ({ x0: k.x0 - 1, x1: k.x1 + 1, y0: neck.inlet.y - 2, y1: neck.inlet.y + neck.inlet.h + 2, hz: (k.x1 - k.x0) / 2 + 1 })),
       ]
     : [tanks];
   if (bottom >= b.y1) return upper;
