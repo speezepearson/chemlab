@@ -10,7 +10,7 @@ import { WALL_PANEL } from './space';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  clockText, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -595,49 +595,57 @@ describe('size sorter', () => {
       SORTER.strength = before;
     }
   };
-  /** Each size's shares out the three spouts, sorting singles, pairs and triples at the current strength. */
+  const FOUR = speciesIndex(['R', 'G', 'B', 'K'], 63);
+  /** Each size's shares out the four spouts, sorting singles, pairs, triples and fours at the current strength. */
   function sort() {
     const so = new Tool('sorter', 0);
     const f = so.tanks[0];
-    f.setMolecules(R, 6e7);
+    f.setMolecules(R, 4e7);
     f.setMolecules(RG, 3e7);
     f.setMolecules(TARGET, 2e7);
+    f.setMolecules(FOUR, 1e7);
     f.setTemperature(3);
     const before = { N: f.N, Q: f.Q };
     const outs = so.step(0.02).map((v) => v ?? new Vessel(Infinity));
-    expect(outs).toHaveLength(3);
+    expect(outs).toHaveLength(SORTER_OUTLETS);
+    expect(so.shape.spouts).toHaveLength(SORTER_OUTLETS);
     // nothing made or lost, and the heat goes with the atoms
     expect(outs.reduce((t, v) => t + v.N, 0) + f.N).toBe(before.N);
     expect(outs.reduce((t, v) => t + v.Q, 0) + f.Q).toBe(before.Q);
-    return [R, RG, TARGET].map((sp) => {
+    return [R, RG, TARGET, FOUR].map((sp) => {
       const total = outs.reduce((t, v) => t + v.n[sp], 0);
       return outs.map((v) => v.n[sp] / total);
     });
   }
 
-  it('sends each size out its own spout, 1/3 + 2/3·strength of it, and the rest evenly out the others', () => {
-    for (const k of [0.2, 0.55, 0.9]) {
+  it('sends each size out its own spout, 1/4 + 3/4·strength of it, and the rest evenly out the others', () => {
+    for (const k of [0.2, 0.6, 0.9]) {
       withStrength(k, () => {
         sort().forEach((shares, own) =>
-          shares.forEach((x, j) => expect(x).toBeCloseTo(j === own ? 1 / 3 + (2 / 3) * k : (1 - k) / 3, 2)),
+          shares.forEach((x, j) => expect(x).toBeCloseTo(j === own ? 1 / 4 + (3 / 4) * k : (1 - k) / 4, 2)),
         );
       });
     }
   });
 
   it('splits every size evenly at strength 0, and sorts perfectly at 1', () => {
-    withStrength(0, () => sort().forEach((shares) => shares.forEach((x) => expect(x).toBeCloseTo(1 / 3, 2))));
-    withStrength(1, () => expect(sort()).toEqual([[1, 0, 0], [0, 1, 0], [0, 0, 1]]));
+    withStrength(0, () => sort().forEach((shares) => shares.forEach((x) => expect(x).toBeCloseTo(1 / 4, 2))));
+    withStrength(1, () => expect(sort()).toEqual([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]));
   });
 
-  it('sends molecules of four atoms off the end, with the triples', () => {
-    const so = new Tool('sorter', 0);
-    filled(so.tanks[0], speciesIndex(['R', 'G', 'B', 'K'], 63), FUNNEL_CAP / 2, 1);
-    so.tanks[0].setMolecules(TARGET, so.tanks[0].n[speciesIndex(['R', 'G', 'B', 'K'], 63)]);
-    const outs = so.step(0.02);
-    expect(outs[0]?.N ?? 0).toBe(0);
-    expect(outs[1]?.N ?? 0).toBe(0);
-    expect(outs[2]!.N).toBeGreaterThan(0);
+  it('sends triples through the third screen and fours off the end, apart', () => {
+    withStrength(1, () => {
+      const so = new Tool('sorter', 0);
+      filled(so.tanks[0], FOUR, FUNNEL_CAP / 2, 1);
+      so.tanks[0].setMolecules(TARGET, so.tanks[0].n[FOUR]);
+      const outs = so.step(0.02);
+      expect(outs[0]?.N ?? 0).toBe(0);
+      expect(outs[1]?.N ?? 0).toBe(0);
+      expect(outs[2]!.n[TARGET]).toBeGreaterThan(0);
+      expect(outs[2]!.n[FOUR]).toBe(0);
+      expect(outs[3]!.n[FOUR]).toBeGreaterThan(0);
+      expect(outs[3]!.n[TARGET]).toBe(0);
+    });
   });
 
   it('keeps the temperature of what it sorts', () => {

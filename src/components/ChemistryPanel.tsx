@@ -162,7 +162,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
             </tr>
             <tr className="group">
               <td colSpan={4}>
-                <b>Size sorter</b> <span>from 0, an even three-way split, to 1, every size out its own spout</span>
+                <b>Size sorter</b> <span>from 0, an even four-way split, to 1, every size out its own spout</span>
               </td>
             </tr>
             <tr>

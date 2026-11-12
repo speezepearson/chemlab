@@ -187,9 +187,9 @@ export const FUNNEL_RATE = 2 * MAX_FLOW;
 
 /**
  * How well the size sorter sorts, editable from the Chemistry panel, from 0 (every size of molecule splits evenly
- * among its three spouts) to 1, the default (singles all fall through the first screen, pairs the second, and
- * anything bigger goes off the end). In between, each size goes 1/3 + 2/3·strength out its own spout and the rest evenly out
- * the other two, so at 0.55, 70% out its own and 15% out each of the others.
+ * among its four spouts) to 1, the default (singles all fall through the first screen, pairs the second, triples the
+ * third, and fours go off the end). In between, each size goes 1/4 + 3/4·strength out its own spout and the rest evenly
+ * out the other three, so at 0.6, 70% out its own and 10% out each of the others.
  */
 export const SORTER = { strength: 1 };
 const DEFAULT_SORTER = { ...SORTER };
@@ -198,10 +198,16 @@ export function restoreDefaultSorter(): void {
   Object.assign(SORTER, DEFAULT_SORTER);
 }
 
-/** For singles, pairs and anything bigger, the share going out each of the size sorter's spouts, in order. */
+/** How many spouts the size sorter has: one per size of molecule, from one atom to four. */
+export const SORTER_OUTLETS = 4;
+
+/** For each size of molecule, from one atom to four, the share going out each of the size sorter's spouts, in order. */
 export function sorterShares(): number[][] {
   const k = Math.max(0, Math.min(1, SORTER.strength));
-  return [0, 1, 2].map((own) => [0, 1, 2].map((j) => (j === own ? 1 / 3 + (2 / 3) * k : (1 - k) / 3)));
+  const n = SORTER_OUTLETS;
+  return Array.from({ length: n }, (_, own) =>
+    Array.from({ length: n }, (_, j) => (j === own ? 1 / n + (1 - 1 / n) * k : (1 - k) / n)),
+  );
 }
 
 /** How much the big tank holds, by volume: a hundred flasks. */
@@ -630,17 +636,17 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -126, x1: 126, y0: -6, y1: 90 },
   },
   sorter: {
-    // a funnel at the high end of the chute (see SORTER_CHUTE), which drops through two screens, then off its end
+    // a funnel at the high end of the chute (see SORTER_CHUTE), which drops through three screens, then off its end
     tanks: [{ name: 'funnel', x0: -CELL - 22, x1: -CELL + 22 }],
     tankH: 30,
     tankCap: FUNNEL_CAP,
     funnel: true,
     noValve: true,
     // a grid cell apart, like the separator's, the first a cell on from the funnel
-    spouts: [0, CELL, 2 * CELL],
+    spouts: [0, CELL, 2 * CELL, 3 * CELL],
     valveY: 30,
     spoutY: 104,
-    box: { x0: -126, x1: 206, y0: -6, y1: 106 },
+    box: { x0: -126, x1: 306, y0: -6, y1: 106 },
   },
   heater: {
     // a funnel over the left end of a long tube (see HEATER_TUBE) with a wire down its middle; three taps
@@ -743,7 +749,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
 };
 
 /** The size sorter's chute, in local units: it slopes down from (x0, y0) to (x1, y1), where it turns down into the last spout. */
-export const SORTER_CHUTE = { x0: -112, x1: 200, y0: 44, y1: 68 };
+export const SORTER_CHUTE = { x0: -112, x1: 300, y0: 44, y1: 76 };
 /** Height of the sorter's chute at x, in local units. */
 export const chuteY = (x: number) =>
   SORTER_CHUTE.y0 + ((x - SORTER_CHUTE.x0) / (SORTER_CHUTE.x1 - SORTER_CHUTE.x0)) * (SORTER_CHUTE.y1 - SORTER_CHUTE.y0);
@@ -924,8 +930,8 @@ export function separatorShares(): number[][] {
  * - A **multiplexer** is a splitter the other way up: two funnels, each draining (at FUNNEL_RATE times how high
  *   its fluid stands) into one spout between them. Its valve picks which: the share of FUNNEL_RATE the right funnel
  *   gets, from 0 (only the left drains) to 1 (only the right), the left getting the rest.
- * - A **size sorter** has a funnel like the splitter's, with no valve, draining down a chute through two
- *   screens and off its end, each with a spout under it (see SORTER_SCREENS).
+ * - A **size sorter** has a funnel like the splitter's, with no valve, draining down a chute through three
+ *   screens and off its end, each with a spout under it (see sieve).
  * - A **resistive heater** has a funnel draining (at HEATER.feed) into one end of a long tube, which carries
  *   it to the other end in HEATER.transit and out a spout there, heating it all the way (see heatBy) with a
  *   wire whose temperature its dial sets (see wireTemperature). Three taps along the tube, each a valve over
@@ -1068,7 +1074,7 @@ export class Tool {
       transfer(packets[1], packets[0], volume(packets[1]));
       packets = [packets[0]];
     }
-    if (this.kind === 'sorter') packets = sieve(packets[0], parts(3));
+    if (this.kind === 'sorter') packets = sieve(packets[0], parts(SORTER_OUTLETS));
     if (this.kind === 'analyzer') packets = divide(packets[0], () => 1 - ANALYZER_SAMPLE, parts(2));
     this.out = packets.map((p) => (p.N > 0 ? p : null));
     this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
@@ -1215,12 +1221,12 @@ export function composition(f: Fluid, cap: number): number[] {
 }
 
 /**
- * Pass a fluid over the size sorter's screens (see sorterShares): what falls through the first (singles), what falls
- * through the second (pairs), and what goes off the end (anything bigger), in whole molecules, with heat in proportion.
+ * Pass a fluid over the size sorter's screens (see sorterShares): what falls through the first (singles), the second
+ * (pairs) and the third (triples), and what goes off the end (fours), in whole molecules, with heat in proportion.
  */
 export function sieve(f: Fluid, into?: Vessel[]): Vessel[] {
   const shares = sorterShares();
-  return split(f, 3, (s) => shares[Math.min(SPECIES[s].size, 3) - 1], into);
+  return split(f, SORTER_OUTLETS, (s) => shares[SPECIES[s].size - 1], into);
 }
 
 /** Split a fluid among the separator's outlets, left to right (see separatorShares), in whole molecules, heat in proportion. */
