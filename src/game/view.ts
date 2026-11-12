@@ -1359,7 +1359,7 @@ class ToolView {
    * reservoir (see gaugeSegments); and a green-on-black screen under its label showing the litres of cryostabilizer in
    * it of the litres needed.
    */
-  private buildStation(pick: (m: THREE.Object3D, part: 'body' | 'tank', k?: number) => void): void {
+  private buildStation(pick: (m: THREE.Object3D, part: 'body' | 'tank' | 'spout', k?: number) => void): void {
     const { t, art } = this;
     const sh = t.shape;
     const { paneW, paneH: H, out, plate, funnel: f, block: bk, gauge: g, display: dp } = STATION;
@@ -1457,16 +1457,20 @@ class ToolView {
       this.segments.push(mat);
     }
 
-    // the waste spigot and the reservoir's faucet: out from the plate, and down
-    for (const sx of sh.spouts) {
+    // the waste spigot and the reservoir's faucet: out from the plate, and down; all of each pipe counts as its spout,
+    // as a faucet's does, and so does the spigot's handleless valve
+    sh.spouts.forEach((sx, k) => {
+      const from = art.children.length;
       rod(art, pipeMat, v3(sx, H + 10, face), v3(sx, H + 10, 0), 2.5);
       pipes(art, [[sx, H + 10], [sx, sh.spoutY - 4]], 2.5);
-    }
+      for (const m of art.children.slice(from)) pick(m, 'spout', k);
+    });
     const valve = new THREE.Mesh(unitCylinder, panelMat);
     valve.rotation.x = Math.PI / 2;
     valve.scale.set(4.5, 8, 4.5);
     valve.position.copy(v3(sh.spouts[0], sh.valveY, 0));
     art.add(valve);
+    pick(valve, 'spout', 0);
     // the readout of the litres in the reservoir, under its label, and beside it, how long it's been delivering steadily
     const screen = (sc: { x0: number; x1: number; y0: number; y1: number }) => {
       block(art, darkMat, sc.x0 - 1.5, sc.x1 + 1.5, sc.y0 - 1.5, sc.y1 + 1.5, face, face + 0.5);
@@ -2802,11 +2806,22 @@ function buildFaucets(
 
 /* ---------------- the view ---------------- */
 
-/** The thing a pick is part of, to outline all of it: a tool for any of its parts, a faucet for its knob or spout. */
+/**
+ * The thing a pick is part of, to outline all of it: a tool for any of its parts, a faucet for its knob or spout. The
+ * cryostabilizer station, built into the wall, is outlined a part at a time: its funnel, its reservoir's window, or one
+ * of its two faucets (its spout's pipe, with its valve); its plate, nothing. Null for nothing.
+ */
 function thingOf(p: Pick): unknown {
   switch (p.kind) {
     case 'flask': return p.f;
-    case 'tool': return p.t;
+    case 'tool': {
+      const { t } = p;
+      if (!t.shape.wall) return t;
+      if (p.part === 'tank') return `tool ${t.id} tank ${p.k}`;
+      if (p.part === 'spout') return `tool ${t.id} spout ${p.k}`;
+      if (p.part === 'valve') return `tool ${t.id} spout ${t.shape.spouts.indexOf(valveLocal(t, p.k).x)}`;
+      return null;
+    }
     case 'scale': return p.sc;
     case 'hose': return p.h;
     case 'faucet': return `faucet ${p.i}`;
@@ -3230,6 +3245,7 @@ export class View {
   private renderOutline(hot: Pick | null): void {
     if (!hot) return;
     const thing = thingOf(hot);
+    if (thing === null) return;
     const meshes = [...this.pickables].filter(([, p]) => thingOf(p) === thing).map(([o]) => o);
     this.outliner.render(this.renderer, this.scene, this.camera, meshes);
   }
