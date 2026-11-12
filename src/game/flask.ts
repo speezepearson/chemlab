@@ -4,7 +4,7 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { GOAL_PURITY, TRACE } from './config';
 import { GLASS_GRAMS } from './scale';
 import { ORIGIN, type Pose } from './space';
-import { LOOK, css, glowWhiteHeat, heatValue, whiteHeat, whiten, type RGB } from './appearance';
+import { LOOK, css, heatValue, whiteHeat, whiten, type RGB } from './appearance';
 
 export interface Point {
   x: number;
@@ -206,10 +206,4 @@ export function fluidRGB(f: Fluid): RGB | null {
 export function fluidColor(f: Fluid): string {
   const c = fluidRGB(f);
   return c ? css(c, fluidAlpha(f)) : 'transparent';
-}
-
-/** Color of the light a hot fluid gives off. */
-export function glowColor(f: Fluid): RGB | null {
-  const hue = fluidHue(f);
-  return hue && whiten(hue, glowWhiteHeat(temperature(f)));
 }
