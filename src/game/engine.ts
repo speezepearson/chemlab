@@ -326,6 +326,11 @@ export class GameEngine {
   private dip = 0;
   /** Real seconds the held wicking strip has been dipped in a fluid since its foot touched it (see DIP_SOAK). */
   private dipFor = 0;
+  /**
+   * Whether the held wicking strip is still on its way in from a press of the right button: a tap, however brief, takes
+   * it all the way in before it rises, so its foot always touches what it's dipped in (see dipping).
+   */
+  private tapping = false;
   /** Where the held flask poured this frame, if it did: its lip, and what it poured into (null: the sink). */
   private pour: { from: Vec3; into: Mouth | null } | null = null;
   /** Where what's held would come to rest if let go, as of the last frame drawn (see placement). */
@@ -1705,6 +1710,8 @@ export class GameEngine {
         this.faceFlask(h.f);
       }
     }
+    // a strip aimed at an open top goes all the way in, however soon the button's let go
+    if (h?.kind === 'tool' && h.t.kind === 'strip' && this.mouthAimed()) this.tapping = true;
     if (h) return;
     const k = this.valveAimed();
     if (!k) return;
@@ -1996,11 +2003,13 @@ export class GameEngine {
       }
     }
     if (h?.kind !== 'flask' || !this.rightHeld) this.pinned = null;
-    if (!h) return;
     // a nozzle held with the crosshair on an open top goes straight over it, where it would be set down to pour in;
-    // and a strip or a thermometer hovers over it, and lowers into it while the right button's held
-    const aim = h.kind === 'tool' && isDipper(h.t.kind) ? this.dipAim(h) : null;
-    this.dip = aim ? Math.max(0, Math.min(1, this.dip + ((this.rightHeld ? 1 : -1) * dt) / DIP_S)) : 0;
+    // and a strip or a thermometer hovers over it, and lowers into it while the right button's held, or, a strip, until
+    // it's all the way in from a tap
+    const aim = h?.kind === 'tool' && isDipper(h.t.kind) ? this.dipAim(h) : null;
+    if (!aim) this.tapping = false;
+    this.dip = aim ? Math.max(0, Math.min(1, this.dip + ((this.rightHeld || this.tapping ? 1 : -1) * dt) / DIP_S)) : 0;
+    if (!h) return;
     const lower = ease(this.dip);
     const over = h.kind === 'hose' ? this.nozzleOver(h)
       : aim ? { ...aim.hover, y: aim.hover.y + (aim.dipped.y - aim.hover.y) * lower, x: aim.dipped.x, z: aim.dipped.z }
@@ -2569,7 +2578,7 @@ export class GameEngine {
       if (this.rightWouldDo())
         add(
           ['RMB'],
-          h.kind === 'tool' ? 'hold to dip it in'
+          h.kind === 'tool' ? (h.t.kind === 'strip' ? 'tap to dip it, hold to soak it' : 'hold to dip it in')
           : h.kind !== 'flask' ? 'hold to let it flow'
           : this.mouthAimed() ? 'hold to pour into it'
           : 'hold to pour',
@@ -2899,9 +2908,9 @@ export class GameEngine {
   /**
    * What each dipper's foot is in (see footAt and bathAt), from where it is now, held or set down; it doesn't change
    * much in a frame. A thermometer's bulb reads whatever it's in. A wicking strip counts as in a fluid only while it's
-   * set down, or held dipped with the right button, so carrying one past fluid does nothing; it drinks it while it's set
-   * down, or once it's been held dipped DIP_SOAK real seconds (`dt`, as the player's own movements go), so a tap only
-   * spots it (see Tool.dipIn).
+   * set down, or held dipped with the right button (or on its way in from a tap of it, see tapping), so carrying one
+   * past fluid does nothing; it drinks it while it's set down, or once it's been held dipped DIP_SOAK real seconds
+   * (`dt`, as the player's own movements go), so a tap only spots it (see Tool.dipIn).
    */
   private dipping(dt: number): void {
     const h = this.held;
@@ -2910,7 +2919,7 @@ export class GameEngine {
       if (isThermometer(t.kind)) t.bath = bathAt(footAt(t), this.flasks, this.tools);
       if (t.kind !== 'strip') continue;
       const held = h?.kind === 'tool' && h.t === t;
-      const v = !held || (this.rightHeld && this.dip > 0) ? bathAt(footAt(t), this.flasks, this.tools) : null;
+      const v = !held || ((this.rightHeld || this.tapping) && this.dip > 0) ? bathAt(footAt(t), this.flasks, this.tools) : null;
       if (held && v) {
         dipped = true;
         this.dipFor += dt;
@@ -2918,6 +2927,8 @@ export class GameEngine {
       t.dipIn(v, !held || this.dipFor > DIP_SOAK);
     }
     if (!dipped) this.dipFor = 0;
+    // all the way in, its foot has touched: a tap is over, and it rises unless the button's still held
+    if (this.dip >= 1) this.tapping = false;
   }
 
   /** Whether fluid would leave a tool's spouts if it ran. */
