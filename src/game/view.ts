@@ -714,22 +714,27 @@ function paperOutline(ctx: CanvasRenderingContext2D, W: number, L: number): void
  * A wicking strip's paper, foot at the bottom, cut to a point there: cream, darker as far as each stretch of it is wet
  * (see wetness), by what's on it, until it's dry; each species on each stretch of it (see Tool.paper) as ink of its own
  * color, as opaque as stripInk says, single atoms first, so what's left in bands lies over the carrier's tint; both
- * blended smoothly from one stretch's middle to the next, except for a spot that has yet to move, a round blot at the
- * foot's point; and browned over by how scorched it is, where it's wet, or all over once it's drying, since by then
- * it's all been wet. Nothing's drawn outside its outline.
+ * blended smoothly from one stretch's middle to the next, except for a spot that has yet to move, which is drawn
+ * stretch by stretch, so its top is a line, where the fluid's surface was; and each stretch browned over by how
+ * scorched it is (see Tool.scorch), stretch by stretch too, so that ends at a line as well. Nothing's drawn outside
+ * its outline.
  */
 function drawStrip(sc: Screen, t: Tool): void {
   const { paper } = t;
   const C = paper.length;
   let sum = 0;
   paper.forEach((v, c) => (sum += v.N * (c + 1)));
-  const key = `${sum} ${t.soaked > 0} ${t.dryness.toFixed(2)} ${t.scorch.toFixed(2)}`;
+  let char = 0;
+  t.scorch.forEach((x, c) => (char += x * (c + 1)));
+  const key = `${sum} ${t.soaked > 0} ${t.dryness.toFixed(2)} ${char.toFixed(2)}`;
   if (key === sc.key) return;
   sc.key = key;
   const { ctx, ppu } = sc;
   const [W, L] = [2 * STRIP.paper.w, STRIP.paper.len];
   const at = (c: number) => 1 - (c + 0.5) / C;
-  const wet = entryWet(paper.map((v) => wetness(volume(v), STRIP.cap, C)));
+  // till the paper's drunk anything, what's on it is a spot, just where it was dipped: nothing's run to blend
+  const spot = t.soaked === 0;
+  const wet = spot ? paper.map((v) => wetness(volume(v), STRIP.cap, C)) : entryWet(paper.map((v) => wetness(volume(v), STRIP.cap, C)));
   ctx.setTransform(ppu, 0, 0, ppu, 0, 0);
   ctx.clearRect(0, 0, W, L);
   ctx.save();
@@ -737,31 +742,26 @@ function drawStrip(sc: Screen, t: Tool): void {
   ctx.clip();
   ctx.fillStyle = '#e6dfc8';
   ctx.fillRect(0, 0, W, L);
-  if (t.dryness < 1 && wet.some((w) => w > 0)) {
-    ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(96, 92, 78, ${0.28 * wet[c] * (1 - t.dryness)})`);
+  // each stretch's own part of the paper, filled edge to edge, wherever it's to show at all
+  const cells = (alpha: (c: number) => number, rgb: string) => {
+    for (let c = 0; c < C; c++) {
+      const a = alpha(c);
+      if (a <= 0) continue;
+      ctx.fillStyle = `rgba(${rgb}, ${a})`;
+      ctx.fillRect(0, L * (1 - (c + 1) / C), W, L / C);
+    }
+  };
+  // blended from each stretch's middle to the next's, or, for a spot, stretch by stretch
+  const lay = (alpha: (c: number) => number, rgb: string) => {
+    if (spot) return cells(alpha, rgb);
+    ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(${rgb}, ${alpha(c)})`);
     ctx.fillRect(0, 0, W, L);
-  }
+  };
+  if (t.dryness < 1 && wet.some((w) => w > 0)) lay((c) => 0.28 * wet[c] * (1 - t.dryness), '96, 92, 78');
   const here = SPECIES.map((_, s) => s).filter((s) => paper.some((v) => v.n[s] > 0));
   here.sort((a, b) => SPECIES[a].size - SPECIES[b].size);
-  // the spot's a blot at the foot's point till the paper's drunk anything
-  const blot = t.soaked === 0 && paper[0].N > 0;
-  const r = STRIP.paper.point / 2;
-  for (const s of here) {
-    const rgb = SPECIES[s].color.slice(4, -1);
-    if (blot) {
-      ctx.fillStyle = `rgba(${rgb}, ${stripInk(s, paper[0].n[s], t.dryness)})`;
-      ctx.beginPath();
-      ctx.ellipse(W / 2, L - r, r * 1.3, r, 0, 0, 2 * Math.PI);
-      ctx.fill();
-      continue;
-    }
-    ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(${rgb}, ${stripInk(s, paper[c].n[s], t.dryness)})`);
-    ctx.fillRect(0, 0, W, L);
-  }
-  if (t.scorch > 0) {
-    ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(46, 28, 14, ${0.92 * t.scorch * (t.dryness > 0 ? 1 : wet[c])})`);
-    ctx.fillRect(0, 0, W, L);
-  }
+  for (const s of here) lay((c) => stripInk(s, paper[c].n[s], t.dryness), SPECIES[s].color.slice(4, -1));
+  cells((c) => 0.92 * t.scorch[c], '46, 28, 14');
   ctx.restore();
   sc.tex.needsUpdate = true;
 }

@@ -4,7 +4,7 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
-  FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, dipPoses, footAt, flaskBox, flaskFluid,
+  FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
   flaskLip, flaskMouth, nozzleBox, tankFluid, docked, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
@@ -2910,7 +2910,7 @@ export class GameEngine {
   }
 
   /**
-   * What each dipper's foot is in (see footAt and bathAt), from where it is now, held or set down; it doesn't change
+   * What each dipper's foot is in (see footAt and dippedIn), from where it is now, held or set down; it doesn't change
    * much in a frame. A thermometer's bulb reads whatever it's in. A wicking strip counts as in a fluid only while it's
    * set down, or held dipped with the right button (or on its way in from a tap of it, see tapping), so carrying one
    * past fluid does nothing; it drinks it while it's set down, or once it's been held dipped DIP_SOAK real seconds
@@ -2923,12 +2923,13 @@ export class GameEngine {
       if (isThermometer(t.kind)) t.bath = bathAt(footAt(t), this.flasks, this.tools);
       if (t.kind !== 'strip') continue;
       const held = h?.kind === 'tool' && h.t === t;
-      const v = !held || ((this.rightHeld || this.tapping) && this.dip > 0) ? bathAt(footAt(t), this.flasks, this.tools) : null;
-      if (held && v) {
+      // one in hand is in the fluid once it's all the way down, so its spot is as deep as it's dipped
+      const d = !held || ((this.rightHeld || this.tapping) && this.dip >= 1) ? dippedIn(footAt(t), this.flasks, this.tools) : null;
+      if (held && d) {
         dipped = true;
         this.dipFor += dt;
       }
-      t.dipIn(v, !held || this.dipFor > DIP_SOAK);
+      t.dipIn(d?.v ?? null, !held || this.dipFor > DIP_SOAK, d?.depth);
     }
     if (!dipped) this.dipFor = 0;
     // all the way in, its foot has touched: a tap is over, and it rises unless the button's still held

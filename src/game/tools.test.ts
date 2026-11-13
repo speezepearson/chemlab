@@ -663,6 +663,31 @@ describe('wicking strip', () => {
     expect(volume(u.paper[0])).toBe(STRIP.spot / 2);
   });
 
+  it('takes its spot over as much of it as is in the fluid, evenly, so its top is where the surface was', () => {
+    const t = new Tool('strip', 0);
+    const v = mix([[TARGET, 1]], 10 * STRIP.spot);
+    const atoms = atomTotal(v);
+    // its foot, the middle of its first stretch, 2.5 under: its first three stretches' middles are under
+    t.dipIn(v, false, 2.5);
+    for (let c = 0; c < 3; c++) expect(Math.abs(volume(t.paper[c]) - STRIP.spot / 3)).toBeLessThanOrEqual(1);
+    t.paper.forEach((p, c) => c >= 3 && expect(p.N).toBe(0));
+    expect(atomTotal(v) + onPaper(t)).toBe(atoms);
+    // a second touch, no deeper, goes over the same stretches, and it's still at most three spots in all
+    for (let k = 2; k <= 4; k++) {
+      t.dipIn(null, false);
+      t.dipIn(v, false, 2.5);
+    }
+    expect(Math.abs(t.paper.reduce((a, p) => a + volume(p), 0) - STRIP.spots * STRIP.spot)).toBeLessThanOrEqual(STRIP.spots * 3);
+    t.paper.forEach((p, c) => c >= 3 && expect(p.N).toBe(0));
+    // barely in, it's its first stretch; and however deep, no more of it than there is
+    const u = new Tool('strip', 1);
+    u.dipIn(mix([[TARGET, 1]]), false, 0.01);
+    expect(volume(u.paper[0])).toBe(STRIP.spot);
+    const w = new Tool('strip', 2);
+    w.dipIn(mix([[TARGET, 1]]), false, 10 * C);
+    expect(w.paper.every((p) => p.N > 0)).toBe(true);
+  });
+
   it('takes no spot once it has begun to drink', () => {
     const t = new Tool('strip', 0);
     t.dipIn(carrierOf(G), true);
@@ -863,36 +888,54 @@ describe('wicking strip', () => {
     }
   });
 
-  it('is scorched by what it takes up hot', () => {
+  it('is scorched where it has been in hot fluid, and nowhere else', () => {
     const { from, to } = STRIP.scorch;
     expect(scorchAt(from)).toBe(0);
     expect(scorchAt((from + to) / 2)).toBeCloseTo(0.5, 9);
     expect(scorchAt(2 * to)).toBe(1);
-    // by a hot spot
+    const scorched = (t: Tool) => [...t.scorch].map((x) => +x.toFixed(2));
+    const upTo = (n: number, by: number) => Array.from({ length: C }, (_, c) => (c < n ? by : 0));
+    // by a hot fluid it's touched to, as far up as it's in it: the same stretches as its spot
     const t = new Tool('strip', 0);
-    t.dipIn(mix([[TARGET, 1]], STRIP.spot, (from + to) / 2), false);
-    expect(t.scorch).toBeCloseTo(0.5, 2);
-    // and stays as scorched as it's been, whatever it takes up after
+    t.dipIn(mix([[TARGET, 1]], STRIP.spot, (from + to) / 2), false, 2.5);
+    expect(scorched(t)).toEqual(upTo(3, 0.5));
+    expect(t.paper.map((p) => p.N > 0)).toEqual(upTo(3, 1).map(Boolean));
+    // and no further, though a cool carrier then wets it to its top, deeper in than it was
     t.dipIn(null, false);
-    t.dipIn(carrierOf(R, STRIP.cap / 4, from), true);
-    run(t, 1);
-    expect(t.scorch).toBeCloseTo(0.5, 2);
-    // or by a hot carrier
+    t.dipIn(carrierOf(R, 2 * STRIP.cap, from), true, 5.5);
+    run(t, STRIP.time + 1);
+    expect(t.soaked).toBe(1);
+    expect(scorched(t)).toEqual(upTo(3, 0.5));
+    // a hot carrier chars what stands in it, and only that, however far it's drawn up
     const u = new Tool('strip', 0);
-    u.dipIn(carrierOf(R, STRIP.cap / 4, to), true);
-    run(u, 1);
-    expect(u.scorch).toBe(1);
+    u.dipIn(carrierOf(R, 2 * STRIP.cap, to), true, 5.5);
+    run(u, STRIP.time / 2);
+    expect(u.soaked).toBeGreaterThan(0.5);
+    expect(scorched(u)).toEqual(upTo(6, 1));
+    // even paper that's done, or that isn't let drink, scorches in hot fluid; in none, nothing does
+    const w = new Tool('strip', 0);
+    w.dipIn(carrierOf(R, STRIP.cap, to), false);
+    expect(scorched(w)).toEqual(upTo(1, 1));
+    const x = new Tool('strip', 0);
+    x.dipIn(null, true, 5.5);
+    run(x, 1);
+    expect(scorched(x)).toEqual(upTo(0, 0));
   });
 
   it('keeps how far it has run, how dry it is and how scorched in a save, and what is on its paper', () => {
     const t = new Tool('strip', 0);
-    t.remember([0.4, 0.2, 0.25]);
-    expect(t.memory).toEqual([0.4, 0.2, 0.25]);
-    t.remember([7, -3, 0.5]);
-    expect(t.memory).toEqual([1, 0, 0.5]);
+    const upTo = (n: number, by: number) => Array.from({ length: C }, (_, c) => (c < n ? by : 0));
+    t.remember([0.4, 0.2, ...upTo(3, 0.25)]);
+    expect(t.memory).toEqual([0.4, 0.2, ...upTo(3, 0.25)]);
+    t.remember([7, -3, ...upTo(C, 0.5)]);
+    expect(t.memory).toEqual([1, 0, ...upTo(C, 0.5)]);
     // what was saved before, of the pad's paper, isn't
     t.remember([0.3, 0.1]);
-    expect(t.memory).toEqual([1, 0, 0.5]);
+    expect(t.memory).toEqual([1, 0, ...upTo(C, 0.5)]);
+    // an older save's strip, scorched alike all over what was wet: as far as it had soaked
+    const o = new Tool('strip', 2);
+    o.remember([0.5, 0, 0.25]);
+    expect(o.memory).toEqual([0.5, 0, ...upTo(C / 2, 0.25)]);
     // and its paper, stretch by stretch
     const { t: u } = spotted([[TARGET, 1]], R);
     run(u, STRIP.time / 2);

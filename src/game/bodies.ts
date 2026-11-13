@@ -242,14 +242,18 @@ export function tankFluid(t: Tool, k: number): { floor: number; surface: number 
   return { floor: onTool(t, 0, bottom).y, surface: onTool(t, 0, bottom - up).y };
 }
 
-/** Whether p is in the fluid in tank k: within its walls as drawn, and below its fluid's surface. */
-function inTank(t: Tool, k: number, p: Vec3): boolean {
+/**
+ * How far under the surface of the fluid in tank k p is, if it's in it: within its walls as drawn, and below its
+ * fluid's surface; null if it isn't.
+ */
+function inTank(t: Tool, k: number, p: Vec3): number | null {
   const v = t.tanks[k];
-  if (v.N <= 0) return false;
+  if (v.N <= 0) return null;
   const { pieces, bottom, xs } = tankInside(t, k);
   const l = toLocal(t.pose, p);
   const up = bottom + l.y;
-  if (up < 0 || up > levelIn(pieces, fullness(v))) return false;
+  const level = levelIn(pieces, fullness(v));
+  if (up < 0 || up > level) return null;
   let base = 0;
   for (let i = 0; i < pieces.length; i++) {
     const pc = pieces[i];
@@ -258,11 +262,11 @@ function inTank(t: Tool, k: number, p: Vec3): boolean {
       const w = pc.w0 + (pc.w1 - pc.w0) * f;
       const d = pc.d0 + (pc.d1 - pc.d0) * f;
       const dx = l.x - xs[i];
-      return pc.round ? Math.hypot(dx, l.z) <= w / 2 : Math.abs(dx) <= w / 2 && Math.abs(l.z) <= d / 2;
+      return (pc.round ? Math.hypot(dx, l.z) <= w / 2 : Math.abs(dx) <= w / 2 && Math.abs(l.z) <= d / 2) ? level - up : null;
     }
     base += pc.h;
   }
-  return false;
+  return null;
 }
 
 /** Where a dipper's foot is, in the room (see footY): a thermometer's bulb, or a wicking strip's paper's tip. */
@@ -301,24 +305,31 @@ export function dipPoses(t: Tool, m: Vec3, fluid: { floor: number; surface: numb
 }
 
 /**
- * The vessel whose fluid p is in, if any, for a dipper's foot: an upright flask (not one tipped to pour), if p is
- * inside its outline and below its fluid's surface as drawn; or a tool's tank, if it's within its walls and below its
- * fluid's surface as drawn. The cryostabilizer station's are in the wall, out of reach. Null if it's in none: in the
- * air, or in a falling stream, which doesn't count.
+ * The vessel whose fluid p is in, if any, for a dipper's foot, and how far under its surface p is: an upright flask
+ * (not one tipped to pour), if p is inside its outline and below its fluid's surface as drawn; or a tool's tank, if
+ * it's within its walls and below its fluid's surface as drawn. The cryostabilizer station's are in the wall, out of
+ * reach. Null if it's in none: in the air, or in a falling stream, which doesn't count.
  */
-export function bathAt(p: Vec3, flasks: readonly Flask[], tools: readonly Tool[]): Vessel | null {
+export function dippedIn(p: Vec3, flasks: readonly Flask[], tools: readonly Tool[]): { v: Vessel; depth: number } | null {
   for (const f of flasks) {
     if (f.N <= 0 || f.tilt !== 0) continue;
     const l = toLocal(f.pose, p);
     if (-l.y < 0 || -l.y > FLASK_H || Math.hypot(l.x, l.z) > flaskRadius(-l.y)) continue;
-    if (l.y <= fillLevel(0, fullness(f))) return f;
+    const depth = fillLevel(0, fullness(f)) - l.y;
+    if (depth >= 0) return { v: f, depth };
   }
   for (const t of tools) {
     if (t.shape.wall) continue;
-    for (let k = 0; k < t.tanks.length; k++) if (inTank(t, k, p)) return t.tanks[k];
+    for (let k = 0; k < t.tanks.length; k++) {
+      const depth = inTank(t, k, p);
+      if (depth !== null) return { v: t.tanks[k], depth };
+    }
   }
   return null;
 }
+
+/** The vessel whose fluid p is in, if any (see dippedIn). */
+export const bathAt = (p: Vec3, flasks: readonly Flask[], tools: readonly Tool[]): Vessel | null => dippedIn(p, flasks, tools)?.v ?? null;
 
 /* ---------------- flasks ---------------- */
 
