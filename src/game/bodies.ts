@@ -21,7 +21,7 @@ const CABINET_DEPTH: Partial<Record<ToolKind, number>> = { analyzer: 50, spectro
 /**
  * How deep each tool is front to back, all told, and how deep its tanks are inside: as deep as they need to be to
  * hold what they hold (see tankDepth), and the tool a little deeper, or as deep as its cabinet or its tank's cup. The
- * cryostabilizer station's column is inside the wall, whatever it holds; it reaches from the wall as far out again
+ * supply station's column is inside the wall, whatever it holds; it reaches from the wall as far out again
  * in front of its funnel and spouts.
  */
 export const TOOL_DEPTH = Object.fromEntries(
@@ -81,7 +81,7 @@ export function tankRect(t: Tool, k: number): { x0: number; x1: number; y0: numb
 
 /**
  * Where fluid goes into a tank, in the tool's flat frame: its open top, or the mouth of the little funnel on top if it
- * has one, or its inlet if it has a neck (see ToolShape.neck), or the cryostabilizer station's funnel (see STATION).
+ * has one, or its inlet if it has a neck (see ToolShape.neck), or the supply station's funnel (see STATION).
  */
 export function openingOf(t: Tool, k: number): { x0: number; x1: number; y: number; hz: number } {
   const r = tankRect(t, k);
@@ -111,7 +111,7 @@ export function tankMouth(t: Tool, k: number): Mouth {
 /**
  * Where, in a tool's flat frame, the player's note about tank k is written (its middle's height): above the tank's
  * opening and the tool's label, or the tank's own (the most lines of any of the tool's tanks', so they line up); on
- * the cryostabilizer station, just above its block.
+ * the supply station, just above its block.
  */
 export function tankNoteY(t: Tool, k: number): number {
   const lines = Math.max(t.shape.label?.length ?? 0, ...t.shape.tanks.map((tk) => tk.label?.length ?? 0));
@@ -122,7 +122,7 @@ export function tankNoteY(t: Tool, k: number): number {
 /**
  * A tool's solid parts, in its flat frame (x right, y down from its top center), each
  * reaching `hz` either side of `z` (its middle, if left out) front to back: its tanks (round, for a round tank), and
- * under them the pipes, valves and spouts there, across only as far as they reach. The cryostabilizer station's are
+ * under them the pipes, valves and spouts there, across only as far as they reach. The supply station's are
  * its funnel, the plate in the wall, and its spouts' pipes out from it. An inline instrument's are its
  * tube and the pipe down from it, and the cabinet beside them, and any pipe on to a spout past the cabinet, or the
  * flow meter's readout round the pipe; the tube's top is flush with its opening, for a nozzle to snap onto (see
@@ -307,7 +307,7 @@ export function dipPoses(t: Tool, m: Vec3, fluid: { floor: number; surface: numb
 /**
  * The vessel whose fluid p is in, if any, for a dipper's foot, and how far under its surface p is: an upright flask
  * (not one tipped to pour), if p is inside its outline and below its fluid's surface as drawn; or a tool's tank, if
- * it's within its walls and below its fluid's surface as drawn. The cryostabilizer station's are in the wall, out of
+ * it's within its walls and below its fluid's surface as drawn. The supply station's are in the wall, out of
  * reach. Null if it's in none: in the air, or in a falling stream, which doesn't count.
  */
 export function dippedIn(p: Vec3, flasks: readonly Flask[], tools: readonly Tool[]): { v: Vessel; depth: number } | null {

@@ -15,7 +15,7 @@ export const CHANNEL_NAMES: Record<Channel, string> = {
   drips: 'drips',
   trickle: 'streams',
   analyzer: 'analyzer',
-  receptacle: 'cryostabilizer',
+  receptacle: 'station',
   glass: 'glass',
 };
 

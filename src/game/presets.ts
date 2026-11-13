@@ -4,7 +4,8 @@ import { SPECIES, TARGET, singleOf } from '../chem/species';
 import { CAP } from './config';
 import type { Vessel } from './flask';
 import { CELL, ROOM, type Pose } from './space';
-import { REFERENCE_START, STATION, type ToolKind } from './tools';
+import { CRYOSTABILIZER } from './supply';
+import { STATION, type ToolKind } from './tools';
 
 /** Starting contents of one shelf slot. */
 export interface FlaskFill {
@@ -37,14 +38,17 @@ export const SPECTROSCOPE_AT: Spot = { at: [1.45, 0.5] };
 export const VISUALIZER_AT: Spot = { at: [1.75, 0.5] };
 
 /**
- * Where the cryostabilizer station is (see STATION in tools.ts): built into the right wall, past the faucets, facing
+ * Where the station is (see STATION in tools.ts): built into the right wall, past the faucets, facing
  * into the room, its funnel and spouts over the middles of the cells of the counter's row nearest the wall, and its
  * spouts high enough for a flask under them. Every lab has it, always here.
  */
 export const STATION_POSE: Pose = { x: ROOM.x1 - CELL / 2, y: STATION.top, z: 11.5 * CELL, yaw: -Math.PI / 2 };
 
-/** What the ship's reservoir starts with: the hundred flasks of the target left on board (see VOYAGE). */
-export const REFERENCE_FILL: FlaskFill = { contents: [{ species: TARGET, molecules: REFERENCE_START }], T: T_ROOM };
+/**
+ * What the cryostabilizer's reservoir starts with: the hundred flasks of the target left on board (see VOYAGE). It's
+ * what a save from before the station was a funnel over a diverter gets, if it had no reservoir (see oldStation).
+ */
+export const REFERENCE_FILL: FlaskFill = { contents: [{ species: TARGET, molecules: CRYOSTABILIZER.start }], T: T_ROOM };
 
 /** A tool on the bench at the start. */
 export interface ToolSpec extends Spot {

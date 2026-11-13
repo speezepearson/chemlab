@@ -239,7 +239,7 @@ export function App() {
           {engine && labeling !== null && (
             <LabelEditor key={labeling} engine={engine} id={labeling} onClose={() => setLabeling(null)} />
           )}
-          {hud && <SleepScreen hud={hud} />}
+          {hud && <SleepScreen hud={hud} onWake={() => engine?.touchNap()} />}
           {hud?.preview && <ArrivalPanel />}
           {engine && hud && (
             <Ending

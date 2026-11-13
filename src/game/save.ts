@@ -28,6 +28,8 @@ export interface SaveState {
   alarmsOff?: boolean;
   /** Whether the porthole's blinds are shut (see GameEngine); not if left out. */
   blindsShut?: boolean;
+  /** Whether the player has been told they can nap (see GameEngine.nap); not if left out. */
+  nap?: boolean;
   /** The sticky notes of saves from when there was a pencil to write them with; no longer written, and ignored. */
   papers?: unknown;
   /**
@@ -79,7 +81,8 @@ export interface SavedTool extends SavedDepth {
   /**
    * An instrument's own state, if it has any (see Tool.memory): a thermometer's bulb's temperature, and whether it's
    * broken; how much a wicking strip's paper has drunk, how dry it is and how scorched; how much a column's bed has
-   * drunk; which of a sleeper culture's cells are dead.
+   * drunk; which of a sleeper culture's cells are dead; what the station is fitted for, and how far into its
+   * changeover it is (a save from before it was fitted for anything but the cryostabilizer has none).
    */
   memory?: number[];
   /** What's on a wicking strip's paper, stretch by stretch from its foot (see Tool.paper). */

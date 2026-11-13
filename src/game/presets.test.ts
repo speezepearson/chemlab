@@ -3,7 +3,8 @@ import { temperature } from '../chem/reactions';
 import { NS, TARGET } from '../chem/species';
 import { CAP, N_FLASKS } from './config';
 import { Flask, roomFor } from './flask';
-import { REFERENCE_START, SHAPES, TANK_CAP, Tool } from './tools';
+import { CRYOSTABILIZER } from './supply';
+import { SHAPES, TANK_CAP, Tool } from './tools';
 import { onGrid, toolAnchor, toolBox } from './bodies';
 import { boxesOverlap } from './physics';
 import { fromFrac } from './space';
@@ -62,8 +63,8 @@ describe('presets', () => {
     const ref = new Tool('receptacle', 0).tanks[1];
     applyFill(ref, REFERENCE_FILL);
     // a hundred flasks of triangles
-    expect(ref.n[TARGET]).toBe(REFERENCE_START);
-    expect(ref.N).toBe(3 * REFERENCE_START);
+    expect(ref.n[TARGET]).toBe(CRYOSTABILIZER.start);
+    expect(ref.N).toBe(3 * CRYOSTABILIZER.start);
     expect(DEFAULT_PRESET.flasks.filter(Boolean)).toHaveLength(0);
   });
 
