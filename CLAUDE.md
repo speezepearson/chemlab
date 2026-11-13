@@ -30,7 +30,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - Headless Chromium won't capture the mouse, and WebGL needs a software renderer. Launch with
   `args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']`, then in dev builds the engine is
   `window.lab`: `lab.debug({ locked: true, x, z, yaw, pitch })` acts as if the mouse were captured, so keys (E,
-  the number row, WASD) and mouse buttons work, and puts the player somewhere. Yaw 0 faces the back wall; pitch is up,
+  1 and 2, WASD) and mouse buttons work, and puts the player somewhere. Yaw 0 faces the back wall; pitch is up,
   in radians. Its private fields (`held`, `target`, `tools`, `turning`, ...) are reachable from `page.evaluate`.
 - Software rendering is slow, a few frames a second, so wait longer than you'd think, and remember that a screenshot
   takes real time during which the sim runs on.
@@ -53,7 +53,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
 - `src/game/`: everything else in the game.
   - `engine.ts` owns the lab: what's in it, the player, input, carrying and the sim loop.
-  - `view.ts` draws it all with Three.js, and raycasts for what the crosshair is on.
+  - `view.ts` draws it all with Three.js, and raycasts for what the crosshair is on. It also draws the equipment
+    wheels' icons (`IconStudio`): a new one of each kind, drawn as in the lab, so there are no icons to keep up to date.
   - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room, what fluid a
     dipper's foot (a thermometer's bulb, a wicking strip's tip) is in (`bathAt`), which the engine hands each one every
     frame (`Tool.bath`, or for a strip `Tool.dipIn`, which also says whether it may drink), and where a dipper aimed at
@@ -76,12 +77,15 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `history.ts` is undo and redo of the lab's arrangement (never fluids). An action that changes the arrangement calls
     the engine's `mark()` as it starts and `commit()` as it ends (or `change()` around it, if it's instant); a carry is
     marked at pick-up and committed at set-down.
+  - `wheel.ts` is the two equipment wheels: what's on each (`WHEELS`), where the mouse puts the pointer while a
+    wheel's key (1 or 2) is held, and which sector that picks. The engine holds the open one's state (`wheel`,
+    `openWheel`, `closeWheel`) and `Wheel` in `Hud.tsx` draws it.
   - `outline.ts` is the player's settings for the outline round what the crosshair is on; the view's `Outliner` draws
     it over the finished frame, from a mask of the meshes registered as that thing's parts.
   - `supply.ts` is what the ship is short of, in the order the station is fitted for them (`SUPPLIES`): the
     antinucleant (R–B), then the cryostabilizer.
   - `cabinet.ts` is the equipment cabinet: its layout (each kind's slots on its shelves) and its stock, which the
-    hotbar takes from and putting away puts back into. The view draws what's in it as instanced meshes
+    equipment wheels take from and putting away puts back into. The view draws what's in it as instanced meshes
     (`CabinetView`), so it's cheap however much it holds.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
@@ -91,8 +95,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     in the lab goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),
     so it fades and pans with where it is relative to the player's head.
 - `src/intro/log.ts`: the intro's console script, deterministic from a seed. `src/components/Intro.tsx` plays it.
-- `src/components/`: the React UI around the canvas: the hotbar (`Palette.tsx`), the crosshair's hints, the corner list of
-  actions and the start hint (`Hud.tsx`), the Chemistry and Appearance panels, the editor.
+- `src/components/`: the React UI around the canvas: the crosshair's hints, the equipment wheels, the corner
+  list of actions and the start hint (`Hud.tsx`), the Chemistry and Appearance panels, the editor.
 
 ## Invariants and gotchas
 
@@ -148,8 +152,11 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Adding a tool kind** touches all of these:
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially.
-  - `ITEMS` and `HOTKEYS` in `engine.ts` (the hotbar's order and keys) and `ICONS` in `Palette.tsx`, unless the tool is
-    unique. The number row is full, through =, so new ones go along the bottom row of letters, from Z, skipping N (a nap; notes are on Enter): it's taken through the comma.
+  - A place on one of the equipment wheels (`WHEELS` in `wheel.ts`: 1's is for experimenting and learning, 2's for
+    mass production; ask the user which, if it isn't plain), unless the tool is unique. `wheel.test.ts` checks
+    everything stocked is on one. There are no keys for particular tools: the wheels are the only way to make one
+    away from the cabinet. Its icon there draws itself, from its `ToolView` (see `IconStudio` in `view.ts`); look at
+    it, and if it's too long and thin to make out whole, give it a pose in `ICON_POSES`.
   - Its place in the equipment cabinet: `STOCK` and a compartment in `BAYS` (`cabinet.ts`), and `ENDLESS` if it's
     used up. `cabinet.test.ts` checks it fits.
   - If it has state of its own that a save should keep, `Tool.memory` and `Tool.remember`.
@@ -162,7 +169,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     says, and its own `x0` and `x1` are its inlet's, since it's the openings and spouts that go on the grid.
   - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `neck`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
 - **Unique tools** (`UNIQUE_TOOLS`: the composition analyzer, the spectroscope, the bond visualizer and the receptacle) aren't on
-  the hotbar and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
+  an equipment wheel and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
   whole supply station (`STATION` in `tools.ts`): its tanks are the funnel and the ship's reservoir, in that
   order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved.
 - **The station is fitted for a supply** (`Tool.supply`, see `supply.ts`): the antinucleant in a new lab, the
@@ -182,7 +189,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 ## Design preferences
 
 - Don't give away the chemistry. The player is meant to work it out. The composition analyzer has no text and no
-  divider lines between its sectors, nor the bond visualizer, whose points are unlabeled, the size sorter's screens look plain, the hotbar has no names, and the faucets aren't labeled (they're the five pure
+  divider lines between its sectors, nor the bond visualizer, whose points are unlabeled, the size sorter's screens look plain, the equipment wheels have no names, and the faucets aren't labeled (they're the five pure
   atoms, the four colors and the solvent, which the user chose). The spectroscope's axes are labeled E (uB) and f (in S, with an SI prefix to suit the range, as mS), at the user's request: both on log scales with
   base-10 log-paper ticks, only the powers of ten numbered, f's ranging itself to the tallest line, and no peak labeled. It plots each bond at the size of its
   energy, a stable one as a peak above the baseline and an uphill one as a dip below it, at the user's request. Ask before adding any visual cue that reveals how a tool or reaction works.

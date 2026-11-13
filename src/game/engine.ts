@@ -16,7 +16,7 @@ import { CAP, DELIVERY, FILL_RATE, HOME_H, HOME_W, POUR_RATE, TRACE } from './co
 import { cool, exposure, taper } from './cooling';
 import { FAUCETS, WALL_FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
-import { Flask, Vessel, fluidColor, roomFor, sustenance, transfer, volume, volumeUnit } from './flask';
+import { Flask, Vessel, roomFor, sustenance, transfer, volume, volumeUnit } from './flask';
 import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
@@ -24,6 +24,7 @@ import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_P
 import { rumble, type Rumble } from './rumble';
 import { CRYOSTABILIZER, FIRST_SUPPLY, litresOf, type Supply } from './supply';
 import { shatter } from './shatter';
+import { WHEELS, wheelMove, wheelPick, type WheelAim } from './wheel';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
 import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
@@ -37,15 +38,11 @@ import {
   type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
-import { ARRIVAL, View, type AirlockLook, type FaucetSpot, type Frame, type GuideLook, type Pick } from './view';
+import { ARRIVAL, View, type AirlockLook, type FaucetSpot, type Frame, type GuideLook, type Icons, type Pick } from './view';
 import { WaterSounds } from './water';
 
 /** What the info panel shows for one vessel: all of it in god mode, otherwise just its color. */
 export interface Inspection {
-  /** Outside god mode: show only the color. */
-  brief: boolean;
-  /** The fluid's color, as drawn in the vessel; null if it's empty. */
-  color: string | null;
   T: number;
   /** How full it is, out of cap, in `unit` (atoms or molecules, see VOLUME). */
   volume: number;
@@ -103,6 +100,11 @@ export interface Hud {
   ended: boolean;
   /** Whether god mode's preview of the end's white void is up (see GameEngine.previewArrival). */
   preview: boolean;
+  /**
+   * While an equipment wheel is held open (see wheel.ts): what's on it, in order, where its pointer is, which of them
+   * it picks, if any, and which of them there are none left of in the cabinet. Otherwise null.
+   */
+  wheel: (WheelAim & { items: readonly Stocked[]; pick: number | null; none: boolean[] }) | null;
   /** While the player's asleep in the pod (see Wake) or napping (see GameEngine.nap), the whole sim seconds they've slept; otherwise null. */
   slept: number | null;
   /**
@@ -120,7 +122,7 @@ export interface Hud {
 
 /**
  * Something the player can do just now: the keys or buttons that do it, pressed together, and what it does, in a few
- * words. Keys are named as on the keyboard; 'LMB' and 'RMB' are the mouse's left and right buttons, 'Wheel' its wheel, '←→' moving it across and '↑↓' up and down. `off` if it can't be done here, though
+ * words. Keys are named as on the keyboard; 'LMB' and 'RMB' are the mouse's left and right buttons, 'Wheel' its wheel, and '↑↓' moving it up and down. `off` if it can't be done here, though
  * it could elsewhere.
  */
 export interface Action {
@@ -130,7 +132,7 @@ export interface Action {
 }
 
 export interface EngineCallbacks {
-  /** Throttled to ~10 Hz; null when nothing is inspected. */
+  /** Throttled to ~10 Hz; null when nothing is inspected, as nothing is outside god mode. */
   onInspect(info: Inspection | null): void;
   /** Enter was pressed on a vessel in god mode; look it up with GameEngine.vessel(id). */
   onEdit(id: string): void;
@@ -202,22 +204,13 @@ type Held = (
   follow?: Follower[];
 };
 
-/** Things that can be made from the hotbar, in its order. */
-export const ITEMS = [
-  'flask', 'dispenser', 'pipette', 'exchanger', 'separator', 'splitter', 'sorter', 'heater', 'scale', 'tank', 'meter', 'multiplexer',
-  'thermometer', 'thermometerWide', 'dilatometer', 'strip', 'culture', 'column', 'dish',
-] as const;
-export type Item = (typeof ITEMS)[number];
 /**
- * The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0, - and =; and then, the number
- * row being full, along the bottom row of letters, from Z, then M (N naps) and the comma.
+ * The keys that, held, open the equipment wheels (see WHEELS), in their order: let go, the key of the wheel that's
+ * open makes what its pointer picks.
  */
-export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Z', 'X', 'C', 'V', 'B', 'M', ','] as const;
-/** The same keys, as KeyboardEvent codes, so they work whatever the keyboard layout's shift state. */
-const HOTKEY_CODES = [
-  'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal',
-  'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyM', 'Comma',
-];
+const WHEEL_CODES = ['Digit1', 'Digit2'];
+/** Those keys, as they're named for the player. */
+const WHEEL_KEYS = ['1', '2'];
 
 /** How tipped a flask held to pour is: past the horizontal, mouth down. */
 const POUR_ANG = Math.PI * 0.61;
@@ -274,6 +267,13 @@ const SEEK = 2;
 const HOLD_CONE = Math.PI / 6;
 /** Radians the view turns per pixel the mouse moves, and that something held turns with Shift. */
 const LOOK_SENS = 0.0022;
+/** The view's field of view, top to bottom, in degrees. */
+const FOV = 90;
+/**
+ * Z, held, zooms the view in: the field of view it narrows to, in degrees, and how long it takes to get there, or
+ * back, in real seconds (it's the player's own doing, like walking).
+ */
+const ZOOM = { fov: 30, s: 0.12 };
 const TURN_SENS = 0.008;
 /** How far a held nozzle's stand slides out per pixel the mouse moves up with Shift. */
 const REACH_SENS = 0.5;
@@ -326,7 +326,7 @@ export class GameEngine {
   private scales: Scale[] = [];
   private hoses: Hose[] = [];
   private faucets: (FaucetSpot & { start: (typeof FAUCETS)[number] })[];
-  /** What's in the equipment cabinet (see cabinet.ts): what the hotbar makes comes out of it, and goes back in. */
+  /** What's in the equipment cabinet (see cabinet.ts): what the equipment wheels make comes out of it, and goes back in. */
   private stock: Stock = stockWith({});
   /** Where the player stands, and which way they look (yaw about the vertical, pitch up). */
   private player = { x: 480, z: 380, yaw: 0, pitch: -0.08 };
@@ -338,6 +338,13 @@ export class GameEngine {
   private rightHeld = false;
   /** A valve being turned with the right button, and where on screen the pointer aiming its lever is. */
   private turning: { t: Tool; k: number; aim: { x: number; y: number } } | null = null;
+  /** How far the view is zoomed in (see ZOOM), from 0, not at all, to 1. */
+  private zoom = 0;
+  /**
+   * While an equipment wheel is held open, which of WHEELS it is and where its pointer is; the mouse moves it, rather
+   * than looking around.
+   */
+  private wheel: (WheelAim & { which: number }) | null = null;
   /** The scale whose tare key is held down, to draw it pressed. */
   private tarePress: Scale | null = null;
   private locked = false;
@@ -1023,7 +1030,7 @@ export class GameEngine {
    * Take a flask, tool or scale out of the equipment cabinet into the player's grip, facing them, if their hands are
    * free (what's held passes through everything, so there's always room) and there's one left. Returns whether it did.
    */
-  spawn(kind: Item): boolean {
+  spawn(kind: Stocked): boolean {
     if (inPod(this.wake) || this.dozing()) return false;
     if (this.held) {
       this.say('Hands full');
@@ -1041,6 +1048,34 @@ export class GameEngine {
     this.enter(held);
     this.held = held;
     return true;
+  }
+
+  /** A little picture of each kind of thing the equipment wheels make, as it's drawn in the lab (see the view's IconStudio). */
+  icons(): Readonly<Icons> {
+    return this.view.icons();
+  }
+
+  /**
+   * Open one of the equipment wheels, its pointer in its middle, if there'd be any use in it: with hands free, and the
+   * mouse not busy turning a valve. With the other wheel open, it takes its place, the pointer staying where it is.
+   */
+  private openWheel(which: number): void {
+    if (this.turning) return;
+    if (this.held) {
+      this.say('Hands full');
+      return;
+    }
+    this.wheel = { x: 0, y: 0, ...this.wheel, which };
+  }
+
+  /** Close an equipment wheel, if it's the one that's open, making what its pointer picks, if anything. */
+  private closeWheel(which: number): void {
+    const w = this.wheel;
+    if (w?.which !== which) return;
+    this.wheel = null;
+    const items = WHEELS[which];
+    const pick = wheelPick(w, items.length);
+    if (pick !== null) this.spawn(items[pick]);
   }
 
   /** Take the one in a slot of the cabinet out of it, held just where it stood, as anything's picked up. */
@@ -1278,7 +1313,16 @@ export class GameEngine {
   }
 
   /**
-   * The touch screen's stand-in for Shift and the mouse, and the wheel: a drag across turns what's held, and up holds it
+   * R: turn what's held a quarter turn anticlockwise, as seen from above; for a hose's nozzle, that swings its stand
+   * round it. A flask is round, so turning it does nothing (see faceFlask).
+   */
+  private turn(): void {
+    const h = this.held;
+    if (h && h.kind !== 'flask') h.relYaw = wrapAngle(h.relYaw + Math.PI / 2);
+  }
+
+  /**
+   * The touch screen's stand-in for R, Shift and the mouse, and the wheel: a drag across turns what's held, and up holds it
    * further, down nearer; but for a hose's nozzle, up slides its stand out and down in (see slideReach).
    */
   turnHeld(dx: number, dy: number): void {
@@ -1308,6 +1352,7 @@ export class GameEngine {
         this.rightHeld = false;
         this.endTurn();
         this.tarePress = null;
+        this.wheel = null;
       }
     };
     document.addEventListener('pointerlockchange', onLock);
@@ -1325,6 +1370,8 @@ export class GameEngine {
         return;
       }
       e.preventDefault();
+      // the wheel has the mouse while it's open
+      if (this.wheel) return;
       if (e.button === 0) this.leftDown(e.shiftKey);
       if (e.button === 2) this.rightDown();
     });
@@ -1337,7 +1384,9 @@ export class GameEngine {
     });
     on(c, 'contextmenu', (e) => e.preventDefault());
     on(window, 'mousemove', (e) => {
-      if (this.locked) this.look(e.movementX, e.movementY, e.shiftKey);
+      if (!this.locked) return;
+      if (this.wheel) this.wheel = { ...this.wheel, ...wheelMove(this.wheel, e.movementX, e.movementY) };
+      else this.look(e.movementX, e.movementY, e.shiftKey);
     });
     on(c, 'wheel', (e) => {
       e.preventDefault();
@@ -1361,7 +1410,7 @@ export class GameEngine {
         if (e.code === 'KeyN' && !e.repeat) this.wakeNap();
         return;
       }
-      // in god mode, = shows the end's white void, or puts the lab back, rather than making anything
+      // in god mode, = shows the end's white void, or puts the lab back
       if (e.code === 'Equal' && (this.god || this.previewing)) {
         if (!e.repeat) this.previewArrival(!this.previewing);
         return;
@@ -1371,15 +1420,16 @@ export class GameEngine {
       if (e.repeat || inPod(this.wake) || this.previewing) return;
       if (e.code === 'KeyE') this.grabOrRelease(e.shiftKey);
       if (e.code === 'KeyQ') this.putBack();
+      if (e.code === 'KeyR') this.turn();
       if (e.code === 'Enter') {
         // the note's text box opens at once, and this Enter mustn't be taken as finishing it
         e.preventDefault();
         this.writeNote();
       }
       if (e.code === 'KeyN') this.nap();
-      const item = HOTKEY_CODES.indexOf(e.code);
-      if (item >= 0) {
-        this.spawn(ITEMS[item]);
+      const wheel = WHEEL_CODES.indexOf(e.code);
+      if (wheel >= 0) {
+        this.openWheel(wheel);
         e.preventDefault();
       }
       if (e.code === 'Backspace' || e.code === 'Delete') {
@@ -1388,8 +1438,15 @@ export class GameEngine {
       }
       if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
     });
-    on(window, 'keyup', (e) => this.keys.delete(e.code));
-    on(window, 'blur', () => this.keys.clear());
+    on(window, 'keyup', (e) => {
+      this.keys.delete(e.code);
+      const wheel = WHEEL_CODES.indexOf(e.code);
+      if (wheel >= 0) this.closeWheel(wheel);
+    });
+    on(window, 'blur', () => {
+      this.keys.clear();
+      this.wheel = null;
+    });
   }
 
   private clampDist(h: Held, d: number): number {
@@ -1398,7 +1455,7 @@ export class GameEngine {
     return Math.max(r + HOLD_NEAR, Math.min(r + HOLD_FAR, d));
   }
 
-  /** The mouse moved by (dx, dy) pixels: aim a valve's lever, turn what's held (with Shift), or look around. */
+  /** The mouse moved by (dx, dy) pixels: aim a valve's lever, slide a held nozzle's stand (with Shift), or look around. */
   private look(dx: number, dy: number, shift: boolean): void {
     if (this.turning) {
       const a = this.turning.aim;
@@ -1407,14 +1464,21 @@ export class GameEngine {
       this.aimTurning();
       return;
     }
-    if (shift && this.held) {
-      if (this.held.kind !== 'flask') this.held.relYaw = wrapAngle(this.held.relYaw - dx * TURN_SENS);
-      if (this.held.kind === 'hose') this.slideReach(this.held, dy);
+    // with Shift, a held nozzle's stand slides along its arm instead (R turns things: see turn)
+    if (shift && this.held?.kind === 'hose') {
+      this.slideReach(this.held, dy);
       return;
     }
     const p = this.player;
-    p.yaw = wrapAngle(p.yaw - dx * LOOK_SENS);
-    p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch - dy * LOOK_SENS));
+    // zoomed in, the mouse turns the view less, so what's seen moves across the screen as it ever does
+    const sens = (LOOK_SENS * Math.tan((this.fov() * Math.PI) / 360)) / Math.tan((FOV * Math.PI) / 360);
+    p.yaw = wrapAngle(p.yaw - dx * sens);
+    p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch - dy * sens));
+  }
+
+  /** The view's field of view now, top to bottom, in degrees: narrower as far as it's zoomed in (see ZOOM). */
+  private fov(): number {
+    return FOV + (ZOOM.fov - FOV) * ease(this.zoom);
   }
 
   /** Point the lever of the valve being turned at where the aim is, on the tool's front face. */
@@ -2152,7 +2216,9 @@ export class GameEngine {
     if (!nap || nap.waking) this.move(dt);
     if (this.wake === 'settling') this.settleIn(dt);
     if (this.held) this.follow(this.held);
-    this.view.look(this.eye(), this.player.yaw, this.player.pitch);
+    const zoomed = this.keys.has('KeyZ') ? 1 : 0;
+    this.zoom = Math.max(0, Math.min(1, this.zoom + (zoomed ? dt : -dt) / ZOOM.s));
+    this.view.look(this.eye(), this.player.yaw, this.player.pitch, this.fov());
     if (!this.turning) this.target = this.previewing ? null : this.view.pick(REACH, this.heldObject());
     this.simulate(dt);
     // the end stands the lab still as it was when there was enough, so it goes on in real time
@@ -2781,7 +2847,7 @@ export class GameEngine {
     return p?.kind === 'cabinet' ? null : p;
   }
 
-  /** The vessel the info panel is showing: what's held, if it's a flask, or else the flask or tank looked at. */
+  /** The vessel the info panel would show, in god mode: what's held, if it's a flask, or else the flask or tank looked at. */
   private inspectTarget(): Vessel | null {
     const h = this.held;
     if (h?.kind === 'flask') return h.f;
@@ -2792,7 +2858,8 @@ export class GameEngine {
   }
 
   private inspect(now: number): void {
-    const f = this.locked ? this.inspectTarget() : null;
+    // only in god mode: otherwise what's in a vessel is for the player to work out
+    const f = this.locked && this.god ? this.inspectTarget() : null;
     if (!f) {
       if (this.inspected) this.cb.onInspect(null);
       this.inspected = null;
@@ -2810,7 +2877,6 @@ export class GameEngine {
     const cx = this.viewW / 2;
     const cy = this.viewH / 2;
     this.cb.onInspect({
-      brief: !this.god, color: f.N > TRACE ? fluidColor(f) : null,
       T: temperature(f), volume: volume(f), cap: f.cap, unit: volumeUnit(), rows,
       // beside the crosshair
       x0: cx - 40, x1: cx + 40, y: cy - 30, stageW: this.viewW, stageH: this.viewH,
@@ -2826,6 +2892,12 @@ export class GameEngine {
     if (this.turning) {
       add(['Mouse'], 'point the lever');
       add(['RMB'], 'let go when it’s set');
+      return out;
+    }
+    // and so does an equipment wheel, until its key's let go
+    if (this.wheel) {
+      add(['Mouse'], 'point at what to take');
+      add([WHEEL_KEYS[this.wheel.which]], 'let go to take it');
       return out;
     }
     const p = this.target;
@@ -2853,16 +2925,16 @@ export class GameEngine {
           : 'hold to pour',
         );
       if (h.kind === 'hose') {
-        add(['Shift', '←→'], 'swing its stand round');
+        add(['R'], 'swing its stand round');
         add(['Shift', '↑↓'], 'slide its stand out or in');
-      } else if (h.kind !== 'flask') add(['Shift', '←→'], 'turn it');
+      } else if (h.kind !== 'flask') add(['R'], 'turn it');
       add(['Wheel'], 'hold it nearer or further');
       if (h.kind === 'hose') add(['Backspace'], 'roll the hose back up');
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it back in the cabinet');
       add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it back in the cabinet') : 'put it back');
     } else {
       if (this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
-      add(['1–0, -, =, Z–B, M, ,'], 'take equipment from the cabinet');
+      add([WHEEL_KEYS.join(', ')], 'hold to grab equipment');
     }
     if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
     else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
@@ -2879,6 +2951,7 @@ export class GameEngine {
     if (this.canNap()) add(['N'], 'nap');
     if (!h && this.history.canUndo) add([MOD, 'Z'], 'undo');
     if (!h && this.history.canRedo) add([MOD, 'Shift', 'Z'], 'redo');
+    add(['Z'], 'hold to zoom in');
     add(['Esc'], 'let go of the mouse');
     add(['/'], 'hide this list');
     return out;
@@ -3097,6 +3170,7 @@ export class GameEngine {
     }
     this.rightHeld = false;
     this.keys.clear();
+    this.wheel = null;
     this.flash = null;
     this.napping = { lids: 0, waking: false };
   }
@@ -3299,6 +3373,13 @@ export class GameEngine {
         : this.wake === 'arrived' ? 1
         : 0,
       preview: !!this.previewing,
+      wheel: this.wheel && {
+        x: this.wheel.x,
+        y: this.wheel.y,
+        items: WHEELS[this.wheel.which],
+        pick: wheelPick(this.wheel, WHEELS[this.wheel.which].length),
+        none: WHEELS[this.wheel.which].map((k) => !endless(k) && !this.stock[k].includes(true)),
+      },
       ended: this.wake === 'arrived',
       slept: this.sleeping ? Math.floor(this.clock - this.sleeping.from) : null,
       reservoir: this.sleeping ? this.reservoirHud() : null,

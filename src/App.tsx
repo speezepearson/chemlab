@@ -11,7 +11,6 @@ import { Ending, SleepScreen } from './components/Sleep';
 import { SoundPanel } from './components/SoundPanel';
 import { Intro } from './components/Intro';
 import { InfoPanel } from './components/InfoPanel';
-import { Palette } from './components/Palette';
 import { SpeedControl } from './components/SpeedControl';
 import { ambience } from './game/ambience';
 import { GameEngine, type Hud as HudState, type Inspection } from './game/engine';
@@ -230,10 +229,9 @@ export function App() {
       <div className="main">
         <div id="stage" ref={stageRef}>
           <canvas ref={canvasRef} />
-          {hud && <Hud hud={hud} help={help} />}
+          {engine && hud && <Hud engine={engine} hud={hud} help={help} />}
           {engine && hud && <TouchControls engine={engine} hud={hud} />}
           {inspection && <InfoPanel info={inspection} />}
-          {engine && <Palette engine={engine} />}
           {hud && !hud.locked && !hud.inPod && !hud.preview && !intro && editing === null && labeling === null && (
             <StartHint />
           )}

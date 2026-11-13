@@ -23,12 +23,13 @@ import { arrival, notice, type Block } from '../intro/notice';
 import { STATION_POSE } from './presets';
 import { litresOf, type Supply } from './supply';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
+import { WHEEL } from './wheel';
 import {
   clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, Tool,
 } from './tools';
-import { CABINET, CABINET_BUILD, type Stock, type Stocked } from './cabinet';
+import { CABINET, CABINET_BUILD, STOCK, type Stock, type Stocked } from './cabinet';
 
 /** What the crosshair is on. */
 export type Pick =
@@ -208,6 +209,12 @@ const edgeMat = new THREE.LineBasicMaterial({ color: 0xbfd4da, transparent: true
 // reflecting the room (see View's environment)
 const pipeMat = new THREE.MeshStandardMaterial({ color: 0xa4adac, metalness: 0.9, roughness: 0.28 });
 const darkMat = new THREE.MeshStandardMaterial({ color: 0x30373a, metalness: 0.6, roughness: 0.42 });
+/**
+ * Graduations printed on glass (the pipette's and the swell bulbs' necks'): ink with no thickness, lying MARK_LIFT
+ * off the glass's surface and following it, seen from both sides, as through the glass from behind.
+ */
+const markMat = new THREE.MeshStandardMaterial({ color: 0x30373a, metalness: 0.2, roughness: 0.6, side: THREE.DoubleSide });
+const MARK_LIFT = 0.08;
 const panelMat = new THREE.MeshPhysicalMaterial({ color: 0xc4cbc7, metalness: 0.1, roughness: 0.5, clearcoat: 0.4, clearcoatRoughness: 0.35 });
 const leverMat = new THREE.MeshPhysicalMaterial({ color: 0x15191a, metalness: 0, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.2 });
 /** A thermometer's white enamel backing (see THERMOMETER_ROD). */
@@ -318,6 +325,8 @@ const v3 = (x: number, y: number, z = 0) => new THREE.Vector3(x, -y, z);
  * seen edge on; and the line along its surface, how far down it fades (by 1/e), in world units, and how opaque it is.
  */
 const FLUID_EDGE = { edge: 0.7, line: 1.2, lineAlpha: 0.8 };
+/** How far under the top of a vessel's fluid's solid it's cut off, at most, so a full one is drawn open (see FluidMesh). */
+const FLUID_TOP = 0.05;
 
 /**
  * How what's seen through a see-through fluid is bent, as through water in glass (see FluidMesh's `bent`): at most
@@ -378,8 +387,19 @@ class FluidMesh {
   private bent: THREE.MeshPhysicalMaterial;
   private bents: THREE.Mesh[] = [];
   private key = '';
+  /** Where its solid reaches up to in the room, as of the last update (see update). */
+  private reach = new THREE.Box3();
+  private piece = new THREE.Box3();
 
-  constructor(geoms: THREE.BufferGeometry[], parent: THREE.Object3D) {
+  /**
+   * `open`: whether it's always cut open at the top, as fluid in a vessel is, with no surface drawn, however full; not
+   * for a solid sized to the fluid itself, whose top is meant to be seen (the station's reservoir).
+   */
+  constructor(
+    geoms: THREE.BufferGeometry[],
+    parent: THREE.Object3D,
+    private open = true,
+  ) {
     this.mat = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide, clippingPlanes: [this.plane] });
     // a see-through fluid (one thinned by the solvent) thickens toward its edges, seen edge on, and shows a bright
     // line where its surface meets the glass, as clear liquid in glass does, so even pure solvent reads as a body of
@@ -402,8 +422,14 @@ class FluidMesh {
     this.mat.customProgramCacheKey = () => 'fluid';
     this.bent = bentMat(this.plane);
     for (const g of geoms) {
+      g.computeBoundingBox();
       const m = new THREE.Mesh(g, this.mat);
       m.castShadow = true;
+      // a see-through fluid is drawn before every other see-through thing, so always before the glass it's in, which
+      // is then seen over it. Left to three.js, the two are drawn farthest first, by the middles of their shapes,
+      // which are nearly in the same place: so which came first, and with it how dark the fluid looked through the
+      // glass's shine, flipped as the eye passed the level of those middles
+      m.renderOrder = -1;
       parent.add(m);
       this.meshes.push(m);
       // drawn only in the frame itself: never hit, outlined, reflected or in the end's white void
@@ -427,7 +453,19 @@ class FluidMesh {
     (this.bent.userData.shift as { value: number }).value = shift;
     for (const b of this.bents) b.visible = shift > 0.01;
     if (!rgb) return;
-    this.plane.constant = level;
+    // never at or over the top of its solid: that would draw the solid's top, a lid of fluid with the bright line
+    // along the surface (see FLUID_EDGE) lit all across it, so a full vessel would look capped where one a hair less
+    // full is open (see FLUID_TOP)
+    let cut = level;
+    if (this.open) {
+      this.reach.makeEmpty();
+      for (const m of this.meshes) {
+        m.updateWorldMatrix(true, false);
+        this.reach.union(this.piece.copy(m.geometry.boundingBox!).applyMatrix4(m.matrixWorld));
+      }
+      cut = Math.min(level, this.reach.max.y - FLUID_TOP);
+    }
+    this.plane.constant = cut;
     const key = `${rgb.map(Math.round)}:${a.toFixed(2)}`;
     if (key === this.key) return;
     this.key = key;
@@ -732,12 +770,12 @@ function paperOutline(ctx: CanvasRenderingContext2D, W: number, L: number): void
 
 /**
  * A wicking strip's paper, foot at the bottom, cut to a point there: cream, darker as far as each stretch of it is wet
- * (see wetness), by what's on it, until it's dry; each species on each stretch of it (see Tool.paper) as ink of its own
+ * (see wetness), by what's on it; each species on each stretch of it (see Tool.paper) as ink of its own
  * color, as opaque as stripInk says, single atoms first, so what's left in bands lies over the carrier's tint; both
  * blended smoothly from one stretch's middle to the next, except for a spot that has yet to move, which is drawn
- * stretch by stretch, so its top is a line, where the fluid's surface was; and each stretch browned over by how
- * scorched it is (see Tool.scorch), stretch by stretch too, so that ends at a line as well. Nothing's drawn outside
- * its outline.
+ * stretch by stretch, so its top is a line, where the fluid's surface was; lines marked across its edges, over all
+ * that (see drawMarks); and each stretch browned over by how scorched it is (see Tool.scorch), stretch by stretch too,
+ * so that ends at a line as well. Nothing's drawn outside its outline.
  */
 function drawStrip(sc: Screen, t: Tool): void {
   const { paper } = t;
@@ -746,7 +784,7 @@ function drawStrip(sc: Screen, t: Tool): void {
   paper.forEach((v, c) => (sum += v.N * (c + 1)));
   let char = 0;
   t.scorch.forEach((x, c) => (char += x * (c + 1)));
-  const key = `${sum} ${t.soaked > 0} ${t.dryness.toFixed(2)} ${char.toFixed(2)}`;
+  const key = `${sum} ${t.soaked > 0} ${char.toFixed(2)}`;
   if (key === sc.key) return;
   sc.key = key;
   const { ctx, ppu } = sc;
@@ -777,13 +815,43 @@ function drawStrip(sc: Screen, t: Tool): void {
     ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(${rgb}, ${alpha(c)})`);
     ctx.fillRect(0, 0, W, L);
   };
-  if (t.dryness < 1 && wet.some((w) => w > 0)) lay((c) => 0.28 * wet[c] * (1 - t.dryness), '96, 92, 78');
+  if (wet.some((w) => w > 0)) lay((c) => 0.28 * wet[c], '96, 92, 78');
   const here = SPECIES.map((_, s) => s).filter((s) => paper.some((v) => v.n[s] > 0));
   here.sort((a, b) => SPECIES[a].size - SPECIES[b].size);
-  for (const s of here) lay((c) => stripInk(s, paper[c].n[s], t.dryness), SPECIES[s].color.slice(4, -1));
+  for (const s of here) lay((c) => stripInk(s, paper[c].n[s]), SPECIES[s].color.slice(4, -1));
+  // printed on the paper, so over what's run up it, and under where it's scorched
+  drawMarks(ctx, W, L, STRIP.marks);
   cells((c) => 0.92 * t.scorch[c], '46, 28, 14');
   ctx.restore();
   sc.tex.needsUpdate = true;
+}
+
+/**
+ * How the lines marked along a wicking strip's paper and a column's bed are drawn, in local units: `w` thick; on
+ * paper, across each edge, `len` in from it, and `long` in for every `every`th; round a bed, right round it, every
+ * `every`th `thick` times as thick.
+ */
+const MARKS = { len: 1.8, long: 3.2, every: 5, w: 0.3, thick: 2.2, color: 'rgba(52, 46, 38, 0.7)' };
+
+/**
+ * Lines marked on a strip of paper, or round a bed, W across and L long, dividing its length into `n` equal parts, to
+ * read off how far along it something has run: on paper, across both its edges, every fifth longer; `round` a bed
+ * (whose canvas runs right round it), rings, every fifth thicker. Nothing's marked at its ends.
+ */
+function drawMarks(ctx: CanvasRenderingContext2D, W: number, L: number, n: number, round = false): void {
+  ctx.strokeStyle = MARKS.color;
+  for (let k = 1; k < n; k++) {
+    const y = (L * k) / n;
+    const fifth = k % MARKS.every === 0;
+    ctx.lineWidth = round && fifth ? MARKS.w * MARKS.thick : MARKS.w;
+    const len = round ? W / 2 : fifth ? MARKS.long : MARKS.len;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(len, y);
+    ctx.moveTo(W, y);
+    ctx.lineTo(W - len, y);
+    ctx.stroke();
+  }
 }
 
 /** Where a thermometer's capillary runs across its rod, in its own frame, left of the middle, with its scale's ticks right of it. */
@@ -792,7 +860,8 @@ const CAPILLARY_X = -1.4;
 /**
  * A column's bed, its top at the top: the paper's cream, darker as far as each stretch of it is wet (see wetness), by
  * what's on it; each species on each stretch (see Tool.bed) as ink of its own color, as opaque as columnInk says,
- * single atoms first, so bands lie over the carrier's tint; both blended smoothly from one stretch's middle to the next.
+ * single atoms first, so bands lie over the carrier's tint; both blended smoothly from one stretch's middle to the next;
+ * and lines marked round it, over all that (see drawMarks).
  */
 function drawColumn(sc: Screen, t: Tool): void {
   const { bed } = t;
@@ -820,6 +889,7 @@ function drawColumn(sc: Screen, t: Tool): void {
     ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(${rgb}, ${columnInk(s, bed[c].n[s])})`);
     ctx.fillRect(0, 0, W, L);
   }
+  drawMarks(ctx, W, L, COLUMN.marks, true);
   sc.tex.needsUpdate = true;
 }
 
@@ -1204,8 +1274,20 @@ const FLASK_PROFILE = FLASK_OUTLINE.filter((p) => p.x >= 0 && !(p.x === 11 && p.
   .map((p) => new THREE.Vector2(p.x, -p.y))
   .sort((a, b) => a.y - b.y);
 const flaskGlassGeom = new THREE.LatheGeometry([new THREE.Vector2(0, -FLASK_H), ...FLASK_PROFILE, new THREE.Vector2(11, 0), new THREE.Vector2(12.5, 0.5)], 48);
+/**
+ * The flask's fluid's solid: a hair inside the glass, so the two don't fight over the same pixels, standing `floor`
+ * off the glass's floor, and so clear of what it stands on (a sink counter's drain grate is 0.5 over the counter);
+ * and how thin a film of it is drawn at least, over that floor, so a trace in a flask shows, however little, rather
+ * than being cut off below the solid.
+ */
+const FLASK_FLUID = { floor: 0.6, film: 0.15 };
 const flaskFluidGeom = new THREE.LatheGeometry(
-  [new THREE.Vector2(0, -FLASK_H + 0.6), ...FLASK_PROFILE.map((p) => new THREE.Vector2(p.x * 0.95, Math.max(p.y, -FLASK_H + 0.6))), new THREE.Vector2(10.4, -0.4), new THREE.Vector2(0, -0.4)],
+  [
+    new THREE.Vector2(0, -FLASK_H + FLASK_FLUID.floor),
+    ...FLASK_PROFILE.map((p) => new THREE.Vector2(p.x * 0.95, Math.max(p.y, -FLASK_H + FLASK_FLUID.floor))),
+    new THREE.Vector2(10.4, -0.4),
+    new THREE.Vector2(0, -0.4),
+  ],
   48,
 );
 
@@ -1238,7 +1320,11 @@ class FlaskView {
     this.root.position.set(f.pose.x, f.pose.y, f.pose.z);
     this.root.rotation.y = f.pose.yaw;
     this.tilt.rotation.z = -f.tilt;
-    this.fluid.update(f, f.pose.y + fillLevel(f.tilt, volume(f) / f.cap));
+    // upright, a trace is drawn as a film at least FLASK_FLUID.film deep over the solid's floor (tipped, the level is
+    // well above its lowest corner as soon as there's anything in it)
+    const level = fillLevel(f.tilt, volume(f) / f.cap);
+    const film = f.tilt === 0 ? -FLASK_H + FLASK_FLUID.floor + FLASK_FLUID.film : -Infinity;
+    this.fluid.update(f, f.pose.y + Math.max(level, film));
     this.label.set(f.label);
   }
 
@@ -1558,7 +1644,10 @@ class ToolView {
     }
   }
 
-  /** Ten marks up the left wall of a tank with a cup, at each tenth of its capacity as its fluid is shown (see levelIn). */
+  /**
+   * Ten marks up the left wall of a tank with a cup, at each tenth of its capacity as its fluid is shown (see levelIn):
+   * printed flat on its square glass's front face, and up the cup on its front face as it leans forward.
+   */
   private graduations(
     r: { x0: number; x1: number; y0: number; y1: number },
     o: { x0: number },
@@ -1567,15 +1656,26 @@ class ToolView {
     pieces: Piece[],
   ): void {
     const tubeH = r.y1 - r.y0;
+    // how far the cup's front face leans forward, from upright, and which way it faces
+    const lean = Math.atan2(cup.w - d / 2, cup.h);
+    const marks: THREE.BufferGeometry[] = [];
     for (let i = 1; i <= 10; i++) {
       const h = levelIn(pieces, i / 10);
       // up the cup, its walls lean out, and its front comes forward
       const f = Math.max(0, (h - tubeH) / cup.h);
       const x = r.x0 + f * (o.x0 - r.x0);
       const z = d / 2 + f * (cup.w - d / 2);
+      const a = f > 0 ? lean : 0;
       const len = i % 5 === 0 ? 5 : 3;
-      block(this.art, darkMat, x, x + len, r.y1 - h - 0.35, r.y1 - h + 0.35, z, z + 0.3).castShadow = false;
+      marks.push(
+        new THREE.PlaneGeometry(len, 0.7)
+          .rotateX(a)
+          .translate(x + len / 2, -(r.y1 - h), z)
+          // just off the glass, along the face's normal
+          .translate(0, -MARK_LIFT * Math.sin(a), MARK_LIFT * Math.cos(a)),
+      );
     }
+    this.art.add(new THREE.Mesh(mergeGeometries(marks), markMat));
   }
 
   /** Ten thin, faint lines across the big tank's front, one at each tenth of its capacity as its fluid is shown, the last at the brim. */
@@ -1817,7 +1917,7 @@ class ToolView {
    * Tank k of a tool whose tanks have necks (see ToolShape.neck), a swell bulb: a closed glass bulb over its sump; its
    * neck up from where it is on the bulb's top, open on top, with a little black float riding the fluid in it, so its
    * level is plain whatever its color; and its inlet, a little funnel up and out from the neck's top, on a thin tube
-   * leaning down and in to it. With the first, the marks across all the necks' fronts, every fifth one longer.
+   * leaning down and in to it. With the first, the marks printed round all the necks' fronts, every fifth one longer.
    * Returns the solids its fluid is drawn from.
    */
   private buildBulb(k: number, bottom: number, pieces: Piece[], share: (v: Vessel) => number): THREE.BufferGeometry[] {
@@ -1850,12 +1950,21 @@ class ToolView {
     art.add(float);
     this.floats.push({ m: float, at: (v) => -Math.min(0, bottom - levelIn(pieces, share(v))) + 0.8 });
     if (k === 0) {
-      const [x0, x1] = [Math.min(...neck.necks) - nr, Math.max(...neck.necks) + nr];
-      for (let i = 0; i <= BULB.marks; i++) {
-        const y = -(i / BULB.marks) * neck.h;
-        const out = i % 5 === 0 ? 3 : 0;
-        block(art, darkMat, x0 - out, x1 + out, y - 0.22, y + 0.22, nr - 0.1, nr + 0.25).castShadow = false;
+      // printed round the necks' glass: on each, an arc across its front half, the longer ones running 3 further
+      // round its outer side
+      const marks: THREE.BufferGeometry[] = [];
+      const R = nr + MARK_LIFT;
+      for (const n of neck.necks) {
+        const outer = Math.sign(n - (neck.necks[0] + neck.necks[neck.necks.length - 1]) / 2) || 1;
+        for (let i = 0; i <= BULB.marks; i++) {
+          const y = (i / BULB.marks) * neck.h;
+          const out = i % 5 === 0 ? 3 / nr : 0;
+          // angles from straight out the front, toward +x
+          const [a0, a1] = outer > 0 ? [-Math.PI / 2, Math.PI / 2 + out] : [-Math.PI / 2 - out, Math.PI / 2];
+          marks.push(new THREE.CylinderGeometry(R, R, 0.44, 24, 1, true, a0, a1 - a0).translate(n, y, 0));
+        }
       }
+      art.add(new THREE.Mesh(mergeGeometries(marks), markMat));
     }
     return geoms;
   }
@@ -2067,7 +2176,7 @@ class ToolView {
     block(art, darkMat, x - paneW / 2, x + paneW / 2, 0, H, wall, wall + 0.5);
     // a box standing on the column's floor, as tall as the fluid stands, so it has a top surface; held a little off
     // the column's back and the pane, so where they'd meet they don't flicker into each other
-    const column = new FluidMesh([new THREE.BoxGeometry(paneW - 1, 1, plate - 4).translate(x, 0.5, wall + 1.5 + (plate - 4) / 2)], art);
+    const column = new FluidMesh([new THREE.BoxGeometry(paneW - 1, 1, plate - 4).translate(x, 0.5, wall + 1.5 + (plate - 4) / 2)], art, false);
     const [solid] = column.meshes;
     solid.position.y = -H;
     pick(solid, 'tank', 1);
@@ -3538,6 +3647,30 @@ const cabinetMat = new THREE.MeshStandardMaterial({ color: 0xb4bdb9, metalness: 
 const cabinetBackMat = new THREE.MeshStandardMaterial({ color: 0x4d5653, metalness: 0.3, roughness: 0.7 });
 
 /**
+ * A view of a new one of a kind, empty and shut, in `scene`, where a new one starts: what the cabinet's stock and the
+ * equipment wheels' icons are drawn from.
+ */
+function specimen(k: Stocked, scene: THREE.Object3D): THREE.Object3D {
+  const none = new Map<THREE.Object3D, Pick>();
+  let root: THREE.Object3D;
+  if (k === 'flask') {
+    const v = new FlaskView(new Flask(CAP), scene, none);
+    v.update(new Set());
+    root = v.root;
+  } else if (k === 'scale') {
+    const v = new ScaleView(new Scale(), scene, none);
+    v.update(false, null);
+    root = v.root;
+  } else {
+    const v = new ToolView(new Tool(k, -1), scene, none);
+    v.update(0, [], new Set());
+    root = v.root;
+  }
+  root.updateMatrixWorld(true);
+  return root;
+}
+
+/**
  * The equipment cabinet (see cabinet.ts): open steel shelving on a dark plinth, and what stands on its shelves. Each
  * kind is drawn from one view of a new one of it, made once, whose meshes are drawn again in each filled slot as an
  * instanced mesh: there are over a hundred things in it, and none of them changes while it's there.
@@ -3579,25 +3712,10 @@ class CabinetView {
     pickables.set(front, { kind: 'cabinet', front: true });
     scene.add(g);
 
-    // what stands on the shelves, each kind drawn from a view of a new one, empty and shut
+    // what stands on the shelves, each kind drawn from a view of a new one
     const proto = new THREE.Scene();
-    const none = new Map<THREE.Object3D, Pick>();
     for (const k of Object.keys(C.slots) as Stocked[]) {
-      let root: THREE.Object3D;
-      if (k === 'flask') {
-        const v = new FlaskView(new Flask(CAP), proto, none);
-        v.update(new Set());
-        root = v.root;
-      } else if (k === 'scale') {
-        const v = new ScaleView(new Scale(), proto, none);
-        v.update(false, null);
-        root = v.root;
-      } else {
-        const v = new ToolView(new Tool(k, -1), proto, none);
-        v.update(0, [], new Set());
-        root = v.root;
-      }
-      root.updateMatrixWorld(true);
+      const root = specimen(k, proto);
       const slots = C.slots[k];
       const proxy = new THREE.Group();
       const meshes: { im: THREE.InstancedMesh; rel: THREE.Matrix4 }[] = [];
@@ -3672,6 +3790,193 @@ class CabinetView {
     v.proxy.rotation.y = p.yaw;
     v.proxy.updateMatrixWorld(true);
     return v.proxy.children;
+  }
+}
+
+/* ---------------- the equipment wheels' icons ---------------- */
+
+/**
+ * How an icon's thing is seen: from in front, `yaw` round to its right and `pitch` above it, in radians, with nothing
+ * behind it, filling the icon but for a `margin`; lit from overhead and a little in front, by `sun`'s direction.
+ * Something over `long` across is seen from further round, `longYaw`, more along it than across it, or it would be a
+ * thin line across the middle of its picture. Glass and its edges are drawn less clear than they are in the lab
+ * (`glass` and `edge`, their opacities), or with no room behind them and so small, they'd hardly show.
+ */
+const ICON_VIEW = {
+  yaw: 0.5, pitch: 0.32, margin: 0.04, long: 300, longYaw: 1.0, sun: new THREE.Vector3(-0.45, 1, 0.7), glass: 0.3, edge: 0.85,
+};
+/**
+ * The kinds that aren't seen whole and upright. A thermometer is so long and thin that its scale's numbers, all that
+ * tells the fine one from the wide one, would be lost: so it lies aslant (`roll`, in radians, anticlockwise), and only
+ * its lower end is in the picture (`only`, heights in its flat frame, y down from its top): its bulb and the first two
+ * numbers of its scale, the rest running off the corner.
+ */
+const ICON_POSES: Partial<Record<Stocked, { roll: number; only: { y0: number; y1: number } }>> = {
+  thermometer: { roll: -Math.PI / 4, only: { y0: THERMOMETER_ROD.foot - 22, y1: THERMOMETER_ROD.h } },
+  thermometerWide: { roll: -Math.PI / 4, only: { y0: THERMOMETER_ROD.foot - 22, y1: THERMOMETER_ROD.h } },
+};
+
+/** A little picture of each kind of thing the equipment wheels make, each on a canvas of its own (see IconStudio). */
+export type Icons = Partial<Record<Stocked, HTMLCanvasElement>>;
+
+/**
+ * The equipment wheels' icons (see wheel.ts): each a little picture of a new one of its kind, drawn by the same code
+ * that draws it in the lab (see specimen), so they're never out of date. Each is alone against nothing, seen
+ * from in front and a little above, in the room's own kind of light and reflecting the room as it does in the lab.
+ * They're drawn at the size they're shown (WHEEL.icon), `scale` device pixels to each of its, so that fine lines
+ * stay whole.
+ */
+class IconStudio {
+  private scene = new THREE.Scene();
+  private things = new Map<Stocked, THREE.Object3D>();
+  private camera = new THREE.OrthographicCamera();
+  private px: number;
+  /** The picture as lit, in linear light with what's see-through still see-through, and then as a plain image. */
+  private lit: THREE.WebGLRenderTarget;
+  private out: THREE.WebGLRenderTarget;
+  /**
+   * Makes the lit picture a plain image. What glass reflects is added in full over what's behind it, however clear
+   * the glass (see glassMat), so with nothing behind it, it's made as opaque as it's bright, or it would all but vanish.
+   */
+  private develop = new THREE.ShaderMaterial({
+    uniforms: { lit: { value: null } },
+    vertexShader: quadVertex,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D lit;
+      varying vec2 vUv;
+      vec3 encode(vec3 v) { return mix(v * 12.92, 1.055 * pow(v, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, v)); }
+      void main() {
+        vec4 c = max(texture2D(lit, vUv), 0.0);
+        float a = min(1.0, max(c.a, max(c.r, max(c.g, c.b))));
+        gl_FragColor = vec4(encode(min(c.rgb / max(a, 1e-4), 1.0)), a);
+      }`,
+    blending: THREE.NoBlending,
+    depthTest: false,
+    depthWrite: false,
+  });
+  private quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.develop);
+  private quadScene = new THREE.Scene().add(this.quad);
+  private quadCamera = new THREE.Camera();
+
+  constructor(scale: number) {
+    this.px = Math.round(WHEEL.icon.size * scale);
+    this.lit = new THREE.WebGLRenderTarget(this.px, this.px, { type: THREE.HalfFloatType, samples: 4 });
+    this.out = new THREE.WebGLRenderTarget(this.px, this.px);
+    this.develop.uniforms.lit.value = this.lit.texture;
+    this.quad.frustumCulled = false;
+    this.scene.add(new THREE.HemisphereLight(0xe4eef0, 0x4a4440, 1.5));
+    const sun = new THREE.DirectionalLight(0xf4f8ff, 1.3);
+    sun.position.copy(ICON_VIEW.sun);
+    this.scene.add(sun);
+    for (const k of Object.keys(STOCK) as Stocked[]) {
+      const root = specimen(k, this.scene);
+      root.visible = false;
+      this.things.set(k, root);
+    }
+  }
+
+  /** Point the camera at a kind's thing, from where an icon's is seen (see ICON_VIEW), so that it just fills the picture. */
+  private frame(k: Stocked, root: THREE.Object3D): void {
+    const { pitch, margin } = ICON_VIEW;
+    const pose = ICON_POSES[k];
+    const cam = this.camera;
+    // the boxes round its meshes, each in the mesh's own frame, and the box round them all, in the room
+    const all = new THREE.Box3();
+    let boxes: { box: THREE.Box3; at: THREE.Matrix4 }[] = [];
+    root.traverseVisible((o) => {
+      if (!(o instanceof THREE.Mesh) || !o.layers.isEnabled(0) || o.userData.bent) return;
+      const mats: THREE.Material[] = Array.isArray(o.material) ? o.material : [o.material];
+      if (!mats.some((m) => m.visible)) return;
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      const box = o.geometry.boundingBox!;
+      if (box.isEmpty()) return;
+      boxes.push({ box, at: o.matrixWorld });
+      all.union(box.clone().applyMatrix4(o.matrixWorld));
+    });
+    // far enough off to be clear of all of it
+    const whole = all.getSize(new THREE.Vector3());
+    const far = whole.length() + 10;
+    const yaw = whole.x > ICON_VIEW.long ? ICON_VIEW.longYaw : ICON_VIEW.yaw;
+    // only part of it: that much of the box round it all, instead (a specimen stands where its flat frame starts)
+    if (pose) {
+      all.max.y = Math.min(all.max.y, -pose.only.y0);
+      all.min.y = Math.max(all.min.y, -pose.only.y1);
+      boxes = [{ box: all, at: new THREE.Matrix4() }];
+    }
+    const mid = all.getCenter(new THREE.Vector3());
+    cam.position.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(far).add(mid);
+    cam.up.set(0, 1, 0);
+    cam.lookAt(mid);
+    if (pose) cam.rotateZ(pose.roll);
+    cam.updateMatrixWorld(true);
+    // as seen: every corner of every box, in the camera's frame
+    const seen = new THREE.Box3();
+    const p = new THREE.Vector3();
+    for (const { box, at } of boxes)
+      for (let i = 0; i < 8; i++) {
+        p.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z);
+        seen.expandByPoint(p.applyMatrix4(at).applyMatrix4(cam.matrixWorldInverse));
+      }
+    const size = seen.getSize(new THREE.Vector3());
+    const c = seen.getCenter(new THREE.Vector3());
+    const half = Math.max(size.x, size.y) / 2 / (1 - 2 * margin);
+    cam.left = c.x - half;
+    cam.right = c.x + half;
+    cam.top = c.y + half;
+    cam.bottom = c.y - half;
+    // the whole thing, in front of and behind what's framed
+    cam.near = 0.1;
+    cam.far = 2 * far;
+    cam.updateProjectionMatrix();
+  }
+
+  /**
+   * Draw every kind's icon with `renderer`, reflecting `environment`, each on a new canvas of its own. The renderer
+   * is left drawing to the screen again, as it was.
+   */
+  render(renderer: THREE.WebGLRenderer, environment: THREE.Texture | null): Icons {
+    const icons: Icons = {};
+    const n = this.px;
+    const clear = renderer.getClearColor(new THREE.Color());
+    const clearAlpha = renderer.getClearAlpha();
+    const [glass, edge] = [glassMat.opacity, edgeMat.opacity];
+    renderer.setClearColor(0x000000, 0);
+    glassMat.opacity = ICON_VIEW.glass;
+    edgeMat.opacity = ICON_VIEW.edge;
+    this.scene.environment = environment;
+    const pixels = new Uint8Array(n * n * 4);
+    for (const [k, root] of this.things) {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = n;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) continue;
+      const image = ctx.createImageData(n, n);
+      root.visible = true;
+      this.frame(k, root);
+      renderer.setRenderTarget(this.lit);
+      renderer.render(this.scene, this.camera);
+      renderer.setRenderTarget(this.out);
+      renderer.render(this.quadScene, this.quadCamera);
+      root.visible = false;
+      renderer.readRenderTargetPixels(this.out, 0, 0, n, n, pixels);
+      // read from the bottom row up
+      for (let y = 0; y < n; y++) image.data.set(pixels.subarray(y * n * 4, (y + 1) * n * 4), (n - 1 - y) * n * 4);
+      ctx.putImageData(image, 0, 0);
+      icons[k] = canvas;
+    }
+    this.scene.environment = null;
+    glassMat.opacity = glass;
+    edgeMat.opacity = edge;
+    renderer.setRenderTarget(null);
+    renderer.setClearColor(clear, clearAlpha);
+    return icons;
+  }
+
+  dispose(): void {
+    this.lit.dispose();
+    this.out.dispose();
+    this.develop.dispose();
+    this.quad.geometry.dispose();
   }
 }
 
@@ -3803,7 +4108,7 @@ class Outliner {
 
 /** Draws the lab with Three.js, from the player's eyes, and says what's under the crosshair. */
 export class View {
-  /** The field of view is 90°, top to bottom. */
+  /** The field of view is 90°, top to bottom, until the player zooms in (see look). */
   readonly camera = new THREE.PerspectiveCamera(90, 1, 2, 8000);
   private renderer: THREE.WebGLRenderer;
   /** What the white void of Mu Ceti is drawn with (see renderArrival), once it's needed. */
@@ -3830,6 +4135,9 @@ export class View {
   private roomLights: { light: THREE.Light; base: number }[] = [];
   private raycaster = new THREE.Raycaster();
   private outliner = new Outliner();
+  private studio = new IconStudio(Math.min(2, window.devicePixelRatio || 1));
+  /** The equipment wheels' icons (see IconStudio): drawn again, on new canvases, whenever what they reflect is. */
+  private drawnIcons: Icons = {};
   private clock = 0;
   private stars = starField();
 
@@ -3876,12 +4184,18 @@ export class View {
       this.scene.environment = pmrem.fromScene(this.scene, 0.02, 10, 8000, { size: 256, position: new THREE.Vector3(cx, eye, cz) }).texture;
       was?.dispose();
       pmrem.dispose();
+      this.drawnIcons = this.studio.render(this.renderer, this.scene.environment);
     };
     reflect();
     whenSurfaced(reflect);
     const fs = buildFaucets(this.scene, faucets, this.pickables);
     this.faucetMats = fs.mats;
     this.faucetNotes = fs.notes;
+  }
+
+  /** A little picture of each kind of thing the equipment wheels make (see IconStudio). */
+  icons(): Readonly<Icons> {
+    return this.drawnIcons;
   }
 
   resize(w: number, h: number, dpr: number): void {
@@ -3903,8 +4217,15 @@ export class View {
     for (const k of items) if (!map.has(k)) map.set(k, make(k));
   }
 
-  /** Put the camera at the player's eyes, looking their way. */
-  look(eye: Vec3, yaw: number, pitch: number): void {
+  /**
+   * Put the camera at the player's eyes, looking their way, with a field of view of `fov` degrees, top to bottom
+   * (as it was, if it's not given).
+   */
+  look(eye: Vec3, yaw: number, pitch: number, fov = this.camera.fov): void {
+    if (this.camera.fov !== fov) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
     this.camera.position.set(eye.x, eye.y, eye.z);
     // the stars are too far off to move as the player does
     this.stars.position.copy(this.camera.position);
@@ -4270,6 +4591,7 @@ export class View {
 
   dispose(): void {
     this.outliner.dispose();
+    this.studio.dispose();
     this.renderer.dispose();
   }
 }

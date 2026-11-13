@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { TOUCH, type Action, type GameEngine, type Hud as HudState } from '../game/engine';
+import { WHEEL, wheelSpan } from '../game/wheel';
 
 /** How far a stick's knob can go from its middle, in CSS pixels. */
 const STICK_R = 44;
@@ -167,19 +168,91 @@ function Actions({ actions }: { actions: readonly Action[] }) {
   );
 }
 
+/** A point of the wheel: `r` out from its middle, `a` radians clockwise from straight up. */
+const onWheel = (r: number, a: number) => ({ x: r * Math.sin(a), y: -r * Math.cos(a) });
+
 /**
- * The crosshair, with hints by it for what the mouse buttons would do; the aim while a valve turns; and, on a
+ * One of a wheel's icons, `size` a side with its corner at (x, y), in the wheel's units: a copy of `picture`, made
+ * before the wheel is first shown, so the icons never come in after it.
+ */
+function Icon({ picture, x, y, size }: { picture: HTMLCanvasElement; x: number; y: number; size: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useLayoutEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    c.width = picture.width;
+    c.height = picture.height;
+    c.getContext('2d')?.drawImage(picture, 0, 0);
+  }, [picture]);
+  return (
+    <foreignObject className="icon" x={x} y={y} width={size} height={size}>
+      <canvas ref={ref} />
+    </foreignObject>
+  );
+}
+
+/**
+ * An equipment wheel, round the middle of the view while its key's held: a sector for each thing it makes (see WHEELS),
+ * in order, clockwise from straight up, with a little picture of it as it's drawn in the lab (see GameEngine.icons)
+ * and no name: working out what each tool does is part of the game. The sector the pointer is in the direction of is
+ * lit, and that's what letting go of the key makes; those there are none left of are faint.
+ */
+function Wheel({ wheel, engine }: { wheel: NonNullable<HudState['wheel']>; engine: GameEngine }) {
+  const icons = engine.icons();
+  const n = wheel.items.length;
+  const size = 2 * WHEEL.rim + 8;
+  return (
+    <svg className="wheel" viewBox={`${-size / 2} ${-size / 2} ${size} ${size}`} aria-hidden="true">
+      {wheel.items.map((kind, i) => {
+        const { from, to } = wheelSpan(i, n);
+        const [a, b, c, d] = [onWheel(WHEEL.rim, from), onWheel(WHEEL.rim, to), onWheel(WHEEL.hole, to), onWheel(WHEEL.hole, from)];
+        const big = to - from > Math.PI ? 1 : 0;
+        const at = onWheel(WHEEL.icon.r, (from + to) / 2);
+        const half = WHEEL.icon.size / 2;
+        return (
+          <g key={kind} className={`${wheel.pick === i ? 'picked' : ''}${wheel.none[i] ? ' none' : ''}`}>
+            <path
+              className="sector"
+              d={`M${a.x} ${a.y} A${WHEEL.rim} ${WHEEL.rim} 0 ${big} 1 ${b.x} ${b.y} L${c.x} ${c.y} A${WHEEL.hole} ${WHEEL.hole} 0 ${big} 0 ${d.x} ${d.y} Z`}
+            />
+            {icons[kind] && <Icon picture={icons[kind]} x={at.x - half} y={at.y - half} size={2 * half} />}
+          </g>
+        );
+      })}
+      <circle className="pointer" cx={wheel.x} cy={wheel.y} r="5" />
+    </svg>
+  );
+}
+
+/**
+ * The crosshair, with hints by it for what the mouse buttons would do, or an equipment wheel while it's held open; the aim while a valve turns; and, on a
  * screen with a mouse and keys, everything else that can be done just now, in a corner, unless `/` has hidden it.
  */
-export function Hud({ hud, help }: { hud: HudState; help: boolean }) {
+export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; help: boolean }) {
   if (!hud.locked) return null;
   return (
     <>
-      <div className={hud.aim ? 'crosshair dim' : 'crosshair'} />
-      <div className="hints">
-        {hud.press && <MouseHint side="left" />}
-        {hud.right && <MouseHint side="right" />}
-      </div>
+      {/* the wheel's pointer stands in for the crosshair while it's open, and the buttons do nothing */}
+      {hud.wheel ? (
+        <Wheel wheel={hud.wheel} engine={engine} />
+      ) : (
+        <>
+          <div className={hud.aim ? 'crosshair dim' : 'crosshair'} />
+          {/* each on its own side of the crosshair, whether or not the other's there */}
+          <div className="hints">
+            {hud.press && (
+              <span className="left">
+                <MouseHint side="left" />
+              </span>
+            )}
+            {hud.right && (
+              <span className="right">
+                <MouseHint side="right" />
+              </span>
+            )}
+          </div>
+        </>
+      )}
       {hud.aim && <div className="aim" style={{ left: hud.aim.x, top: hud.aim.y }} />}
       {hud.note && <div className={hud.tip ? 'note tip' : 'note'}>{hud.note}</div>}
       {!TOUCH && help && <Actions actions={hud.actions} />}

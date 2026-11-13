@@ -44,6 +44,32 @@ describe('flask fill level', () => {
     }
   });
 
+  it('is exactly at the floor when empty and the mouth when full, upright', () => {
+    expect(fillLevel(0, 0)).toBeCloseTo(-FLASK_H, 9);
+    expect(fillLevel(0, 1)).toBeCloseTo(0, 9);
+  });
+
+  it('rises smoothly from the floor with a trace of fluid, not a slab at a time', () => {
+    const full = volumeBelow(0);
+    // a percent or so lies in a film on the floor, thinner than the slabs it's worked out from, so it's only as close
+    // as spreading the bottom row's volume evenly over its height allows
+    for (const frac of [0.001, 0.005, 0.013]) {
+      expect(fillLevel(0, frac)).toBeGreaterThan(-FLASK_H);
+      expect(Math.abs(volumeBelow(-fillLevel(0, frac)) / full - frac)).toBeLessThan(frac * 0.4);
+    }
+    // no jumps: a little more fluid never raises it by a slab's height (0.6), as filling a row of them at once would
+    // (but for the first and last drops, which in a tipped flask fill only a corner, and rise fast there)
+    for (const tilt of [0, 0.3]) {
+      let last = fillLevel(tilt, 0.001);
+      for (let k = 21; k <= 19900; k++) {
+        const l = fillLevel(tilt, k / 20000);
+        expect(l).toBeGreaterThan(last);
+        expect(l - last).toBeLessThan(0.1);
+        last = l;
+      }
+    }
+  });
+
   it('keeps a trace of fluid visible in a flask tipped to pour', () => {
     expect(fillLevel(POUR, 0.02) - fillLevel(POUR, 0)).toBeGreaterThan(1);
   });

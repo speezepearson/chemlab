@@ -19,6 +19,9 @@ export class View {
   toHead(p: { x: number; y: number; z: number }) {
     return { x: p.x, y: p.y, z: p.z };
   }
+  icons(): Record<string, never> {
+    return {};
+  }
   render(): void {}
   dispose(): void {}
 }

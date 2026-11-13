@@ -82,43 +82,21 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .hint{width:100%;margin:0;color:var(--muted);font-size:12px}
 #stage{flex:1;position:relative;min-height:0;min-width:0;overflow:hidden}
 .main{flex:1;display:flex;min-height:0}
-.palette{
-  position:absolute;left:50%;bottom:12px;transform:translateX(-50%);display:flex;gap:6px;padding:6px;
-  /* onto a second row, when the window is too narrow for them all in one */
-  flex-wrap:wrap;justify-content:center;width:max-content;max-width:calc(100% - 24px);box-sizing:border-box;
-  background:rgba(20,26,24,.55);border:1px solid rgba(255,255,255,.12);border-radius:10px;z-index:2;
-  user-select:none;-webkit-user-select:none;backdrop-filter:blur(4px);
-  --glass:rgba(227,232,227,.7);--glasshi:rgba(255,255,255,.1);--pipe:#8d9a93;--bench:#2b3230;
-}
-.palette button{
-  position:relative;padding:3px;display:flex;justify-content:center;background:rgba(255,255,255,.06);
-  border-color:rgba(255,255,255,.14);
-}
-.palette svg{width:34px;height:34px;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-.palette kbd{
-  position:absolute;left:1px;top:1px;font:600 10px/12px "Schibsted Grotesk",sans-serif;color:#d6dfda;
-  /* opaque, so the icon under it can't make it hard to read */
-  background:#3a4541;border-radius:3px;padding:0 3px;z-index:1;
-}
-.palette .glass{fill:var(--glasshi);stroke:var(--glass)}
-.palette .pipe{stroke:var(--pipe);stroke-width:3}
-.palette .valve{fill:var(--bench);stroke:var(--pipe)}
-.palette .lcd{fill:#26302b;stroke:none}
-.palette .digits{stroke:#9fe0b8;stroke-width:1.5}
-/* smaller, in a window too narrow for the hotbar as it is, before it has to wrap */
-@media (max-width:860px){
-  .palette{gap:3px;padding:4px}
-  .palette svg{width:26px;height:26px}
-}
 @media (max-width:560px){
   /* panels span the screen, rather than hanging left off it from their names */
   details{position:static}
   details > div{left:16px;right:16px;top:auto;margin-top:6px}
-  .palette{gap:3px;padding:4px;flex-wrap:wrap;justify-content:center;width:calc(100% - 24px);box-sizing:border-box}
-  .stick{bottom:104px}
-  .touch-buttons{bottom:228px}
-  .palette svg{width:24px;height:24px}
 }
+/* an equipment wheel, round the middle of the view while its key's held; smaller, in a view too small for it */
+.wheel{
+  position:absolute;left:50%;top:50%;width:468px;height:468px;max-width:calc(100% - 16px);max-height:calc(100% - 16px);
+  transform:translate(-50%,-50%);pointer-events:none;z-index:3;
+}
+.wheel .sector{fill:rgba(20,26,24,.76);stroke:rgba(255,255,255,.22);stroke-width:1.2}
+.wheel .picked .sector{fill:rgba(47,106,86,.85);stroke:rgba(255,255,255,.5)}
+.wheel .icon canvas{display:block;width:100%;height:100%}
+.wheel .none .icon{opacity:.25}
+.wheel .pointer{fill:#fff;stroke:rgba(0,0,0,.6);stroke-width:1.2}
 .crosshair{
   position:absolute;left:50%;top:50%;width:14px;height:14px;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
   background:
@@ -127,28 +105,21 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
   opacity:.75;mix-blend-mode:difference;
 }
 .crosshair.dim{opacity:.25}
-.hints{
-  position:absolute;left:calc(50% + 14px);top:calc(50% + 12px);display:flex;gap:6px;align-items:center;
-  pointer-events:none;z-index:2;
-}
-.hints kbd{
-  font:600 11px "Schibsted Grotesk",sans-serif;color:#1b2320;background:rgba(238,240,235,.85);
-  border-radius:4px;padding:1px 5px;
-}
+/* the mouse hints: at the crosshair's own height, the left button's due left of it and the right button's due right */
+.hints{position:absolute;left:50%;top:50%;pointer-events:none;z-index:2}
+.hints span{position:absolute;top:0;transform:translateY(-50%);display:flex}
+.hints .left{right:16px}
+.hints .right{left:16px}
 .hints .mouse rect{fill:rgba(238,240,235,.85);stroke:#1b2320;stroke-width:1.2}
 .hints .mouse path{fill:none;stroke:#1b2320;stroke-width:1.2}
 .hints .mouse path.lit{fill:#2f6a56;stroke:none}
-.hints .mouse,.doable .mouse{width:12px;height:17px;opacity:.85}
+.hints .mouse{width:24px;height:34px;opacity:.85}
+.doable .mouse{width:12px;height:17px;opacity:.85}
 .doable{
   position:absolute;left:12px;bottom:12px;z-index:2;pointer-events:none;display:flex;flex-direction:column;gap:3px;
   padding:7px 9px;border-radius:7px;background:rgba(12,17,15,.55);color:#dfe6e2;font-size:12px;line-height:1.2;
-  max-width:min(340px,calc(50% - 150px));
+  max-width:min(340px,calc(100% - 24px));box-sizing:border-box;
 }
-/* above the hotbar, wherever the window's too narrow for it to sit beside it: the hotbar's own height up, and
-   more once the hotbar has wrapped onto a second row */
-@media (max-width:1540px){.doable{bottom:84px;max-width:340px}}
-@media (max-width:860px){.doable{bottom:68px}}
-@media (max-width:660px){.doable{bottom:108px}}
 .can{display:flex;align-items:center;gap:8px}
 .can.off{opacity:.45}
 .doable .keys{display:flex;align-items:center;gap:3px;flex:none;min-width:76px}
@@ -174,7 +145,7 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
   color:#eef0eb;background:rgba(8,12,11,.55);padding:6px 14px;border-radius:8px;font-size:15px;font-weight:600;
 }
 .stick{
-  position:absolute;bottom:84px;width:112px;height:112px;border-radius:50%;z-index:3;touch-action:none;
+  position:absolute;bottom:24px;width:112px;height:112px;border-radius:50%;z-index:3;touch-action:none;
   background:rgba(20,26,24,.28);border:2px solid rgba(255,255,255,.35);
   display:flex;align-items:center;justify-content:center;user-select:none;-webkit-user-select:none;
 }
@@ -182,7 +153,7 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .stick.look{right:20px}
 .stick i{width:44px;height:44px;border-radius:50%;background:rgba(238,240,235,.55);pointer-events:none}
 .touch-buttons{
-  position:absolute;bottom:208px;display:flex;flex-direction:column;align-items:center;gap:10px;z-index:3;
+  position:absolute;bottom:148px;display:flex;flex-direction:column;align-items:center;gap:10px;z-index:3;
 }
 .touch-buttons.left{left:48px}
 .touch-buttons.right{right:48px}
@@ -199,9 +170,6 @@ canvas{display:block;width:100%;height:100%;touch-action:none}
   border-radius:8px;padding:8px 10px;width:220px;font-size:12px;
   box-shadow:0 6px 20px var(--shadow);
 }
-#info.brief{width:auto;padding:6px}
-#info .blotch{display:block;width:34px;height:30px;border-radius:52% 48% 57% 43% / 46% 58% 42% 54%}
-#info .blotch.empty{border:1.5px dashed var(--line)}
 #info .hd{display:flex;justify-content:space-between;color:var(--muted);margin-bottom:6px}
 #info .row{display:flex;gap:10px;align-items:flex-start}
 #info canvas{width:88px;height:88px;flex:none}
