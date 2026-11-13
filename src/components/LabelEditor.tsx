@@ -51,7 +51,8 @@ export function LabelEditor({ engine, id, onClose }: { engine: GameEngine; id: s
       aria-label="note"
       onChange={(e) => setText(e.target.value)}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') finish(true);
+        // (not the Enter that opened it, still held)
+        if (e.key === 'Enter' && !e.repeat) finish(true);
         if (e.key === 'Escape') finish(false);
       }}
       onBlur={() => finish(true)}

@@ -85,7 +85,7 @@ export interface Hud {
   right: boolean;
   /** While a valve is being turned, where the pointer that aims its lever is, in CSS pixels. */
   aim: { x: number; y: number } | null;
-  /** Whether N would write a note about what the crosshair is on (see GameEngine.note). */
+  /** Whether Enter would write a note about what the crosshair is on (see GameEngine.note). */
   label: boolean;
   /** What the right button does now, in a word, for the touch screen's button that stands in for it. */
   hand: 'Pour' | 'Flow' | 'Dip' | 'Turn';
@@ -132,9 +132,9 @@ export interface Action {
 export interface EngineCallbacks {
   /** Throttled to ~10 Hz; null when nothing is inspected. */
   onInspect(info: Inspection | null): void;
-  /** N was pressed on a vessel in god mode; look it up with GameEngine.vessel(id). */
+  /** Enter was pressed on a vessel in god mode; look it up with GameEngine.vessel(id). */
   onEdit(id: string): void;
-  /** N was pressed on something, to write a note about it: the note's id (see GameEngine.note). */
+  /** Enter was pressed on something, to write a note about it: the note's id (see GameEngine.note). */
   onLabel(id: string): void;
   /** Whenever the heads-up display changes. */
   onHud(hud: Hud): void;
@@ -210,7 +210,7 @@ export const ITEMS = [
 export type Item = (typeof ITEMS)[number];
 /**
  * The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0, - and =; and then, the number
- * row being full, along the bottom row of letters, from Z, then M (N writes notes) and the comma.
+ * row being full, along the bottom row of letters, from Z, then M (N naps) and the comma.
  */
 export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Z', 'X', 'C', 'V', 'B', 'M', ','] as const;
 /** The same keys, as KeyboardEvent codes, so they work whatever the keyboard layout's shift state. */
@@ -1248,12 +1248,12 @@ export class GameEngine {
     if (this.locked) this.grabOrRelease(false);
   }
 
-  /** N: write a note about what the crosshair is on. */
+  /** Enter: write a note about what the crosshair is on. */
   touchNote(): void {
     if (this.locked) this.writeNote();
   }
 
-  /** N, on nothing: nap, or wake from one. */
+  /** N: nap, or wake from one. */
   touchNap(): void {
     if (this.dozing()) this.wakeNap();
     else if (this.locked) this.nap();
@@ -1371,13 +1371,12 @@ export class GameEngine {
       if (e.repeat || inPod(this.wake) || this.previewing) return;
       if (e.code === 'KeyE') this.grabOrRelease(e.shiftKey);
       if (e.code === 'KeyQ') this.putBack();
-      if (e.code === 'KeyN') {
-        // the note's text box opens at once, and N mustn't be typed into it
+      if (e.code === 'Enter') {
+        // the note's text box opens at once, and this Enter mustn't be taken as finishing it
         e.preventDefault();
-        // on something a note can be written about, N writes one; on nothing, it's a nap
-        if (this.targetNote()) this.writeNote();
-        else this.nap();
+        this.writeNote();
       }
+      if (e.code === 'KeyN') this.nap();
       const item = HOTKEY_CODES.indexOf(e.code);
       if (item >= 0) {
         this.spawn(ITEMS[item]);
@@ -2454,7 +2453,7 @@ export class GameEngine {
     const st = this.station();
     if (!this.napKnown && st.steady >= DELIVERY.nap) {
       this.napKnown = true;
-      const text = 'Steady delivery. To nap while it runs, look away from the equipment and press N.';
+      const text = 'Steady delivery. Press N to nap while it runs.';
       this.flash = { text, until: performance.now() + NAP_HINT_MS, tip: true };
     }
   }
@@ -2876,8 +2875,8 @@ export class GameEngine {
       if (this.hooked(p)) add(['Shift', 'LMB'], 'pick it up still hooked up');
     }
     const id = this.targetNote();
-    if (id) add(['N'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
-    else if (this.canNap()) add(['N'], 'nap');
+    if (id) add(['Enter'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
+    if (this.canNap()) add(['N'], 'nap');
     if (!h && this.history.canUndo) add([MOD, 'Z'], 'undo');
     if (!h && this.history.canRedo) add([MOD, 'Shift', 'Z'], 'redo');
     add(['Esc'], 'let go of the mouse');
@@ -3076,18 +3075,17 @@ export class GameEngine {
 
   /**
    * Whether N would start a nap: once the player's been told they can (see napKnown), out in the lab, with empty
-   * hands, the crosshair on nothing a note could be written about, and the station not in the middle of its changeover,
-   * whose alarm nobody could nap through.
+   * hands, and the station not in the middle of its changeover, whose alarm nobody could nap through.
    */
   private canNap(): boolean {
     return (
       this.napKnown && !this.napping && !inPod(this.wake) && !this.previewing && !this.held && !this.turning &&
-      !this.targetNote() && this.station().swap === null
+      this.station().swap === null
     );
   }
 
   /**
-   * N, on nothing: nap where they stand. Their eyes close, over NAP_S.close real seconds (it's their own doing, like
+   * N: nap where they stand. Their eyes close, over NAP_S.close real seconds (it's their own doing, like
    * walking), and then the lab runs on as fast as it can, as while they sleep in the pod (see fallAsleep), whether or
    * not anything is being delivered, until N wakes them (see wakeNap), or the station's reservoir comes to hold enough
    * of what it's fitted for.

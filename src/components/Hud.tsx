@@ -99,7 +99,7 @@ function TouchButton({
 /**
  * On a touch screen, while playing: the stick that walks, bottom left, and the one that looks, bottom right; and
  * buttons standing in for the keys and the right button. Over the look stick, Grab (E) and the right button, which
- * is named for what it'll do and, while a valve turns, aims its lever as the finger drags; and Note (N) when there's something to write a note about, or Nap (N) when a nap can be had. Over the move stick, while something's held, a pad to drag (across to turn it,
+ * is named for what it'll do and, while a valve turns, aims its lever as the finger drags; and Note (Enter) when there's something to write a note about, and Nap (N) when a nap can be had. Over the move stick, while something's held, a pad to drag (across to turn it,
  * up and down to hold it further or nearer, or for a hose's nozzle, to slide its stand out or in) and Put away
  * (Backspace).
  */

@@ -65,7 +65,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `flask.ts` has `Vessel`, `transfer`, volume and colors.
   - `cooling.ts` is Newtonian cooling to the room; the engine works out each vessel's exposure from its flat outline.
   - `airlock.ts` is the airlock and cryopod where the player wakes: their size, collisions, and the `Wake` states.
-    `sleep.ts` is sleeping in the pod, or napping (N, on nothing): the lab run in windows, measured, and jumped ahead
+    `sleep.ts` is sleeping in the pod, or napping (N): the lab run in windows, measured, and jumped ahead
     while it's steady.
     `src/intro/notice.ts` is the messages projected inside the pod: the notice she wakes to (its litres as of then),
     and the welcome to Mu Ceti at the end.
@@ -149,13 +149,13 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially.
   - `ITEMS` and `HOTKEYS` in `engine.ts` (the hotbar's order and keys) and `ICONS` in `Palette.tsx`, unless the tool is
-    unique. The number row is full, through =, so new ones go along the bottom row of letters, from Z, skipping N (notes, and on nothing, a nap): it's taken through the comma.
+    unique. The number row is full, through =, so new ones go along the bottom row of letters, from Z, skipping N (a nap; notes are on Enter): it's taken through the comma.
   - Its place in the equipment cabinet: `STOCK` and a compartment in `BAYS` (`cabinet.ts`), and `ENDLESS` if it's
     used up. `cabinet.test.ts` checks it fits.
   - If it has state of its own that a save should keep, `Tool.memory` and `Tool.remember`.
   - Tests and the README.
   - A tool needn't have tanks at all: the thermometers and the wicking strip (the `DIPPERS`) have none, nor spouts nor
-    valves. Then its grid anchor is its middle (`toolAnchor`), N writes its own `note`, and its collision is whatever
+    valves. Then its grid anchor is its middle (`toolAnchor`), Enter writes its own `note`, and its collision is whatever
     `toolParts` gives it (a thermometer's, only the top of its rod; a strip's, its clip), so code that reaches for
     `tanks[0]` must allow for there being none. Nor need a tool with tanks have spouts (the dish): nothing drains from it.
   - A tank needn't be under its opening: one with a `neck` (the swell bulbs') has its bulb and neck where the flag
