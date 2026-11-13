@@ -209,6 +209,12 @@ const edgeMat = new THREE.LineBasicMaterial({ color: 0xbfd4da, transparent: true
 // reflecting the room (see View's environment)
 const pipeMat = new THREE.MeshStandardMaterial({ color: 0xa4adac, metalness: 0.9, roughness: 0.28 });
 const darkMat = new THREE.MeshStandardMaterial({ color: 0x30373a, metalness: 0.6, roughness: 0.42 });
+/**
+ * Graduations printed on glass (the pipette's and the swell bulbs' necks'): ink with no thickness, lying MARK_LIFT
+ * off the glass's surface and following it, seen from both sides, as through the glass from behind.
+ */
+const markMat = new THREE.MeshStandardMaterial({ color: 0x30373a, metalness: 0.2, roughness: 0.6, side: THREE.DoubleSide });
+const MARK_LIFT = 0.08;
 const panelMat = new THREE.MeshPhysicalMaterial({ color: 0xc4cbc7, metalness: 0.1, roughness: 0.5, clearcoat: 0.4, clearcoatRoughness: 0.35 });
 const leverMat = new THREE.MeshPhysicalMaterial({ color: 0x15191a, metalness: 0, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.2 });
 /** A thermometer's white enamel backing (see THERMOMETER_ROD). */
@@ -1591,7 +1597,10 @@ class ToolView {
     }
   }
 
-  /** Ten marks up the left wall of a tank with a cup, at each tenth of its capacity as its fluid is shown (see levelIn). */
+  /**
+   * Ten marks up the left wall of a tank with a cup, at each tenth of its capacity as its fluid is shown (see levelIn):
+   * printed flat on its square glass's front face, and up the cup on its front face as it leans forward.
+   */
   private graduations(
     r: { x0: number; x1: number; y0: number; y1: number },
     o: { x0: number },
@@ -1600,15 +1609,26 @@ class ToolView {
     pieces: Piece[],
   ): void {
     const tubeH = r.y1 - r.y0;
+    // how far the cup's front face leans forward, from upright, and which way it faces
+    const lean = Math.atan2(cup.w - d / 2, cup.h);
+    const marks: THREE.BufferGeometry[] = [];
     for (let i = 1; i <= 10; i++) {
       const h = levelIn(pieces, i / 10);
       // up the cup, its walls lean out, and its front comes forward
       const f = Math.max(0, (h - tubeH) / cup.h);
       const x = r.x0 + f * (o.x0 - r.x0);
       const z = d / 2 + f * (cup.w - d / 2);
+      const a = f > 0 ? lean : 0;
       const len = i % 5 === 0 ? 5 : 3;
-      block(this.art, darkMat, x, x + len, r.y1 - h - 0.35, r.y1 - h + 0.35, z, z + 0.3).castShadow = false;
+      marks.push(
+        new THREE.PlaneGeometry(len, 0.7)
+          .rotateX(a)
+          .translate(x + len / 2, -(r.y1 - h), z)
+          // just off the glass, along the face's normal
+          .translate(0, -MARK_LIFT * Math.sin(a), MARK_LIFT * Math.cos(a)),
+      );
     }
+    this.art.add(new THREE.Mesh(mergeGeometries(marks), markMat));
   }
 
   /** Ten thin, faint lines across the big tank's front, one at each tenth of its capacity as its fluid is shown, the last at the brim. */
@@ -1850,7 +1870,7 @@ class ToolView {
    * Tank k of a tool whose tanks have necks (see ToolShape.neck), a swell bulb: a closed glass bulb over its sump; its
    * neck up from where it is on the bulb's top, open on top, with a little black float riding the fluid in it, so its
    * level is plain whatever its color; and its inlet, a little funnel up and out from the neck's top, on a thin tube
-   * leaning down and in to it. With the first, the marks across all the necks' fronts, every fifth one longer.
+   * leaning down and in to it. With the first, the marks printed round all the necks' fronts, every fifth one longer.
    * Returns the solids its fluid is drawn from.
    */
   private buildBulb(k: number, bottom: number, pieces: Piece[], share: (v: Vessel) => number): THREE.BufferGeometry[] {
@@ -1883,12 +1903,21 @@ class ToolView {
     art.add(float);
     this.floats.push({ m: float, at: (v) => -Math.min(0, bottom - levelIn(pieces, share(v))) + 0.8 });
     if (k === 0) {
-      const [x0, x1] = [Math.min(...neck.necks) - nr, Math.max(...neck.necks) + nr];
-      for (let i = 0; i <= BULB.marks; i++) {
-        const y = -(i / BULB.marks) * neck.h;
-        const out = i % 5 === 0 ? 3 : 0;
-        block(art, darkMat, x0 - out, x1 + out, y - 0.22, y + 0.22, nr - 0.1, nr + 0.25).castShadow = false;
+      // printed round the necks' glass: on each, an arc across its front half, the longer ones running 3 further
+      // round its outer side
+      const marks: THREE.BufferGeometry[] = [];
+      const R = nr + MARK_LIFT;
+      for (const n of neck.necks) {
+        const outer = Math.sign(n - (neck.necks[0] + neck.necks[neck.necks.length - 1]) / 2) || 1;
+        for (let i = 0; i <= BULB.marks; i++) {
+          const y = (i / BULB.marks) * neck.h;
+          const out = i % 5 === 0 ? 3 / nr : 0;
+          // angles from straight out the front, toward +x
+          const [a0, a1] = outer > 0 ? [-Math.PI / 2, Math.PI / 2 + out] : [-Math.PI / 2 - out, Math.PI / 2];
+          marks.push(new THREE.CylinderGeometry(R, R, 0.44, 24, 1, true, a0, a1 - a0).translate(n, y, 0));
+        }
       }
+      art.add(new THREE.Mesh(mergeGeometries(marks), markMat));
     }
     return geoms;
   }
