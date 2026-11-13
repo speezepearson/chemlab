@@ -2,7 +2,7 @@ import { Spot, audio, bus } from './audio';
 import type { Placement } from './place';
 
 /**
- * The cryostabilizer station's chime, once it has delivered steadily for a sim minute (see DELIVERY) and the airlock
+ * The supply station's chime, once it has delivered steadily for a sim minute (see DELIVERY) and the airlock
  * opens: a happy major chord rung as bells, a root, third, fifth and octave one after another, each ringing on as the
  * next comes in. It plays on the receptacle channel (see audio.ts), from the station; without audio it's silent.
  */

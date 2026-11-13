@@ -1,4 +1,4 @@
-import { GOAL_L, VOYAGE } from '../game/config';
+import { ANTINUCLEANT, ANTINUCLEANT_L, GOAL_L, VOYAGE } from '../game/config';
 import { PLAYER } from './log';
 
 /**
@@ -13,9 +13,9 @@ export type Block =
 
 const num = (x: number, digits = 0) => x.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
-/** The litres needed, present, and so still to be made, right-aligned together. */
-function litres(presentL: number): [needed: string, present: string, short: string] {
-  const ls = [GOAL_L, presentL, Math.max(0, GOAL_L - presentL)].map((l) => `${num(l, 2)} L`);
+/** The litres needed (`goalL`), present, and so still to be made, right-aligned together. */
+function litres(goalL: number, presentL: number): [needed: string, present: string, short: string] {
+  const ls = [goalL, presentL, Math.max(0, goalL - presentL)].map((l) => `${num(l, 2)} L`);
   const w = Math.max(...ls.map((l) => l.length)) + 2;
   const [a, b, c] = ls.map((l) => l.padStart(w));
   return [a, b, c];
@@ -24,9 +24,31 @@ function litres(presentL: number): [needed: string, present: string, short: stri
 /**
  * The notice, with `presentL` litres of cryostabilizer on board: at first what's left after the incident, and when
  * the player wakes from a sleep that ended with the station no longer delivering, what the reservoir holds then.
+ * While the antinucleant is still to be made (see SUPPLIES), `firstL` is the litres of it on board, and the notice
+ * sets out both problems, the antinucleant first and briefly, as a warm-up; with enough of it (null), only the
+ * cryostabilizer.
  */
-export function notice(presentL: number = VOYAGE.presentL): Block[] {
-  const [needed, present, short] = litres(presentL);
+export function notice(presentL: number = VOYAGE.presentL, firstL: number | null = ANTINUCLEANT.presentL): Block[] {
+  const [needed, present, short] = litres(GOAL_L, presentL);
+  const first: Block[] = [];
+  if (firstL !== null) {
+    const rows: [string, string][] = [
+      ['Antinucleant required to complete journey:', ''],
+      ['Antinucleant present:', ''],
+      ['Must synthesize more antinucleant:', ''],
+    ];
+    litres(ANTINUCLEANT_L, firstL).forEach((l, i) => (rows[i][1] = l));
+    const w = Math.max(...rows.map(([label]) => label.length));
+    first.push(
+      {
+        kind: 'p',
+        text:
+          'First, a quick one to help you find your feet! Each passenger enjoys a trace of antinucleant daily ' +
+          `(${ANTINUCLEANT.mlPerPassengerDay} mL), to stay delightfully free of ice crystals:`,
+      },
+      { kind: 'pre', text: rows.map(([label, l]) => label.padEnd(w) + l).join('\n') },
+    );
+  }
   return [
     { kind: 'brand', text: '✦ Celestia Starlines' },
     { kind: 'h', text: `Good morning, passenger ${PLAYER}!` },
@@ -43,8 +65,9 @@ export function notice(presentL: number = VOYAGE.presentL): Block[] {
       kind: 'p',
       text:
         'In the absence of any more capable crew members or passengers, you have been selected (per Passenger Agreement ' +
-        'Sec. 041 - Understaffing) to be proactively depreserved to assist in solving the following problem:',
+        `Sec. 041 - Understaffing) to be proactively depreserved to assist in solving the following ${firstL === null ? 'problem' : 'problems'}:`,
     },
+    ...first,
     {
       kind: 'pre',
       text:
@@ -60,7 +83,10 @@ export function notice(presentL: number = VOYAGE.presentL): Block[] {
     { kind: 'hr' },
     {
       kind: 'p',
-      text: 'Your cryo pod has been transported to R046 - Emergency Chemistry Lab. Please select OK to meet your teammates and begin your valuable contributions!',
+      text:
+        'Your cryo pod has been transported to R046 - Emergency Chemistry Lab' +
+        (firstL === null ? '' : ', whose supply station will be refitted for cryostabilizer as soon as the antinucleant is topped up') +
+        '. Please select OK to meet your teammates and begin your valuable contributions!',
     },
     { kind: 'hr' },
     { kind: 'p', text: 'Thank you for flying with Celestia Starlines! We look forward to flying with you again soon.' },

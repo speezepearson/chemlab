@@ -1,8 +1,8 @@
 import { ATOMS } from '../chem/atoms';
 import { THERMO } from '../chem/params';
 import { roundRandom } from '../chem/reactions';
-import { NS, SPECIES, TARGET } from '../chem/species';
-import { DELIVERY, GOAL_TARGET, SUSTAIN } from './config';
+import { NS, SPECIES } from '../chem/species';
+import { DELIVERY, SUSTAIN } from './config';
 import { roomFor, type Vessel } from './flask';
 import type { Tool } from './tools';
 
@@ -94,7 +94,7 @@ export const SLEEP = {
 export interface Sleeper {
   /** Every vessel the lab moves fluid between, and whether anything drains it, as the lab stands now. */
   vessels(): { v: Vessel; terminal: boolean }[];
-  /** The cryostabilizer station. */
+  /** The station: the goal is its reservoir holding enough of what it's fitted for (see Tool.supply). */
   station: Tool;
   /** The lab's sim clock. */
   clock(): number;
@@ -105,8 +105,8 @@ export interface Sleeper {
 }
 
 /**
- * Why a sleep ended: the reservoir holds enough to reach Mu Ceti, or the station stopped delivering (letting nothing
- * in for DELIVERY.gap, or less than the passengers use up over SLEEP.sustain).
+ * Why a sleep ended: the reservoir holds enough of what the station's fitted for, or the station stopped delivering
+ * (letting nothing in for DELIVERY.gap, or less than the passengers use up over SLEEP.sustain).
  */
 export type Woke = 'goal' | 'stopped';
 
@@ -202,7 +202,7 @@ const ACC = NS + 1;
 /**
  * How long a jump may be, from a window's tracks, and per vessel the rates to apply (0 where it's steady), as at the
  * window's middle, followed by how fast each is changing (see ACC). Infinity if nothing limits it. `reservoir` is the
- * station's, which stops at the goal.
+ * station's, which stops at `goal` molecules of `species`.
  */
 function plan(
   tracks: Track[],
@@ -210,6 +210,7 @@ function plan(
   prev: Map<Vessel, Seen>,
   t: number,
   reservoir: Vessel,
+  { species, goal }: { species: number; goal: number },
 ): { dt: number; rates: Float64Array[]; seen: Map<Vessel, Seen> } {
   const { eps, z, zConfirm, floor, memory } = SLEEP;
   const seen = new Map<Vessel, Seen>();
@@ -357,9 +358,9 @@ function plan(
     const room = tr.v.cap - vol(last);
     if (room > 1e-6 * tr.v.cap) limit(reach(room, vr, va) - W / 2);
     if (tr.v === reservoir) {
-      const [r0, a] = [startRate(out, TARGET, W), out[ACC + TARGET]];
+      const [r0, a] = [startRate(out, species, W), out[ACC + species]];
       // no further than the goal
-      limit(reach(Math.max(0, GOAL_TARGET - last[TARGET]), r0, a));
+      limit(reach(Math.max(0, goal - last[species]), r0, a));
       // and none at all once it's filling slower than the passengers use it up, nor past when it will: that's for a
       // window, run as ever, to see
       if (r0 < SUSTAIN) limit(0);
@@ -403,7 +404,8 @@ function jump(tracks: Track[], rates: Float64Array[], dt: number, W: number): vo
 }
 
 /**
- * Sleep: windows and jumps as above, until the reservoir holds the goal, or the station stops delivering: lets nothing
+ * Sleep: windows and jumps as above, until the reservoir holds the goal (enough of what the station is fitted for as
+ * the sleep starts, see Tool.supply), or the station stops delivering: lets nothing
  * into the reservoir for DELIVERY.gap sim seconds, or over any SLEEP.sustain sim seconds, less than the passengers use
  * up (SUSTAIN; through a jump, the reservoir's taken to have filled evenly). It yields every SLEEP.piece sim seconds of the lab run as
  * ever, and after every jump, so it can be run a little each frame; it returns why it woke. `stats`, if given, is
@@ -412,20 +414,21 @@ function jump(tracks: Track[], rates: Float64Array[], dt: number, W: number): vo
 export function* sleep(lab: Sleeper, stats: SleepStats = { plain: 0, jumped: 0, jumps: 0 }): Generator<void, Woke> {
   const { window: W, samples: K, piece } = SLEEP;
   const reservoir = lab.station.tanks[1];
+  const { species, goal } = lab.station.supply;
   // the reservoir's target as the sleep goes on, from the last at least SLEEP.sustain ago
-  const filled: [number, number][] = [[lab.clock(), reservoir.n[TARGET]]];
+  const filled: [number, number][] = [[lab.clock(), reservoir.n[species]]];
   const short = (): boolean => {
     const t = lab.clock();
     const from = t - SLEEP.sustain;
-    filled.push([t, reservoir.n[TARGET]]);
+    filled.push([t, reservoir.n[species]]);
     while (filled.length > 2 && filled[1][0] <= from) filled.shift();
     const [[t0, n0], [t1, n1]] = filled;
     if (t0 > from) return false;
     const then = t1 > t0 ? n0 + ((n1 - n0) * (from - t0)) / (t1 - t0) : n0;
-    return reservoir.n[TARGET] - then < SUSTAIN * SLEEP.sustain;
+    return reservoir.n[species] - then < SUSTAIN * SLEEP.sustain;
   };
   const woke = (): Woke | null =>
-    reservoir.n[TARGET] >= GOAL_TARGET ? 'goal'
+    reservoir.n[species] >= goal ? 'goal'
     : short() || lab.station.sinceDelivery > DELIVERY.gap ? 'stopped'
     : null;
   // run the lab as ever for dt, a piece at a time
@@ -447,7 +450,7 @@ export function* sleep(lab: Sleeper, stats: SleepStats = { plain: 0, jumped: 0, 
       if (why) return why;
       tracks.forEach((tr) => tr.xs.push(sample(tr.v)));
     }
-    const p = plan(tracks, W, seen, lab.clock() - W / 2, reservoir);
+    const p = plan(tracks, W, seen, lab.clock() - W / 2, reservoir, { species, goal });
     seen = p.seen;
     // (nothing limits a jump only if nothing's changing, so nothing's being delivered either: wait for it to stop)
     if (p.dt < SLEEP.minJump * W || !Number.isFinite(p.dt)) continue;

@@ -4,6 +4,7 @@ import { TARGET } from '../chem/species';
 import { CAP, DELIVERY, GOAL_TARGET, SUSTAIN } from './config';
 import { Vessel } from './flask';
 import { SLEEP, sleep, sleptFor, type SleepStats, type Sleeper, type Woke } from './sleep';
+import { FIRST_SUPPLY } from './supply';
 import { Tool } from './tools';
 
 /**
@@ -122,6 +123,27 @@ describe('sleep', () => {
     const { l, now } = lab(0, share(1e-3), 0);
     expect(run(l).woke).toBe('stopped');
     expect(now()).toBeLessThanOrEqual(DELIVERY.gap + 0.5);
+  });
+
+  it("sleeps to the goal of whatever the station is fitted for", () => {
+    const { l, station, tank } = lab(0, share(1e-3), 0);
+    station.stock(FIRST_SUPPLY);
+    const { species, goal, start } = FIRST_SUPPLY;
+    const supply = 2 * (goal - start);
+    tank.setMolecules(species, supply);
+    // the stand-in lab moves the cryostabilizer: have it move what the station's fitted for instead
+    l.advance = (dt) => {
+      const m = Math.min(tank.n[species], roundRandom(tank.n[species] * 1e-3 * dt));
+      tank.n[species] -= m;
+      tank.N -= 2 * m;
+      station.tanks[1].n[species] += m;
+      station.tanks[1].N += 2 * m;
+      station.sinceDelivery = m > 0 ? 0 : station.sinceDelivery + dt;
+      l.skip(dt);
+    };
+    expect(run(l).woke).toBe('goal');
+    expect(station.tanks[1].n[species]).toBeGreaterThanOrEqual(goal);
+    expect(station.tanks[1].n[species]).toBeLessThan(goal + 0.01 * supply);
   });
 
   it('says how long it has gone on', () => {

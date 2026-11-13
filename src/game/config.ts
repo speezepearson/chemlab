@@ -12,6 +12,13 @@ export const FLASK_L = VOYAGE.presentL / 100;
 /** The cryostabilizer needed to reach Mu Ceti, in litres: the intro's sum, about 50.22 L. */
 export const GOAL_L = (VOYAGE.passengers * VOYAGE.mlPerPassengerDay * VOYAGE.days) / 1000;
 /**
+ * The same sum for the antinucleant, the little that's made first (see SUPPLIES): a trace of it a day for each
+ * passenger, 9.20 L in all, of which 8.30 L are left on board.
+ */
+export const ANTINUCLEANT = { mlPerPassengerDay: 0.0000641, presentL: 8.3 };
+/** The antinucleant needed to reach Mu Ceti, in litres: about 9.20 L. */
+export const ANTINUCLEANT_L = (VOYAGE.passengers * ANTINUCLEANT.mlPerPassengerDay * VOYAGE.days) / 1000;
+/**
  * The target to win, in molecules: GOAL_L, about 179 flasks of it, in the ship's reservoir, which starts with
  * a hundred (see REFERENCE_START).
  */

@@ -10,7 +10,7 @@ import {
 } from './bodies';
 import { chime } from './chime';
 import { diverter, type Diverter } from './diverter';
-import { CAP, DELIVERY, FILL_RATE, FLASK_L, GOAL_TARGET, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
+import { CAP, DELIVERY, FILL_RATE, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
 import { FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
@@ -20,6 +20,7 @@ import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
 import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
+import { CRYOSTABILIZER, FIRST_SUPPLY, litresOf, nextSupply } from './supply';
 import { shatter } from './shatter';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
@@ -100,8 +101,11 @@ export interface Hud {
   preview: boolean;
   /** While the player's asleep in the pod (see Wake), the whole sim seconds they've slept; otherwise null. */
   slept: number | null;
-  /** While they're asleep, the litres of cryostabilizer in the ship's reservoir, to two places; otherwise null. */
-  litres: number | null;
+  /**
+   * While they're asleep, what the station's reservoir is of (see Supply), the litres of it there, to two places, and
+   * the litres needed; otherwise null.
+   */
+  reservoir: { name: string; litres: number; goalL: number } | null;
 }
 
 /**
@@ -360,8 +364,11 @@ export class GameEngine {
    * Mu Ceti, and what follows is the end (see Wake's arriving).
    */
   private arrival = false;
-  /** The litres of cryostabilizer the pod's message says are on board: how much there was when they were put in it. */
-  private podLitres = 0;
+  /**
+   * What the pod's message says is on board, as of when they were put in it: the litres of cryostabilizer, and while
+   * the station is still fitted for something before it (see SUPPLIES), the litres of that; else null.
+   */
+  private podNotice: { litres: number; first: number | null } = { litres: 0, first: null };
   /**
    * While previewing the end's white void (see previewArrival), how the player stood before, to put them back; null
    * otherwise.
@@ -371,7 +378,7 @@ export class GameEngine {
   private settling: { x: number; z: number; yaw: number; pitch: number; t: number } | null = null;
   /** Runs the sleeping lab a slice at a time (see pump), independent of frames. */
   private pumper = new MessageChannel();
-  /** The cryostabilizer station's diverter's sounds, while it's swinging or letting into the reservoir. */
+  /** The supply station's diverter's sounds, while it's swinging or letting into the reservoir. */
   private diverters = new Map<Tool, Diverter>();
   /** Undo and redo, of the lab's arrangement (see history.ts). */
   private history = new History();
@@ -542,6 +549,8 @@ export class GameEngine {
       return t;
     });
     this.uniqueTools();
+    // a new lab's station is fitted for the first thing the ship is short of
+    this.station().stock(FIRST_SUPPLY);
     this.hoses = (preset.hoses ?? []).map(({ from, to }) => {
       const m = tankMouth(this.tools[to.tool], to.tank ?? 0);
       return new Hose({ tool: this.tools[from.tool], spout: from.spout }, { x: m.x, y: m.y + (to.up ?? 24), z: m.z }, NOZZLE_REACH.min);
@@ -758,8 +767,9 @@ export class GameEngine {
 
   /**
    * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a composition analyzer, a
-   * spectroscope, a bond visualizer and a cryostabilizer station: if there's none, one is added where it starts, or as
-   * near there as it has room (see roomy), the station's reservoir holding what's left on board (see REFERENCE_FILL). The
+   * spectroscope, a bond visualizer and a station: if there's none, one is added where it starts, or as
+   * near there as it has room (see roomy), the station fitted for the cryostabilizer, its reservoir holding what's
+   * left on board (see Tool.stock), as a save from before it was fitted for anything else would have it. The
    * station is built into the wall, so it's always where it is.
    */
   private uniqueTools(): void {
@@ -770,7 +780,7 @@ export class GameEngine {
     const add = (kind: ToolKind, at: Pose) => {
       if (this.tools.some((t) => t.kind === kind)) return;
       const t = new Tool(kind, this.nextToolId++, at);
-      if (kind === 'receptacle') applyFill(t.tanks[1], REFERENCE_FILL);
+      if (kind === 'receptacle') t.stock(CRYOSTABILIZER);
       else t.pose = this.roomy(t);
       this.tools.push(t);
     };
@@ -802,13 +812,13 @@ export class GameEngine {
     return t.pose;
   }
 
-  /** The cryostabilizer station (see STATION): there's always exactly one. */
+  /** The station (see STATION): there's always exactly one. */
   private station(): Tool {
     return this.tools.find((t) => t.kind === 'receptacle')!;
   }
 
   /**
-   * A save from before the cryostabilizer station was a funnel over a diverter gets the station's reservoir filled
+   * A save from before the supply station was a funnel over a diverter gets the station's reservoir filled
    * with what its reservoir held: the third of the three columns it had (a buffer, a tester and the reservoir); or,
    * from before that (when the receptacle stood on an island and flushed what it took away, counting it as delivered,
    * and the reservoir was a tool of its own), what that held, or what it started with if it had none, plus what it
@@ -1533,7 +1543,8 @@ export class GameEngine {
   private mountAimed(): HoseMount | null {
     const p = this.target;
     if (p?.kind === 'faucet') return p.spout ? { faucet: p.i } : null;
-    if (p?.kind !== 'tool' || !p.t.shape.spouts.length) return null;
+    // nothing on the station can be worked through its changeover
+    if (p?.kind !== 'tool' || !p.t.shape.spouts.length || p.t.swap !== null) return null;
     if (p.part === 'spout') return { tool: p.t, spout: p.k };
     const l = toLocal(p.t.pose, p.point);
     const j = spoutNear(p.t, l.x, -l.y);
@@ -1791,7 +1802,7 @@ export class GameEngine {
    */
   private valveAimed(): { t: Tool; k: number } | null {
     const p = this.target;
-    if (p?.kind !== 'tool' || p.t.shape.noValve) return null;
+    if (p?.kind !== 'tool' || p.t.shape.noValve || p.t.swap !== null) return null;
     if (p.part === 'valve') return { t: p.t, k: p.k };
     const l = toLocal(p.t.pose, p.point);
     const k = valveNear(p.t, l.x, -l.y);
@@ -1826,7 +1837,7 @@ export class GameEngine {
     return placement(h.x, h.y, h.z);
   }
 
-  /** Where a tool's machinery sounds from: the middle of its cabinet, or the cryostabilizer station's display. */
+  /** Where a tool's machinery sounds from: the middle of its cabinet, or the supply station's display. */
   private machineAt(t: Tool): Vec3 {
     if (t.shape.wall) {
       const d = STATION.display;
@@ -1898,7 +1909,8 @@ export class GameEngine {
   private mouths(): Mouth[] {
     const out: Mouth[] = [];
     for (const f of this.flasks) if (f.tilt < 0.05) out.push(flaskMouth(f));
-    for (const t of this.tools) t.tanks.forEach((_, k) => t.isOpen(k) && out.push(tankMouth(t, k)));
+    // (the station's funnel is back in the wall through a changeover)
+    for (const t of this.tools) if (!t.away) t.tanks.forEach((_, k) => t.isOpen(k) && out.push(tankMouth(t, k)));
     return out;
   }
 
@@ -2097,6 +2109,7 @@ export class GameEngine {
       if (m && simDt > 0 && i !== stillFaucet) this.faucetFlows.push({ fa, from, m });
     });
 
+    this.clearStation();
     const gateFrom = this.tools.map((t) => t.gate);
     const steadyFrom = this.station().steady;
     const vessels = this.vessels();
@@ -2227,7 +2240,7 @@ export class GameEngine {
     });
     // and it chimes as it's been delivering steadily for long enough to open the airlock
     const st = this.station();
-    if (steadyFrom < DELIVERY.streak && st.steady >= DELIVERY.streak) chime(this.hear(this.machineAt(st)));
+    if (st.supply.airlock && steadyFrom < DELIVERY.streak && st.steady >= DELIVERY.streak) chime(this.hear(this.machineAt(st)));
 
     // fluid's sounds, each heard from where it lands: a stream from the mouth it runs into
     const streams = new Map<Vessel, { flow: number; full: number; at: Placement }>();
@@ -2240,11 +2253,33 @@ export class GameEngine {
     this.goal();
   }
 
-  /** The goal: enough of the target in the ship's reservoir. */
+  /**
+   * The goal: enough cryostabilizer in the ship's reservoir. (Enough of what the station's fitted for before that only
+   * brings on the next, see CHANGEOVER.)
+   */
   private goal(): void {
-    if (this.station().tanks[1].n[TARGET] >= GOAL_TARGET && !this.won) {
+    const st = this.station();
+    if (!nextSupply(st.supply) && st.tanks[1].n[st.supply.species] >= st.supply.goal && !this.won) {
       this.won = true;
       this.cb.onWin();
+    }
+  }
+
+  /**
+   * Through the station's changeover (see CHANGEOVER), nothing of it can be worked: its hoses are rolled up, a hose of
+   * its in hand is let go of, and so is its valve if it's being turned.
+   */
+  private clearStation(): void {
+    const st = this.station();
+    if (st.swap === null) return;
+    const its = (h: Hose) => 'tool' in h.on && h.on.tool === st;
+    if (this.turning?.t === st) this.endTurn();
+    const held = this.held?.kind === 'hose' && its(this.held.h);
+    this.hoses = this.hoses.filter((h) => !its(h));
+    if (held) {
+      this.held = null;
+      this.pinned = null;
+      this.commit();
     }
   }
 
@@ -2673,12 +2708,18 @@ export class GameEngine {
     this.sleeping = null;
     this.riseT = null;
     this.arrival = false;
-    this.podLitres = this.reservoirLitres();
+    this.podNotice = this.onBoard();
   }
 
-  /** The litres of cryostabilizer in the ship's reservoir. */
-  private reservoirLitres(): number {
-    return (this.station().tanks[1].n[TARGET] / CAP) * FLASK_L;
+  /**
+   * What's on board, for the pod's message: the litres of cryostabilizer (what the station's reservoir holds, once
+   * it's fitted for it; till then, what was left after the incident), and while the station is fitted for something
+   * before it, the litres of that in its reservoir.
+   */
+  private onBoard(): { litres: number; first: number | null } {
+    const st = this.station();
+    const held = litresOf(st.tanks[1].n[st.supply.species]);
+    return st.supply === CRYOSTABILIZER ? { litres: held, first: null } : { litres: CRYOSTABILIZER.startL, first: held };
   }
 
   /** Put the player in the pod, facing the lab, empty-handed (see emptyHanded). */
@@ -2806,7 +2847,7 @@ export class GameEngine {
     this.wakeT = 0;
     this.riseT = 0;
     this.arrival = why === 'goal';
-    this.podLitres = this.reservoirLitres();
+    this.podNotice = this.onBoard();
   }
 
   /**
@@ -2841,8 +2882,8 @@ export class GameEngine {
     else if (this.wake === 'arriving' && t >= WAKE_S.arrive) next('arrived');
     else if (this.wake === 'boarding' && t >= WAKE_S.open + WAKE_S.fade) next('asleep');
     else if (this.wake === 'out' && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
-    // steady delivery opens the doors again, and once it stops they close, when she's out in the lab
-    else if (this.wake === 'closed' && this.station().steady >= DELIVERY.streak) next('open');
+    // steady delivery of cryostabilizer opens the doors again, and once it stops they close, when she's out in the lab
+    else if (this.wake === 'closed' && this.station().supply.airlock && this.station().steady >= DELIVERY.streak) next('open');
     else if (this.wake === 'open' && this.station().steady === 0 && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
   }
 
@@ -2870,7 +2911,7 @@ export class GameEngine {
       // the room's light floods in as the front slides up, and is shut out as it slides down
       dark: 1 - up,
       message: w === 'pod' || flick,
-      notice: this.arrival ? { arrival: true } : { arrival: false, litres: this.podLitres },
+      notice: this.arrival ? { arrival: true } : { arrival: false, ...this.podNotice },
       okHot: w === 'pod' && this.target?.kind === 'wake',
       // flashing while the doors stand open to sleep, a second on and half a second off, on sim time
       lamp: w === 'open' && this.clock % 1.5 < 1,
@@ -2938,12 +2979,18 @@ export class GameEngine {
 
   /** Whether fluid would leave a tool's spouts if it ran. */
   private wouldFlow(t: Tool): boolean {
-    // the station's reservoir through its faucet, or its funnel through the diverter
-    if (t.kind === 'receptacle') return t.tanks.some((v, k) => v.N > TRACE && drains(t, k));
+    // the station's reservoir through its faucet, or its funnel through the diverter, unless its block is away
+    if (t.kind === 'receptacle') return !t.away && t.tanks.some((v, k) => v.N > TRACE && drains(t, k));
     // a column's dry bed drinks what's in its funnel, and lets nothing out
     if (t.kind === 'column') return t.soaked >= 1 && t.valves[0] > 0 && t.tanks[0].N > TRACE;
     // a heater's tube runs whatever its valves say
     return (t.shape.spouts.length > 0 && t.tanks.some((v, k) => v.N > TRACE && drains(t, k))) || t.tube.some((v) => v.N > TRACE);
+  }
+
+  /** What the station's reservoir is of, and the litres of it there, to two places, of the litres needed (see Hud.reservoir). */
+  private reservoirHud(): NonNullable<Hud['reservoir']> {
+    const { supply, tanks } = this.station();
+    return { name: supply.name, litres: Math.floor(100 * litresOf(tanks[1].n[supply.species])) / 100, goalL: supply.goalL };
   }
 
   private hud(now: number): void {
@@ -2972,7 +3019,7 @@ export class GameEngine {
       preview: !!this.previewing,
       ended: this.wake === 'arrived',
       slept: this.sleeping ? Math.floor(this.clock - this.sleeping.from) : null,
-      litres: this.sleeping ? Math.floor(100 * this.reservoirLitres()) / 100 : null,
+      reservoir: this.sleeping ? this.reservoirHud() : null,
     };
     const key = JSON.stringify(hud);
     if (key === this.lastHud) return;

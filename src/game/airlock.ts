@@ -5,7 +5,7 @@ import { ROOM, WALL_PANEL } from './space';
  * The airlock: a small chamber behind the front wall, just big enough for a standing cryopod, where the player wakes
  * the first time (see GameEngine.enterPod). All in world units.
  * - x: the middle of its doorway, along the front wall: the doorway is two of the wall's panels across and two high,
- *   lined up with them, as the cryostabilizer station is (the front wall's panels run from its end at ROOM.x1).
+ *   lined up with them, as the supply station is (the front wall's panels run from its end at ROOM.x1).
  * - w, d, h: the chamber inside, across, front to back and high.
  * - wall: how thick the wall with the doorway is, which the doors slide into.
  * - door: the doorway, across and high.
