@@ -22,7 +22,7 @@ import { CENTER, placement, type Placement } from './place';
 import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
 import { shatter } from './shatter';
-import { wheelMove, wheelPick, type WheelAim } from './wheel';
+import { WHEELS, wheelMove, wheelPick, type WheelAim } from './wheel';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
 import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
@@ -101,10 +101,10 @@ export interface Hud {
   /** Whether god mode's preview of the end's white void is up (see GameEngine.previewArrival). */
   preview: boolean;
   /**
-   * While the equipment wheel is held open (see wheel.ts): where its pointer is, which of ITEMS it picks, if any, and
-   * which of them there are none left of in the cabinet. Otherwise null.
+   * While an equipment wheel is held open (see wheel.ts): what's on it, in order, where its pointer is, which of them
+   * it picks, if any, and which of them there are none left of in the cabinet. Otherwise null.
    */
-  wheel: (WheelAim & { pick: number | null; none: boolean[] }) | null;
+  wheel: (WheelAim & { items: readonly Stocked[]; pick: number | null; none: boolean[] }) | null;
   /** While the player's asleep in the pod (see Wake), the whole sim seconds they've slept; otherwise null. */
   slept: number | null;
   /** While they're asleep, the litres of cryostabilizer in the ship's reservoir, to two places; otherwise null. */
@@ -195,14 +195,13 @@ type Held = (
   follow?: Follower[];
 };
 
-/** Things that can be taken out of the equipment cabinet with the equipment wheel, in its order (see wheel.ts). */
-export const ITEMS = [
-  'flask', 'dispenser', 'pipette', 'exchanger', 'separator', 'splitter', 'sorter', 'heater', 'scale', 'tank', 'meter', 'multiplexer',
-  'thermometer', 'thermometerWide', 'dilatometer', 'strip', 'culture', 'column', 'dish',
-] as const;
-export type Item = (typeof ITEMS)[number];
-/** The key that, held, opens the equipment wheel (see wheel.ts): let go, it makes what the wheel's pointer picks. */
-const WHEEL_CODE = 'KeyC';
+/**
+ * The keys that, held, open the equipment wheels (see WHEELS), in their order: let go, the key of the wheel that's
+ * open makes what its pointer picks.
+ */
+const WHEEL_CODES = ['Digit1', 'Digit2'];
+/** Those keys, as they're named for the player. */
+const WHEEL_KEYS = ['1', '2'];
 
 /** How tipped a flask held to pour is: past the horizontal, mouth down. */
 const POUR_ANG = Math.PI * 0.61;
@@ -307,7 +306,7 @@ export class GameEngine {
   private scales: Scale[] = [];
   private hoses: Hose[] = [];
   private faucets: (FaucetSpot & { start: (typeof FAUCETS)[number] })[];
-  /** What's in the equipment cabinet (see cabinet.ts): what the equipment wheel makes comes out of it, and goes back in. */
+  /** What's in the equipment cabinet (see cabinet.ts): what the equipment wheels make comes out of it, and goes back in. */
   private stock: Stock = stockWith({});
   /** Where the player stands, and which way they look (yaw about the vertical, pitch up). */
   private player = { x: 480, z: 380, yaw: 0, pitch: -0.08 };
@@ -319,8 +318,11 @@ export class GameEngine {
   private rightHeld = false;
   /** A valve being turned with the right button, and where on screen the pointer aiming its lever is. */
   private turning: { t: Tool; k: number; aim: { x: number; y: number } } | null = null;
-  /** While the equipment wheel is held open, where its pointer is; the mouse moves it, rather than looking around. */
-  private wheel: WheelAim | null = null;
+  /**
+   * While an equipment wheel is held open, which of WHEELS it is and where its pointer is; the mouse moves it, rather
+   * than looking around.
+   */
+  private wheel: (WheelAim & { which: number }) | null = null;
   /** The scale whose tare key is held down, to draw it pressed. */
   private tarePress: Scale | null = null;
   private locked = false;
@@ -975,7 +977,7 @@ export class GameEngine {
    * Take a flask, tool or scale out of the equipment cabinet into the player's grip, facing them, if their hands are
    * free (what's held passes through everything, so there's always room) and there's one left. Returns whether it did.
    */
-  spawn(kind: Item): boolean {
+  spawn(kind: Stocked): boolean {
     if (inPod(this.wake)) return false;
     if (this.held) {
       this.say('Hands full');
@@ -996,25 +998,26 @@ export class GameEngine {
   }
 
   /**
-   * Open the equipment wheel, its pointer in its middle, if there'd be any use in it: with hands free, and the mouse
-   * not busy turning a valve.
+   * Open one of the equipment wheels, its pointer in its middle, if there'd be any use in it: with hands free, and the
+   * mouse not busy turning a valve. With the other wheel open, it takes its place, the pointer staying where it is.
    */
-  private openWheel(): void {
+  private openWheel(which: number): void {
     if (this.turning) return;
     if (this.held) {
       this.say('Hands full');
       return;
     }
-    this.wheel = { x: 0, y: 0 };
+    this.wheel = { x: 0, y: 0, ...this.wheel, which };
   }
 
-  /** Close the equipment wheel, making what its pointer picks, if anything. */
-  private closeWheel(): void {
+  /** Close an equipment wheel, if it's the one that's open, making what its pointer picks, if anything. */
+  private closeWheel(which: number): void {
     const w = this.wheel;
-    if (!w) return;
+    if (w?.which !== which) return;
     this.wheel = null;
-    const pick = wheelPick(w, ITEMS.length);
-    if (pick !== null) this.spawn(ITEMS[pick]);
+    const items = WHEELS[which];
+    const pick = wheelPick(w, items.length);
+    if (pick !== null) this.spawn(items[pick]);
   }
 
   /** Take the one in a slot of the cabinet out of it, held just where it stood, as anything's picked up. */
@@ -1308,7 +1311,7 @@ export class GameEngine {
     on(c, 'contextmenu', (e) => e.preventDefault());
     on(window, 'mousemove', (e) => {
       if (!this.locked) return;
-      if (this.wheel) this.wheel = wheelMove(this.wheel, e.movementX, e.movementY);
+      if (this.wheel) this.wheel = { ...this.wheel, ...wheelMove(this.wheel, e.movementX, e.movementY) };
       else this.look(e.movementX, e.movementY, e.shiftKey);
     });
     on(c, 'wheel', (e) => {
@@ -1343,7 +1346,11 @@ export class GameEngine {
         e.preventDefault();
         this.writeNote();
       }
-      if (e.code === WHEEL_CODE) this.openWheel();
+      const wheel = WHEEL_CODES.indexOf(e.code);
+      if (wheel >= 0) {
+        this.openWheel(wheel);
+        e.preventDefault();
+      }
       if (e.code === 'Backspace' || e.code === 'Delete') {
         this.putAway();
         e.preventDefault();
@@ -1352,7 +1359,8 @@ export class GameEngine {
     });
     on(window, 'keyup', (e) => {
       this.keys.delete(e.code);
-      if (e.code === WHEEL_CODE) this.closeWheel();
+      const wheel = WHEEL_CODES.indexOf(e.code);
+      if (wheel >= 0) this.closeWheel(wheel);
     });
     on(window, 'blur', () => {
       this.keys.clear();
@@ -2720,10 +2728,10 @@ export class GameEngine {
       add(['RMB'], 'let go when it’s set');
       return out;
     }
-    // and so does the equipment wheel, until its key's let go
+    // and so does an equipment wheel, until its key's let go
     if (this.wheel) {
       add(['Mouse'], 'point at what to take');
-      add(['C'], 'let go to take it');
+      add([WHEEL_KEYS[this.wheel.which]], 'let go to take it');
       return out;
     }
     const p = this.target;
@@ -2760,7 +2768,8 @@ export class GameEngine {
       add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it back in the cabinet') : 'put it back');
     } else {
       if (this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
-      add(['C'], 'hold for the equipment wheel');
+      add([WHEEL_KEYS[0]], 'hold for equipment to experiment with');
+      add([WHEEL_KEYS[1]], 'hold for equipment to produce with');
     }
     if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
     else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
@@ -3135,9 +3144,11 @@ export class GameEngine {
         : 0,
       preview: !!this.previewing,
       wheel: this.wheel && {
-        ...this.wheel,
-        pick: wheelPick(this.wheel, ITEMS.length),
-        none: ITEMS.map((k) => !endless(k) && !this.stock[k].includes(true)),
+        x: this.wheel.x,
+        y: this.wheel.y,
+        items: WHEELS[this.wheel.which],
+        pick: wheelPick(this.wheel, WHEELS[this.wheel.which].length),
+        none: WHEELS[this.wheel.which].map((k) => !endless(k) && !this.stock[k].includes(true)),
       },
       ended: this.wake === 'arrived',
       slept: this.sleeping ? Math.floor(this.clock - this.sleeping.from) : null,

@@ -1,7 +1,9 @@
+import type { Stocked } from './cabinet';
+
 /**
- * The equipment wheel: held open with a key, a ring of sectors round the middle of the view, one for each thing that
- * can be taken out of the equipment cabinet. The mouse, instead of looking around, moves a pointer out from the
- * middle, and whichever sector it's in the direction of when the key's let go is what's taken.
+ * The equipment wheels: each held open with a key, a ring of sectors round the middle of the view, one for each thing
+ * it takes out of the equipment cabinet. The mouse, instead of looking around, moves a pointer out from the middle,
+ * and whichever sector it's in the direction of when the key's let go is what's taken.
  *
  * Lengths are in the wheel's own units, which are CSS pixels unless the view is too small for it and it's drawn
  * smaller. Its sectors go clockwise from the first, which is centered straight up.
@@ -14,6 +16,15 @@ export const WHEEL = {
   /** As far out as the pointer goes, so that it's never far from pointing some other way. */
   reach: 150,
 };
+
+/**
+ * What's on each wheel, in its order: between them, everything the cabinet stocks, each on one wheel. Roughly, the
+ * first is for experimenting and learning, and the second for mass production.
+ */
+export const WHEELS: readonly (readonly Stocked[])[] = [
+  ['flask', 'scale', 'pipette', 'thermometer', 'thermometerWide', 'strip', 'dish', 'column', 'culture'],
+  ['dispenser', 'exchanger', 'separator', 'splitter', 'sorter', 'heater', 'tank', 'meter', 'multiplexer', 'dilatometer'],
+];
 
 /** Where the wheel's pointer is, from its middle: x right, y down. */
 export interface WheelAim {

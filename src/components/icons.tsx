@@ -15,7 +15,7 @@ function thermometerIcon(gap: number, top: number): ReactNode {
 }
 
 /**
- * Small drawings of each item, echoing how the bench draws it, in a 40 × 40 box, for the equipment wheel (see Wheel in
+ * Small drawings of each item, echoing how the bench draws it, in a 40 × 40 box, for the equipment wheels (see Wheel in
  * Hud.tsx). They have no names: working out what each tool does is part of the game.
  */
 export const ICONS: Record<string, ReactNode> = {

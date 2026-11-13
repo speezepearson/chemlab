@@ -6,12 +6,12 @@ import { Tool, type ToolKind } from './tools';
 
 /**
  * The equipment cabinet: open steel shelving against the back wall (CABINET_AREA), holding the lab's stock of
- * everything the equipment wheel makes. Each item it holds sits in a slot of its own on the shelves, and is only drawn there:
+ * everything the equipment wheels make. Each item it holds sits in a slot of its own on the shelves, and is only drawn there:
  * nothing in it works, and no fluid gets into it. Making an item from the wheel takes one out of the cabinet, and
  * putting one away puts it back. The consumables (ENDLESS) are stacked deep, and never run out.
  */
 
-/** What the cabinet stocks: every kind of thing the equipment wheel makes. */
+/** What the cabinet stocks: every kind of thing the equipment wheels make. */
 export type Stocked = 'flask' | 'scale' | Exclude<ToolKind, 'receptacle' | 'analyzer' | 'spectroscope' | 'visualizer'>;
 
 /** The consumables: stacked deep in the cabinet, more than anyone could use, so taking one never empties it. */
@@ -175,7 +175,7 @@ export const isStocked = (k: string): k is Stocked => k in STOCK;
 
 /**
  * The cabinet as it would be with `out` of each kind out in the lab: full but for those, taken from the front first,
- * as the equipment wheel takes them (see takeFrom); endless kinds are always full.
+ * as the equipment wheels take them (see takeFrom); endless kinds are always full.
  */
 export function stockWith(out: Partial<Record<Stocked, number>>): Stock {
   const s = {} as Stock;
@@ -191,7 +191,7 @@ export const copyStock = (s: Stock): Stock =>
   Object.fromEntries(Object.entries(s).map(([k, v]) => [k, [...v]])) as Stock;
 
 /**
- * Take one of a kind out of the cabinet, as the equipment wheel does: the front-most there is (the last filled slot), or for an
+ * Take one of a kind out of the cabinet, as an equipment wheel does: the front-most there is (the last filled slot), or for an
  * endless kind, any. Returns the slot it came from, or null if there are none left.
  */
 export function takeFrom(s: Stock, k: Stocked): number | null {

@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { WHEEL, wheelMove, wheelPick, wheelSpan } from './wheel';
+import { STOCK } from './cabinet';
+import { WHEEL, WHEELS, wheelMove, wheelPick, wheelSpan } from './wheel';
 
 const out = (WHEEL.hole + WHEEL.reach) / 2;
 /** A pointer `r` out, `turn` of a full turn clockwise from straight up. */
 const at = (turn: number, r = out) => ({ x: r * Math.sin(turn * 2 * Math.PI), y: -r * Math.cos(turn * 2 * Math.PI) });
+
+describe('WHEELS', () => {
+  it('have everything the cabinet stocks, each on one wheel', () => {
+    expect(WHEELS.flat().sort()).toEqual(Object.keys(STOCK).sort());
+  });
+});
 
 describe('wheelPick', () => {
   it('picks nothing in the hole', () => {

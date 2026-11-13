@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { ITEMS, TOUCH, type Action, type GameEngine, type Hud as HudState } from '../game/engine';
+import { TOUCH, type Action, type GameEngine, type Hud as HudState } from '../game/engine';
 import { WHEEL, wheelSpan } from '../game/wheel';
 import { ICONS } from './icons';
 
@@ -172,19 +172,19 @@ function Actions({ actions }: { actions: readonly Action[] }) {
 const onWheel = (r: number, a: number) => ({ x: r * Math.sin(a), y: -r * Math.cos(a) });
 
 /** How far out the wheel's icons are, in its units, and how big they're drawn there, as a multiple of the 40 they're drawn in. */
-const WHEEL_ICON = { r: 176, scale: 1.2 };
+const WHEEL_ICON = { r: 160, scale: 1.6 };
 
 /**
- * The equipment wheel, round the middle of the view while its key's held: a sector for each thing it makes (ITEMS),
+ * An equipment wheel, round the middle of the view while its key's held: a sector for each thing it makes (see WHEELS),
  * in order, clockwise from straight up, with its icon and no name (see ICONS). The sector the pointer
  * is in the direction of is lit, and that's what letting go of the key makes; those there are none left of are faint.
  */
 function Wheel({ wheel }: { wheel: NonNullable<HudState['wheel']> }) {
-  const n = ITEMS.length;
+  const n = wheel.items.length;
   const size = 2 * WHEEL.rim + 8;
   return (
     <svg className="wheel" viewBox={`${-size / 2} ${-size / 2} ${size} ${size}`} aria-hidden="true">
-      {ITEMS.map((kind, i) => {
+      {wheel.items.map((kind, i) => {
         const { from, to } = wheelSpan(i, n);
         const [a, b, c, d] = [onWheel(WHEEL.rim, from), onWheel(WHEEL.rim, to), onWheel(WHEEL.hole, to), onWheel(WHEEL.hole, from)];
         const big = to - from > Math.PI ? 1 : 0;
@@ -208,7 +208,7 @@ function Wheel({ wheel }: { wheel: NonNullable<HudState['wheel']> }) {
 }
 
 /**
- * The crosshair, with hints by it for what the mouse buttons would do, or the equipment wheel while it's held open; the aim while a valve turns; and, on a
+ * The crosshair, with hints by it for what the mouse buttons would do, or an equipment wheel while it's held open; the aim while a valve turns; and, on a
  * screen with a mouse and keys, everything else that can be done just now, in a corner, unless `/` has hidden it.
  */
 export function Hud({ hud, help }: { hud: HudState; help: boolean }) {

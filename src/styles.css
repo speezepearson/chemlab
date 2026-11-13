@@ -87,7 +87,7 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
   details{position:static}
   details > div{left:16px;right:16px;top:auto;margin-top:6px}
 }
-/* the equipment wheel, round the middle of the view while its key's held; smaller, in a view too small for it */
+/* an equipment wheel, round the middle of the view while its key's held; smaller, in a view too small for it */
 .wheel{
   position:absolute;left:50%;top:50%;width:468px;height:468px;max-width:calc(100% - 16px);max-height:calc(100% - 16px);
   transform:translate(-50%,-50%);pointer-events:none;z-index:3;
