@@ -122,7 +122,7 @@ export interface Hud {
 
 /**
  * Something the player can do just now: the keys or buttons that do it, pressed together, and what it does, in a few
- * words. Keys are named as on the keyboard; 'LMB' and 'RMB' are the mouse's left and right buttons, 'Wheel' its wheel, '←→' moving it across and '↑↓' up and down. `off` if it can't be done here, though
+ * words. Keys are named as on the keyboard; 'LMB' and 'RMB' are the mouse's left and right buttons, 'Wheel' its wheel, and '↑↓' moving it up and down. `off` if it can't be done here, though
  * it could elsewhere.
  */
 export interface Action {
@@ -1304,7 +1304,16 @@ export class GameEngine {
   }
 
   /**
-   * The touch screen's stand-in for Shift and the mouse, and the wheel: a drag across turns what's held, and up holds it
+   * R: turn what's held a quarter turn anticlockwise, as seen from above; for a hose's nozzle, that swings its stand
+   * round it. A flask is round, so turning it does nothing (see faceFlask).
+   */
+  private turn(): void {
+    const h = this.held;
+    if (h && h.kind !== 'flask') h.relYaw = wrapAngle(h.relYaw + Math.PI / 2);
+  }
+
+  /**
+   * The touch screen's stand-in for R, Shift and the mouse, and the wheel: a drag across turns what's held, and up holds it
    * further, down nearer; but for a hose's nozzle, up slides its stand out and down in (see slideReach).
    */
   turnHeld(dx: number, dy: number): void {
@@ -1402,6 +1411,7 @@ export class GameEngine {
       if (e.repeat || inPod(this.wake) || this.previewing) return;
       if (e.code === 'KeyE') this.grabOrRelease(e.shiftKey);
       if (e.code === 'KeyQ') this.putBack();
+      if (e.code === 'KeyR') this.turn();
       if (e.code === 'Enter') {
         // the note's text box opens at once, and this Enter mustn't be taken as finishing it
         e.preventDefault();
@@ -1436,7 +1446,7 @@ export class GameEngine {
     return Math.max(r + HOLD_NEAR, Math.min(r + HOLD_FAR, d));
   }
 
-  /** The mouse moved by (dx, dy) pixels: aim a valve's lever, turn what's held (with Shift), or look around. */
+  /** The mouse moved by (dx, dy) pixels: aim a valve's lever, slide a held nozzle's stand (with Shift), or look around. */
   private look(dx: number, dy: number, shift: boolean): void {
     if (this.turning) {
       const a = this.turning.aim;
@@ -1445,9 +1455,9 @@ export class GameEngine {
       this.aimTurning();
       return;
     }
-    if (shift && this.held) {
-      if (this.held.kind !== 'flask') this.held.relYaw = wrapAngle(this.held.relYaw - dx * TURN_SENS);
-      if (this.held.kind === 'hose') this.slideReach(this.held, dy);
+    // with Shift, a held nozzle's stand slides along its arm instead (R turns things: see turn)
+    if (shift && this.held?.kind === 'hose') {
+      this.slideReach(this.held, dy);
       return;
     }
     const p = this.player;
@@ -2897,9 +2907,9 @@ export class GameEngine {
           : 'hold to pour',
         );
       if (h.kind === 'hose') {
-        add(['Shift', '←→'], 'swing its stand round');
+        add(['R'], 'swing its stand round');
         add(['Shift', '↑↓'], 'slide its stand out or in');
-      } else if (h.kind !== 'flask') add(['Shift', '←→'], 'turn it');
+      } else if (h.kind !== 'flask') add(['R'], 'turn it');
       add(['Wheel'], 'hold it nearer or further');
       if (h.kind === 'hose') add(['Backspace'], 'roll the hose back up');
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it back in the cabinet');
