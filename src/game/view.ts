@@ -736,9 +736,9 @@ function paperOutline(ctx: CanvasRenderingContext2D, W: number, L: number): void
  * (see wetness), by what's on it; each species on each stretch of it (see Tool.paper) as ink of its own
  * color, as opaque as stripInk says, single atoms first, so what's left in bands lies over the carrier's tint; both
  * blended smoothly from one stretch's middle to the next, except for a spot that has yet to move, which is drawn
- * stretch by stretch, so its top is a line, where the fluid's surface was; and each stretch browned over by how
- * scorched it is (see Tool.scorch), stretch by stretch too, so that ends at a line as well. Nothing's drawn outside
- * its outline.
+ * stretch by stretch, so its top is a line, where the fluid's surface was; lines marked across its edges, over all
+ * that (see drawMarks); and each stretch browned over by how scorched it is (see Tool.scorch), stretch by stretch too,
+ * so that ends at a line as well. Nothing's drawn outside its outline.
  */
 function drawStrip(sc: Screen, t: Tool): void {
   const { paper } = t;
@@ -782,9 +782,39 @@ function drawStrip(sc: Screen, t: Tool): void {
   const here = SPECIES.map((_, s) => s).filter((s) => paper.some((v) => v.n[s] > 0));
   here.sort((a, b) => SPECIES[a].size - SPECIES[b].size);
   for (const s of here) lay((c) => stripInk(s, paper[c].n[s]), SPECIES[s].color.slice(4, -1));
+  // printed on the paper, so over what's run up it, and under where it's scorched
+  drawMarks(ctx, W, L, STRIP.marks);
   cells((c) => 0.92 * t.scorch[c], '46, 28, 14');
   ctx.restore();
   sc.tex.needsUpdate = true;
+}
+
+/**
+ * How the lines marked along a wicking strip's paper and a column's bed are drawn, in local units: `w` thick; on
+ * paper, across each edge, `len` in from it, and `long` in for every `every`th; round a bed, right round it, every
+ * `every`th `thick` times as thick.
+ */
+const MARKS = { len: 1.8, long: 3.2, every: 5, w: 0.3, thick: 2.2, color: 'rgba(52, 46, 38, 0.7)' };
+
+/**
+ * Lines marked on a strip of paper, or round a bed, W across and L long, dividing its length into `n` equal parts, to
+ * read off how far along it something has run: on paper, across both its edges, every fifth longer; `round` a bed
+ * (whose canvas runs right round it), rings, every fifth thicker. Nothing's marked at its ends.
+ */
+function drawMarks(ctx: CanvasRenderingContext2D, W: number, L: number, n: number, round = false): void {
+  ctx.strokeStyle = MARKS.color;
+  for (let k = 1; k < n; k++) {
+    const y = (L * k) / n;
+    const fifth = k % MARKS.every === 0;
+    ctx.lineWidth = round && fifth ? MARKS.w * MARKS.thick : MARKS.w;
+    const len = round ? W / 2 : fifth ? MARKS.long : MARKS.len;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(len, y);
+    ctx.moveTo(W, y);
+    ctx.lineTo(W - len, y);
+    ctx.stroke();
+  }
 }
 
 /** Where a thermometer's capillary runs across its rod, in its own frame, left of the middle, with its scale's ticks right of it. */
@@ -793,7 +823,8 @@ const CAPILLARY_X = -1.4;
 /**
  * A column's bed, its top at the top: the paper's cream, darker as far as each stretch of it is wet (see wetness), by
  * what's on it; each species on each stretch (see Tool.bed) as ink of its own color, as opaque as columnInk says,
- * single atoms first, so bands lie over the carrier's tint; both blended smoothly from one stretch's middle to the next.
+ * single atoms first, so bands lie over the carrier's tint; both blended smoothly from one stretch's middle to the next;
+ * and lines marked round it, over all that (see drawMarks).
  */
 function drawColumn(sc: Screen, t: Tool): void {
   const { bed } = t;
@@ -821,6 +852,7 @@ function drawColumn(sc: Screen, t: Tool): void {
     ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(${rgb}, ${columnInk(s, bed[c].n[s])})`);
     ctx.fillRect(0, 0, W, L);
   }
+  drawMarks(ctx, W, L, COLUMN.marks, true);
   sc.tex.needsUpdate = true;
 }
 

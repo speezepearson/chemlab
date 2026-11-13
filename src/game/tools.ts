@@ -638,6 +638,8 @@ export function neckShare(vol: number): number {
  * - spread: the share of a species on each stretch that's left behind each time it moves on a stretch (see Tool.wick),
  *   which is all that widens a band: after n moves it's about √(n · spread · (1 − spread)) stretches wide;
  * - ink: how strongly what's on it shows (see stripInk), and tint, how much less strongly single atoms do;
+ * - marks: how many equal parts the lines printed across the paper's edges divide its length into, to read off how
+ *   far up it something has run;
  * - scorch: the temperatures from which a fluid starts to brown the paper that's in it, and at which it chars it
  *   through;
  * - paper: the paper itself, in local units, y down from the top of its clip: reaching w either side of the middle,
@@ -646,7 +648,7 @@ export function neckShare(vol: number): number {
  *   back: what its stand holds.
  */
 export const STRIP = {
-  cap: CAP / 100, spot: CAP / 1000, spots: 3, time: 20, drag: 34, cells: 108, spread: 0.05, ink: 33, tint: 0.4,
+  cap: CAP / 100, spot: CAP / 1000, spots: 3, time: 20, drag: 34, cells: 108, spread: 0.05, ink: 33, tint: 0.4, marks: 20,
   scorch: { from: 2, to: 6 },
   paper: { w: 6, top: 10, len: 108, point: 6 },
   clip: { w: 4.5, h: 15, d: 4 },
@@ -787,10 +789,11 @@ export class Bed {
  *   flask, a bed's worth in 10 sim s; in proportion to how far the tap's open;
  * - funnel: the funnel, reaching w either side of its middle, h deep, holding cap (by volume) as drawn;
  * - tube: the glass tube under the funnel's stem, w across, from y0 to y1 down from the funnel's mouth, its bed
- *   filling it.
+ *   filling it;
+ * - marks: how many equal parts the lines marked round the bed divide its length into, as on a strip's paper.
  */
 export const COLUMN = {
-  cells: 80, cap: CAP / 5, soak: CAP / 20, flow: CAP / 50,
+  cells: 80, cap: CAP / 5, soak: CAP / 20, flow: CAP / 50, marks: 20,
   funnel: { w: 11, h: 20, cap: 0.06 * CAP },
   tube: { w: 16, y0: 26, y1: 186 },
 };
