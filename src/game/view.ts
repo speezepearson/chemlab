@@ -4000,7 +4000,7 @@ class Outliner {
 
 /** Draws the lab with Three.js, from the player's eyes, and says what's under the crosshair. */
 export class View {
-  /** The field of view is 90°, top to bottom. */
+  /** The field of view is 90°, top to bottom, until the player zooms in (see look). */
   readonly camera = new THREE.PerspectiveCamera(90, 1, 2, 8000);
   private renderer: THREE.WebGLRenderer;
   /** What the white void of Mu Ceti is drawn with (see renderArrival), once it's needed. */
@@ -4109,8 +4109,15 @@ export class View {
     for (const k of items) if (!map.has(k)) map.set(k, make(k));
   }
 
-  /** Put the camera at the player's eyes, looking their way. */
-  look(eye: Vec3, yaw: number, pitch: number): void {
+  /**
+   * Put the camera at the player's eyes, looking their way, with a field of view of `fov` degrees, top to bottom
+   * (as it was, if it's not given).
+   */
+  look(eye: Vec3, yaw: number, pitch: number, fov = this.camera.fov): void {
+    if (this.camera.fov !== fov) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
     this.camera.position.set(eye.x, eye.y, eye.z);
     // the stars are too far off to move as the player does
     this.stars.position.copy(this.camera.position);

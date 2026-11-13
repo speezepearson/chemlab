@@ -267,6 +267,13 @@ const SEEK = 2;
 const HOLD_CONE = Math.PI / 6;
 /** Radians the view turns per pixel the mouse moves, and that something held turns with Shift. */
 const LOOK_SENS = 0.0022;
+/** The view's field of view, top to bottom, in degrees. */
+const FOV = 90;
+/**
+ * Z, held, zooms the view in: the field of view it narrows to, in degrees, and how long it takes to get there, or
+ * back, in real seconds (it's the player's own doing, like walking).
+ */
+const ZOOM = { fov: 30, s: 0.12 };
 const TURN_SENS = 0.008;
 /** How far a held nozzle's stand slides out per pixel the mouse moves up with Shift. */
 const REACH_SENS = 0.5;
@@ -331,6 +338,8 @@ export class GameEngine {
   private rightHeld = false;
   /** A valve being turned with the right button, and where on screen the pointer aiming its lever is. */
   private turning: { t: Tool; k: number; aim: { x: number; y: number } } | null = null;
+  /** How far the view is zoomed in (see ZOOM), from 0, not at all, to 1. */
+  private zoom = 0;
   /**
    * While an equipment wheel is held open, which of WHEELS it is and where its pointer is; the mouse moves it, rather
    * than looking around.
@@ -1461,8 +1470,15 @@ export class GameEngine {
       return;
     }
     const p = this.player;
-    p.yaw = wrapAngle(p.yaw - dx * LOOK_SENS);
-    p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch - dy * LOOK_SENS));
+    // zoomed in, the mouse turns the view less, so what's seen moves across the screen as it ever does
+    const sens = (LOOK_SENS * Math.tan((this.fov() * Math.PI) / 360)) / Math.tan((FOV * Math.PI) / 360);
+    p.yaw = wrapAngle(p.yaw - dx * sens);
+    p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch - dy * sens));
+  }
+
+  /** The view's field of view now, top to bottom, in degrees: narrower as far as it's zoomed in (see ZOOM). */
+  private fov(): number {
+    return FOV + (ZOOM.fov - FOV) * ease(this.zoom);
   }
 
   /** Point the lever of the valve being turned at where the aim is, on the tool's front face. */
@@ -2200,7 +2216,9 @@ export class GameEngine {
     if (!nap || nap.waking) this.move(dt);
     if (this.wake === 'settling') this.settleIn(dt);
     if (this.held) this.follow(this.held);
-    this.view.look(this.eye(), this.player.yaw, this.player.pitch);
+    const zoomed = this.keys.has('KeyZ') ? 1 : 0;
+    this.zoom = Math.max(0, Math.min(1, this.zoom + (zoomed ? dt : -dt) / ZOOM.s));
+    this.view.look(this.eye(), this.player.yaw, this.player.pitch, this.fov());
     if (!this.turning) this.target = this.previewing ? null : this.view.pick(REACH, this.heldObject());
     this.simulate(dt);
     // the end stands the lab still as it was when there was enough, so it goes on in real time
@@ -2933,6 +2951,7 @@ export class GameEngine {
     if (this.canNap()) add(['N'], 'nap');
     if (!h && this.history.canUndo) add([MOD, 'Z'], 'undo');
     if (!h && this.history.canRedo) add([MOD, 'Shift', 'Z'], 'redo');
+    add(['Z'], 'hold to zoom in');
     add(['Esc'], 'let go of the mouse');
     add(['/'], 'hide this list');
     return out;
