@@ -2406,11 +2406,15 @@ export class GameEngine {
     return { turn: toCardinal(this.player.yaw + h.relYaw), reach: snapReach(h.reach) };
   }
 
-  /** Every stand in the lab, with what it holds up. */
+  /** Every stand in the lab, with what it holds up; but none for a dipper (see DIPPERS) while it's in hand. */
   private stands(): { s: Stand; of: Pick }[] {
     const out: { s: Stand; of: Pick }[] = [];
-    for (const t of this.tools) for (const s of toolStands(t)) out.push({ s, of: { kind: 'tool', t, part: 'body', k: 0 } });
     const held = this.held;
+    for (const t of this.tools) {
+      // a strip or a thermometer in hand is just itself: its stand is there once it's set down
+      if (held?.kind === 'tool' && held.t === t && isDipper(t.kind)) continue;
+      for (const s of toolStands(t)) out.push({ s, of: { kind: 'tool', t, part: 'body', k: 0 } });
+    }
     const pl = this.placed;
     const follow = held?.follow ?? [];
     for (const h of this.hoses) {
