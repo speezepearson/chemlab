@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react';
-import { HOTKEYS, ITEMS, type GameEngine } from '../game/engine';
 
 /** A thermometer's icon: ticks every `gap` up its backing, every fifth longer, and its column of spirit up to `top`. */
 function thermometerIcon(gap: number, top: number): ReactNode {
@@ -15,7 +14,10 @@ function thermometerIcon(gap: number, top: number): ReactNode {
   );
 }
 
-/** Small drawings of each item, echoing how the bench draws it, in a 40 × 40 box. */
+/**
+ * Small drawings of each item, echoing how the bench draws it, in a 40 × 40 box, for the equipment wheel (see Wheel in
+ * Hud.tsx). They have no names: working out what each tool does is part of the game.
+ */
 export const ICONS: Record<string, ReactNode> = {
   flask: <path className="glass" d="M16 6 H24 L23 15 L31 32 Q32 35 29 35 H11 Q8 35 9 32 L17 15 Z" />,
   dispenser: (
@@ -152,33 +154,3 @@ export const ICONS: Record<string, ReactNode> = {
   thermometer: thermometerIcon(2, 21),
   thermometerWide: thermometerIcon(5, 14),
 };
-
-/**
- * The equipment that can be made, along the bottom of the view: a key (along the number row, and then from Z along
- * the bottom row of letters) makes one in the player's hands, if they're empty. Clicking one does the same, when the mouse isn't captured.
- * The equipment wheel (see Wheel in Hud.tsx) makes the same things, in the same order.
- */
-export function Palette({ engine }: { engine: GameEngine }) {
-  return (
-    <div className="palette" aria-label="equipment">
-      {ITEMS.map((kind, i) => (
-        <button
-          key={kind}
-          aria-label={kind}
-          aria-keyshortcuts={HOTKEYS[i]}
-          // no name in the tooltip: working out what each tool does is part of the game
-          title={`Press ${HOTKEYS[i]} to make one in your hands`}
-          onClick={() => {
-            engine.lock();
-            engine.spawn(kind);
-          }}
-        >
-          <svg viewBox="0 0 40 40" aria-hidden="true">
-            {ICONS[kind]}
-          </svg>
-          <kbd>{HOTKEYS[i]}</kbd>
-        </button>
-      ))}
-    </div>
-  );
-}

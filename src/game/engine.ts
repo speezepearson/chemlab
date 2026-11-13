@@ -195,23 +195,12 @@ type Held = (
   follow?: Follower[];
 };
 
-/** Things that can be made from the hotbar, in its order. */
+/** Things that can be taken out of the equipment cabinet with the equipment wheel, in its order (see wheel.ts). */
 export const ITEMS = [
   'flask', 'dispenser', 'pipette', 'exchanger', 'separator', 'splitter', 'sorter', 'heater', 'scale', 'tank', 'meter', 'multiplexer',
-  'thermometer', 'thermometerWide', 'strip', 'culture', 'column', 'dish', 'dilatometer',
+  'thermometer', 'thermometerWide', 'dilatometer', 'strip', 'culture', 'column', 'dish',
 ] as const;
 export type Item = (typeof ITEMS)[number];
-/**
- * The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0, - and =; and then, the number
- * row being full, along the bottom row of letters, from Z, skipping C (which holds the equipment wheel open, see
- * WHEEL_CODE) and N (which writes notes), through the comma and the period.
- */
-export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Z', 'X', 'V', 'B', 'M', ',', '.'] as const;
-/** The same keys, as KeyboardEvent codes, so they work whatever the keyboard layout's shift state. */
-const HOTKEY_CODES = [
-  'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal',
-  'KeyZ', 'KeyX', 'KeyV', 'KeyB', 'KeyM', 'Comma', 'Period',
-];
 /** The key that, held, opens the equipment wheel (see wheel.ts): let go, it makes what the wheel's pointer picks. */
 const WHEEL_CODE = 'KeyC';
 
@@ -318,7 +307,7 @@ export class GameEngine {
   private scales: Scale[] = [];
   private hoses: Hose[] = [];
   private faucets: (FaucetSpot & { start: (typeof FAUCETS)[number] })[];
-  /** What's in the equipment cabinet (see cabinet.ts): what the hotbar makes comes out of it, and goes back in. */
+  /** What's in the equipment cabinet (see cabinet.ts): what the equipment wheel makes comes out of it, and goes back in. */
   private stock: Stock = stockWith({});
   /** Where the player stands, and which way they look (yaw about the vertical, pitch up). */
   private player = { x: 480, z: 380, yaw: 0, pitch: -0.08 };
@@ -1339,7 +1328,7 @@ export class GameEngine {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       // Enter is OK on the message inside the cryopod, as it was on the notice it replaced
       if (e.code === 'Enter' && this.wake === 'pod') this.pressOk();
-      // in god mode, = shows the end's white void, or puts the lab back, rather than making anything
+      // in god mode, = shows the end's white void, or puts the lab back
       if (e.code === 'Equal' && (this.god || this.previewing)) {
         if (!e.repeat) this.previewArrival(!this.previewing);
         return;
@@ -1353,11 +1342,6 @@ export class GameEngine {
         // the note's text box opens at once, and N mustn't be typed into it
         e.preventDefault();
         this.writeNote();
-      }
-      const item = HOTKEY_CODES.indexOf(e.code);
-      if (item >= 0) {
-        this.spawn(ITEMS[item]);
-        e.preventDefault();
       }
       if (e.code === WHEEL_CODE) this.openWheel();
       if (e.code === 'Backspace' || e.code === 'Delete') {
@@ -2776,8 +2760,7 @@ export class GameEngine {
       add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it back in the cabinet') : 'put it back');
     } else {
       if (this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
-      add(['C'], 'hold, point and let go to take equipment from the cabinet');
-      add(['1–0, -, =, Z, X, V, B, M, ,, .'], 'or take it with its key');
+      add(['C'], 'hold for the equipment wheel');
     }
     if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
     else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');

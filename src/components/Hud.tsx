@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { ITEMS, TOUCH, type Action, type GameEngine, type Hud as HudState } from '../game/engine';
 import { WHEEL, wheelSpan } from '../game/wheel';
-import { ICONS } from './Palette';
+import { ICONS } from './icons';
 
 /** How far a stick's knob can go from its middle, in CSS pixels. */
 const STICK_R = 44;
@@ -171,12 +171,12 @@ function Actions({ actions }: { actions: readonly Action[] }) {
 /** A point of the wheel: `r` out from its middle, `a` radians clockwise from straight up. */
 const onWheel = (r: number, a: number) => ({ x: r * Math.sin(a), y: -r * Math.cos(a) });
 
-/** How far out the wheel's icons are, in its units, and how big they're drawn there, as a multiple of the hotbar's 40. */
+/** How far out the wheel's icons are, in its units, and how big they're drawn there, as a multiple of the 40 they're drawn in. */
 const WHEEL_ICON = { r: 176, scale: 1.2 };
 
 /**
- * The equipment wheel, round the middle of the view while its key's held: a sector for each thing the hotbar makes,
- * in the hotbar's order, clockwise from straight up, with its icon and no name (see Palette). The sector the pointer
+ * The equipment wheel, round the middle of the view while its key's held: a sector for each thing it makes (ITEMS),
+ * in order, clockwise from straight up, with its icon and no name (see ICONS). The sector the pointer
  * is in the direction of is lit, and that's what letting go of the key makes; those there are none left of are faint.
  */
 function Wheel({ wheel }: { wheel: NonNullable<HudState['wheel']> }) {

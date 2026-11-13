@@ -30,7 +30,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - Headless Chromium won't capture the mouse, and WebGL needs a software renderer. Launch with
   `args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']`, then in dev builds the engine is
   `window.lab`: `lab.debug({ locked: true, x, z, yaw, pitch })` acts as if the mouse were captured, so keys (E,
-  the number row, WASD) and mouse buttons work, and puts the player somewhere. Yaw 0 faces the back wall; pitch is up,
+  C, WASD) and mouse buttons work, and puts the player somewhere. Yaw 0 faces the back wall; pitch is up,
   in radians. Its private fields (`held`, `target`, `tools`, `turning`, ...) are reachable from `page.evaluate`.
 - Software rendering is slow, a few frames a second, so wait longer than you'd think, and remember that a screenshot
   takes real time during which the sim runs on.
@@ -80,7 +80,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `outline.ts` is the player's settings for the outline round what the crosshair is on; the view's `Outliner` draws
     it over the finished frame, from a mask of the meshes registered as that thing's parts.
   - `cabinet.ts` is the equipment cabinet: its layout (each kind's slots on its shelves) and its stock, which the
-    hotbar takes from and putting away puts back into. The view draws what's in it as instanced meshes
+    equipment wheel takes from and putting away puts back into. The view draws what's in it as instanced meshes
     (`CabinetView`), so it's cheap however much it holds.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
@@ -90,8 +90,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     in the lab goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),
     so it fades and pans with where it is relative to the player's head.
 - `src/intro/log.ts`: the intro's console script, deterministic from a seed. `src/components/Intro.tsx` plays it.
-- `src/components/`: the React UI around the canvas: the hotbar (`Palette.tsx`), the crosshair's hints, the equipment
-  wheel, the corner list of actions and the start hint (`Hud.tsx`), the Chemistry and Appearance panels, the editor.
+- `src/components/`: the React UI around the canvas: the crosshair's hints, the equipment wheel, the corner
+  list of actions and the start hint (`Hud.tsx`), the wheel's icons (`icons.tsx`), the Chemistry and Appearance panels, the editor.
 
 ## Invariants and gotchas
 
@@ -147,8 +147,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Adding a tool kind** touches all of these:
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially.
-  - `ITEMS` and `HOTKEYS` in `engine.ts` (the hotbar's order and keys) and `ICONS` in `Palette.tsx`, unless the tool is
-    unique. The number row is full, through =, so new ones go along the bottom row of letters, from Z, skipping C (the equipment wheel) and N (notes): it's taken through the period. The wheel takes its sectors and icons from `ITEMS` and `ICONS`, so a new one is on it at once.
+  - `ITEMS` in `engine.ts` (the equipment wheel's sectors, in order) and `ICONS` in `icons.tsx`, unless the tool is
+    unique. There are no keys for particular tools: the wheel (held open with C) is the only way to make one away from
+    the cabinet.
   - Its place in the equipment cabinet: `STOCK` and a compartment in `BAYS` (`cabinet.ts`), and `ENDLESS` if it's
     used up. `cabinet.test.ts` checks it fits.
   - If it has state of its own that a save should keep, `Tool.memory` and `Tool.remember`.
@@ -161,7 +162,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     says, and its own `x0` and `x1` are its inlet's, since it's the openings and spouts that go on the grid.
   - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `neck`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
 - **Unique tools** (`UNIQUE_TOOLS`: the composition analyzer, the spectroscope, the bond visualizer and the receptacle) aren't on
-  the hotbar and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
+  the equipment wheel and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
   whole cryostabilizer station (`STATION` in `tools.ts`): its tanks are the funnel and the ship's reservoir, in that
   order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved.
 - **Inline instruments** (`INLINE_TOOLS`: the composition analyzer, the spectroscope, the bond visualizer and the flow meter) are a tube draining straight through at a fixed rate past a cabinet
@@ -176,7 +177,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 ## Design preferences
 
 - Don't give away the chemistry. The player is meant to work it out. The composition analyzer has no text and no
-  divider lines between its sectors, nor the bond visualizer, whose points are unlabeled, the size sorter's screens look plain, the hotbar has no names, and the faucets aren't labeled (they're the five pure
+  divider lines between its sectors, nor the bond visualizer, whose points are unlabeled, the size sorter's screens look plain, the equipment wheel has no names, and the faucets aren't labeled (they're the five pure
   atoms, the four colors and the solvent, which the user chose). The spectroscope's axes are labeled E (uB) and f (in S, with an SI prefix to suit the range, as mS), at the user's request: both on log scales with
   base-10 log-paper ticks, only the powers of ten numbered, f's ranging itself to the tallest line, and no peak labeled. It plots each bond at the size of its
   energy, a stable one as a peak above the baseline and an uphill one as a dip below it, at the user's request. Ask before adding any visual cue that reveals how a tool or reaction works.

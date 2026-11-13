@@ -874,7 +874,7 @@ export type ToolKind =
   | 'receptacle';
 
 /**
- * Tools there's only ever one of: not in the palette, and never put away. The receptacle is the whole cryostabilizer
+ * Tools there's only ever one of: not on the equipment wheel, and never put away. The receptacle is the whole cryostabilizer
  * station (see STATION), reservoir included.
  */
 export const UNIQUE_TOOLS: readonly ToolKind[] = ['analyzer', 'spectroscope', 'visualizer', 'receptacle'];
