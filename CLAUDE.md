@@ -77,6 +77,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     marked at pick-up and committed at set-down.
   - `outline.ts` is the player's settings for the outline round what the crosshair is on; the view's `Outliner` draws
     it over the finished frame, from a mask of the meshes registered as that thing's parts.
+  - `cabinet.ts` is the equipment cabinet: its layout (each kind's slots on its shelves) and its stock, which the
+    hotbar takes from and putting away puts back into. The view draws what's in it as instanced meshes
+    (`CabinetView`), so it's cheap however much it holds.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
     `volumes.ts`); `rumble.ts` is the composition analyzer, `diverter.ts` the cryostabilizer station, `ambience.ts` the ship, `water.ts` drips and streams, `shatter.ts` a thermometer
@@ -144,6 +147,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially.
   - `ITEMS` and `HOTKEYS` in `engine.ts` (the hotbar's order and keys) and `ICONS` in `Palette.tsx`, unless the tool is
     unique. The number row is full, through =, so new ones go along the bottom row of letters, from Z, skipping N (notes): it's taken through the comma.
+  - Its place in the equipment cabinet: `STOCK` and a compartment in `BAYS` (`cabinet.ts`), and `ENDLESS` if it's
+    used up. `cabinet.test.ts` checks it fits.
   - If it has state of its own that a save should keep, `Tool.memory` and `Tool.remember`.
   - Tests and the README.
   - A tool needn't have tanks at all: the thermometers and the wicking strip (the `DIPPERS`) have none, nor spouts nor

@@ -1,6 +1,7 @@
 export const CAP = 1e9; // flask capacity, atoms
 export const POUR_RATE = (7 / 30) * CAP; // atoms/s, flask to flask
 export const FILL_RATE = (11 / 30) * CAP; // atoms/s, from faucet
+/** The most flasks a preset stands out (along the front of the first island). */
 export const N_FLASKS = 8;
 /**
  * The sum in the intro: the passengers still asleep, the days left to Mu Ceti, the cryostabilizer each needs a day,

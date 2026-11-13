@@ -105,7 +105,7 @@ function hose(e: Engine, on: Hose['on'], into: { x: number; y: number; z: number
 }
 
 const SCENES: Record<string, Scene> = {
-  idle: { about: 'default lab: 8 empty flasks, station (reference full of target), analyzer, spectroscope', preset: base([], 'idle') },
+  idle: { about: 'default lab: no flasks out, station (reference full of target), analyzer, spectroscope', preset: base([], 'idle') },
   quiet8: {
     about: '8 flasks 2/3 full, each one pure color at room T',
     preset: base(COLORS.map((c) => ({ contents: [{ species: singleOf(c), molecules: (2 / 3) * CAP }], T: T_ROOM })), 'quiet8'),
