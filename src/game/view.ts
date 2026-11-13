@@ -1243,8 +1243,20 @@ const FLASK_PROFILE = FLASK_OUTLINE.filter((p) => p.x >= 0 && !(p.x === 11 && p.
   .map((p) => new THREE.Vector2(p.x, -p.y))
   .sort((a, b) => a.y - b.y);
 const flaskGlassGeom = new THREE.LatheGeometry([new THREE.Vector2(0, -FLASK_H), ...FLASK_PROFILE, new THREE.Vector2(11, 0), new THREE.Vector2(12.5, 0.5)], 48);
+/**
+ * The flask's fluid's solid: a hair inside the glass, so the two don't fight over the same pixels, standing `floor`
+ * off the glass's floor, and so clear of what it stands on (a sink counter's drain grate is 0.5 over the counter);
+ * and how thin a film of it is drawn at least, over that floor, so a trace in a flask shows, however little, rather
+ * than being cut off below the solid.
+ */
+const FLASK_FLUID = { floor: 0.6, film: 0.15 };
 const flaskFluidGeom = new THREE.LatheGeometry(
-  [new THREE.Vector2(0, -FLASK_H + 0.6), ...FLASK_PROFILE.map((p) => new THREE.Vector2(p.x * 0.95, Math.max(p.y, -FLASK_H + 0.6))), new THREE.Vector2(10.4, -0.4), new THREE.Vector2(0, -0.4)],
+  [
+    new THREE.Vector2(0, -FLASK_H + FLASK_FLUID.floor),
+    ...FLASK_PROFILE.map((p) => new THREE.Vector2(p.x * 0.95, Math.max(p.y, -FLASK_H + FLASK_FLUID.floor))),
+    new THREE.Vector2(10.4, -0.4),
+    new THREE.Vector2(0, -0.4),
+  ],
   48,
 );
 
@@ -1277,7 +1289,11 @@ class FlaskView {
     this.root.position.set(f.pose.x, f.pose.y, f.pose.z);
     this.root.rotation.y = f.pose.yaw;
     this.tilt.rotation.z = -f.tilt;
-    this.fluid.update(f, f.pose.y + fillLevel(f.tilt, volume(f) / f.cap));
+    // upright, a trace is drawn as a film at least FLASK_FLUID.film deep over the solid's floor (tipped, the level is
+    // well above its lowest corner as soon as there's anything in it)
+    const level = fillLevel(f.tilt, volume(f) / f.cap);
+    const film = f.tilt === 0 ? -FLASK_H + FLASK_FLUID.floor + FLASK_FLUID.film : -Infinity;
+    this.fluid.update(f, f.pose.y + Math.max(level, film));
     this.label.set(f.label);
   }
 

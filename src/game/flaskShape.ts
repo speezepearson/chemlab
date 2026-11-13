@@ -80,6 +80,9 @@ export const FLASK_VOLUME = (() => {
   return v;
 })();
 
+/** The side of the square slabs SLABS cuts the flask's inside into: rows that tile its depth exactly. */
+const STEP = FLASK_H / Math.round(FLASK_H / 0.6);
+
 /**
  * The flask's inside, the solid FLASK_OUTLINE turns about its axis, as thin slabs: each is a point (x, y), with the
  * mouth at the origin and y up, and the volume of the slab through it from front to back. Front to back doesn't
@@ -87,8 +90,8 @@ export const FLASK_VOLUME = (() => {
  */
 const SLABS: readonly (readonly [number, number, number])[] = (() => {
   const out: [number, number, number][] = [];
-  const STEP = 0.6;
-  for (let d = STEP / 2; d < FLASK_H; d += STEP) {
+  for (let row = 0; row < Math.round(FLASK_H / STEP); row++) {
+    const d = (row + 0.5) * STEP;
     const r = flaskRadius(d);
     for (let x = -r + STEP / 2; x < r; x += STEP) out.push([x, -d, 2 * Math.sqrt(r * r - x * x) * STEP * STEP]);
   }
@@ -101,29 +104,41 @@ let levelCache = { tilt: NaN, heights: new Float64Array(0), below: new Float64Ar
  * Where the fluid's surface is in a flask filled to fraction `frac` of its capacity and tipped by `tilt` about
  * its mouth (its own right side going down, see Flask.tilt): the height above the mouth that leaves `frac` of the
  * flask's volume underneath. So the fluid shown always tracks the amount in it, whether the level is in the
- * wide base or the narrow neck, or the flask is tipped to pour.
+ * wide base or the narrow neck, or the flask is tipped to pour. Each slab's volume is spread evenly over the heights
+ * it spans, tipped, so the level rises smoothly with the fill, a trace included, rather than a slab's row at a time.
  */
 export function fillLevel(tilt: number, frac: number): number {
   if (levelCache.tilt !== tilt) {
     const c = Math.cos(tilt);
     const s = Math.sin(tilt);
     const slabs = SLABS.map(([x, y, w]) => [y * c - x * s, w] as const).sort((a, b) => a[0] - b[0]);
-    const heights = Float64Array.from(slabs, (sl) => sl[0]);
-    // the share of the volume below each slab's middle
-    const below = new Float64Array(slabs.length);
-    let total = 0;
-    for (const [, w] of slabs) total += w;
-    let acc = 0;
-    slabs.forEach(([, w], i) => {
-      below[i] = (acc + w / 2) / total;
-      acc += w;
-    });
+    // how far above and below its middle a tipped square slab reaches
+    const e = (STEP / 2) * (Math.abs(c) + Math.abs(s));
+    // the volume below a height is piecewise linear, bending where a slab starts or ends: walk those heights in
+    // order (the starts and the ends are each sorted already), adding up the volume as it goes
+    const n = slabs.length;
+    const heights = new Float64Array(2 * n);
+    const below = new Float64Array(2 * n);
+    let [i, j, slope, acc] = [0, 0, 0, 0];
+    let y = slabs[0][0] - e;
+    for (let k = 0; k < 2 * n; k++) {
+      const start = i < n && slabs[i][0] - e <= slabs[j][0] + e;
+      const yk = start ? slabs[i][0] - e : slabs[j][0] + e;
+      acc += slope * (yk - y);
+      y = yk;
+      heights[k] = yk;
+      below[k] = acc;
+      if (start) slope += slabs[i++][1] / (2 * e);
+      else slope -= slabs[j++][1] / (2 * e);
+    }
+    for (let k = 0; k < 2 * n; k++) below[k] /= acc;
     levelCache = { tilt, heights, below };
   }
   const { heights: h, below } = levelCache;
   const f = Math.max(0, Math.min(1, frac));
   if (f <= below[0]) return h[0];
   if (f >= below[below.length - 1]) return h[h.length - 1];
+  // the last height with no more than f below it, and the next, which has more
   let lo = 0;
   let hi = below.length - 1;
   while (hi - lo > 1) {
