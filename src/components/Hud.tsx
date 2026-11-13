@@ -238,9 +238,18 @@ export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; 
       ) : (
         <>
           <div className={hud.aim ? 'crosshair dim' : 'crosshair'} />
+          {/* each on its own side of the crosshair, whether or not the other's there */}
           <div className="hints">
-            {hud.press && <MouseHint side="left" />}
-            {hud.right && <MouseHint side="right" />}
+            {hud.press && (
+              <span className="left">
+                <MouseHint side="left" />
+              </span>
+            )}
+            {hud.right && (
+              <span className="right">
+                <MouseHint side="right" />
+              </span>
+            )}
           </div>
         </>
       )}
