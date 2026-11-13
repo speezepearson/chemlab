@@ -43,10 +43,14 @@ export type Pick =
   /** The OK on the message inside the cryopod. */
   | { kind: 'wake' };
 
-/** A faucet where it is: its spout, where its pipe meets the wall, and what it pours. */
+/**
+ * A faucet where it is: its spout, where its pipe meets the wall (or the top of its riser), and what it pours. One on
+ * an island has a `base`, where its riser stands on the counter; one with none comes out of a manifold on the wall.
+ */
 export interface FaucetSpot {
   spout: Vec3;
   wall: Vec3;
+  base?: Vec3;
   output: Fluid;
   /** The player's note, written above its knob; empty for none. */
   note: string;
@@ -3292,8 +3296,9 @@ class BlindsButton {
 }
 
 /**
- * The faucets: a manifold along a wall, and each faucet a pipe out over the counter, a knob of its color (the
- * solvent's clear, see View.update), and a spout.
+ * The faucets: a manifold along a wall, with each of its faucets a pipe out over the counter; and on each island, a
+ * chrome riser up from the counter with a pipe out over it. Each has a knob of its color (the solvent's clear, see
+ * View.update), and a spout.
  */
 function buildFaucets(
   scene: THREE.Scene,
@@ -3303,37 +3308,57 @@ function buildFaucets(
   if (!faucets.length) return { mats: [], notes: [] };
   const g = new THREE.Group();
   const at = (p: Vec3) => new THREE.Vector3(p.x, p.y, p.z);
-  const first = at(faucets[0].wall);
-  const last = at(faucets[faucets.length - 1].wall);
-  const along = last.clone().sub(first).normalize().multiplyScalar(60);
-  rod(g, chromeMat, first.clone().sub(along), last.clone().add(along), 6);
-  // the manifold's end caps, and brackets holding it to the wall
-  const out = new THREE.Vector3(faucets[0].spout.x - faucets[0].wall.x, 0, faucets[0].spout.z - faucets[0].wall.z).normalize();
-  for (const [end, s] of [[first, -1], [last, 1]] as const) {
-    const cap = new THREE.Mesh(unitSphere, chromeMat);
-    cap.position.copy(end).addScaledVector(along, s);
-    cap.scale.setScalar(6);
-    g.add(cap);
-    const foot = end.clone().addScaledVector(along, s * 0.5);
-    rod(g, darkMat, foot.clone().addScaledVector(out, -12), foot, 3);
-    const plate = new THREE.Mesh(unitCylinder, darkMat);
-    plate.position.copy(foot).addScaledVector(out, -12);
-    plate.scale.set(12, 3, 12);
-    plate.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), out);
-    g.add(plate);
+  const onWall = faucets.filter((fa) => !fa.base);
+  const out = onWall.length
+    ? new THREE.Vector3(onWall[0].spout.x - onWall[0].wall.x, 0, onWall[0].spout.z - onWall[0].wall.z).normalize()
+    : new THREE.Vector3();
+  if (onWall.length) {
+    const first = at(onWall[0].wall);
+    const last = at(onWall[onWall.length - 1].wall);
+    const along = last.clone().sub(first).normalize().multiplyScalar(60);
+    rod(g, chromeMat, first.clone().sub(along), last.clone().add(along), 6);
+    // the manifold's end caps, and brackets holding it to the wall
+    for (const [end, s] of [[first, -1], [last, 1]] as const) {
+      const cap = new THREE.Mesh(unitSphere, chromeMat);
+      cap.position.copy(end).addScaledVector(along, s);
+      cap.scale.setScalar(6);
+      g.add(cap);
+      const foot = end.clone().addScaledVector(along, s * 0.5);
+      rod(g, darkMat, foot.clone().addScaledVector(out, -12), foot, 3);
+      const plate = new THREE.Mesh(unitCylinder, darkMat);
+      plate.position.copy(foot).addScaledVector(out, -12);
+      plate.scale.set(12, 3, 12);
+      plate.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), out);
+      g.add(plate);
+    }
   }
   const notes: Label[] = [];
-  const mats = faucets.map(({ wall, spout }, i) => {
+  const mats = faucets.map(({ wall, spout, base }, i) => {
     const elbow = new THREE.Vector3(spout.x, wall.y, spout.z);
     pickables.set(rod(g, chromeMat, at(wall), elbow, 3.5), { kind: 'faucet', i });
     pickables.set(rod(g, chromeMat, elbow, new THREE.Vector3(spout.x, spout.y + 6, spout.z), 3), { kind: 'faucet', i, spout: true });
-    // a collar where it leaves the manifold
-    const collar = new THREE.Mesh(unitCylinder, chromeMat);
-    collar.position.copy(at(wall)).addScaledVector(out, 7);
-    collar.scale.set(5, 6, 5);
-    collar.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), out);
-    g.add(collar);
-    pickables.set(collar, { kind: 'faucet', i });
+    if (base) {
+      // a riser up from a flange on the counter, rounded over at its top
+      pickables.set(rod(g, chromeMat, at(base), at(wall), 6), { kind: 'faucet', i });
+      const flange = new THREE.Mesh(unitCylinder, chromeMat);
+      flange.position.set(base.x, base.y + 1.5, base.z);
+      flange.scale.set(16, 3, 16);
+      g.add(flange);
+      pickables.set(flange, { kind: 'faucet', i });
+      const top = new THREE.Mesh(unitSphere, chromeMat);
+      top.position.copy(at(wall));
+      top.scale.setScalar(6);
+      g.add(top);
+      pickables.set(top, { kind: 'faucet', i });
+    } else {
+      // a collar where it leaves the manifold
+      const collar = new THREE.Mesh(unitCylinder, chromeMat);
+      collar.position.copy(at(wall)).addScaledVector(out, 7);
+      collar.scale.set(5, 6, 5);
+      collar.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), out);
+      g.add(collar);
+      pickables.set(collar, { kind: 'faucet', i });
+    }
     notes.push(new Label(g, elbow.clone().setY(elbow.y + 16 + LABEL_H / 2)));
     const tip = new THREE.Mesh(new THREE.CylinderGeometry(5, 4, 7, 16), chromeMat);
     tip.position.set(spout.x, spout.y + 3.5, spout.z);

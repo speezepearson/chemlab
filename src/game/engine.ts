@@ -12,7 +12,7 @@ import { chime } from './chime';
 import { diverter, type Diverter } from './diverter';
 import { CAP, DELIVERY, FILL_RATE, FLASK_L, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
-import { FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
+import { FAUCETS, WALL_FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
 import { Flask, Vessel, fluidColor, roomFor, sustenance, transfer, volume, volumeUnit } from './flask';
 import { History, arrange, arrangement, type Arrangement } from './history';
@@ -275,6 +275,13 @@ const FAUCET_NECK = 30;
 const FAUCET_Z0 = 3.5 * CELL;
 const FAUCET_GAP = CELL;
 const FAUCET_OUT = CELL / 2;
+/**
+ * An island's faucet rises from the island's middle, a corner of four cells, and reaches out over the middle of one
+ * of them, this far along x and along z (see CELL).
+ */
+const ISLAND_FAUCET_OUT = CELL / 2;
+/** How thick an island faucet's riser is, round, for bumping into: its radius. */
+const RISER_R = 6;
 /** How long a note stays up, in ms. */
 const NOTE_MS = 1600;
 /** A flask's outline's area, in local units squared, for how exposed its fluid is (see exposures). */
@@ -398,15 +405,26 @@ export class GameEngine {
     private cb: EngineCallbacks,
     private preset: Preset = DEFAULT_PRESET,
   ) {
-    // along the right wall, left to right as the player faces it
+    // the colors' along the right wall, left to right as the player faces it; then the solvent's, one on each island
+    const islands = COUNTERS.filter((c) => c.island);
     this.faucets = FAUCETS.map((start, i) => {
-      const z = FAUCET_Z0 + i * FAUCET_GAP;
+      const output = faucetOutput(start, chem);
+      if (i < WALL_FAUCETS) {
+        const z = FAUCET_Z0 + i * FAUCET_GAP;
+        return {
+          start, output, note: '',
+          spout: { x: ROOM.x1 - FAUCET_OUT, y: FAUCET_Y, z },
+          wall: { x: ROOM.x1 - 14, y: FAUCET_Y + FAUCET_NECK, z },
+        };
+      }
+      const c = islands[i - WALL_FAUCETS];
+      const x = (c.x0 + c.x1) / 2;
+      const z = (c.z0 + c.z1) / 2;
       return {
-        start,
-        spout: { x: ROOM.x1 - FAUCET_OUT, y: FAUCET_Y, z },
-        wall: { x: ROOM.x1 - 14, y: FAUCET_Y + FAUCET_NECK, z },
-        output: faucetOutput(start, chem),
-        note: '',
+        start, output, note: '',
+        spout: { x: x + ISLAND_FAUCET_OUT, y: FAUCET_Y, z: z + ISLAND_FAUCET_OUT },
+        wall: { x, y: FAUCET_Y + FAUCET_NECK, z },
+        base: { x, y: LIFT, z },
       };
     });
     this.view = new View(canvas, this.faucets, EYE);
@@ -1032,7 +1050,7 @@ export class GameEngine {
     // while the airlock's doors are open, its doorway and chamber take the front wall's place
     const room = this.wake === 'closed' ? roomBoxes(ROOM) : [...roomBoxes(ROOM, false), ...airlockBoxes()];
     const riders = h?.kind === 'scale' ? new Set(h.sc.load.map((l) => l.f)) : new Set<Flask>();
-    const out: Box[] = [...room, ...COUNTER_BOXES];
+    const out: Box[] = [...room, ...COUNTER_BOXES, ...this.risers()];
     for (const f of this.flasks) if (!(h?.kind === 'flask' && h.f === f) && !riders.has(f)) out.push(flaskBox(f));
     const gone = (t: Tool) => (h?.kind === 'tool' && h.t === t) || t === away;
     for (const t of this.tools) if (!gone(t)) out.push(toolBox(t));
@@ -1045,6 +1063,15 @@ export class GameEngine {
       }
     if (bases) for (const t of this.tools) if (!gone(t)) for (const st of toolStands(t)) out.push(standBase(st));
     return out;
+  }
+
+  /** The islands' faucets' risers, each a round post from the counter up to its knob. */
+  private risers(): Box[] {
+    return this.faucets.flatMap(({ base, wall }) => {
+      if (!base) return [];
+      const hy = (wall.y - base.y) / 2;
+      return [{ x: base.x, y: base.y + hy, z: base.z, yaw: 0, hx: RISER_R, hy, hz: RISER_R, round: true }];
+    });
   }
 
   private eye(): Vec3 {
