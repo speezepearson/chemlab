@@ -425,6 +425,11 @@ class FluidMesh {
       g.computeBoundingBox();
       const m = new THREE.Mesh(g, this.mat);
       m.castShadow = true;
+      // a see-through fluid is drawn before every other see-through thing, so always before the glass it's in, which
+      // is then seen over it. Left to three.js, the two are drawn farthest first, by the middles of their shapes,
+      // which are nearly in the same place: so which came first, and with it how dark the fluid looked through the
+      // glass's shine, flipped as the eye passed the level of those middles
+      m.renderOrder = -1;
       parent.add(m);
       this.meshes.push(m);
       // drawn only in the frame itself: never hit, outlined, reflected or in the end's white void
