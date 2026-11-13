@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -12,9 +13,9 @@ import {
 } from './bodies';
 import { SPECIES, TARGET } from '../chem/species';
 import { CAP, DELIVERY, FLASK_L, GOAL_L, GOAL_PURITY, GOAL_TARGET, TRACE } from './config';
-import { Vessel, fluidAlpha, fluidRGB, volume, type Flask } from './flask';
+import { Flask, Vessel, fluidAlpha, fluidRGB, volume } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
-import { SCALE_SHAPE, type Scale } from './scale';
+import { SCALE_SHAPE, Scale } from './scale';
 import { COUNTERS, LIFT, ROOM, groundAt, toWorld, type Vec3 } from './space';
 import { PORT_FRAC, PORT_WALL, porthole, type Porthole } from './porthole';
 import { AIRLOCK, POD } from './airlock';
@@ -24,8 +25,9 @@ import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import {
   clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
-  type Hose, type Piece, type Tool,
+  type Hose, type Piece, Tool,
 } from './tools';
+import { CABINET, CABINET_BUILD, type Stock, type Stocked } from './cabinet';
 
 /** What the crosshair is on. */
 export type Pick =
@@ -41,12 +43,23 @@ export type Pick =
   /** The button by the porthole that shuts its blinds, or opens them. */
   | { kind: 'blinds' }
   /** The OK on the message inside the cryopod. */
-  | { kind: 'wake' };
+  | { kind: 'wake' }
+  /**
+   * The equipment cabinet itself: its shelves, uprights, back and top; or if `front`, its open front, which is only
+   * hit while something's held, to put it in.
+   */
+  | { kind: 'cabinet'; front?: boolean }
+  /** One of the things standing in the equipment cabinet: the one in its kind's `slot`. */
+  | { kind: 'stock'; item: Stocked; slot: number };
 
-/** A faucet where it is: its spout, where its pipe meets the wall, and what it pours. */
+/**
+ * A faucet where it is: its spout, where its pipe meets the wall (or the top of its riser), and what it pours. One on
+ * an island has a `base`, where its riser stands on the counter; one with none comes out of a manifold on the wall.
+ */
 export interface FaucetSpot {
   spout: Vec3;
   wall: Vec3;
+  base?: Vec3;
   output: Fluid;
   /** The player's note, written above its knob; empty for none. */
   note: string;
@@ -63,6 +76,8 @@ export interface Frame {
   /** Each hose, from the spout or faucet it's pulled out of, with what's running through it. */
   hoses: readonly { h: Hose; from: Vec3; fluid: Fluid | null }[];
   faucets: readonly FaucetSpot[];
+  /** What's in the equipment cabinet. */
+  stock: Stock;
   streams: readonly { from: Vec3; toY: number; fluid: Fluid; flow: number }[];
   /**
    * Streams for lining things up: gray where a held flask would pour, green for what will line up when what's held is
@@ -2053,12 +2068,12 @@ class ToolView {
     const label = sh.tanks[1].label;
     if (label) printed(art, label.join(' '), x, STATION.labelY, face + 0.1, 11);
     this.labels.push(new Label(art, v3(x, tankNoteY(t, 1))));
-    // the gauge beside the reservoir: an LCD stack of segments, as tall as the pane, on a dark strip
-    block(art, darkMat, g.x0 - 2, g.x1 + 2, -2, H + 2, face, face + 1);
+    // the gauge beside the reservoir: an LCD stack of segments, as tall as the pane, each set on its own into the
+    // station's face
     const seg = H / g.segments;
     for (let i = 0; i < g.segments; i++) {
       const mat = new THREE.MeshStandardMaterial({ color: SEGMENT_COLORS.off, roughness: 0.4 });
-      block(art, mat, g.x0, g.x1, H - (i + 1) * seg + 1, H - i * seg - 1, face + 1, face + 1.4).castShadow = false;
+      block(art, mat, g.x0, g.x1, H - (i + 1) * seg + 1, H - i * seg - 1, face, face + 0.4).castShadow = false;
       this.segments.push(mat);
     }
 
@@ -3292,8 +3307,9 @@ class BlindsButton {
 }
 
 /**
- * The faucets: a manifold along a wall, and each faucet a pipe out over the counter, a knob of its color (the
- * solvent's clear, see View.update), and a spout.
+ * The faucets: a manifold along a wall, with each of its faucets a pipe out over the counter; and on each island, a
+ * chrome riser up from the counter with a pipe out over it. Each has a knob of its color (the solvent's clear, see
+ * View.update), and a spout.
  */
 function buildFaucets(
   scene: THREE.Scene,
@@ -3303,37 +3319,57 @@ function buildFaucets(
   if (!faucets.length) return { mats: [], notes: [] };
   const g = new THREE.Group();
   const at = (p: Vec3) => new THREE.Vector3(p.x, p.y, p.z);
-  const first = at(faucets[0].wall);
-  const last = at(faucets[faucets.length - 1].wall);
-  const along = last.clone().sub(first).normalize().multiplyScalar(60);
-  rod(g, chromeMat, first.clone().sub(along), last.clone().add(along), 6);
-  // the manifold's end caps, and brackets holding it to the wall
-  const out = new THREE.Vector3(faucets[0].spout.x - faucets[0].wall.x, 0, faucets[0].spout.z - faucets[0].wall.z).normalize();
-  for (const [end, s] of [[first, -1], [last, 1]] as const) {
-    const cap = new THREE.Mesh(unitSphere, chromeMat);
-    cap.position.copy(end).addScaledVector(along, s);
-    cap.scale.setScalar(6);
-    g.add(cap);
-    const foot = end.clone().addScaledVector(along, s * 0.5);
-    rod(g, darkMat, foot.clone().addScaledVector(out, -12), foot, 3);
-    const plate = new THREE.Mesh(unitCylinder, darkMat);
-    plate.position.copy(foot).addScaledVector(out, -12);
-    plate.scale.set(12, 3, 12);
-    plate.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), out);
-    g.add(plate);
+  const onWall = faucets.filter((fa) => !fa.base);
+  const out = onWall.length
+    ? new THREE.Vector3(onWall[0].spout.x - onWall[0].wall.x, 0, onWall[0].spout.z - onWall[0].wall.z).normalize()
+    : new THREE.Vector3();
+  if (onWall.length) {
+    const first = at(onWall[0].wall);
+    const last = at(onWall[onWall.length - 1].wall);
+    const along = last.clone().sub(first).normalize().multiplyScalar(60);
+    rod(g, chromeMat, first.clone().sub(along), last.clone().add(along), 6);
+    // the manifold's end caps, and brackets holding it to the wall
+    for (const [end, s] of [[first, -1], [last, 1]] as const) {
+      const cap = new THREE.Mesh(unitSphere, chromeMat);
+      cap.position.copy(end).addScaledVector(along, s);
+      cap.scale.setScalar(6);
+      g.add(cap);
+      const foot = end.clone().addScaledVector(along, s * 0.5);
+      rod(g, darkMat, foot.clone().addScaledVector(out, -12), foot, 3);
+      const plate = new THREE.Mesh(unitCylinder, darkMat);
+      plate.position.copy(foot).addScaledVector(out, -12);
+      plate.scale.set(12, 3, 12);
+      plate.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), out);
+      g.add(plate);
+    }
   }
   const notes: Label[] = [];
-  const mats = faucets.map(({ wall, spout }, i) => {
+  const mats = faucets.map(({ wall, spout, base }, i) => {
     const elbow = new THREE.Vector3(spout.x, wall.y, spout.z);
     pickables.set(rod(g, chromeMat, at(wall), elbow, 3.5), { kind: 'faucet', i });
     pickables.set(rod(g, chromeMat, elbow, new THREE.Vector3(spout.x, spout.y + 6, spout.z), 3), { kind: 'faucet', i, spout: true });
-    // a collar where it leaves the manifold
-    const collar = new THREE.Mesh(unitCylinder, chromeMat);
-    collar.position.copy(at(wall)).addScaledVector(out, 7);
-    collar.scale.set(5, 6, 5);
-    collar.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), out);
-    g.add(collar);
-    pickables.set(collar, { kind: 'faucet', i });
+    if (base) {
+      // a riser up from a flange on the counter, rounded over at its top
+      pickables.set(rod(g, chromeMat, at(base), at(wall), 6), { kind: 'faucet', i });
+      const flange = new THREE.Mesh(unitCylinder, chromeMat);
+      flange.position.set(base.x, base.y + 1.5, base.z);
+      flange.scale.set(16, 3, 16);
+      g.add(flange);
+      pickables.set(flange, { kind: 'faucet', i });
+      const top = new THREE.Mesh(unitSphere, chromeMat);
+      top.position.copy(at(wall));
+      top.scale.setScalar(6);
+      g.add(top);
+      pickables.set(top, { kind: 'faucet', i });
+    } else {
+      // a collar where it leaves the manifold
+      const collar = new THREE.Mesh(unitCylinder, chromeMat);
+      collar.position.copy(at(wall)).addScaledVector(out, 7);
+      collar.scale.set(5, 6, 5);
+      collar.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), out);
+      g.add(collar);
+      pickables.set(collar, { kind: 'faucet', i });
+    }
     notes.push(new Label(g, elbow.clone().setY(elbow.y + 16 + LABEL_H / 2)));
     const tip = new THREE.Mesh(new THREE.CylinderGeometry(5, 4, 7, 16), chromeMat);
     tip.position.set(spout.x, spout.y + 3.5, spout.z);
@@ -3383,6 +3419,150 @@ void main() {
   vUv = uv;
   gl_Position = vec4(position.xy, 0.0, 1.0);
 }`;
+
+/* ---------------- the equipment cabinet ---------------- */
+
+/** The cabinet's painted steel, outside and in, and its darker back panel. */
+const cabinetMat = new THREE.MeshStandardMaterial({ color: 0xb4bdb9, metalness: 0.35, roughness: 0.55 });
+const cabinetBackMat = new THREE.MeshStandardMaterial({ color: 0x4d5653, metalness: 0.3, roughness: 0.7 });
+
+/**
+ * The equipment cabinet (see cabinet.ts): open steel shelving on a dark plinth, and what stands on its shelves. Each
+ * kind is drawn from one view of a new one of it, made once, whose meshes are drawn again in each filled slot as an
+ * instanced mesh: there are over a hundred things in it, and none of them changes while it's there.
+ */
+class CabinetView {
+  /** Each kind's meshes, as instanced meshes, with where each mesh is in the kind's own frame. */
+  private kinds = new Map<Stocked, { meshes: { im: THREE.InstancedMesh; rel: THREE.Matrix4 }[]; drawn: number[]; proxy: THREE.Group }>();
+  /** What the stock was when last drawn, to redraw only when it changes. */
+  private key = '';
+
+  constructor(scene: THREE.Scene, pickables: Map<THREE.Object3D, Pick>) {
+    const C = CABINET;
+    const B = CABINET_BUILD;
+    const g = new THREE.Group();
+    const box = (mat: THREE.Material, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), mat);
+      m.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+      m.receiveShadow = m.castShadow = true;
+      g.add(m);
+      pickables.set(m, { kind: 'cabinet' });
+      return m;
+    };
+    const kick = new THREE.MeshStandardMaterial({ color: 0x1e2322, roughness: 0.8, metalness: 0.1 });
+    // a plinth set in a little at the foot, under a panel to the first shelf
+    box(kick, C.x0, C.x1, 0, 48, C.z0, C.z1 - 10);
+    box(cabinetMat, C.x0, C.x1, 48, B.base, C.z0, C.z1);
+    box(cabinetBackMat, C.x0, C.x1, B.base, C.y1, C.z0, C.z0 + B.back);
+    box(cabinetMat, C.x0, C.x1, C.y1 - B.top / 2, C.y1, C.z0, C.z1);
+    // the uprights: one at each end and one between each two bays
+    const ends = [C.x0, ...C.bays.map((b) => b.x1)];
+    for (const x of ends) box(cabinetMat, x, x + B.side, B.base, C.y1 - B.top / 2, C.z0, C.z1);
+    // the shelves, each under what stands on it (the first is the plinth's top)
+    for (const sh of C.shelves) if (sh.y > B.base) box(cabinetMat, sh.x0, sh.x1, sh.y - B.board, sh.y, C.z0 + B.back, C.z1 - 2);
+    // its open front, never drawn, to aim what's held at to put it in (see View.pick)
+    const front = new THREE.Mesh(new THREE.PlaneGeometry(C.x1 - C.x0, C.y1 - B.base), new THREE.MeshBasicMaterial());
+    front.position.set((C.x0 + C.x1) / 2, (B.base + C.y1) / 2, C.z1);
+    front.visible = false;
+    g.add(front);
+    pickables.set(front, { kind: 'cabinet', front: true });
+    scene.add(g);
+
+    // what stands on the shelves, each kind drawn from a view of a new one, empty and shut
+    const proto = new THREE.Scene();
+    const none = new Map<THREE.Object3D, Pick>();
+    for (const k of Object.keys(C.slots) as Stocked[]) {
+      let root: THREE.Object3D;
+      if (k === 'flask') {
+        const v = new FlaskView(new Flask(CAP), proto, none);
+        v.update(new Set());
+        root = v.root;
+      } else if (k === 'scale') {
+        const v = new ScaleView(new Scale(), proto, none);
+        v.update(false, null);
+        root = v.root;
+      } else {
+        const v = new ToolView(new Tool(k, -1), proto, none);
+        v.update(0, [], new Set());
+        root = v.root;
+      }
+      root.updateMatrixWorld(true);
+      const slots = C.slots[k];
+      const proxy = new THREE.Group();
+      const meshes: { im: THREE.InstancedMesh; rel: THREE.Matrix4 }[] = [];
+      // its meshes in its own frame, those of each material made one where they can be, to draw fewer of them
+      const byMat = new Map<THREE.Material | THREE.Material[], THREE.BufferGeometry[]>();
+      root.traverseVisible((o) => {
+        if (!(o instanceof THREE.Mesh) || o instanceof THREE.InstancedMesh || !o.layers.isEnabled(0) || o.userData.bent) return;
+        const geom = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(o.matrixWorld);
+        for (const name of Object.keys(geom.attributes)) if (!['position', 'normal', 'uv', 'color'].includes(name)) geom.deleteAttribute(name);
+        geom.clearGroups();
+        byMat.set(o.material, [...(byMat.get(o.material) ?? []), geom]);
+      });
+      for (const [mat, geoms] of byMat) {
+        // geometries can be made one only if they have the same attributes
+        const sets = new Map<string, THREE.BufferGeometry[]>();
+        for (const geom of geoms) {
+          const key = Object.keys(geom.attributes).sort().join();
+          sets.set(key, [...(sets.get(key) ?? []), geom]);
+        }
+        for (const set of sets.values()) {
+          const geom = set.length > 1 ? (mergeGeometries(set) ?? set[0]) : set[0];
+          const im = new THREE.InstancedMesh(geom, mat, slots.length);
+          im.frustumCulled = false;
+          im.count = 0;
+          g.add(im);
+          pickables.set(im, { kind: 'stock', item: k, slot: -1 });
+          meshes.push({ im, rel: new THREE.Matrix4() });
+          // the same, for outlining one of them alone: drawn only into the outline's mask (see Outliner)
+          const m = new THREE.Mesh(geom, mat);
+          m.layers.disableAll();
+          proxy.add(m);
+        }
+      }
+      scene.add(proxy);
+      this.kinds.set(k, { meshes, drawn: [], proxy });
+    }
+  }
+
+  /** Draw what's in the cabinet, if it's changed since it was last drawn. */
+  update(stock: Stock): void {
+    const key = JSON.stringify(stock);
+    if (key === this.key) return;
+    this.key = key;
+    const at = new THREE.Matrix4();
+    const m = new THREE.Matrix4();
+    for (const [k, v] of this.kinds) {
+      v.drawn = stock[k].flatMap((filled, i) => (filled ? [i] : []));
+      for (const { im, rel } of v.meshes) {
+        v.drawn.forEach((slot, j) => {
+          const p = CABINET.slots[k][slot];
+          at.makeRotationY(p.yaw).setPosition(p.x, p.y, p.z);
+          im.setMatrixAt(j, m.multiplyMatrices(at, rel));
+        });
+        im.count = v.drawn.length;
+        im.instanceMatrix.needsUpdate = true;
+        im.computeBoundingSphere();
+      }
+    }
+  }
+
+  /** Which slot the `instance`th drawn one of a kind is in. */
+  slotOf(k: Stocked, instance: number): number {
+    return this.kinds.get(k)?.drawn[instance] ?? -1;
+  }
+
+  /** The meshes of the one in a kind's slot, for its outline. */
+  outline(k: Stocked, slot: number): THREE.Object3D[] {
+    const v = this.kinds.get(k);
+    const p = CABINET.slots[k][slot];
+    if (!v || !p) return [];
+    v.proxy.position.set(p.x, p.y, p.z);
+    v.proxy.rotation.y = p.yaw;
+    v.proxy.updateMatrixWorld(true);
+    return v.proxy.children;
+  }
+}
 
 /**
  * The outline round whatever the crosshair is on (see OUTLINE in outline.ts), drawn over the finished frame. Its
@@ -3534,6 +3714,7 @@ export class View {
   private alarmButton: AlarmButton;
   private blindsButton: BlindsButton;
   private airlock: AirlockView;
+  private cabinet: CabinetView;
   /** The room's lights, and how bright each is, to be dimmed while the cryopod is shut (see AirlockLook.dark). */
   private roomLights: { light: THREE.Light; base: number }[] = [];
   private raycaster = new THREE.Raycaster();
@@ -3575,6 +3756,7 @@ export class View {
     this.alarmButton = new AlarmButton(this.scene, this.pickables);
     this.blindsButton = new BlindsButton(this.scene, this.pickables);
     this.airlock = new AirlockView(this.scene, this.pickables, eye);
+    this.cabinet = new CabinetView(this.scene, this.pickables);
     // what metal and glass reflect: the room itself, seen from its middle at eye height, before anything's in it, and
     // again once its surfaces have their textures (see textures.ts)
     const reflect = () => {
@@ -3658,6 +3840,7 @@ export class View {
     this.alarmButton.update(fr.alarmsOff);
     this.blindsButton.update(fr.blindsShut);
     this.airlock.update(fr.airlock);
+    this.cabinet.update(fr.stock);
     // the beacon turns slowly, on sim time like everything else in the lab
     const pulse = 0.5 + 0.5 * Math.sin(fr.clock * 2.4);
     const lit = 1 - fr.airlock.dark;
@@ -3784,6 +3967,10 @@ export class View {
   /** The outline round everything that's part of what the crosshair is on (see Outliner). */
   private renderOutline(hot: Pick | null): void {
     if (!hot) return;
+    if (hot.kind === 'stock') {
+      this.outliner.render(this.renderer, this.scene, this.camera, this.cabinet.outline(hot.item, hot.slot));
+      return;
+    }
     const thing = thingOf(hot);
     if (thing === null) return;
     const meshes = [...this.pickables].filter(([, p]) => thingOf(p) === thing).map(([o]) => o);
@@ -3929,7 +4116,9 @@ export class View {
     const hits = this.raycaster
       .intersectObjects([...this.pickables.keys()], false)
       .map((h) => ({ h, p: this.pickables.get(h.object)! }))
-      .filter(({ p }) => p && !(skip && Object.values(p).includes(skip)));
+      .filter(({ p }) => p && !(skip && Object.values(p).includes(skip)))
+      // the cabinet's open front only while something's held (see CabinetView)
+      .filter(({ p }) => !(p.kind === 'cabinet' && p.front && !skip));
     if (!hits.length) return null;
     // a tool's hull is hit before its parts: take the part the ray goes on to hit just behind, if there is one
     let best = hits[0];
@@ -3939,6 +4128,12 @@ export class View {
       if (part) best = part;
     }
     const { point, distance } = best.h;
+    // one of the things in the cabinet: which, of those drawn by the one mesh
+    if (best.p.kind === 'stock') {
+      const slot = this.cabinet.slotOf(best.p.item, best.h.instanceId ?? -1);
+      if (slot < 0) return null;
+      return { ...best.p, slot, point: { x: point.x, y: point.y, z: point.z }, distance };
+    }
     return { ...best.p, point: { x: point.x, y: point.y, z: point.z }, distance };
   }
 

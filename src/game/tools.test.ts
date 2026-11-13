@@ -437,8 +437,12 @@ describe('cryostabilizer station', () => {
   it('gauges the reservoir: green for what it holds, red for what the goal still wants, dark above', () => {
     // ten segments of 10 each; 34 held of a goal of 72
     expect(gaugeSegments(34, 72, 100, 10)).toEqual(['held', 'held', 'held', 'wanted', 'wanted', 'wanted', 'wanted', 'wanted', 'off', 'off']);
-    // past the goal, nothing's wanted
-    expect(gaugeSegments(80, 72, 100, 10).filter((g) => g === 'wanted')).toEqual([]);
+    // the goal's own segment stays red until the goal is reached, and turns green just as it is
+    expect(gaugeSegments(71.9, 72, 100, 10)[7]).toBe('wanted');
+    expect(gaugeSegments(72, 72, 100, 10)).toEqual([...Array(8).fill('held'), 'off', 'off']);
+    // past the goal, nothing's wanted, and segments above it are green only when wholly held
+    expect(gaugeSegments(85, 72, 100, 10)).toEqual([...Array(8).fill('held'), 'off', 'off']);
+    expect(gaugeSegments(90, 72, 100, 10)).toEqual([...Array(9).fill('held'), 'off']);
   });
 
   it("is a block of the wall lined up with the wall's panels", () => {

@@ -58,6 +58,12 @@ export const SINK_D = CELL;
  * grid cells: each is ten cells by four.
  */
 const ISLAND = { w: 10 * CELL, d: 4 * CELL, x0: -4 * CELL, z0: 6 * CELL, dx: 13 * CELL, dz: 8 * CELL, cols: 2, rows: 3 };
+/**
+ * Where the equipment cabinet stands (see cabinet.ts): against the back wall from the left wall, eighteen grid cells
+ * along it and three out from it, a cell further than the counter, and as tall as its shelves need. The back counter
+ * runs on from its end.
+ */
+export const CABINET_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 18 * CELL, z0: ROOM.z0, z1: ROOM.z0 + 3 * CELL };
 /** A counter: its x and z extents, and whether it's an island out in the room rather than a sink counter on a wall. */
 export interface Counter {
   x0: number;
@@ -67,11 +73,12 @@ export interface Counter {
   island?: boolean;
 }
 /**
- * The counters, all LIFT high, as x and z extents: one along the back wall under the old bench, one along the right
- * wall under the faucets, and a grid of islands out in the room, like an undergraduate lab's benches.
+ * The counters, all LIFT high, as x and z extents: one along the back wall under the old bench, from the equipment
+ * cabinet on, one along the right wall under the faucets, and a grid of islands out in the room, like an
+ * undergraduate lab's benches.
  */
 export const COUNTERS: readonly Counter[] = [
-  { x0: ROOM.x0, x1: ROOM.x1 - SINK_D, z0: ROOM.z0, z1: ROOM.z0 + COUNTER_D },
+  { x0: CABINET_AREA.x1, x1: ROOM.x1 - SINK_D, z0: ROOM.z0, z1: ROOM.z0 + COUNTER_D },
   { x0: ROOM.x1 - SINK_D, x1: ROOM.x1, z0: ROOM.z0, z1: ROOM.z1 },
   ...Array.from({ length: ISLAND.cols * ISLAND.rows }, (_, i) => {
     const x0 = ISLAND.x0 + (i % ISLAND.cols) * ISLAND.dx;

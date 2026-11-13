@@ -329,13 +329,15 @@ export const STATION_FUNNEL: Piece[] = [
 
 /**
  * What each of the station's gauge's segments shows, bottom up, with the reservoir holding `held` of `cap` and the
- * goal at `goal` (all in molecules): lit green if it's wholly below what's held, flashing red if any of it is below
- * the goal, and dark otherwise.
+ * goal at `goal` (all in molecules): lit green once what's held reaches its top, or the goal if that's lower, so the
+ * last red one turns green just as the goal is reached; flashing red if any of it is below the goal; dark otherwise.
  */
 export function gaugeSegments(held: number, goal: number, cap: number, n = STATION.gauge.segments): ('held' | 'wanted' | 'off')[] {
-  return Array.from({ length: n }, (_, i) =>
-    ((i + 1) / n) * cap <= held ? 'held' : (i / n) * cap < goal ? 'wanted' : 'off',
-  );
+  return Array.from({ length: n }, (_, i) => {
+    const below = (i / n) * cap < goal;
+    const top = ((i + 1) / n) * cap;
+    return held >= (below ? Math.min(top, goal) : top) ? 'held' : below ? 'wanted' : 'off';
+  });
 }
 /** How much the station's funnel holds, by volume: as much as it's drawn to hold (see SPACE_PER_ATOM), about 0.6 flask. */
 export const INTAKE_CAP = Math.round(spaceOf(STATION_FUNNEL) / SPACE_PER_ATOM);
