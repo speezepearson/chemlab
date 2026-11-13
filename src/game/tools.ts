@@ -527,6 +527,13 @@ export const THERMOMETER_ROD = {
 export const BULB_Y = (THERMOMETER_ROD.bulb.y0 + THERMOMETER_ROD.bulb.y1) / 2;
 
 /**
+ * The tools that are dipped (see Tool.bath): a wicking strip and the thermometers. They have no tanks; held with the
+ * crosshair on an open top, one hovers upright over it, the right button lowers it in, and the left stands it in it.
+ */
+export const DIPPERS: readonly ToolKind[] = ['strip', 'thermometer', 'thermometerWide'];
+export const isDipper = (kind: ToolKind): boolean => DIPPERS.includes(kind);
+
+/**
  * A swell bulb (see SHAPES.dilatometer): a squat round bulb `w` across and `h` tall, over a little sump, under a
  * narrow neck (see ToolShape.neck). The neck holds about a fifth of what the bulb does, so fluid that fills the bulb
  * and swells by a twentieth climbs a quarter of the neck. The two bulbs stand pressed together like the letters
@@ -550,38 +557,51 @@ export function neckShare(vol: number): number {
 }
 
 /**
- * How a wicking strip behaves (see SHAPES.strip and Tool.wick). Its paper stands up in a shallow glass tray; a spot of
- * a sample is dabbed onto it at its origin (see Tool.dab), and what's in the tray, the carrier, is drawn up the paper,
- * carrying what's on it along at each species' own pace (see Bed):
+ * How a wicking strip behaves (see SHAPES.strip and Tool.wick). It's bare paper, hanging from a clip, its foot cut to
+ * a point. Touched to a fluid, its foot takes a spot of it (see Tool.touch); stood in a fluid, it drinks it, the
+ * carrier, up the paper, carrying what's on it along at each species' own pace (see Bed):
  * - cap: how much the paper holds wet from end to end, by volume: a hundredth of a flask. Soaking a share d of it
- *   (see Tool.soaked) draws d times this from the tray;
- * - spot: the most a dab puts on it, by volume: a tenth of cap;
+ *   (see Tool.soaked) draws d times this from what its foot is in;
+ * - spot: what a touch puts on it, by volume: a tenth of cap; and spots, how many spots' worth it takes in all;
  * - time: how long the paper takes to soak through, in sim seconds, with carrier enough: quickly at first and ever
  *   more slowly, as paper wicks, as the square root of the time;
  * - drag: the drag at which a molecule doesn't move at all (see STRIP_RUN);
  * - dry: how long the paper takes to dry once it's soaked through, in sim seconds;
  * - cells: how many stretches the paper is modelled as, from its foot to its top, one local unit each (see Tool.paper);
- * - origin: which of them the spot goes on: the one about 0.12 of the way up (see STRIP_ORIGIN), above the tray's rim;
+ *   the spot goes on the first, at the foot;
  * - spread: the share of a species on each stretch that's left behind each time it moves on a stretch (see Tool.wick),
  *   which is all that widens a band: after n moves it's about √(n · spread · (1 − spread)) stretches wide;
  * - ink: how strongly what's on it shows (see stripInk), and tint, how much less strongly single atoms do;
  * - scorch: the temperatures from which what it takes up starts to brown the paper, and at which it's charred through;
- * - paper: the paper itself, in local units: reaching w either side of the middle, from its foot, just above the
- *   tray's floor, `len` up, at z, toward the back of the tray;
- * - tray: the tray, reaching w either side of the middle, h deep and d front to back inside.
+ * - paper: the paper itself, in local units, y down from the top of its clip: reaching w either side of the middle,
+ *   from `top` down `len` to its foot, the last `point` of it narrowing to a point there;
+ * - clip: the clip it hangs from, at its top, reaching w either side of the middle, h down from its top, d front to
+ *   back: what its stand holds.
  */
 export const STRIP = {
-  cap: CAP / 100, spot: CAP / 1000, time: 20, drag: 34, dry: 3, cells: 108, origin: 12, spread: 0.05, ink: 33, tint: 0.4,
+  cap: CAP / 100, spot: CAP / 1000, spots: 3, time: 20, drag: 34, dry: 3, cells: 108, spread: 0.05, ink: 33, tint: 0.4,
   scorch: { from: 2, to: 6 },
-  paper: { w: 9, foot: 4, len: 108, z: -4.5 },
-  tray: { w: 20, h: 5, d: 16 },
+  paper: { w: 6, top: 10, len: 108, point: 6 },
+  clip: { w: 4.5, h: 15, d: 4 },
 };
 
-/** Where on a wicking strip's paper the spot goes, as a share of its length from its foot: its origin cell's middle. */
-export const STRIP_ORIGIN = (STRIP.origin + 0.5) / STRIP.cells;
+/** Where a wicking strip's foot is, in its own frame (y down from its top): the tip of its paper. */
+export const STRIP_FOOT = STRIP.paper.top + STRIP.paper.len;
 
-/** How much a wicking strip's tray holds, by volume: as much as it's drawn to hold (see SPACE_PER_ATOM), about 0.02 flask. */
-export const TRAY_CAP = Math.round((2 * STRIP.tray.w * STRIP.tray.d * STRIP.tray.h) / SPACE_PER_ATOM);
+/**
+ * Where a dipper's foot is, in its own frame (y down from its top): what's dipped, and what's in a fluid or not (see
+ * bathAt): a thermometer's bulb's middle, or the middle of a wicking strip's first stretch, at the tip of its paper.
+ */
+export const footY = (kind: ToolKind): number => (kind === 'strip' ? STRIP_FOOT - 0.5 : BULB_Y);
+
+/**
+ * The dish (see SHAPES.dish): a shallow open glass tray, reaching w either side of its middle, h deep and d front to
+ * back inside, on a little base `base` tall, for its stand to clamp.
+ */
+export const DISH = { w: 20, h: 5, d: 16, base: 13 };
+
+/** How much the dish holds, by volume: as much as it's drawn to hold (see SPACE_PER_ATOM), about 0.05 flask. */
+export const DISH_CAP = Math.round((2 * DISH.w * DISH.d * DISH.h) / SPACE_PER_ATOM);
 
 /**
  * How freely each species runs along a wicking strip's paper or a column's bed: 1 − drag / STRIP.drag, where a
@@ -838,7 +858,7 @@ export function analyzerSector(atom: ColorAtom): (readonly [number, number])[] {
 
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater' | 'analyzer'
-  | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'column' | 'culture' | 'tank'
+  | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'dish' | 'column' | 'culture' | 'tank'
   | 'receptacle';
 
 /**
@@ -1095,17 +1115,24 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -CELL / 2 - 14, x1: CELL / 2 + 14, y0: -(BULB.neck.h + BULB.inlet.rise + BULB.inlet.h) - 6, y1: 62 },
   },
   strip: {
-    // a shallow glass tray, with a strip of paper standing up in it toward its back (see STRIP.paper), held at its top
-    // by a clip on a thin rod up from the tray's floor, and a little base under it for its stand to clamp; nothing
-    // drains from it
-    tanks: [{ name: 'tray', x0: -STRIP.tray.w, x1: STRIP.tray.w }],
-    tankH: STRIP.tray.h,
-    tankCap: TRAY_CAP,
+    // bare paper hanging from a clip (see STRIP.paper), its foot cut to a point, with no tanks, spouts or valves
+    tanks: [],
     noValve: true,
     spouts: [],
-    valveY: STRIP.tray.h,
-    spoutY: STRIP.tray.h + 13,
-    box: { x0: -STRIP.tray.w - 2, x1: STRIP.tray.w + 2, y0: STRIP.paper.foot - STRIP.paper.len - 6, y1: STRIP.tray.h + 13 },
+    valveY: 0,
+    spoutY: STRIP_FOOT,
+    box: { x0: -STRIP.paper.w - 0.5, x1: STRIP.paper.w + 0.5, y0: -0.5, y1: STRIP_FOOT + 0.5 },
+  },
+  dish: {
+    // a shallow open glass tray (see DISH) on a little base for its stand to clamp; nothing drains from it
+    tanks: [{ name: 'dish', x0: -DISH.w, x1: DISH.w }],
+    tankH: DISH.h,
+    tankCap: DISH_CAP,
+    noValve: true,
+    spouts: [],
+    valveY: DISH.h,
+    spoutY: DISH.h + DISH.base,
+    box: { x0: -DISH.w - 2, x1: DISH.w + 2, y0: -6, y1: DISH.h + DISH.base },
   },
   column: {
     // a small glass funnel over a tall glass tube, packed (see COLUMN), over a tap and a spout, all on one line
@@ -1337,6 +1364,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   thermometerWide: 'Wide thermometer',
   dilatometer: 'Swell bulbs',
   strip: 'Wicking strip',
+  dish: 'Dish',
   column: 'Column',
   culture: 'Sleeper culture',
   tank: 'Tank',
@@ -1425,9 +1453,10 @@ export function separatorShares(): number[][] {
  * - **Swell bulbs** are two little round tanks with narrow necks (see BULB), pressed together so the necks stand
  *   side by side, each draining at up to PIPETTE_FLOW, heated alike by one wire whose temperature a dial sets (see
  *   wireTemperature and heatBy), so how much each swells shows side by side.
- * - A **wicking strip** is a strip of paper standing in a shallow tray. A spot of a sample is dabbed onto it (see
- *   dab), and what's in the tray is drawn up it, carrying each species of the spot along at its own pace (see wick
+ * - A **wicking strip** is bare paper, with no tanks. Its foot touched to a fluid takes a spot of it (see touch), and
+ *   stood in a fluid, it drinks it up (see bath), carrying each species of the spot along at its own pace (see wick
  *   and STRIP_RUN), to leave it as a band once the paper's dry. It's used once.
+ * - A **dish** is a shallow open tray with no valve or spout, to stand a strip in.
  * - A **column** is a small funnel over a tall tube packed with the strips' paper, its bed, over a tap and a spout. A
  *   dry bed drinks from the funnel until it's wet through; then what's poured in runs through it as far as the tap's
  *   open, carrying each species down it at its own pace, as on a strip, and out the spout (see elute).
@@ -1507,6 +1536,8 @@ export class Tool {
    * wetness).
    */
   soaked = 0;
+  /** What a wicking strip's foot was in when it was last told (see dipIn), if anything: it touches what it comes into. */
+  private wasIn: Vessel | null = null;
   /** How far a wicking strip's paper has dried since it soaked through, from 0 to 1, where it's done. */
   dryness = 0;
   /** How what's on a wicking strip's paper or a column's bed is carried along it (see Bed); null for any other tool. */
@@ -1517,8 +1548,11 @@ export class Tool {
   readonly dead: Uint8Array | null;
   /** A thermometer's bulb's temperature (see warm), which its column shows; the room's to start with. */
   temp = COOLING.ambient;
-  /** The fluid a thermometer's bulb is in, if any, which whoever runs it sets before each step (see warm). */
-  bath: Fluid | null = null;
+  /**
+   * The vessel a dipper's foot is in (see footY), if any, which whoever runs it sets before each step: the fluid a
+   * thermometer's bulb is in (see warm), or what a wicking strip drinks from, only while it may (see wick).
+   */
+  bath: Vessel | null = null;
   /** Whether a thermometer has shattered (see warm): for good, reading nothing. */
   broken = false;
   /** An inline instrument's exponentially weighted average of what it's measured, per sim second (see smooth). */
@@ -1591,6 +1625,8 @@ export class Tool {
     if (this.kind === 'column') return this.elute(h);
     // a culture's cells sicken in what's in the plate, which then drains like any tank
     if (this.kind === 'culture') this.sicken(h);
+    // nothing drains from a tool with no spouts (a dish)
+    if (!this.shape.spouts.length) return this.none();
     // with nothing in it and its readings faded to nothing, a step would do nothing; an instrument's smoothing starts
     // again from nothing measured, as it would have to within less than TRACE
     if (this.tanks.every((tk) => tk.N <= 0) && this.rate === 0 && !this.reading && !this.links && this.bonds.every((b) => b === 0)) {
@@ -1672,39 +1708,45 @@ export class Tool {
   }
 
   /**
-   * Whether a wicking strip's paper would take a spot of v (see dab): while it's unused, nothing yet drawn up it,
-   * and its spot isn't full, from anything holding fluid but its own tray.
+   * Tell a wicking strip what its foot is in now, if it counts as in anything (null if not), and whether it may drink
+   * it, before it's stepped (whoever runs it decides both): coming into a fluid from none, its foot touches it (see
+   * touch), and it drinks from it (see bath and wick) only while it may.
    */
-  canDab(v: Vessel): boolean {
-    return this.kind === 'strip' && this.soaked === 0 && v !== this.tanks[0] && v.N > TRACE && volume(this.paper[STRIP.origin]) < 0.99 * STRIP.spot;
+  dipIn(v: Vessel | null, soak: boolean): void {
+    if (v && !this.wasIn) this.touch(v);
+    this.wasIn = v;
+    this.bath = v && soak ? v : null;
   }
 
   /**
-   * Dab a wicking strip's paper on v: it takes a spot of v's fluid at its origin, topping what's there up to
-   * STRIP.spot, scorching if that's hot (see scorchAt). Only unused paper takes a spot (see canDab). Returns the atoms
-   * it took.
+   * A wicking strip's foot touched to v, as it comes into v's fluid: unused paper, nothing yet drunk up it, takes a
+   * spot of it, STRIP.spot, onto its first stretch, or what v has if that's less, up to STRIP.spots spots' worth in
+   * all, scorching if it's hot (see scorchAt). Returns the atoms it took.
    */
-  dab(v: Vessel): number {
-    if (!this.canDab(v)) return 0;
-    const spot = this.paper[STRIP.origin];
+  touch(v: Vessel): number {
+    const foot = this.paper[0];
+    if (this.kind !== 'strip' || this.soaked > 0 || v.N <= 0) return 0;
+    const room = Math.min(STRIP.spot, STRIP.spots * STRIP.spot - volume(foot));
+    if (room <= 0) return 0;
     const T = temperature(v);
-    const moved = transfer(v, spot, STRIP.spot - volume(spot));
+    const moved = transfer(v, foot, room);
     if (moved > 0) this.scorch = Math.max(this.scorch, scorchAt(T));
-    spot.Q = 0;
+    foot.Q = 0;
     return moved;
   }
 
   /**
-   * A wicking strip's step. While there's carrier in the tray and the paper hasn't soaked through, the paper draws it
-   * up: what it's drunk grows as the square root of the time (its square grows steadily), all it holds in STRIP.time,
-   * but only as far as the tray can supply, since soaking a share d takes d · STRIP.cap from it. What it draws goes
-   * into the foot of the paper, scorching it if that's hot (see scorchAt). As it soaks a share d, the liquid, at the
-   * pace of what it drew (see leadOf), carries what's on the paper d · STRIP.cells stretches' worth up it (see Bed),
-   * never past that share of its length. Once it's soaked through, the paper dries over STRIP.dry, and is done: single
-   * atoms dry off it, and it takes up nothing more. Nothing leaves it.
+   * A wicking strip's step. While it may drink from what its foot is in (see bath), and the paper hasn't soaked
+   * through, the paper draws it up: what it's drunk grows as the square root of the time (its square grows steadily),
+   * all it holds in STRIP.time, but only as far as the vessel can supply, since soaking a share d takes d · STRIP.cap
+   * from it. What it draws goes into the foot of the paper, scorching it if that's hot (see scorchAt). As it soaks a
+   * share d, the liquid, at the pace of what it drew (see leadOf), carries what's on the paper d · STRIP.cells
+   * stretches' worth up it (see Bed), never past that share of its length. Lifted out, it stops where it is, and put
+   * back, it goes on. Once it's soaked through, the paper dries over STRIP.dry, and is done: single atoms dry off it,
+   * and it takes up nothing more. Nothing leaves it.
    */
   private wick(h: number): (Vessel | null)[] {
-    const tray = this.tanks[0];
+    const bath = this.bath;
     const { paper } = this;
     if (this.soaked >= 1) {
       if (this.dryness < 1) {
@@ -1719,14 +1761,14 @@ export class Tool {
       }
       return this.none();
     }
-    if (tray.N <= 0) return this.none();
+    if (!bath || bath.N <= 0) return this.none();
     const C = STRIP.cells;
-    const d = Math.min(Math.min(1, Math.sqrt(this.soaked ** 2 + h / STRIP.time)) - this.soaked, volume(tray) / STRIP.cap);
+    const d = Math.min(Math.min(1, Math.sqrt(this.soaked ** 2 + h / STRIP.time)) - this.soaked, volume(bath) / STRIP.cap);
     if (d <= 0) return this.none();
-    this.scorch = Math.max(this.scorch, scorchAt(temperature(tray)));
+    this.scorch = Math.max(this.scorch, scorchAt(temperature(bath)));
     // what it draws this step, which runs at its own pace
     const drawn = this.packet(0);
-    transfer(tray, drawn, d * STRIP.cap);
+    transfer(bath, drawn, d * STRIP.cap);
     const lead = leadOf(drawn);
     // in passes of at most a twentieth of a stretch, so that what comes in lands evenly between moves, and the
     // paper's evenly wet (see wetness)

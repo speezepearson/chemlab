@@ -4,7 +4,7 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
-  FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, bulbAt, flaskBox, flaskFluid,
+  FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, dipPoses, footAt, flaskBox, flaskFluid,
   flaskLip, flaskMouth, nozzleBox, tankFluid, docked, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
@@ -29,8 +29,8 @@ import {
   type Pose, type Vec3,
 } from './space';
 import {
-  ANALYZER_HUM, BOND_KEYS, BULB_Y, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, SUMP_TIP,
-  TANK_H, TOOL_NAMES, isThermometer, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
+  ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
+  TANK_H, TOOL_NAMES, isDipper, isThermometer, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
   type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
@@ -76,8 +76,8 @@ export interface Hud {
    */
   press: boolean;
   /**
-   * Whether the right button would do something: turn the valve looked at, let fluid out of what's held, or dab a held
-   * wicking strip on what's looked at.
+   * Whether the right button would do something: turn the valve looked at, let fluid out of what's held, or dip a held
+   * wicking strip or thermometer into what's looked at.
    */
   right: boolean;
   /** While a valve is being turned, where the pointer that aims its lever is, in CSS pixels. */
@@ -85,7 +85,7 @@ export interface Hud {
   /** Whether N would write a note about what the crosshair is on (see GameEngine.note). */
   label: boolean;
   /** What the right button does now, in a word, for the touch screen's button that stands in for it. */
-  hand: 'Pour' | 'Flow' | 'Dab' | 'Turn';
+  hand: 'Pour' | 'Flow' | 'Dip' | 'Turn';
   /** A brief note, like there being no room for something. */
   note: string | null;
   /** Everything the player can do just now besides walking and looking, with how (see Action), for a reminder. */
@@ -193,18 +193,18 @@ type Held = (
 /** Things that can be made from the hotbar, in its order. */
 export const ITEMS = [
   'flask', 'dispenser', 'pipette', 'exchanger', 'separator', 'splitter', 'sorter', 'heater', 'scale', 'tank', 'meter', 'multiplexer',
-  'thermometer', 'thermometerWide', 'dilatometer', 'strip', 'culture', 'column',
+  'thermometer', 'thermometerWide', 'dilatometer', 'strip', 'culture', 'column', 'dish',
 ] as const;
 export type Item = (typeof ITEMS)[number];
 /**
  * The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0, - and =; and then, the number
- * row being full, along the bottom row of letters, from Z, and M.
+ * row being full, along the bottom row of letters, from Z, then M (N writes notes) and the comma.
  */
-export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Z', 'X', 'C', 'V', 'B', 'M'] as const;
+export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Z', 'X', 'C', 'V', 'B', 'M', ','] as const;
 /** The same keys, as KeyboardEvent codes, so they work whatever the keyboard layout's shift state. */
 const HOTKEY_CODES = [
   'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal',
-  'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyM',
+  'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyM', 'Comma',
 ];
 
 /** How tipped a flask held to pour is: past the horizontal, mouth down. */
@@ -219,8 +219,13 @@ const POUR_GAP = 20;
 const POUR_RISE = 300;
 /** How far above a mouth, at least, a held nozzle goes with the crosshair on it (see nozzleOver), up to POUR_RISE. */
 const NOZZLE_GAP = 15;
-/** How far above an empty vessel's floor a thermometer held over it has its bulb (see dipOver). */
-const BULB_DIP = 4;
+/** How long a dipper takes to lower into what it's aimed at, or rise back out, in real seconds (see dipAim). */
+const DIP_S = 0.2;
+/**
+ * How long a wicking strip has to be held dipped in a fluid, in real seconds from its foot touching it, before it
+ * drinks it: a shorter tap only takes a spot (see Tool.touch).
+ */
+const DIP_SOAK = 0.35;
 /** How fast a falling drop speeds up, in world units per sim second squared: a 500-unit fall takes 0.7 s. */
 const GRAVITY = 2000;
 /** The player's eyes, and their body's radius. */
@@ -317,6 +322,10 @@ export class GameEngine {
   private faucetFlows: { fa: FaucetSpot; from: Vec3; m: Mouth }[] = [];
   /** Where the held flask is kept, over the mouth the right button was pressed on, while it's held (see pourPose). */
   private pinned: Pose | null = null;
+  /** How far a held dipper aimed at an open top is lowered into it, from 0 (hovering) to 1 (dipped; see dipAim). */
+  private dip = 0;
+  /** Real seconds the held wicking strip has been dipped in a fluid since its foot touched it (see DIP_SOAK). */
+  private dipFor = 0;
   /** Where the held flask poured this frame, if it did: its lip, and what it poured into (null: the sink). */
   private pour: { from: Vec3; into: Mouth | null } | null = null;
   /** Where what's held would come to rest if let go, as of the last frame drawn (see placement). */
@@ -676,6 +685,14 @@ export class GameEngine {
         t.remember(st.memory);
         t.paper.forEach((v, k) => st.paper?.[k] && loadVessel(v, st.paper[k]));
         t.bed.forEach((v, k) => st.bed?.[k] && loadVessel(v, st.bed[k]));
+        // an older save's strip stood in a tray, posed at the tray's top, 4 above its paper's foot: it's bare paper now,
+        // so it goes up to keep its paper where it was (its tray, and what was in it, are gone), and the tray's label
+        // is its note
+        if (st.kind === 'strip' && st.tanks?.length) {
+          t.pose = { ...t.pose, y: t.pose.y + STRIP_FOOT - 4 };
+          const label = st.tanks[0]?.label;
+          if (!t.note && typeof label === 'string') t.note = label;
+        }
         return t;
       });
     this.nextToolId = Math.max(-1, ...this.tools.map((t) => t.id)) + 1;
@@ -1076,7 +1093,7 @@ export class GameEngine {
     if (this.locked) this.putAway();
   }
 
-  /** The right button, pressed or let go: it pours, lets fluid out, dabs a wicking strip, or turns the valve looked at. */
+  /** The right button, pressed or let go: it pours, lets fluid out, dips a strip or a thermometer, or turns the valve looked at. */
   hand(down: boolean): void {
     if (!down) {
       this.rightHeld = false;
@@ -1688,11 +1705,6 @@ export class GameEngine {
         this.faceFlask(h.f);
       }
     }
-    // a wicking strip takes a spot of what's in the vessel looked at
-    if (h?.kind === 'tool' && h.t.kind === 'strip') {
-      const m = this.mouthAimed();
-      if (m) h.t.dab(m.v);
-    }
     if (h) return;
     const k = this.valveAimed();
     if (!k) return;
@@ -1745,20 +1757,25 @@ export class GameEngine {
   }
 
   /**
-   * Where a held thermometer goes with the crosshair on an open top (see mouthAimed): upright, facing as it's held,
-   * straight over the middle of the mouth, on the grid, with its bulb lowered to the middle of the fluid's depth, or
-   * to BULB_DIP above the floor if it's empty, so a click sets it down there, dipped in. Null if it can't be set down
-   * there (see rest), or the crosshair is on no open top.
+   * Where a held dipper (see DIPPERS) goes with the crosshair on an open top (see mouthAimed): upright, facing as it's
+   * held, over the middle of the mouth, on the grid, hovering a little above it, or dipped into it, its foot at the
+   * middle of the fluid's depth or just above the floor if it's empty (see dipPoses); and whether it can be set down
+   * there dipped, standing in it (see rest), or why not. Null if the crosshair is on no open top.
    */
-  private dipOver(h: Held & { kind: 'tool' }): Pose | null {
+  private dipAim(h: Held & { kind: 'tool' }): { hover: Pose; dipped: Pose; rest: { rest: Rest } | { why: string } } | null {
     const p = this.target;
     const m = this.mouthAimed();
     if (!m || (p?.kind !== 'flask' && p?.kind !== 'tool')) return null;
-    const { floor, surface } = p.kind === 'flask' ? flaskFluid(p.f) : tankFluid(p.t, p.k);
-    const y = surface > floor ? (floor + surface) / 2 : floor + BULB_DIP;
-    const pose = onGrid({ x: m.x, y: y + BULB_Y, z: m.z, yaw: toCardinal(this.player.yaw + h.relYaw) }, toolAnchor(h.t));
-    const r = this.rest(h, pose, this.obstacles(h), this.obstacles(h, false));
-    return typeof r === 'string' ? null : r.pose;
+    const fluid = p.kind === 'flask' ? flaskFluid(p.f) : tankFluid(p.t, p.k);
+    const { hover, dipped } = dipPoses(h.t, m, fluid, toCardinal(this.player.yaw + h.relYaw));
+    const r = this.rest(h, dipped, [...this.obstacles(h), this.me()], [...this.obstacles(h, false), this.me()]);
+    return typeof r === 'string' ? { hover, dipped, rest: { why: r } } : { hover, dipped: r.pose, rest: { rest: r } };
+  }
+
+  /** The player's body, as a box, which what's set down mustn't overlap. */
+  private me(): Box {
+    const { x, z } = this.player;
+    return { x, y: (EYE + 20) / 2, z, yaw: 0, hx: PLAYER_R, hy: (EYE + 20) / 2, hz: PLAYER_R, round: true };
   }
 
   /**
@@ -1980,9 +1997,14 @@ export class GameEngine {
     }
     if (h?.kind !== 'flask' || !this.rightHeld) this.pinned = null;
     if (!h) return;
-    // a nozzle held with the crosshair on an open top goes straight over it, where it would be set down to pour in,
-    // and a thermometer down into it, where it would be set down dipped in it
-    const over = h.kind === 'hose' ? this.nozzleOver(h) : h.kind === 'tool' && isThermometer(h.t.kind) ? this.dipOver(h) : null;
+    // a nozzle held with the crosshair on an open top goes straight over it, where it would be set down to pour in;
+    // and a strip or a thermometer hovers over it, and lowers into it while the right button's held
+    const aim = h.kind === 'tool' && isDipper(h.t.kind) ? this.dipAim(h) : null;
+    this.dip = aim ? Math.max(0, Math.min(1, this.dip + ((this.rightHeld ? 1 : -1) * dt) / DIP_S)) : 0;
+    const lower = ease(this.dip);
+    const over = h.kind === 'hose' ? this.nozzleOver(h)
+      : aim ? { ...aim.hover, y: aim.hover.y + (aim.dipped.y - aim.hover.y) * lower, x: aim.dipped.x, z: aim.dipped.z }
+      : null;
     if (over) {
       this.placeHeld(h, over);
       return;
@@ -2071,10 +2093,9 @@ export class GameEngine {
     const vessels = this.vessels();
     // how exposed each one's fluid is to the room, from how it stands now; it hardly changes in a frame
     const exposures = simDt > 0 ? this.exposures() : [];
-    // what each thermometer's bulb is in, from where it is now, whether it's held or set down; nor does that change much
-    // in a frame
+    // what each thermometer's bulb and each strip's foot is in (see dipping)
     const whole = this.tools.map((t) => !t.broken);
-    for (const t of this.tools) if (isThermometer(t.kind)) t.bath = bathAt(bulbAt(t), this.flasks, this.tools);
+    this.dipping(quiet ? 0 : dt);
     if (simDt > 0) {
       const sub = Math.ceil(simDt / 0.02);
       const step = simDt / sub;
@@ -2193,7 +2214,7 @@ export class GameEngine {
       }
     // a thermometer whose bulb got too hot shatters, with a crack of glass, on sim time like what broke it
     this.tools.forEach((t, j) => {
-      if (t.broken && whole[j]) shatter(this.hear(bulbAt(t)));
+      if (t.broken && whole[j]) shatter(this.hear(footAt(t)));
     });
     // and it chimes as it's been delivering steadily for long enough to open the airlock
     const st = this.station();
@@ -2273,9 +2294,11 @@ export class GameEngine {
    * player too. If it can't rest anywhere near, why not where it's held.
    */
   private placement(h: Held): { rest: Rest } | { why: string } {
+    // a strip or a thermometer aimed at an open top is set down standing in it
+    const aim = h.kind === 'tool' && isDipper(h.t.kind) ? this.dipAim(h) : null;
+    if (aim) return aim.rest;
     const p = this.heldPose(h);
-    const { x, z } = this.player;
-    const me: Box = { x, y: (EYE + 20) / 2, z, yaw: 0, hx: PLAYER_R, hy: (EYE + 20) / 2, hz: PLAYER_R, round: true };
+    const me = this.me();
     const obstacles = [...this.obstacles(h), me];
     const solid = [...this.obstacles(h, false), me];
     // each cell's spot, nearest where it's held first; that's the cell it's held over
@@ -2314,9 +2337,10 @@ export class GameEngine {
       const tops = stands.map((st) => counterUnder(standBase(st, 0)));
       if (tops.some((t) => t === null)) return 'Its stand needs a counter under it';
       let dy = -Math.max(0, ...stands.map((st, i) => st.clampY - tops[i]! - STAND_MAX));
-      // held sunk into a counter, it comes up to stand on it: all of a thermometer, though its rod bumps into nothing else
+      // held sunk into a counter, it comes up to stand on it: all of a strip or a thermometer, though its lower part
+      // bumps into nothing else
       const sunk = LIFT - (box.y + dy - box.hy);
-      const solidBox = h.kind === 'tool' && isThermometer(h.t.kind) ? { ...box, parts: undefined } : box;
+      const solidBox = h.kind === 'tool' && isDipper(h.t.kind) ? { ...box, parts: undefined } : box;
       if (sunk > 0 && COUNTER_BOXES.some((c) => boxesOverlap({ ...solidBox, y: box.y + dy }, c))) dy += sunk;
       const to = { ...box, y: box.y + dy };
       if (blocked(to)) return 'No room';
@@ -2537,13 +2561,15 @@ export class GameEngine {
     }
     if (h) {
       const ok = !!this.placed && 'rest' in this.placed;
-      const how = h.kind === 'hose' ? 'set the hose’s end down' : 'set it down';
+      const how = h.kind === 'hose' ? 'set the hose’s end down'
+        : h.kind === 'tool' && isDipper(h.t.kind) && this.mouthAimed() ? 'stand it in it'
+        : 'set it down';
       // a button looked at takes the click
       if (!this.onButton()) add(['LMB'], ok ? how : `${how}: not here`, !ok);
       if (this.rightWouldDo())
         add(
           ['RMB'],
-          h.kind === 'tool' ? 'dab a spot of it onto the paper'
+          h.kind === 'tool' ? 'hold to dip it in'
           : h.kind !== 'flask' ? 'hold to let it flow'
           : this.mouthAimed() ? 'hold to pour into it'
           : 'hold to pour',
@@ -2558,7 +2584,7 @@ export class GameEngine {
       add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it away') : 'put it back');
     } else {
       if (this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
-      add(['1–0, -, =, Z–B, M'], 'make equipment in your hands');
+      add(['1–0, -, =, Z–B, M, ,'], 'make equipment in your hands');
     }
     if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
     else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
@@ -2861,15 +2887,37 @@ export class GameEngine {
     if (this.rightHeld) return false;
     const h = this.held;
     if (h?.kind === 'flask') return h.f.N > TRACE;
-    if (h?.kind === 'tool' && h.t.kind === 'strip') {
-      const m = this.mouthAimed();
-      return !!m && h.t.canDab(m.v);
-    }
+    // a strip or a thermometer dips into the open top looked at
+    if (h?.kind === 'tool' && isDipper(h.t.kind)) return !!this.mouthAimed();
     // a held tool runs anyway
     if (h?.kind === 'tool') return false;
     // a faucet always runs
     if (h?.kind === 'hose') return 'tool' in h.h.on ? this.wouldFlow(h.h.on.tool) : true;
     return !!this.valveAimed();
+  }
+
+  /**
+   * What each dipper's foot is in (see footAt and bathAt), from where it is now, held or set down; it doesn't change
+   * much in a frame. A thermometer's bulb reads whatever it's in. A wicking strip counts as in a fluid only while it's
+   * set down, or held dipped with the right button, so carrying one past fluid does nothing; it drinks it while it's set
+   * down, or once it's been held dipped DIP_SOAK real seconds (`dt`, as the player's own movements go), so a tap only
+   * spots it (see Tool.dipIn).
+   */
+  private dipping(dt: number): void {
+    const h = this.held;
+    let dipped = false;
+    for (const t of this.tools) {
+      if (isThermometer(t.kind)) t.bath = bathAt(footAt(t), this.flasks, this.tools);
+      if (t.kind !== 'strip') continue;
+      const held = h?.kind === 'tool' && h.t === t;
+      const v = !held || (this.rightHeld && this.dip > 0) ? bathAt(footAt(t), this.flasks, this.tools) : null;
+      if (held && v) {
+        dipped = true;
+        this.dipFor += dt;
+      }
+      t.dipIn(v, !held || this.dipFor > DIP_SOAK);
+    }
+    if (!dipped) this.dipFor = 0;
   }
 
   /** Whether fluid would leave a tool's spouts if it ran. */
@@ -2896,7 +2944,7 @@ export class GameEngine {
       right: this.rightWouldDo(),
       aim: this.turning ? { ...this.turning.aim } : null,
       label: !inPod(this.wake) && !!this.targetNote(),
-      hand: h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : h?.kind === 'tool' && h.t.kind === 'strip' ? 'Dab' : 'Turn',
+      hand: h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : h?.kind === 'tool' && isDipper(h.t.kind) ? 'Dip' : 'Turn',
       note: this.flash?.text ?? null,
       actions: this.actions(),
       black: this.black(),

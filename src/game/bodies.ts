@@ -4,7 +4,7 @@ import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { CELL, groundAt, toCardinal, toCell, toLocal, toWorld, type Pose, type Vec3 } from './space';
 import {
-  ANALYZER, BULB_Y, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, STRIP, TANK_H, THERMOMETER_ROD, isThermometer, levelIn,
+  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, STRIP, TANK_H, THERMOMETER_ROD, footY, isThermometer, levelIn,
   tankDepth, tankPieces, tankX, overMouth, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
 } from './tools';
 
@@ -116,9 +116,7 @@ export function tankMouth(t: Tool, k: number): Mouth {
 export function tankNoteY(t: Tool, k: number): number {
   const lines = Math.max(t.shape.label?.length ?? 0, ...t.shape.tanks.map((tk) => tk.label?.length ?? 0));
   if (t.shape.wall) return STATION.block.y0 - 14;
-  // over a wicking strip's paper, not across it
-  const y = t.kind === 'strip' ? t.shape.box.y0 : openingOf(t, k).y;
-  return y - (lines ? 11 * lines + 10 : 9);
+  return openingOf(t, k).y - (lines ? 11 * lines + 10 : 9);
 }
 
 /**
@@ -128,8 +126,8 @@ export function tankNoteY(t: Tool, k: number): number {
  * its funnel, the plate in the wall, and its spouts' pipes out from it. An inline instrument's are its
  * tube and the pipe down from it, and the cabinet beside them, and any pipe on to a spout past the cabinet, or the
  * flow meter's readout round the pipe; the tube's top is flush with its opening, for a nozzle to snap onto (see
- * INLINE_DOCK). A thermometer's is only the top of its rod, where its stand's clamp holds it: the rest of it bumps
- * into nothing, so it can stand down in a flask or a tank.
+ * INLINE_DOCK). A dipper's (see DIPPERS) is only its top, where its stand's clamp holds it: a thermometer's rod's, or
+ * a wicking strip's clip; the rest of it bumps into nothing, so it can stand down in a flask or a tank.
  */
 export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean }[] {
   const sh = t.shape;
@@ -149,6 +147,10 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
   if (isThermometer(t.kind)) {
     const r = THERMOMETER_ROD.r;
     return [{ x0: -r, x1: r, y0: b.y0, y1: 24, hz: r, round: true }];
+  }
+  if (t.kind === 'strip') {
+    // its clip, and the top of the paper it holds
+    return [{ x0: b.x0, x1: b.x1, y0: b.y0, y1: Math.max(STRIP.clip.h, 24), hz: STRIP.clip.d / 2 }];
   }
   const D = TOOL_DEPTH[t.kind];
   const bottom = (sh.tankH ?? TANK_H) + (sh.sump?.h ?? 0);
@@ -187,8 +189,6 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
         ...sh.tanks.map((k) => ({ x0: k.x0 - 1, x1: k.x1 + 1, y0: neck.inlet.y - 2, y1: neck.inlet.y + neck.inlet.h + 2, hz: (k.x1 - k.x0) / 2 + 1 })),
       ]
     : [tanks];
-  // a wicking strip's paper, standing up out of its tray, and the clip at its top
-  if (t.kind === 'strip') upper.push({ x0: -STRIP.paper.w - 1, x1: STRIP.paper.w + 1, y0: b.y0, y1: tanks.y0, hz: 3, z: STRIP.paper.z });
   if (bottom >= b.y1) return upper;
   const valves = sh.noValve ? [] : (sh.valves ?? sh.tanks.map((k) => ({ x: tankX(k), y: sh.valveY })));
   const xs = [...sh.spouts, ...valves.map((v) => v.x), ...sh.tanks.map(tankX)];
@@ -265,11 +265,27 @@ function inTank(t: Tool, k: number, p: Vec3): boolean {
   return false;
 }
 
-/** Where a thermometer's bulb is, in the room (see BULB_Y). */
-export const bulbAt = (t: Tool): Vec3 => onTool(t, 0, BULB_Y);
+/** Where a dipper's foot is, in the room (see footY): a thermometer's bulb, or a wicking strip's paper's tip. */
+export const footAt = (t: Tool): Vec3 => onTool(t, 0, footY(t.kind));
+
+/** How far above a mouth a dipper aimed at it hovers, its foot (see dipPose). */
+export const DIP_HOVER = 15;
+/** How far above an empty vessel's floor a dipper dipped into it has its foot (see dipPose). */
+export const DIP_FLOOR = 4;
 
 /**
- * The vessel whose fluid p is in, if any, for a thermometer's bulb: an upright flask (not one tipped to pour), if p is
+ * Where a dipper (see DIPPERS) aimed at mouth m goes, facing `yaw`, upright, over the middle of the mouth, on the grid:
+ * hovering, its foot DIP_HOVER above the mouth; and dipped, its foot at the middle of the depth of the fluid in it
+ * (between its floor and its surface, see flaskFluid and tankFluid), or DIP_FLOOR above its floor if it's empty.
+ */
+export function dipPoses(t: Tool, m: Vec3, fluid: { floor: number; surface: number }, yaw: number): { hover: Pose; dipped: Pose } {
+  const at = (foot: number) => onGrid({ x: m.x, y: foot + footY(t.kind), z: m.z, yaw }, toolAnchor(t));
+  const { floor, surface } = fluid;
+  return { hover: at(m.y + DIP_HOVER), dipped: at(surface > floor ? (floor + surface) / 2 : floor + DIP_FLOOR) };
+}
+
+/**
+ * The vessel whose fluid p is in, if any, for a dipper's foot: an upright flask (not one tipped to pour), if p is
  * inside its outline and below its fluid's surface as drawn; or a tool's tank, if it's within its walls and below its
  * fluid's surface as drawn. The cryostabilizer station's are in the wall, out of reach. Null if it's in none: in the
  * air, or in a falling stream, which doesn't count.

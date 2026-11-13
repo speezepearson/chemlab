@@ -23,7 +23,7 @@ import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import {
   clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
-  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, STRIP_ORIGIN, stripInk, COLUMN, columnInk, wetness, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
+  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
 
@@ -697,56 +697,72 @@ function entryWet(wet: number[]): number[] {
 }
 
 /**
- * A wicking strip's paper, foot at the bottom: cream, darker as far as each stretch of it is wet (see wetness), by
- * what's on it, until it's dry; a faint pencil line across its origin; each species on each stretch of it (see
- * Tool.paper) as ink of its own color, as opaque as stripInk says, single atoms first, so what's left in bands lies
- * over the carrier's tint; both blended smoothly from one stretch's middle to the next, except for a spot that has yet
- * to move, a round blot on the line; and browned over by how scorched it is, where it's wet, or all over once it's
- * drying, since by then it's all been wet.
+ * A wicking strip's paper's outline on its canvas, W across and L tall, foot at the bottom: its sides straight down,
+ * and its last STRIP.paper.point narrowing to a point at its foot.
+ */
+function paperOutline(ctx: CanvasRenderingContext2D, W: number, L: number): void {
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(W, 0);
+  ctx.lineTo(W, L - STRIP.paper.point);
+  ctx.lineTo(W / 2, L);
+  ctx.lineTo(0, L - STRIP.paper.point);
+  ctx.closePath();
+}
+
+/**
+ * A wicking strip's paper, foot at the bottom, cut to a point there: cream, darker as far as each stretch of it is wet
+ * (see wetness), by what's on it, until it's dry; each species on each stretch of it (see Tool.paper) as ink of its own
+ * color, as opaque as stripInk says, single atoms first, so what's left in bands lies over the carrier's tint; both
+ * blended smoothly from one stretch's middle to the next, except for a spot that has yet to move, a round blot at the
+ * foot's point; and browned over by how scorched it is, where it's wet, or all over once it's drying, since by then
+ * it's all been wet. Nothing's drawn outside its outline.
  */
 function drawStrip(sc: Screen, t: Tool): void {
   const { paper } = t;
   const C = paper.length;
   let sum = 0;
   paper.forEach((v, c) => (sum += v.N * (c + 1)));
-  const key = `${sum} ${t.dryness.toFixed(2)} ${t.scorch.toFixed(2)}`;
+  const key = `${sum} ${t.soaked > 0} ${t.dryness.toFixed(2)} ${t.scorch.toFixed(2)}`;
   if (key === sc.key) return;
   sc.key = key;
   const { ctx, ppu } = sc;
   const [W, L] = [2 * STRIP.paper.w, STRIP.paper.len];
-  // the canvas's y down from the paper's top, of a share of the way up from its foot
-  const y = (up: number) => L * (1 - up);
   const at = (c: number) => 1 - (c + 0.5) / C;
   const wet = entryWet(paper.map((v) => wetness(volume(v), STRIP.cap, C)));
   ctx.setTransform(ppu, 0, 0, ppu, 0, 0);
+  ctx.clearRect(0, 0, W, L);
+  ctx.save();
+  paperOutline(ctx, W, L);
+  ctx.clip();
   ctx.fillStyle = '#e6dfc8';
   ctx.fillRect(0, 0, W, L);
   if (t.dryness < 1 && wet.some((w) => w > 0)) {
     ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(96, 92, 78, ${0.28 * wet[c] * (1 - t.dryness)})`);
     ctx.fillRect(0, 0, W, L);
   }
-  ctx.fillStyle = 'rgba(70, 70, 76, 0.35)';
-  ctx.fillRect(1, y(STRIP_ORIGIN) - 0.12, W - 2, 0.24);
   const here = SPECIES.map((_, s) => s).filter((s) => paper.some((v) => v.n[s] > 0));
   here.sort((a, b) => SPECIES[a].size - SPECIES[b].size);
-  // the spot's a blot till anything's moved on from it
-  const blot = paper[STRIP.origin].N > 0 && paper.every((v, c) => c <= STRIP.origin || v.N === 0);
+  // the spot's a blot at the foot's point till the paper's drunk anything
+  const blot = t.soaked === 0 && paper[0].N > 0;
+  const r = STRIP.paper.point / 2;
   for (const s of here) {
     const rgb = SPECIES[s].color.slice(4, -1);
     if (blot) {
-      const a = stripInk(s, paper[STRIP.origin].n[s], t.dryness);
-      ctx.fillStyle = `rgba(${rgb}, ${a})`;
+      ctx.fillStyle = `rgba(${rgb}, ${stripInk(s, paper[0].n[s], t.dryness)})`;
       ctx.beginPath();
-      ctx.ellipse(W / 2, y(STRIP_ORIGIN), W / 4, W / 5, 0, 0, 2 * Math.PI);
+      ctx.ellipse(W / 2, L - r, r * 1.3, r, 0, 0, 2 * Math.PI);
       ctx.fill();
+      continue;
     }
-    ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(${rgb}, ${blot && c === STRIP.origin ? 0 : stripInk(s, paper[c].n[s], t.dryness)})`);
+    ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(${rgb}, ${stripInk(s, paper[c].n[s], t.dryness)})`);
     ctx.fillRect(0, 0, W, L);
   }
   if (t.scorch > 0) {
     ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(46, 28, 14, ${0.92 * t.scorch * (t.dryness > 0 ? 1 : wet[c])})`);
     ctx.fillRect(0, 0, W, L);
   }
+  ctx.restore();
   sc.tex.needsUpdate = true;
 }
 
@@ -1356,6 +1372,10 @@ class ToolView {
       sh.neck.bodies.forEach((bx, k) => pipes(art, [[bx, floor], [bx, floor + 4], [sh.spouts[k], floor + 4], [sh.spouts[k], sh.spoutY - 4]]));
     }
     else if (t.kind === 'strip') this.buildStrip();
+    else if (t.kind === 'dish') {
+      // a little base under the dish, for its stand to clamp
+      block(art, darkMat, -12, 12, TH + 0.6, sh.box.y1, -D.body / 2, D.body / 2, 1);
+    }
     else if (isThermometer(t.kind)) this.buildThermometer(t.kind);
     else if (t.kind === 'column') {
       this.buildColumn();
@@ -1659,20 +1679,26 @@ class ToolView {
   }
 
   /**
-   * A wicking strip: its paper standing up toward the back of its tray, from just above the tray's floor, held at its
-   * top by a little clip on a thin rod up from the floor behind it, with what's on it shown on its front (see
-   * drawStrip); and a little base under the tray, for its stand to clamp.
+   * A wicking strip: its paper hanging from a little clip at its top (which its stand holds), its foot cut to a point,
+   * with what's on it shown on its front (see drawStrip).
    */
   private buildStrip(): void {
-    const { w, foot, len, z } = STRIP.paper;
-    const H = STRIP.tray.h;
-    const top = foot - len;
-    const body = TOOL_DEPTH.strip.body;
-    block(this.art, darkMat, -12, 12, H + 0.6, this.t.shape.box.y1, -body / 2, body / 2, 1);
-    block(this.art, paperMat, -w, w, top, foot, z - 0.3, z + 0.3).castShadow = true;
-    rod(this.art, rodMat, v3(0, H, z - 2), v3(0, top - 2.5, z - 2), 0.7);
-    block(this.art, darkMat, -3.5, 3.5, top - 3, top + 4, z - 2.8, z + 1, 0.5);
-    this.screen = new Screen(this.art, -w, w, top, foot, z + 0.31, 6);
+    const { w, top, len, point } = STRIP.paper;
+    const c = STRIP.clip;
+    const foot = top + len;
+    // the paper, a thin sheet of its outline, flat side to the front
+    const shape = new THREE.Shape([
+      new THREE.Vector2(-w, -top), new THREE.Vector2(w, -top), new THREE.Vector2(w, -(foot - point)),
+      new THREE.Vector2(0, -foot), new THREE.Vector2(-w, -(foot - point)),
+    ]);
+    const sheet = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.6, bevelEnabled: false }).translate(0, 0, -0.3), paperMat);
+    sheet.castShadow = true;
+    this.art.add(sheet);
+    // the clip: two jaws over the paper's top, and a bar across above them
+    block(this.art, darkMat, -c.w, c.w, top - 1, c.h, -c.d / 2, -0.35, 0.4);
+    block(this.art, darkMat, -c.w, c.w, top - 1, c.h, 0.35, c.d / 2, 0.4);
+    block(this.art, darkMat, -c.w, c.w, 0, top - 1, -c.d / 2, c.d / 2, 0.6);
+    this.screen = new Screen(this.art, -w, w, top, foot, 0.31, 6, true);
   }
 
   /**

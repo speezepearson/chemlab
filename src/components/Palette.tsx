@@ -116,10 +116,15 @@ const ICONS: Record<string, ReactNode> = {
   ),
   strip: (
     <>
-      <rect x="14.5" y="4" width="11" height="30" rx="0.8" style={{ fill: '#e6dfc8', stroke: 'var(--pipe)', strokeWidth: 0.8 }} />
-      <path d="M15.5 11 H24.5 M15.5 19 H24.5 M15.5 22.5 H24.5" style={{ stroke: 'var(--pipe)', strokeWidth: 2.2, opacity: 0.75 }} />
-      <rect x="17.5" y="2" width="5" height="4" rx="0.6" style={{ fill: 'var(--pipe)', stroke: 'none' }} />
-      <path className="glass" d="M5 29 V35 H35 V29" />
+      <path d="M15 5 H25 V32 L20 38 L15 32 Z" style={{ fill: '#e6dfc8', stroke: 'var(--pipe)', strokeWidth: 0.8 }} />
+      <path d="M16 13 H24 M16 21 H24 M16 24.5 H24" style={{ stroke: 'var(--pipe)', strokeWidth: 2.2, opacity: 0.75 }} />
+      <rect x="16.5" y="2" width="7" height="6" rx="0.8" style={{ fill: 'var(--pipe)', stroke: 'none' }} />
+    </>
+  ),
+  dish: (
+    <>
+      <rect x="15" y="25" width="10" height="9" rx="1" style={{ fill: 'var(--pipe)', stroke: 'none' }} />
+      <path className="glass" d="M4 16 V24 H36 V16" />
     </>
   ),
   column: (

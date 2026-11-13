@@ -54,8 +54,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - `src/game/`: everything else in the game.
   - `engine.ts` owns the lab: what's in it, the player, input, carrying and the sim loop.
   - `view.ts` draws it all with Three.js, and raycasts for what the crosshair is on.
-  - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room, and what fluid a
-    thermometer's bulb is in (`bathAt`), which the engine hands each thermometer every frame (`Tool.bath`).
+  - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room, what fluid a
+    dipper's foot (a thermometer's bulb, a wicking strip's tip) is in (`bathAt`), which the engine hands each one every
+    frame (`Tool.bath`, or for a strip `Tool.dipIn`, which also says whether it may drink), and where a dipper aimed at
+    a mouth hovers and dips (`dipPoses`).
   - `physics.ts` is the collisions: yawed boxes, the player's cylinder and `walk`. What's held collides with nothing; only
     where it would be set down is checked (the engine's `placement` and `rest`).
   - `space.ts` is the room, poses, and the mapping from the old flat bench to its back wall.
@@ -141,12 +143,13 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially.
   - `ITEMS` and `HOTKEYS` in `engine.ts` (the hotbar's order and keys) and `ICONS` in `Palette.tsx`, unless the tool is
-    unique. The number row is full, through =, so new ones go along the bottom row of letters, from Z.
+    unique. The number row is full, through =, so new ones go along the bottom row of letters, from Z, skipping N (notes): it's taken through the comma.
   - If it has state of its own that a save should keep, `Tool.memory` and `Tool.remember`.
   - Tests and the README.
-  - A tool needn't have tanks at all: the thermometers have none, nor spouts nor valves. Then its grid anchor is its
-    middle (`toolAnchor`), N writes its own `note`, and its collision is whatever `toolParts` gives it (a thermometer's,
-    only the top of its rod), so code that reaches for `tanks[0]` must allow for there being none.
+  - A tool needn't have tanks at all: the thermometers and the wicking strip (the `DIPPERS`) have none, nor spouts nor
+    valves. Then its grid anchor is its middle (`toolAnchor`), N writes its own `note`, and its collision is whatever
+    `toolParts` gives it (a thermometer's, only the top of its rod; a strip's, its clip), so code that reaches for
+    `tanks[0]` must allow for there being none. Nor need a tool with tanks have spouts (the dish): nothing drains from it.
   - A tank needn't be under its opening: one with a `neck` (the swell bulbs') has its bulb and neck where the flag
     says, and its own `x0` and `x1` are its inlet's, since it's the openings and spouts that go on the grid.
   - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `neck`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
