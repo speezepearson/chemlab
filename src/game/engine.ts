@@ -90,6 +90,8 @@ export interface Hud {
   hand: 'Pour' | 'Flow' | 'Dip' | 'Turn';
   /** A brief note, like there being no room for something. */
   note: string | null;
+  /** Whether the note is a tip, something the player can now do, not something they can't. */
+  tip: boolean;
   /** Everything the player can do just now besides walking and looking, with how (see Action), for a reminder. */
   actions: Action[];
   /** How far the screen has faded to black as the player falls asleep in the pod, or wakes, 0 to 1. */
@@ -100,13 +102,19 @@ export interface Hud {
   ended: boolean;
   /** Whether god mode's preview of the end's white void is up (see GameEngine.previewArrival). */
   preview: boolean;
-  /** While the player's asleep in the pod (see Wake), the whole sim seconds they've slept; otherwise null. */
+  /** While the player's asleep in the pod (see Wake) or napping (see GameEngine.nap), the whole sim seconds they've slept; otherwise null. */
   slept: number | null;
   /**
    * While they're asleep, what the station's reservoir is of (see Supply), the litres of it there, to two places, and
    * the litres needed; otherwise null.
    */
   reservoir: { name: string; litres: number; goalL: number } | null;
+  /** How far shut the player's eyes are, for a nap (see GameEngine.nap): 0 open, 1 shut. */
+  lids: number;
+  /** Whether they're napping, their eyes shut: N wakes them. */
+  napping: boolean;
+  /** Whether N would start a nap just now. */
+  nap: boolean;
 }
 
 /**
@@ -284,6 +292,10 @@ const FAUCET_GAP = CELL;
 const FAUCET_OUT = CELL / 2;
 /** How long a note stays up, in ms. */
 const NOTE_MS = 1600;
+/** How long the note that she can nap stays up, in ms: long enough to read. */
+const NAP_HINT_MS = 9000;
+/** Real seconds the player's eyes take to close for a nap, and to open again as they wake (see GameEngine.nap). */
+const NAP_S = { close: 0.9, open: 0.6 };
 /** A flask's outline's area, in local units squared, for how exposed its fluid is (see exposures). */
 const FLASK_AREA = areaBelow(FLASK_OUTLINE, 0);
 /** Width of the stem a funnel-shaped tank narrows to, in local units. */
@@ -343,7 +355,7 @@ export class GameEngine {
   /** What the crosshair is on. */
   private target: (Pick & { point: Vec3; distance: number }) | null = null;
   /** A brief note on the display, like there being no room for something (see say). */
-  private flash: { text: string; until: number } | null = null;
+  private flash: { text: string; until: number; tip?: boolean } | null = null;
   private won = false;
   /** Whether the alarms are silenced, by the button under the beacon (see hushAlarms). Saved, and kept through Reset. */
   private alarmsOff = false;
@@ -370,6 +382,16 @@ export class GameEngine {
    * the station is still fitted for something before it (see SUPPLIES), the litres of that; else null.
    */
   private podNotice: { litres: number; first: number | null } = { litres: 0, first: null };
+  /**
+   * A nap under way (see nap): how far shut the player's eyes are, 0 to 1, and whether they're waking, their eyes
+   * opening again. With their eyes shut, the lab runs on as it does while they sleep in the pod (see sleeping).
+   */
+  private napping: { lids: number; waking: boolean } | null = null;
+  /**
+   * Whether the player has been told they can nap: the station has delivered steadily for DELIVERY.nap sim seconds on
+   * end, once. From then on N naps. It's saved with the lab.
+   */
+  private napKnown = false;
   /**
    * While previewing the end's white void (see previewArrival), how the player stood before, to put them back; null
    * otherwise.
@@ -555,8 +577,9 @@ export class GameEngine {
       return t;
     });
     this.uniqueTools();
-    // a new lab's station is fitted for the first thing the ship is short of
+    // a new lab's station is fitted for the first thing the ship is short of, and nobody has napped in it
     this.station().stock(FIRST_SUPPLY);
+    this.napKnown = false;
     this.hoses = (preset.hoses ?? []).map(({ from, to }) => {
       const m = tankMouth(this.tools[to.tool], to.tank ?? 0);
       return new Hose({ tool: this.tools[from.tool], spout: from.spout }, { x: m.x, y: m.y + (to.up ?? 24), z: m.z }, NOZZLE_REACH.min);
@@ -578,6 +601,11 @@ export class GameEngine {
       const p = this.player;
       const r = this.inRoom({ x: p.x, y: 0, z: p.z, yaw: p.yaw });
       [p.x, p.z] = [r.x, r.z];
+    }
+    // and anyone napping wakes
+    if (this.napping) {
+      this.napping.waking = true;
+      this.sleeping = null;
     }
     for (const d of this.diverters.values()) d.stop();
     this.diverters.clear();
@@ -618,7 +646,7 @@ export class GameEngine {
    * (see putBack), as a carry isn't done until it's set down. Ctrl+Shift+Z or Ctrl+Y: redo.
    */
   undo(redo = false): void {
-    if (inPod(this.wake)) return;
+    if (inPod(this.wake) || this.dozing()) return;
     if (this.held) {
       if (!redo) this.putBack();
       return;
@@ -672,6 +700,7 @@ export class GameEngine {
       faucets: this.faucets.map((fa, i, all) => ({ x: (i + 0.5) / all.length, y: 30 / HOME_H, ...(fa.note ? { note: fa.note } : {}) })),
       ...(this.alarmsOff ? { alarmsOff: true } : {}),
       ...(this.blindsShut ? { blindsShut: true } : {}),
+      ...(this.napKnown ? { nap: true } : {}),
       player: { x: this.player.x, z: this.player.z, yaw: this.player.yaw, pitch: this.player.pitch },
       chem: saveChem(this.chem.params),
     };
@@ -753,6 +782,7 @@ export class GameEngine {
     });
     this.setAlarmsOff(!!s.alarmsOff);
     this.blindsShut = !!s.blindsShut;
+    this.napKnown = !!s.nap;
     const pl = s.player;
     if (pl && [pl.x, pl.z, pl.yaw, pl.pitch].every(Number.isFinite)) {
       const p = this.inRoom({ x: pl.x, y: 0, z: pl.z, yaw: pl.yaw });
@@ -920,7 +950,7 @@ export class GameEngine {
    * through everything, so there's always room). Returns whether it did.
    */
   spawn(kind: Item): boolean {
-    if (inPod(this.wake)) return false;
+    if (inPod(this.wake) || this.dozing()) return false;
     if (this.held) {
       this.say('Hands full');
       return false;
@@ -951,6 +981,7 @@ export class GameEngine {
    * nozzle rolled back up into its spout or faucet.
    */
   private putAway(): void {
+    if (this.dozing()) return;
     const h = this.held;
     if (!h) return;
     if (h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind)) {
@@ -1111,6 +1142,12 @@ export class GameEngine {
     if (this.locked) this.writeNote();
   }
 
+  /** N, on nothing: nap, or wake from one. */
+  touchNap(): void {
+    if (this.dozing()) this.wakeNap();
+    else if (this.locked) this.nap();
+  }
+
   /** Backspace: put away what's held. */
   touchPutAway(): void {
     if (this.locked) this.putAway();
@@ -1208,6 +1245,11 @@ export class GameEngine {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       // Enter is OK on the message inside the cryopod, as it was on the notice it replaced
       if (e.code === 'Enter' && this.wake === 'pod') this.pressOk();
+      // napping, or nodding off, N wakes them, whether or not the mouse is captured, and nothing else does anything
+      if (this.dozing()) {
+        if (e.code === 'KeyN' && !e.repeat) this.wakeNap();
+        return;
+      }
       // in god mode, = shows the end's white void, or puts the lab back, rather than making anything
       if (e.code === 'Equal' && (this.god || this.previewing)) {
         if (!e.repeat) this.previewArrival(!this.previewing);
@@ -1221,7 +1263,9 @@ export class GameEngine {
       if (e.code === 'KeyN') {
         // the note's text box opens at once, and N mustn't be typed into it
         e.preventDefault();
-        this.writeNote();
+        // on something a note can be written about, N writes one; on nothing, it's a nap
+        if (this.targetNote()) this.writeNote();
+        else this.nap();
       }
       const item = HOTKEY_CODES.indexOf(e.code);
       if (item >= 0) {
@@ -1284,6 +1328,7 @@ export class GameEngine {
    * what it pours into and what pours into it (see keepPouring and gather); otherwise it's moved alone.
    */
   private grabOrRelease(linked: boolean): void {
+    if (this.dozing()) return;
     if (inPod(this.wake)) return;
     if (this.held) {
       this.release();
@@ -1616,6 +1661,7 @@ export class GameEngine {
    * away (see putAway); a hose just pulled out is rolled back up.
    */
   private putBack(): void {
+    if (this.dozing()) return;
     const h = this.held;
     if (!h || inPod(this.wake)) return;
     if (!h.from) return this.putAway();
@@ -1651,6 +1697,7 @@ export class GameEngine {
   }
 
   private leftDown(shift: boolean): void {
+    if (this.dozing()) return;
     const p = this.target;
     if (p?.kind === 'wake') {
       this.pressOk();
@@ -1691,6 +1738,7 @@ export class GameEngine {
    * In god mode a flask or tank opens the editor instead, which has a field for its label.
    */
   private writeNote(): void {
+    if (this.dozing()) return;
     const id = this.targetNote();
     if (!id || inPod(this.wake)) return;
     document.exitPointerLock();
@@ -1717,6 +1765,7 @@ export class GameEngine {
   }
 
   private rightDown(): void {
+    if (this.dozing()) return;
     if (inPod(this.wake)) return;
     this.rightHeld = true;
     const h = this.held;
@@ -1969,14 +2018,23 @@ export class GameEngine {
   private frame = (now: number): void => {
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
+    // a nap: their eyes close, or open again, in their own time
+    const nap = this.napping;
+    // (the alarm of the station's changeover wakes them, even as they nod off)
+    if (nap && !nap.waking && this.station().swap !== null) this.wakeNap();
+    if (nap) {
+      nap.lids = Math.max(0, Math.min(1, nap.lids + (nap.waking ? -dt / NAP_S.open : dt / NAP_S.close)));
+      if (nap.waking && nap.lids <= 0) this.napping = null;
+    }
     // asleep, the screen is black: nothing to draw, and the lab runs on its own (see fallAsleep)
-    if (this.wake === 'asleep') {
+    if (this.asleep()) {
       if (!this.sleeping) this.fallAsleep();
       this.hud(now);
       this.raf = requestAnimationFrame(this.frame);
       return;
     }
-    this.move(dt);
+    // nodding off, they stand where they are
+    if (!nap || nap.waking) this.move(dt);
     if (this.wake === 'settling') this.settleIn(dt);
     if (this.held) this.follow(this.held);
     this.view.look(this.eye(), this.player.yaw, this.player.pitch);
@@ -2264,13 +2322,19 @@ export class GameEngine {
 
   /**
    * The goal: enough cryostabilizer in the ship's reservoir. (Enough of what the station's fitted for before that only
-   * brings on the next, see CHANGEOVER.)
+   * brings on the next, see CHANGEOVER.) And the first time the station has delivered steadily for DELIVERY.nap, a
+   * note says the player can nap, as they can from then on (see nap).
    */
   private goal(): void {
     const st = this.station();
     if (!nextSupply(st.supply) && st.tanks[1].n[st.supply.species] >= st.supply.goal && !this.won) {
       this.won = true;
       this.cb.onWin();
+    }
+    if (!this.napKnown && st.steady >= DELIVERY.nap) {
+      this.napKnown = true;
+      const text = 'Steady delivery. To nap while it runs, look away from the equipment and press N.';
+      this.flash = { text, until: performance.now() + NAP_HINT_MS, tip: true };
     }
   }
 
@@ -2681,6 +2745,7 @@ export class GameEngine {
     }
     const id = this.targetNote();
     if (id) add(['N'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
+    else if (this.canNap()) add(['N'], 'nap');
     if (!h && this.history.canUndo) add([MOD, 'Z'], 'undo');
     if (!h && this.history.canRedo) add([MOD, 'Shift', 'Z'], 'redo');
     add(['Esc'], 'let go of the mouse');
@@ -2813,7 +2878,7 @@ export class GameEngine {
     this.changing?.sound.stop();
     this.changing = null;
     const stats = { plain: 0, jumped: 0, jumps: 0 };
-    this.sleeping = { run: sleep(this.sleeper(), stats), stats, from: this.clock, woke: null };
+    this.sleeping = { run: sleep(this.sleeper(), stats, !!this.napping), stats, from: this.clock, woke: null };
     this.pumper.port1.onmessage = () => this.pump();
     this.pumper.port2.postMessage(null);
   }
@@ -2824,7 +2889,7 @@ export class GameEngine {
    */
   private pump(): void {
     const s = this.sleeping;
-    if (!s || s.woke || this.wake !== 'asleep') return;
+    if (!s || s.woke || !this.asleep()) return;
     if (this.speed === 0) {
       setTimeout(() => this.pumper.port2.postMessage(null), 100);
       return;
@@ -2836,7 +2901,8 @@ export class GameEngine {
       s.woke = r.value;
       // a jump can reach the goal, with no substep after it to see it
       if (r.value === 'goal') this.goal();
-      this.wakeFrom(r.value);
+      if (this.napping) this.wakeNap();
+      else this.wakeFrom(r.value);
       return;
     }
     this.pumper.port2.postMessage(null);
@@ -2862,6 +2928,53 @@ export class GameEngine {
         this.station().steady += dt;
       },
     };
+  }
+
+  /** Whether the player is napping or nodding off (see nap): nothing they'd do does anything, but N, which wakes them. */
+  private dozing(): boolean {
+    return !!this.napping && !this.napping.waking;
+  }
+
+  /** Whether the player is asleep, in the pod or in a nap with their eyes shut: the lab runs on its own, undrawn. */
+  private asleep(): boolean {
+    const nap = this.napping;
+    return this.wake === 'asleep' || (!!nap && !nap.waking && nap.lids >= 1);
+  }
+
+  /**
+   * Whether N would start a nap: once the player's been told they can (see napKnown), out in the lab, with empty
+   * hands, the crosshair on nothing a note could be written about, and the station not in the middle of its changeover,
+   * whose alarm nobody could nap through.
+   */
+  private canNap(): boolean {
+    return (
+      this.napKnown && !this.napping && !inPod(this.wake) && !this.previewing && !this.held && !this.turning &&
+      !this.targetNote() && this.station().swap === null
+    );
+  }
+
+  /**
+   * N, on nothing: nap where they stand. Their eyes close, over NAP_S.close real seconds (it's their own doing, like
+   * walking), and then the lab runs on as fast as it can, as while they sleep in the pod (see fallAsleep), whether or
+   * not anything is being delivered, until N wakes them (see wakeNap), or the station's reservoir comes to hold enough
+   * of what it's fitted for.
+   */
+  private nap(): void {
+    if (!this.canNap()) {
+      if (this.napKnown && this.held && !inPod(this.wake)) this.say('Hands full');
+      return;
+    }
+    this.rightHeld = false;
+    this.keys.clear();
+    this.flash = null;
+    this.napping = { lids: 0, waking: false };
+  }
+
+  /** Wake from a nap: the lab runs as ever again, and their eyes open, over NAP_S.open real seconds. */
+  private wakeNap(): void {
+    if (!this.napping) return;
+    this.napping.waking = true;
+    this.sleeping = null;
   }
 
   /** How far the screen has faded to black (see Hud.black). */
@@ -3046,6 +3159,7 @@ export class GameEngine {
       label: !inPod(this.wake) && !!this.targetNote(),
       hand: h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : h?.kind === 'tool' && isDipper(h.t.kind) ? 'Dip' : 'Turn',
       note: this.flash?.text ?? null,
+      tip: !!this.flash?.tip,
       actions: this.actions(),
       black: this.black(),
       // blinded a while by the white void once the pod's open, then all white
@@ -3057,6 +3171,9 @@ export class GameEngine {
       ended: this.wake === 'arrived',
       slept: this.sleeping ? Math.floor(this.clock - this.sleeping.from) : null,
       reservoir: this.sleeping ? this.reservoirHud() : null,
+      lids: this.napping ? ease(this.napping.lids) : 0,
+      napping: this.dozing(),
+      nap: this.canNap(),
     };
     const key = JSON.stringify(hud);
     if (key === this.lastHud) return;

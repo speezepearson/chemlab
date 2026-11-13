@@ -42,9 +42,9 @@ function lab(supply: number, drain: (n: number, dt: number) => number, reservoir
 /** A share k of what it holds each sim second, as a tank drains through a valve. */
 const share = (k: number) => (n: number, dt: number) => n * k * dt;
 
-function run(l: Sleeper): { woke: Woke; stats: SleepStats } {
+function run(l: Sleeper, nap = false): { woke: Woke; stats: SleepStats } {
   const stats = { plain: 0, jumped: 0, jumps: 0 };
-  const it = sleep(l, stats);
+  const it = sleep(l, stats, nap);
   for (let i = 0; i < 1e7; i++) {
     const r = it.next();
     if (r.done) return { woke: r.value, stats };
@@ -144,6 +144,32 @@ describe('sleep', () => {
     expect(run(l).woke).toBe('goal');
     expect(station.tanks[1].n[species]).toBeGreaterThanOrEqual(goal);
     expect(station.tanks[1].n[species]).toBeLessThan(goal + 0.01 * supply);
+  });
+
+  it('naps on though nothing is being delivered, until the goal', () => {
+    // nothing for long past DELIVERY.gap and SLEEP.sustain, and then all at once enough
+    let clock = 0;
+    const { l, station } = lab(0, share(1e-3), GOAL_TARGET - 1e9);
+    l.advance = (dt) => {
+      clock += dt;
+      if (clock > 3 * SLEEP.sustain) station.tanks[1].setMolecules(TARGET, GOAL_TARGET + 1);
+    };
+    l.clock = () => clock;
+    expect(run(l, true).woke).toBe('goal');
+    expect(clock).toBeGreaterThan(3 * SLEEP.sustain);
+  });
+
+  it('naps on past a goal that was already met, jumping ahead while a line runs', () => {
+    const { l, station, now } = lab(1e15, (_, dt) => 1e6 * dt, GOAL_TARGET + 1e9);
+    const stats = { plain: 0, jumped: 0, jumps: 0 };
+    const it = sleep(l, stats, true);
+    for (let i = 0; i < 2000 && !stats.jumps; i++) expect(it.next().done).toBe(false);
+    // it jumps as soon as the delivery is seen to be steady, a long way, and doesn't wake
+    expect(stats.jumps).toBe(1);
+    expect(stats.jumped).toBeGreaterThan(10 * stats.plain);
+    expect(it.next().done).toBe(false);
+    // what it jumped through reached the reservoir as it would have
+    expect(Math.abs((station.tanks[1].n[TARGET] - GOAL_TARGET - 1e9) / (1e6 * now()) - 1)).toBeLessThan(0.01);
   });
 
   it('says how long it has gone on', () => {

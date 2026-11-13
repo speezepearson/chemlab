@@ -28,6 +28,8 @@ export interface SaveState {
   alarmsOff?: boolean;
   /** Whether the porthole's blinds are shut (see GameEngine); not if left out. */
   blindsShut?: boolean;
+  /** Whether the player has been told they can nap (see GameEngine.nap); not if left out. */
+  nap?: boolean;
   /** The sticky notes of saves from when there was a pencil to write them with; no longer written, and ignored. */
   papers?: unknown;
   /** Where the player stood and looked (see GameEngine); where they start if left out. */

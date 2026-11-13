@@ -65,7 +65,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `flask.ts` has `Vessel`, `transfer`, volume and colors.
   - `cooling.ts` is Newtonian cooling to the room; the engine works out each vessel's exposure from its flat outline.
   - `airlock.ts` is the airlock and cryopod where the player wakes: their size, collisions, and the `Wake` states.
-    `sleep.ts` is sleeping in the pod: the lab run in windows, measured, and jumped ahead while it's steady.
+    `sleep.ts` is sleeping in the pod, or napping (N, on nothing): the lab run in windows, measured, and jumped ahead
+    while it's steady.
     `src/intro/notice.ts` is the messages projected inside the pod: the notice she wakes to (its litres as of then),
     and the welcome to Mu Ceti at the end.
   - `porthole.ts` is the porthole's shape, for how much of the wall it takes up.
@@ -102,8 +103,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
-  notice; the player themselves (walking, looking, carrying, tipping a flask), which is input, not the sim; and what
-  isn't in the world (the HUD, the guides' flashing). While the player sleeps in the cryopod, the lab is run as ever in
+  notice; the player themselves (walking, looking, carrying, tipping a flask, their eyes closing for a nap), which is input, not the sim; and what
+  isn't in the world (the HUD, the guides' flashing). While the player sleeps in the cryopod, or naps, the lab is run as ever in
   windows and jumped ahead between them (`sleep.ts`): still sim time, just not substep by substep through the jumps.
   And once the reservoir holds the goal, the lab stands still as it was then through the end (the welcome to Mu Ceti,
   the pod opening onto white), so that goes in real time, as do the screen's fades in from black on waking.
@@ -145,7 +146,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially.
   - `ITEMS` and `HOTKEYS` in `engine.ts` (the hotbar's order and keys) and `ICONS` in `Palette.tsx`, unless the tool is
-    unique. The number row is full, through =, so new ones go along the bottom row of letters, from Z, skipping N (notes): it's taken through the comma.
+    unique. The number row is full, through =, so new ones go along the bottom row of letters, from Z, skipping N (notes, and on nothing, a nap): it's taken through the comma.
   - If it has state of its own that a save should keep, `Tool.memory` and `Tool.remember`.
   - Tests and the README.
   - A tool needn't have tanks at all: the thermometers and the wicking strip (the `DIPPERS`) have none, nor spouts nor

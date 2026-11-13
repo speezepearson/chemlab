@@ -7,7 +7,8 @@ import { roomFor, type Vessel } from './flask';
 import type { Tool } from './tools';
 
 /*
- * Sleeping in the cryopod while a steady line fills the ship's reservoir (see the README's The airlock), much faster
+ * Sleeping in the cryopod, or napping on her feet (see the README's Napping), while a steady line fills the ship's
+ * reservoir (see the README's The airlock), much faster
  * than the lab can be run substep by substep. The lab is run as ever, as a black box, for a window; how every
  * vessel's contents changed through it is measured; and if they're changing steadily, the lab jumps ahead by applying
  * those changes for a stretch Δ, as long as nothing would happen within it that the window couldn't have seen (a
@@ -48,7 +49,8 @@ import type { Tool } from './tools';
  *    would overshoot;
  *  - a vessel nothing drains gains no more uncertainty than `precision` of what it holds, until its rate is known;
  *  - no vessel reaches its brim within it, nor within half a window after;
- *  - the reservoir goes no further than the goal, nor past where it fills slower than the passengers use it up.
+ *  - the reservoir goes no further than the goal (if it's short of it), nor, asleep in the pod, past where it fills
+ *    slower than the passengers use it up.
  * After a jump, the lab runs `settle` sim seconds unmeasured, for whatever the jump knocked out of balance (fast
  * reactions and their reverses) to settle, so the next window doesn't mistake its relaxing for a drift. Anything
  * significant but unconfirmed means no jump yet.
@@ -106,7 +108,8 @@ export interface Sleeper {
 
 /**
  * Why a sleep ended: the reservoir holds enough of what the station's fitted for, or the station stopped delivering
- * (letting nothing in for DELIVERY.gap, or less than the passengers use up over SLEEP.sustain).
+ * (letting nothing in for DELIVERY.gap, or less than the passengers use up over SLEEP.sustain). A nap never ends
+ * because it stopped: it's for whoever's napping to wake up.
  */
 export type Woke = 'goal' | 'stopped';
 
@@ -202,7 +205,8 @@ const ACC = NS + 1;
 /**
  * How long a jump may be, from a window's tracks, and per vessel the rates to apply (0 where it's steady), as at the
  * window's middle, followed by how fast each is changing (see ACC). Infinity if nothing limits it. `reservoir` is the
- * station's, which stops at `goal` molecules of `species`.
+ * station's, which stops at `goal` molecules of `species`, if it's short of that; and if `sustain`, it doesn't go on
+ * once it's filling slower than the passengers use it up.
  */
 function plan(
   tracks: Track[],
@@ -210,7 +214,7 @@ function plan(
   prev: Map<Vessel, Seen>,
   t: number,
   reservoir: Vessel,
-  { species, goal }: { species: number; goal: number },
+  { species, goal, sustain }: { species: number; goal: number; sustain: boolean },
 ): { dt: number; rates: Float64Array[]; seen: Map<Vessel, Seen> } {
   const { eps, z, zConfirm, floor, memory } = SLEEP;
   const seen = new Map<Vessel, Seen>();
@@ -359,12 +363,12 @@ function plan(
     if (room > 1e-6 * tr.v.cap) limit(reach(room, vr, va) - W / 2);
     if (tr.v === reservoir) {
       const [r0, a] = [startRate(out, species, W), out[ACC + species]];
-      // no further than the goal
-      limit(reach(Math.max(0, goal - last[species]), r0, a));
+      // no further than the goal, unless it's already there (a nap once there's enough)
+      if (last[species] < goal) limit(reach(goal - last[species], r0, a));
       // and none at all once it's filling slower than the passengers use it up, nor past when it will: that's for a
       // window, run as ever, to see
-      if (r0 < SUSTAIN) limit(0);
-      else if (a < 0) limit((SUSTAIN - r0) / a);
+      if (sustain && r0 < SUSTAIN) limit(0);
+      else if (sustain && a < 0) limit((SUSTAIN - r0) / a);
     }
     return out;
   });
@@ -410,11 +414,15 @@ function jump(tracks: Track[], rates: Float64Array[], dt: number, W: number): vo
  * up (SUSTAIN; through a jump, the reservoir's taken to have filled evenly). It yields every SLEEP.piece sim seconds of the lab run as
  * ever, and after every jump, so it can be run a little each frame; it returns why it woke. `stats`, if given, is
  * kept up to date.
+ *
+ * A `nap` is the same, but it never ends because the station stopped delivering, nor at the goal if the reservoir
+ * already held it as the nap began: then it goes on until whoever's running it stops.
  */
-export function* sleep(lab: Sleeper, stats: SleepStats = { plain: 0, jumped: 0, jumps: 0 }): Generator<void, Woke> {
+export function* sleep(lab: Sleeper, stats: SleepStats = { plain: 0, jumped: 0, jumps: 0 }, nap = false): Generator<void, Woke> {
   const { window: W, samples: K, piece } = SLEEP;
   const reservoir = lab.station.tanks[1];
   const { species, goal } = lab.station.supply;
+  const had = reservoir.n[species] >= goal;
   // the reservoir's target as the sleep goes on, from the last at least SLEEP.sustain ago
   const filled: [number, number][] = [[lab.clock(), reservoir.n[species]]];
   const short = (): boolean => {
@@ -428,7 +436,8 @@ export function* sleep(lab: Sleeper, stats: SleepStats = { plain: 0, jumped: 0, 
     return reservoir.n[species] - then < SUSTAIN * SLEEP.sustain;
   };
   const woke = (): Woke | null =>
-    reservoir.n[species] >= goal ? 'goal'
+    nap ? (!had && reservoir.n[species] >= goal ? 'goal' : null)
+    : reservoir.n[species] >= goal ? 'goal'
     : short() || lab.station.sinceDelivery > DELIVERY.gap ? 'stopped'
     : null;
   // run the lab as ever for dt, a piece at a time
@@ -450,7 +459,7 @@ export function* sleep(lab: Sleeper, stats: SleepStats = { plain: 0, jumped: 0, 
       if (why) return why;
       tracks.forEach((tr) => tr.xs.push(sample(tr.v)));
     }
-    const p = plan(tracks, W, seen, lab.clock() - W / 2, reservoir, { species, goal });
+    const p = plan(tracks, W, seen, lab.clock() - W / 2, reservoir, { species, goal, sustain: !nap });
     seen = p.seen;
     // (nothing limits a jump only if nothing's changing, so nothing's being delivered either: wait for it to stop)
     if (p.dt < SLEEP.minJump * W || !Number.isFinite(p.dt)) continue;

@@ -247,7 +247,7 @@ export function App() {
             <LabelEditor key={labeling} engine={engine} id={labeling} onClose={() => setLabeling(null)} />
           )}
           {won && hud && !hud.inPod && <div id="win">Enough cryostabilizer to reach Mu Ceti.</div>}
-          {hud && <SleepScreen hud={hud} />}
+          {hud && <SleepScreen hud={hud} onWake={() => engine?.touchNap()} />}
           {hud?.preview && <ArrivalPanel />}
           {engine && hud && (
             <Ending
