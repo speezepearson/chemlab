@@ -32,6 +32,11 @@ export interface SaveState {
   nap?: boolean;
   /** The sticky notes of saves from when there was a pencil to write them with; no longer written, and ignored. */
   papers?: unknown;
+  /**
+   * What's in the equipment cabinet (see cabinet.ts): for each kind it holds a limited supply of, the slots that are
+   * filled. Left out (as in saves from before the cabinet), it's full but for what's out in the lab.
+   */
+  cabinet?: Record<string, number[]>;
   /** Where the player stood and looked (see GameEngine); where they start if left out. */
   player?: { x: number; z: number; yaw: number; pitch: number };
 }

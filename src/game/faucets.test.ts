@@ -7,20 +7,23 @@ import { NS, SOLVENT_SPECIES, SPECIES, pairOf } from '../chem/species';
 import { pairKey } from '../chem/atoms';
 import { CAP } from './config';
 import { Vessel } from './flask';
-import { FAUCETS, describeFaucet, faucetIndex, faucetOutput, faucetTarget, type Faucet } from './faucets';
+import { FAUCETS, WALL_FAUCETS, describeFaucet, faucetIndex, faucetOutput, faucetTarget, type Faucet } from './faucets';
+import { COUNTERS } from './space';
 import type { Mouth } from './tools';
 
 describe('faucets', () => {
   const net = new ReactionNetwork(testChemParams());
 
-  it('are the five atoms, once each, in the order R, G, B, K, then the solvent S', () => {
+  it("are the four colors' on the wall, in the order R, G, B, K, then the solvent S's, one on each island", () => {
     const starts = FAUCETS.map((fa) => SPECIES[fa.start]);
-    expect(starts.map((s) => s.name)).toEqual(['R', 'G', 'B', 'K', 'S']);
+    const islands = COUNTERS.filter((c) => c.island).length;
+    expect(starts.map((s) => s.name)).toEqual(['R', 'G', 'B', 'K', ...Array(islands).fill('S')]);
+    expect(WALL_FAUCETS).toBe(4);
     expect(starts.every((s) => s.size === 1)).toBe(true);
   });
 
-  it('pours pure solvent from the fifth, which nothing changes', () => {
-    const out = faucetOutput(FAUCETS[4], net);
+  it('pours pure solvent from the islands, which nothing changes', () => {
+    const out = faucetOutput(FAUCETS[WALL_FAUCETS], net);
     expect(out.n[SOLVENT_SPECIES]).toBe(1);
     expect(out.N).toBe(1);
   });
@@ -88,6 +91,10 @@ describe('faucetIndex', () => {
   });
 
   const [R, G, B, K] = ['R', 'G', 'B', 'K'].map((a) => FAUCETS.findIndex((fa) => SPECIES[fa.start].name === a));
+
+  it("finds the colors' faucets, and the first island's for the solvent's, among a save's five from when it was on the wall", () => {
+    expect(Array.from({ length: 5 }, (_, i) => faucetIndex(i, 5))).toEqual([R, G, B, K, WALL_FAUCETS]);
+  });
 
   it("finds R, G, B and K's faucets among a save's four from before the solvent", () => {
     expect(Array.from({ length: 4 }, (_, i) => faucetIndex(i, 4))).toEqual([R, G, B, K]);

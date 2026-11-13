@@ -87,6 +87,12 @@ export interface Preset {
 /** `atoms` atoms' worth of one species. */
 const atomsOf = (species: number, atoms: number) => ({ species, molecules: atoms / SPECIES[species].size });
 
+/**
+ * How far out from the back wall the demos' tools stand: over the first island, in the middle of its second row of
+ * cells, so their stands behind them have its first (the back wall's end of the counter is the equipment cabinet's).
+ */
+const DEMO_Z = 7.5 * CELL;
+
 const SHOWCASE: [Atom, number][] = [
   ['R', 0], ['G', 0.2], ['B', 0.5], ['K', 1], ['R', 3], ['G', 10], ['B', 30], ['K', 100],
 ];
@@ -95,15 +101,8 @@ export const PRESETS: readonly Preset[] = [
   {
     id: 'stranded',
     name: 'Stranded',
+    // everything's in the equipment cabinet
     flasks: [],
-    tools: [
-      { kind: 'separator', at: [0.25, 0.3] },
-      { kind: 'dispenser', at: [0.55, 0.3] },
-      // its tanks half a grid cell either side of its middle
-      { kind: 'exchanger', at: [0.7, 0.3] },
-    ],
-    // its two places for flasks half a grid cell either side of its middle
-    scales: [[1.4, 0.62]],
   },
   {
     id: 'exchanger',
@@ -114,9 +113,9 @@ export const PRESETS: readonly Preset[] = [
     flasks: [],
     tools: [
       // over the exchanger's two tanks, half a grid cell either side of its middle
-      { kind: 'dispenser', at: [0.65, 0.22], valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('R'), 4 * CAP)], T: 10 }] },
-      { kind: 'dispenser', at: [0.75, 0.22], valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('G'), 4 * CAP)], T: T_ROOM }] },
-      { kind: 'exchanger', at: [0.7, 0.48], valves: [0.25, 0.25] },
+      { kind: 'dispenser', at: [0.35, 0.22], z: DEMO_Z, valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('R'), 4 * CAP)], T: 10 }] },
+      { kind: 'dispenser', at: [0.45, 0.22], z: DEMO_Z, valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('G'), 4 * CAP)], T: T_ROOM }] },
+      { kind: 'exchanger', at: [0.4, 0.48], z: DEMO_Z, valves: [0.25, 0.25] },
     ],
   },
   {
@@ -129,12 +128,12 @@ export const PRESETS: readonly Preset[] = [
     flasks: [],
     tools: [
       {
-        kind: 'separator', at: [0.35, 0.2], valves: [0.3],
+        kind: 'separator', at: [0.35, 0.2], z: DEMO_Z, valves: [0.3],
         tanks: [{ contents: [atomsOf(singleOf('R'), 2 * CAP), atomsOf(singleOf('K'), 2 * CAP)], T: T_ROOM }],
       },
       // under its end spouts, two grid cells either side of its middle
-      { kind: 'dispenser', at: [0.15, 0.5] },
-      { kind: 'dispenser', at: [0.55, 0.5] },
+      { kind: 'dispenser', at: [0.15, 0.5], z: DEMO_Z },
+      { kind: 'dispenser', at: [0.55, 0.5], z: DEMO_Z },
     ],
   },
   {

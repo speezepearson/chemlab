@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { stockWith, takeFrom } from './cabinet';
 import { Flask } from './flask';
 import { History, UNDO_DEPTH, arrange, arrangement, sameArrangement, type Things } from './history';
 import { Scale } from './scale';
@@ -12,7 +13,7 @@ function lab(): Things {
   const t = new Tool('dispenser', 0, { x: 250, y: 800, z: 150, yaw: 0 });
   const sc = new Scale({ x: 450, y: 420, z: 150, yaw: 0 });
   const h = new Hose({ tool: t, spout: 0 }, { x: 250, y: 600, z: 150 }, 50);
-  return { flasks: [f], tools: [t], scales: [sc], hoses: [h], faucets: [{ note: '' }] };
+  return { flasks: [f], tools: [t], scales: [sc], hoses: [h], faucets: [{ note: '' }], stock: stockWith({}) };
 }
 
 describe('arrangement', () => {
@@ -42,6 +43,18 @@ describe('arrangement', () => {
     arrange(l, a);
     expect(l.flasks).toEqual([f]);
     expect(l.flasks[0]).toBe(f);
+  });
+
+  it("puts what's in the equipment cabinet back as it was, in place", () => {
+    const l = lab();
+    const flasks = l.stock.flask;
+    const a = arrangement(l, sw);
+    takeFrom(l.stock, 'flask');
+    expect(l.stock.flask.filter(Boolean)).toHaveLength(flasks.length - 1);
+    expect(sameArrangement(a, arrangement(l, sw))).toBe(false);
+    arrange(l, a);
+    expect(l.stock.flask).toBe(flasks);
+    expect(flasks.every(Boolean)).toBe(true);
   });
 
   it('keeps what stands on a scale, and the hoses where they were', () => {

@@ -58,7 +58,7 @@ export function notice(presentL: number = VOYAGE.presentL, firstL: number | null
       kind: 'p',
       text:
         'Congratulations! On the basis of the incomparable expertise demonstrated by your career as a(n) ELEMENTARY SCHOOL ' +
-        'GEOGRAPHY TEACHER, our intelligent automated systems have identified you as the most competent ' +
+        'SOCIAL STUDIES TEACHER, our intelligent automated systems have identified you as the most competent ' +
         'currently-capable passenger in the fields of CHEMISTRY, BIOLOGY!',
     },
     {

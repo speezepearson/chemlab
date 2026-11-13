@@ -1,3 +1,4 @@
+import { copyStock, type Stock, type Stocked } from './cabinet';
 import type { Flask } from './flask';
 import type { Scale } from './scale';
 import type { Pose, Vec3 } from './space';
@@ -18,6 +19,8 @@ export interface Things {
   scales: Scale[];
   hoses: Hose[];
   faucets: { note: string }[];
+  /** What's in the equipment cabinet, changed in place. */
+  stock: Stock;
 }
 
 /** The lab's arrangement at some moment (see arrangement). */
@@ -27,6 +30,7 @@ export interface Arrangement {
   scales: { sc: Scale; pose: Pose; load: { f: Flask; dx: number }[]; tare: number; note: string }[];
   hoses: { h: Hose; outlet: Vec3; turn: number; reach: number }[];
   faucets: string[];
+  stock: Stock;
   alarmsOff: boolean;
   blindsShut: boolean;
 }
@@ -44,6 +48,7 @@ export function arrangement(l: Things, sw: Switches): Arrangement {
     scales: l.scales.map((sc) => ({ sc, pose: { ...sc.pose }, load: sc.load.map((x) => ({ ...x })), tare: sc.tare, note: sc.note })),
     hoses: l.hoses.map((h) => ({ h, outlet: { ...h.outlet }, turn: h.turn, reach: h.reach })),
     faucets: l.faucets.map((fa) => fa.note),
+    stock: copyStock(l.stock),
     alarmsOff: sw.alarmsOff,
     blindsShut: sw.blindsShut,
   };
@@ -73,6 +78,7 @@ export function arrange(l: Things, a: Arrangement): void {
   );
   l.hoses.splice(0, Infinity, ...a.hoses.map(({ h, outlet, turn, reach }) => Object.assign(h, { outlet: { ...outlet }, turn, reach })));
   l.faucets.forEach((fa, i) => (fa.note = a.faucets[i] ?? ''));
+  for (const k of Object.keys(a.stock) as Stocked[]) l.stock[k].splice(0, Infinity, ...a.stock[k]);
 }
 
 /** Whether two arrangements are the same: the same things, in the same order, arranged the same way. */

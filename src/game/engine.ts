@@ -8,12 +8,13 @@ import {
   flaskLip, flaskMouth, nozzleBox, tankFluid, docked, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
+import { CABINET, endless, isStocked, putIn, stockWith, takeFrom, takeSlot, type Stock, type Stocked } from './cabinet';
 import { changeover, type ChangeoverSound } from './changeover';
 import { chime } from './chime';
 import { diverter, type Diverter } from './diverter';
-import { CAP, DELIVERY, FILL_RATE, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
+import { CAP, DELIVERY, FILL_RATE, HOME_H, HOME_W, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
-import { FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
+import { FAUCETS, WALL_FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
 import { Flask, Vessel, fluidColor, roomFor, sustenance, transfer, volume, volumeUnit } from './flask';
 import { History, arrange, arrangement, type Arrangement } from './history';
@@ -21,7 +22,7 @@ import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
 import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
-import { CRYOSTABILIZER, FIRST_SUPPLY, litresOf, nextSupply, type Supply } from './supply';
+import { CRYOSTABILIZER, FIRST_SUPPLY, litresOf, type Supply } from './supply';
 import { shatter } from './shatter';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
@@ -129,8 +130,6 @@ export interface Action {
 }
 
 export interface EngineCallbacks {
-  /** The ship's reservoir holds GOAL_TARGET of the target. */
-  onWin(): void;
   /** Throttled to ~10 Hz; null when nothing is inspected. */
   onInspect(info: Inspection | null): void;
   /** N was pressed on a vessel in god mode; look it up with GameEngine.vessel(id). */
@@ -261,6 +260,11 @@ const HOLD_NEAR = 40;
 const FLASK_HOLD = 1.7;
 const HOLD_FAR = 520;
 /** The counters, as boxes from the floor up to their tops. */
+/** The equipment cabinet, solid all through: nothing's set down in it but by putting it away. */
+const CABINET_BOX: Box = {
+  x: (CABINET.x0 + CABINET.x1) / 2, y: CABINET.y1 / 2, z: (CABINET.z0 + CABINET.z1) / 2, yaw: 0,
+  hx: (CABINET.x1 - CABINET.x0) / 2, hy: CABINET.y1 / 2, hz: (CABINET.z1 - CABINET.z0) / 2,
+};
 const COUNTER_BOXES: readonly Box[] = COUNTERS.map((c) => ({
   x: (c.x0 + c.x1) / 2, y: LIFT / 2, z: (c.z0 + c.z1) / 2, yaw: 0, hx: (c.x1 - c.x0) / 2, hy: LIFT / 2, hz: (c.z1 - c.z0) / 2,
 }));
@@ -290,6 +294,13 @@ const FAUCET_NECK = 30;
 const FAUCET_Z0 = 3.5 * CELL;
 const FAUCET_GAP = CELL;
 const FAUCET_OUT = CELL / 2;
+/**
+ * An island's faucet rises from the island's middle, a corner of four cells, and reaches out over the middle of one
+ * of them, this far along x and along z (see CELL).
+ */
+const ISLAND_FAUCET_OUT = CELL / 2;
+/** How thick an island faucet's riser is, round, for bumping into: its radius. */
+const RISER_R = 6;
 /** How long a note stays up, in ms. */
 const NOTE_MS = 1600;
 /** How long the note that she can nap stays up, in ms: long enough to read. */
@@ -315,6 +326,8 @@ export class GameEngine {
   private scales: Scale[] = [];
   private hoses: Hose[] = [];
   private faucets: (FaucetSpot & { start: (typeof FAUCETS)[number] })[];
+  /** What's in the equipment cabinet (see cabinet.ts): what the hotbar makes comes out of it, and goes back in. */
+  private stock: Stock = stockWith({});
   /** Where the player stands, and which way they look (yaw about the vertical, pitch up). */
   private player = { x: 480, z: 380, yaw: 0, pitch: -0.08 };
   private keys = new Set<string>();
@@ -356,7 +369,6 @@ export class GameEngine {
   private target: (Pick & { point: Vec3; distance: number }) | null = null;
   /** A brief note on the display, like there being no room for something (see say). */
   private flash: { text: string; until: number; tip?: boolean } | null = null;
-  private won = false;
   /** Whether the alarms are silenced, by the button under the beacon (see hushAlarms). Saved, and kept through Reset. */
   private alarmsOff = false;
   /** Whether the porthole's blinds are shut, by the button beside it. Saved, and kept through Reset. */
@@ -436,15 +448,26 @@ export class GameEngine {
     private cb: EngineCallbacks,
     private preset: Preset = DEFAULT_PRESET,
   ) {
-    // along the right wall, left to right as the player faces it
+    // the colors' along the right wall, left to right as the player faces it; then the solvent's, one on each island
+    const islands = COUNTERS.filter((c) => c.island);
     this.faucets = FAUCETS.map((start, i) => {
-      const z = FAUCET_Z0 + i * FAUCET_GAP;
+      const output = faucetOutput(start, chem);
+      if (i < WALL_FAUCETS) {
+        const z = FAUCET_Z0 + i * FAUCET_GAP;
+        return {
+          start, output, note: '',
+          spout: { x: ROOM.x1 - FAUCET_OUT, y: FAUCET_Y, z },
+          wall: { x: ROOM.x1 - 14, y: FAUCET_Y + FAUCET_NECK, z },
+        };
+      }
+      const c = islands[i - WALL_FAUCETS];
+      const x = (c.x0 + c.x1) / 2;
+      const z = (c.z0 + c.z1) / 2;
       return {
-        start,
-        spout: { x: ROOM.x1 - FAUCET_OUT, y: FAUCET_Y, z },
-        wall: { x: ROOM.x1 - 14, y: FAUCET_Y + FAUCET_NECK, z },
-        output: faucetOutput(start, chem),
-        note: '',
+        start, output, note: '',
+        spout: { x: x + ISLAND_FAUCET_OUT, y: FAUCET_Y, z: z + ISLAND_FAUCET_OUT },
+        wall: { x, y: FAUCET_Y + FAUCET_NECK, z },
+        base: { x, y: LIFT, z },
       };
     });
     this.view = new View(canvas, this.faucets, EYE);
@@ -562,11 +585,13 @@ export class GameEngine {
 
   load(preset: Preset): void {
     this.preset = preset;
-    this.flasks = Array.from({ length: N_FLASKS }, (_, i) => {
+    // a preset's flasks along the front of the first island
+    const island = COUNTERS.find((c) => c.island)!;
+    this.flasks = preset.flasks.map((fill, i) => {
       const f = new Flask(CAP);
-      f.pose = { x: (i + 0.5) * CELL, y: LIFT + FLASK_H, z: Z_HOME, yaw: 0 };
+      f.pose = { x: island.x0 + (i + 0.5) * CELL, y: LIFT + FLASK_H, z: island.z1 - CELL / 2, yaw: 0 };
       f.glass = glassGrams(i);
-      applyFill(f, preset.flasks[i] ?? null);
+      applyFill(f, fill);
       return f;
     });
     this.scales = (preset.scales ?? []).map(([fx, fy]) => new Scale({ ...fromFrac({ x: fx, y: fy }), yaw: 0 }));
@@ -585,11 +610,46 @@ export class GameEngine {
       return new Hose({ tool: this.tools[from.tool], spout: from.spout }, { x: m.x, y: m.y + (to.up ?? 24), z: m.z }, NOZZLE_REACH.min);
     });
     this.restAll();
+    this.stock = stockWith(this.outOfCabinet());
     this.afterLoad();
   }
 
+  /** How many of each kind the cabinet stocks are out in the lab. */
+  private outOfCabinet(): Partial<Record<Stocked, number>> {
+    const out: Partial<Record<Stocked, number>> = {};
+    const kinds: string[] = [...this.flasks.map(() => 'flask'), ...this.scales.map(() => 'scale'), ...this.tools.map((t) => t.kind)];
+    for (const k of kinds) if (isStocked(k)) out[k] = (out[k] ?? 0) + 1;
+    return out;
+  }
+
+  /**
+   * Put back in the cabinet whatever a save left where it now stands (an older save's things along the back counter,
+   * before the cabinet took that end of it), emptied, as if put away; and whatever couldn't be put away, as a unique
+   * tool can't, somewhere near. Returns how many of each kind were put back.
+   */
+  private clearCabinet(): Partial<Record<Stocked, number>> {
+    const back: Partial<Record<Stocked, number>> = {};
+    const inIt = (b: Box) => boxesOverlap(b, CABINET_BOX);
+    const count = (k: Stocked) => (back[k] = (back[k] ?? 0) + 1);
+    // a scale goes with whatever stands on it
+    const scales = new Set(this.scales.filter((sc) => inIt(scaleBox(sc, true))));
+    const riders = new Set([...scales].flatMap((sc) => sc.load.map((l) => l.f)));
+    const flasks = new Set(this.flasks.filter((f) => riders.has(f) || inIt(flaskBox(f))));
+    const tools = new Set(this.tools.filter((t) => !t.shape.wall && isStocked(t.kind) && inIt(toolBox(t))));
+    scales.forEach(() => count('scale'));
+    flasks.forEach(() => count('flask'));
+    tools.forEach((t) => count(t.kind as Stocked));
+    this.scales = this.scales.filter((sc) => !scales.has(sc));
+    this.flasks = this.flasks.filter((f) => !flasks.has(f));
+    this.tools = this.tools.filter((t) => !tools.has(t));
+    for (const sc of this.scales) for (const { f } of [...sc.load]) if (flasks.has(f)) sc.remove(f);
+    this.hoses = this.hoses.filter((h) => !('tool' in h.on && tools.has(h.on.tool)) && !inIt(nozzleBox(h)));
+    // what can't be put away (a unique tool) goes somewhere near instead
+    for (const t of this.tools) if (!t.shape.wall && inIt(toolBox(t))) t.pose = this.roomy(t);
+    return back;
+  }
+
   private afterLoad(): void {
-    this.won = false;
     // a lab loads with the airlock shut, until its station has been delivering steadily again, and anyone in it or
     // asleep in the pod wakes in the lab
     if (this.wake === 'open' || this.wake === 'settling' || this.wake === 'boarding' || this.wake === 'asleep' || this.arrival) {
@@ -620,8 +680,8 @@ export class GameEngine {
 
   /** How the lab is arranged just now (see history.ts). */
   private arranged(): Arrangement {
-    const { flasks, tools, scales, hoses, faucets, alarmsOff, blindsShut } = this;
-    return arrangement({ flasks, tools, scales, hoses, faucets }, { alarmsOff, blindsShut });
+    const { flasks, tools, scales, hoses, faucets, stock, alarmsOff, blindsShut } = this;
+    return arrangement({ flasks, tools, scales, hoses, faucets, stock }, { alarmsOff, blindsShut });
   }
 
   /** An action that changes the arrangement is starting (see History.mark). */
@@ -654,8 +714,8 @@ export class GameEngine {
     const now = this.arranged();
     const a = redo ? this.history.redo(now) : this.history.undo(now);
     if (!a) return;
-    const { flasks, tools, scales, hoses, faucets } = this;
-    arrange({ flasks, tools, scales, hoses, faucets }, a);
+    const { flasks, tools, scales, hoses, faucets, stock } = this;
+    arrange({ flasks, tools, scales, hoses, faucets, stock }, a);
     this.setAlarmsOff(a.alarmsOff);
     this.blindsShut = a.blindsShut;
     this.turning = null;
@@ -698,6 +758,9 @@ export class GameEngine {
       })),
       // where they started on the old flat bench, so the save still loads there, with their notes
       faucets: this.faucets.map((fa, i, all) => ({ x: (i + 0.5) / all.length, y: 30 / HOME_H, ...(fa.note ? { note: fa.note } : {}) })),
+      cabinet: Object.fromEntries(
+        (Object.keys(this.stock) as Stocked[]).filter((k) => !endless(k)).map((k) => [k, this.stock[k].flatMap((on, i) => (on ? [i] : []))]),
+      ),
       ...(this.alarmsOff ? { alarmsOff: true } : {}),
       ...(this.blindsShut ? { blindsShut: true } : {}),
       ...(this.napKnown ? { nap: true } : {}),
@@ -788,7 +851,18 @@ export class GameEngine {
       const p = this.inRoom({ x: pl.x, y: 0, z: pl.z, yaw: pl.yaw });
       Object.assign(this.player, { x: p.x, z: p.z, yaw: pl.yaw, pitch: pl.pitch });
     }
+    const back = this.clearCabinet();
     this.restAll();
+    // the cabinet as saved, with whatever was just put back in it; or for a save from before it, full but for what's out
+    if (s.cabinet) {
+      this.stock = stockWith({});
+      for (const k of Object.keys(this.stock) as Stocked[]) {
+        if (endless(k) || !Array.isArray(s.cabinet[k])) continue;
+        const filled = new Set(s.cabinet[k]);
+        this.stock[k] = this.stock[k].map((_, i) => filled.has(i));
+        for (let n = back[k] ?? 0; n > 0; n--) putIn(this.stock, k);
+      }
+    } else this.stock = stockWith(this.outOfCabinet());
     this.afterLoad();
   }
 
@@ -946,8 +1020,8 @@ export class GameEngine {
   /* ---------------- making and putting away ---------------- */
 
   /**
-   * Make a new flask, tool or scale in the player's grip, facing them, if their hands are free (what's held passes
-   * through everything, so there's always room). Returns whether it did.
+   * Take a flask, tool or scale out of the equipment cabinet into the player's grip, facing them, if their hands are
+   * free (what's held passes through everything, so there's always room) and there's one left. Returns whether it did.
    */
   spawn(kind: Item): boolean {
     if (inPod(this.wake) || this.dozing()) return false;
@@ -955,30 +1029,56 @@ export class GameEngine {
       this.say('Hands full');
       return false;
     }
-    let held: Held;
-    if (kind === 'flask') {
-      const f = new Flask(CAP);
-      f.glass = glassGrams(this.flasks.length);
-      held = { kind: 'flask', f, relYaw: 0, dist: 0 };
-    } else if (kind === 'scale') held = { kind: 'scale', sc: new Scale(), relYaw: 0, dist: 0 };
-    else held = { kind: 'tool', t: new Tool(kind, this.nextToolId, undefined), relYaw: 0, dist: 0 };
+    if (!endless(kind) && !this.stock[kind].includes(true)) {
+      this.say('None left in the cabinet');
+      return false;
+    }
+    this.mark();
+    const held = this.fresh(kind, takeFrom(this.stock, kind)!);
     held.dist = this.holdDist(held);
     this.placeHeld(held, this.gripPose(held));
     held.dist = this.clampDist(held, held.dist);
-    this.mark();
-    if (held.kind === 'flask') this.flasks.push(held.f);
-    if (held.kind === 'scale') this.scales.push(held.sc);
-    if (held.kind === 'tool') {
-      this.nextToolId++;
-      this.tools.push(held.t);
-    }
+    this.enter(held);
     this.held = held;
     return true;
   }
 
+  /** Take the one in a slot of the cabinet out of it, held just where it stood, as anything's picked up. */
+  private takeOut(kind: Stocked, slot: number): void {
+    if (!this.stock[kind][slot]) return;
+    this.mark();
+    takeSlot(this.stock, kind, slot);
+    const held = this.fresh(kind, slot);
+    this.placeHeld(held, CABINET.slots[kind][slot]);
+    held.relYaw = held.kind === 'flask' ? 0 : wrapAngle(this.heldPose(held).yaw - this.player.yaw);
+    held.follow = [];
+    this.enter(held);
+    this.holdInPlace(held);
+    this.held = held;
+  }
+
+  /** A new one of a kind, empty, as it comes out of the cabinet's `slot`, held but not yet in the lab (see enter). */
+  private fresh(kind: Stocked, slot: number): Held {
+    if (kind === 'flask') {
+      const f = new Flask(CAP);
+      // each of the cabinet's flasks its own weight
+      f.glass = glassGrams(slot);
+      return { kind: 'flask', f, relYaw: 0, dist: 0 };
+    }
+    if (kind === 'scale') return { kind: 'scale', sc: new Scale(), relYaw: 0, dist: 0 };
+    return { kind: 'tool', t: new Tool(kind, this.nextToolId++, undefined), relYaw: 0, dist: 0 };
+  }
+
+  /** Bring something just made (see fresh) into the lab. */
+  private enter(h: Held): void {
+    if (h.kind === 'flask') this.flasks.push(h.f);
+    if (h.kind === 'scale') this.scales.push(h.sc);
+    if (h.kind === 'tool') this.tools.push(h.t);
+  }
+
   /**
-   * Put away whatever's held, unless it's one of a kind: a tool with the hoses pulled out of its spouts, and a hose's
-   * nozzle rolled back up into its spout or faucet.
+   * Put away whatever's held, unless it's one of a kind: back in the equipment cabinet, emptied, a tool with the hoses
+   * pulled out of its spouts rolled back up, and a hose's nozzle rolled back up into its spout or faucet.
    */
   private putAway(): void {
     if (this.dozing()) return;
@@ -995,6 +1095,8 @@ export class GameEngine {
       this.hoses = this.hoses.filter((hose) => !('tool' in hose.on && hose.on.tool === h.t));
     }
     if (h.kind === 'scale') this.scales.splice(this.scales.indexOf(h.sc), 1);
+    const kind = h.kind === 'tool' ? h.t.kind : h.kind;
+    if (isStocked(kind)) putIn(this.stock, kind);
     if (h.kind === 'hose') this.hoses.splice(this.hoses.indexOf(h.h), 1);
     this.held = null;
     this.pinned = null;
@@ -1085,7 +1187,7 @@ export class GameEngine {
     // while the airlock's doors are open, its doorway and chamber take the front wall's place
     const room = this.wake === 'closed' ? roomBoxes(ROOM) : [...roomBoxes(ROOM, false), ...airlockBoxes()];
     const riders = h?.kind === 'scale' ? new Set(h.sc.load.map((l) => l.f)) : new Set<Flask>();
-    const out: Box[] = [...room, ...COUNTER_BOXES];
+    const out: Box[] = [...room, ...COUNTER_BOXES, CABINET_BOX, ...this.risers()];
     for (const f of this.flasks) if (!(h?.kind === 'flask' && h.f === f) && !riders.has(f)) out.push(flaskBox(f));
     const gone = (t: Tool) => (h?.kind === 'tool' && h.t === t) || t === away;
     for (const t of this.tools) if (!gone(t)) out.push(toolBox(t));
@@ -1098,6 +1200,15 @@ export class GameEngine {
       }
     if (bases) for (const t of this.tools) if (!gone(t)) for (const st of toolStands(t)) out.push(standBase(st));
     return out;
+  }
+
+  /** The islands' faucets' risers, each a round post from the counter up to its knob. */
+  private risers(): Box[] {
+    return this.faucets.flatMap(({ base, wall }) => {
+      if (!base) return [];
+      const hy = (wall.y - base.y) / 2;
+      return [{ x: base.x, y: base.y + hy, z: base.z, yaw: 0, hx: RISER_R, hy, hz: RISER_R, round: true }];
+    });
   }
 
   private eye(): Vec3 {
@@ -1331,13 +1442,18 @@ export class GameEngine {
     if (this.dozing()) return;
     if (inPod(this.wake)) return;
     if (this.held) {
-      this.release();
+      if (this.intoCabinet()) this.putAway();
+      else this.release();
       return;
     }
     const p = this.target;
     if (!p) return;
     let h: Held;
-    if (p.kind === 'faucet' || p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake') return;
+    if (p.kind === 'stock') {
+      this.takeOut(p.item, p.slot);
+      return;
+    }
+    if (p.kind === 'faucet' || p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake' || p.kind === 'cabinet') return;
     if (p.kind === 'tool' && p.t.shape.fixed) {
       this.say('That stays where it is');
       return;
@@ -1760,8 +1876,8 @@ export class GameEngine {
       return t.tanks.length === 1 ? `t${t.id}.0` : `t${t.id}`;
     }
     if (p.kind === 'scale') return `s${this.scales.indexOf(p.sc)}`;
-    if (p.kind === 'hose' || p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake') return null;
-    return `F${p.i}`;
+    if (p.kind === 'faucet') return `F${p.i}`;
+    return null;
   }
 
   private rightDown(): void {
@@ -2125,6 +2241,17 @@ export class GameEngine {
   }
 
   /** The thing the player holds, as the view knows it. */
+  /**
+   * Whether letting go of what's held would put it in the equipment cabinet: it's aimed at the cabinet, or at
+   * something in it, and it's something the cabinet holds.
+   */
+  private intoCabinet(): boolean {
+    const h = this.held;
+    const p = this.target;
+    if (!h || h.kind === 'hose' || (p?.kind !== 'cabinet' && p?.kind !== 'stock')) return false;
+    return isStocked(h.kind === 'tool' ? h.t.kind : h.kind);
+  }
+
   private heldObject(): object | null {
     const h = this.held;
     if (!h) return null;
@@ -2266,7 +2393,6 @@ export class GameEngine {
         t.flow.fill(0);
         t.streaming.fill(false);
       }
-      this.goal();
       return;
     }
 
@@ -2317,20 +2443,15 @@ export class GameEngine {
     }
     this.water.update(dt, this.landed.map((p) => this.hear(p)), streams);
 
-    this.goal();
+    this.napHint();
   }
 
   /**
-   * The goal: enough cryostabilizer in the ship's reservoir. (Enough of what the station's fitted for before that only
-   * brings on the next, see CHANGEOVER.) And the first time the station has delivered steadily for DELIVERY.nap, a
-   * note says the player can nap, as they can from then on (see nap).
+   * The first time the station has delivered steadily for DELIVERY.nap, whatever it's fitted for, a note says the
+   * player can nap, as they can from then on (see nap).
    */
-  private goal(): void {
+  private napHint(): void {
     const st = this.station();
-    if (!nextSupply(st.supply) && st.tanks[1].n[st.supply.species] >= st.supply.goal && !this.won) {
-      this.won = true;
-      this.cb.onWin();
-    }
     if (!this.napKnown && st.steady >= DELIVERY.nap) {
       this.napKnown = true;
       const text = 'Steady delivery. To nap while it runs, look away from the equipment and press N.';
@@ -2642,13 +2763,23 @@ export class GameEngine {
     });
     this.view.render({
       eye: this.eye(), yaw: this.player.yaw, pitch: this.player.pitch,
-      flasks: this.flasks, tools: this.tools, scales: this.scales, hoses, faucets: this.faucets,
+      flasks: this.flasks, tools: this.tools, scales: this.scales, hoses, faucets: this.faucets, stock: this.stock,
       streams, drops,
-      tarePress: this.tarePress, hot: this.target, dt, clock: this.clock,
+      tarePress: this.tarePress, hot: this.hot(), dt, clock: this.clock,
       energies: BOND_KEYS.map((k) => this.chem.params.bonds[k].E), alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
       airlock: this.airlockLook(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(),
     });
+  }
+
+  /**
+   * What's outlined: what the crosshair is on, but the whole equipment cabinet while what's held would go into it,
+   * and nothing for the cabinet itself otherwise.
+   */
+  private hot(): Pick | null {
+    const p = this.target;
+    if (this.held) return this.intoCabinet() ? { kind: 'cabinet' } : p?.kind === 'cabinet' || p?.kind === 'stock' ? null : p;
+    return p?.kind === 'cabinet' ? null : p;
   }
 
   /** The vessel the info panel is showing: what's held, if it's a flask, or else the flask or tank looked at. */
@@ -2712,7 +2843,8 @@ export class GameEngine {
         : h.kind === 'tool' && isDipper(h.t.kind) && this.mouthAimed() ? 'stand it in it'
         : 'set it down';
       // a button looked at takes the click
-      if (!this.onButton()) add(['LMB'], ok ? how : `${how}: not here`, !ok);
+      if (this.intoCabinet()) add(['LMB'], 'put it in the cabinet');
+      else if (!this.onButton()) add(['LMB'], ok ? how : `${how}: not here`, !ok);
       if (this.rightWouldDo())
         add(
           ['RMB'],
@@ -2727,11 +2859,11 @@ export class GameEngine {
       } else if (h.kind !== 'flask') add(['Shift', '←→'], 'turn it');
       add(['Wheel'], 'hold it nearer or further');
       if (h.kind === 'hose') add(['Backspace'], 'roll the hose back up');
-      else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it away');
-      add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it away') : 'put it back');
+      else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it back in the cabinet');
+      add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it back in the cabinet') : 'put it back');
     } else {
       if (this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
-      add(['1–0, -, =, Z–B, M, ,'], 'make equipment in your hands');
+      add(['1–0, -, =, Z–B, M, ,'], 'take equipment from the cabinet');
     }
     if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
     else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
@@ -2764,7 +2896,7 @@ export class GameEngine {
    */
   private leftWouldDo(): boolean {
     if (this.onButton()) return this.pressable();
-    if (this.held) return !!this.placed && 'rest' in this.placed;
+    if (this.held) return this.intoCabinet() || (!!this.placed && 'rest' in this.placed);
     const p = this.target;
     return !!this.mountAimed() || (!!p && this.grabbable(p));
   }
@@ -2791,7 +2923,10 @@ export class GameEngine {
 
   /** Whether `p` can be picked up: anything but what's fixed in place. */
   private grabbable(p: Pick): boolean {
-    return p.kind !== 'faucet' && p.kind !== 'alarm' && p.kind !== 'blinds' && p.kind !== 'wake' && !(p.kind === 'tool' && p.t.shape.fixed);
+    return (
+      p.kind !== 'faucet' && p.kind !== 'alarm' && p.kind !== 'blinds' && p.kind !== 'wake' && p.kind !== 'cabinet' &&
+      !(p.kind === 'tool' && p.t.shape.fixed)
+    );
   }
 
   /* ---------------- waking in the airlock ---------------- */
@@ -2899,8 +3034,6 @@ export class GameEngine {
       const r = s.run.next();
       if (!r.done) continue;
       s.woke = r.value;
-      // a jump can reach the goal, with no substep after it to see it
-      if (r.value === 'goal') this.goal();
       if (this.napping) this.wakeNap();
       else this.wakeFrom(r.value);
       return;

@@ -2,7 +2,7 @@ import { type Atom } from '../chem/atoms';
 import { THERMO, T_ROOM } from '../chem/params';
 import { ReactionNetwork, heatAt, type Fluid } from '../chem/reactions';
 import { NS, SPECIES, singleOf } from '../chem/species';
-import type { Vec3 } from './space';
+import { COUNTERS, type Vec3 } from './space';
 import { mouthBelow, type Mouth } from './tools';
 
 /** A faucet dispenses an unlimited supply of one fixed fluid. */
@@ -16,18 +16,28 @@ export interface Faucet {
 /** A faucet of one atom, pure. */
 const pure = (a: Atom): Faucet => ({ start: singleOf(a) });
 
-/**
- * One faucet for each of the five atoms, pure, at room temperature, left to right: the four colors, then the clear
- * solvent, S. Every pair has to be made by mixing.
- */
-export const FAUCETS: readonly Faucet[] = [pure('R'), pure('G'), pure('B'), pure('K'), pure('S')];
+/** How many of the faucets are the four colors' on the right wall; the rest are the solvent's, one on each island. */
+export const WALL_FAUCETS = 4;
+const SOLVENT: Faucet = pure('S');
 
 /**
- * Older saves' faucets, by how many there were, as places among the new ones (null for one that's gone): from before
- * the solvent, when there were the four colors' alone, in the same order; from when there were six atoms, R, Y, G, C, B and M; and from before that, when the twelve pairs that could bond had faucets
- * too, 18, with the six atoms' at 3, 5, 7, 9, 11 and 13 (see faucetIndex).
+ * The faucets, all pure, at room temperature: first the four colors', left to right along the right wall, then the
+ * clear solvent's, S, one in the middle of each island, in the order of COUNTERS. Every pair has to be made by mixing.
+ */
+export const FAUCETS: readonly Faucet[] = [
+  pure('R'), pure('G'), pure('B'), pure('K'),
+  ...COUNTERS.filter((c) => c.island).map(() => SOLVENT),
+];
+
+/**
+ * Older saves' faucets, by how many there were, as places among the new ones (null for one that's gone): from when
+ * the solvent's was a fifth on the right wall, which is now the first island's; from before the solvent, when there
+ * were the four colors' alone, in the same order; from when there were six atoms, R, Y, G, C, B and M; and from before
+ * that, when the twelve pairs that could bond had faucets too, 18, with the six atoms' at 3, 5, 7, 9, 11 and 13 (see
+ * faucetIndex).
  */
 const OLD: Record<number, readonly (number | null)[]> = {
+  5: [0, 1, 2, 3, 4],
   4: [0, 1, 2, 3],
   6: [0, null, 1, null, 2, null],
   18: Array.from({ length: 18 }, (_, i) => ({ 3: 0, 7: 1, 11: 2 } as Record<number, number>)[i] ?? null),
