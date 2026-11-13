@@ -38,7 +38,7 @@ import {
   type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
-import { ARRIVAL, View, type AirlockLook, type FaucetSpot, type Frame, type GuideLook, type Pick } from './view';
+import { ARRIVAL, View, type AirlockLook, type FaucetSpot, type Frame, type GuideLook, type Icons, type Pick } from './view';
 import { WaterSounds } from './water';
 
 /** What the info panel shows for one vessel: all of it in god mode, otherwise just its color. */
@@ -1043,6 +1043,11 @@ export class GameEngine {
     this.enter(held);
     this.held = held;
     return true;
+  }
+
+  /** A little picture of each kind of thing the equipment wheels make, as it's drawn in the lab (see the view's IconStudio). */
+  icons(): Readonly<Icons> {
+    return this.view.icons();
   }
 
   /**

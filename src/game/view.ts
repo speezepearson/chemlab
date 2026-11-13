@@ -23,12 +23,13 @@ import { arrival, notice, type Block } from '../intro/notice';
 import { STATION_POSE } from './presets';
 import { litresOf, type Supply } from './supply';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
+import { WHEEL } from './wheel';
 import {
   clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, Tool,
 } from './tools';
-import { CABINET, CABINET_BUILD, type Stock, type Stocked } from './cabinet';
+import { CABINET, CABINET_BUILD, STOCK, type Stock, type Stocked } from './cabinet';
 
 /** What the crosshair is on. */
 export type Pick =
@@ -3538,6 +3539,30 @@ const cabinetMat = new THREE.MeshStandardMaterial({ color: 0xb4bdb9, metalness: 
 const cabinetBackMat = new THREE.MeshStandardMaterial({ color: 0x4d5653, metalness: 0.3, roughness: 0.7 });
 
 /**
+ * A view of a new one of a kind, empty and shut, in `scene`, where a new one starts: what the cabinet's stock and the
+ * equipment wheels' icons are drawn from.
+ */
+function specimen(k: Stocked, scene: THREE.Object3D): THREE.Object3D {
+  const none = new Map<THREE.Object3D, Pick>();
+  let root: THREE.Object3D;
+  if (k === 'flask') {
+    const v = new FlaskView(new Flask(CAP), scene, none);
+    v.update(new Set());
+    root = v.root;
+  } else if (k === 'scale') {
+    const v = new ScaleView(new Scale(), scene, none);
+    v.update(false, null);
+    root = v.root;
+  } else {
+    const v = new ToolView(new Tool(k, -1), scene, none);
+    v.update(0, [], new Set());
+    root = v.root;
+  }
+  root.updateMatrixWorld(true);
+  return root;
+}
+
+/**
  * The equipment cabinet (see cabinet.ts): open steel shelving on a dark plinth, and what stands on its shelves. Each
  * kind is drawn from one view of a new one of it, made once, whose meshes are drawn again in each filled slot as an
  * instanced mesh: there are over a hundred things in it, and none of them changes while it's there.
@@ -3579,25 +3604,10 @@ class CabinetView {
     pickables.set(front, { kind: 'cabinet', front: true });
     scene.add(g);
 
-    // what stands on the shelves, each kind drawn from a view of a new one, empty and shut
+    // what stands on the shelves, each kind drawn from a view of a new one
     const proto = new THREE.Scene();
-    const none = new Map<THREE.Object3D, Pick>();
     for (const k of Object.keys(C.slots) as Stocked[]) {
-      let root: THREE.Object3D;
-      if (k === 'flask') {
-        const v = new FlaskView(new Flask(CAP), proto, none);
-        v.update(new Set());
-        root = v.root;
-      } else if (k === 'scale') {
-        const v = new ScaleView(new Scale(), proto, none);
-        v.update(false, null);
-        root = v.root;
-      } else {
-        const v = new ToolView(new Tool(k, -1), proto, none);
-        v.update(0, [], new Set());
-        root = v.root;
-      }
-      root.updateMatrixWorld(true);
+      const root = specimen(k, proto);
       const slots = C.slots[k];
       const proxy = new THREE.Group();
       const meshes: { im: THREE.InstancedMesh; rel: THREE.Matrix4 }[] = [];
@@ -3672,6 +3682,193 @@ class CabinetView {
     v.proxy.rotation.y = p.yaw;
     v.proxy.updateMatrixWorld(true);
     return v.proxy.children;
+  }
+}
+
+/* ---------------- the equipment wheels' icons ---------------- */
+
+/**
+ * How an icon's thing is seen: from in front, `yaw` round to its right and `pitch` above it, in radians, with nothing
+ * behind it, filling the icon but for a `margin`; lit from overhead and a little in front, by `sun`'s direction.
+ * Something over `long` across is seen from further round, `longYaw`, more along it than across it, or it would be a
+ * thin line across the middle of its picture. Glass and its edges are drawn less clear than they are in the lab
+ * (`glass` and `edge`, their opacities), or with no room behind them and so small, they'd hardly show.
+ */
+const ICON_VIEW = {
+  yaw: 0.5, pitch: 0.32, margin: 0.04, long: 300, longYaw: 1.0, sun: new THREE.Vector3(-0.45, 1, 0.7), glass: 0.3, edge: 0.85,
+};
+/**
+ * The kinds that aren't seen whole and upright. A thermometer is so long and thin that its scale's numbers, all that
+ * tells the fine one from the wide one, would be lost: so it lies aslant (`roll`, in radians, anticlockwise), and only
+ * its lower end is in the picture (`only`, heights in its flat frame, y down from its top): its bulb and the first two
+ * numbers of its scale, the rest running off the corner.
+ */
+const ICON_POSES: Partial<Record<Stocked, { roll: number; only: { y0: number; y1: number } }>> = {
+  thermometer: { roll: -Math.PI / 4, only: { y0: THERMOMETER_ROD.foot - 22, y1: THERMOMETER_ROD.h } },
+  thermometerWide: { roll: -Math.PI / 4, only: { y0: THERMOMETER_ROD.foot - 22, y1: THERMOMETER_ROD.h } },
+};
+
+/** A little picture of each kind of thing the equipment wheels make, each on a canvas of its own (see IconStudio). */
+export type Icons = Partial<Record<Stocked, HTMLCanvasElement>>;
+
+/**
+ * The equipment wheels' icons (see wheel.ts): each a little picture of a new one of its kind, drawn by the same code
+ * that draws it in the lab (see specimen), so they're never out of date. Each is alone against nothing, seen
+ * from in front and a little above, in the room's own kind of light and reflecting the room as it does in the lab.
+ * They're drawn at the size they're shown (WHEEL.icon), `scale` device pixels to each of its, so that fine lines
+ * stay whole.
+ */
+class IconStudio {
+  private scene = new THREE.Scene();
+  private things = new Map<Stocked, THREE.Object3D>();
+  private camera = new THREE.OrthographicCamera();
+  private px: number;
+  /** The picture as lit, in linear light with what's see-through still see-through, and then as a plain image. */
+  private lit: THREE.WebGLRenderTarget;
+  private out: THREE.WebGLRenderTarget;
+  /**
+   * Makes the lit picture a plain image. What glass reflects is added in full over what's behind it, however clear
+   * the glass (see glassMat), so with nothing behind it, it's made as opaque as it's bright, or it would all but vanish.
+   */
+  private develop = new THREE.ShaderMaterial({
+    uniforms: { lit: { value: null } },
+    vertexShader: quadVertex,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D lit;
+      varying vec2 vUv;
+      vec3 encode(vec3 v) { return mix(v * 12.92, 1.055 * pow(v, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, v)); }
+      void main() {
+        vec4 c = max(texture2D(lit, vUv), 0.0);
+        float a = min(1.0, max(c.a, max(c.r, max(c.g, c.b))));
+        gl_FragColor = vec4(encode(min(c.rgb / max(a, 1e-4), 1.0)), a);
+      }`,
+    blending: THREE.NoBlending,
+    depthTest: false,
+    depthWrite: false,
+  });
+  private quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.develop);
+  private quadScene = new THREE.Scene().add(this.quad);
+  private quadCamera = new THREE.Camera();
+
+  constructor(scale: number) {
+    this.px = Math.round(WHEEL.icon.size * scale);
+    this.lit = new THREE.WebGLRenderTarget(this.px, this.px, { type: THREE.HalfFloatType, samples: 4 });
+    this.out = new THREE.WebGLRenderTarget(this.px, this.px);
+    this.develop.uniforms.lit.value = this.lit.texture;
+    this.quad.frustumCulled = false;
+    this.scene.add(new THREE.HemisphereLight(0xe4eef0, 0x4a4440, 1.5));
+    const sun = new THREE.DirectionalLight(0xf4f8ff, 1.3);
+    sun.position.copy(ICON_VIEW.sun);
+    this.scene.add(sun);
+    for (const k of Object.keys(STOCK) as Stocked[]) {
+      const root = specimen(k, this.scene);
+      root.visible = false;
+      this.things.set(k, root);
+    }
+  }
+
+  /** Point the camera at a kind's thing, from where an icon's is seen (see ICON_VIEW), so that it just fills the picture. */
+  private frame(k: Stocked, root: THREE.Object3D): void {
+    const { pitch, margin } = ICON_VIEW;
+    const pose = ICON_POSES[k];
+    const cam = this.camera;
+    // the boxes round its meshes, each in the mesh's own frame, and the box round them all, in the room
+    const all = new THREE.Box3();
+    let boxes: { box: THREE.Box3; at: THREE.Matrix4 }[] = [];
+    root.traverseVisible((o) => {
+      if (!(o instanceof THREE.Mesh) || !o.layers.isEnabled(0) || o.userData.bent) return;
+      const mats: THREE.Material[] = Array.isArray(o.material) ? o.material : [o.material];
+      if (!mats.some((m) => m.visible)) return;
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      const box = o.geometry.boundingBox!;
+      if (box.isEmpty()) return;
+      boxes.push({ box, at: o.matrixWorld });
+      all.union(box.clone().applyMatrix4(o.matrixWorld));
+    });
+    // far enough off to be clear of all of it
+    const whole = all.getSize(new THREE.Vector3());
+    const far = whole.length() + 10;
+    const yaw = whole.x > ICON_VIEW.long ? ICON_VIEW.longYaw : ICON_VIEW.yaw;
+    // only part of it: that much of the box round it all, instead (a specimen stands where its flat frame starts)
+    if (pose) {
+      all.max.y = Math.min(all.max.y, -pose.only.y0);
+      all.min.y = Math.max(all.min.y, -pose.only.y1);
+      boxes = [{ box: all, at: new THREE.Matrix4() }];
+    }
+    const mid = all.getCenter(new THREE.Vector3());
+    cam.position.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(far).add(mid);
+    cam.up.set(0, 1, 0);
+    cam.lookAt(mid);
+    if (pose) cam.rotateZ(pose.roll);
+    cam.updateMatrixWorld(true);
+    // as seen: every corner of every box, in the camera's frame
+    const seen = new THREE.Box3();
+    const p = new THREE.Vector3();
+    for (const { box, at } of boxes)
+      for (let i = 0; i < 8; i++) {
+        p.set(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z);
+        seen.expandByPoint(p.applyMatrix4(at).applyMatrix4(cam.matrixWorldInverse));
+      }
+    const size = seen.getSize(new THREE.Vector3());
+    const c = seen.getCenter(new THREE.Vector3());
+    const half = Math.max(size.x, size.y) / 2 / (1 - 2 * margin);
+    cam.left = c.x - half;
+    cam.right = c.x + half;
+    cam.top = c.y + half;
+    cam.bottom = c.y - half;
+    // the whole thing, in front of and behind what's framed
+    cam.near = 0.1;
+    cam.far = 2 * far;
+    cam.updateProjectionMatrix();
+  }
+
+  /**
+   * Draw every kind's icon with `renderer`, reflecting `environment`, each on a new canvas of its own. The renderer
+   * is left drawing to the screen again, as it was.
+   */
+  render(renderer: THREE.WebGLRenderer, environment: THREE.Texture | null): Icons {
+    const icons: Icons = {};
+    const n = this.px;
+    const clear = renderer.getClearColor(new THREE.Color());
+    const clearAlpha = renderer.getClearAlpha();
+    const [glass, edge] = [glassMat.opacity, edgeMat.opacity];
+    renderer.setClearColor(0x000000, 0);
+    glassMat.opacity = ICON_VIEW.glass;
+    edgeMat.opacity = ICON_VIEW.edge;
+    this.scene.environment = environment;
+    const pixels = new Uint8Array(n * n * 4);
+    for (const [k, root] of this.things) {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = n;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) continue;
+      const image = ctx.createImageData(n, n);
+      root.visible = true;
+      this.frame(k, root);
+      renderer.setRenderTarget(this.lit);
+      renderer.render(this.scene, this.camera);
+      renderer.setRenderTarget(this.out);
+      renderer.render(this.quadScene, this.quadCamera);
+      root.visible = false;
+      renderer.readRenderTargetPixels(this.out, 0, 0, n, n, pixels);
+      // read from the bottom row up
+      for (let y = 0; y < n; y++) image.data.set(pixels.subarray(y * n * 4, (y + 1) * n * 4), (n - 1 - y) * n * 4);
+      ctx.putImageData(image, 0, 0);
+      icons[k] = canvas;
+    }
+    this.scene.environment = null;
+    glassMat.opacity = glass;
+    edgeMat.opacity = edge;
+    renderer.setRenderTarget(null);
+    renderer.setClearColor(clear, clearAlpha);
+    return icons;
+  }
+
+  dispose(): void {
+    this.lit.dispose();
+    this.out.dispose();
+    this.develop.dispose();
+    this.quad.geometry.dispose();
   }
 }
 
@@ -3830,6 +4027,9 @@ export class View {
   private roomLights: { light: THREE.Light; base: number }[] = [];
   private raycaster = new THREE.Raycaster();
   private outliner = new Outliner();
+  private studio = new IconStudio(Math.min(2, window.devicePixelRatio || 1));
+  /** The equipment wheels' icons (see IconStudio): drawn again, on new canvases, whenever what they reflect is. */
+  private drawnIcons: Icons = {};
   private clock = 0;
   private stars = starField();
 
@@ -3876,12 +4076,18 @@ export class View {
       this.scene.environment = pmrem.fromScene(this.scene, 0.02, 10, 8000, { size: 256, position: new THREE.Vector3(cx, eye, cz) }).texture;
       was?.dispose();
       pmrem.dispose();
+      this.drawnIcons = this.studio.render(this.renderer, this.scene.environment);
     };
     reflect();
     whenSurfaced(reflect);
     const fs = buildFaucets(this.scene, faucets, this.pickables);
     this.faucetMats = fs.mats;
     this.faucetNotes = fs.notes;
+  }
+
+  /** A little picture of each kind of thing the equipment wheels make (see IconStudio). */
+  icons(): Readonly<Icons> {
+    return this.drawnIcons;
   }
 
   resize(w: number, h: number, dpr: number): void {
@@ -4270,6 +4476,7 @@ export class View {
 
   dispose(): void {
     this.outliner.dispose();
+    this.studio.dispose();
     this.renderer.dispose();
   }
 }

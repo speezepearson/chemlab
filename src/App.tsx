@@ -229,7 +229,7 @@ export function App() {
       <div className="main">
         <div id="stage" ref={stageRef}>
           <canvas ref={canvasRef} />
-          {hud && <Hud hud={hud} help={help} />}
+          {engine && hud && <Hud engine={engine} hud={hud} help={help} />}
           {engine && hud && <TouchControls engine={engine} hud={hud} />}
           {inspection && <InfoPanel info={inspection} />}
           {hud && !hud.locked && !hud.inPod && !hud.preview && !intro && editing === null && labeling === null && (

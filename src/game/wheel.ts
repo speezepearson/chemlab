@@ -15,6 +15,8 @@ export const WHEEL = {
   rim: 230,
   /** As far out as the pointer goes, so that it's never far from pointing some other way. */
   reach: 150,
+  /** Each sector's icon: how far out its middle is, and how big it is, a side. */
+  icon: { r: 160, size: 112 },
 };
 
 /**

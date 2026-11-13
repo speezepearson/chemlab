@@ -53,7 +53,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
 - `src/game/`: everything else in the game.
   - `engine.ts` owns the lab: what's in it, the player, input, carrying and the sim loop.
-  - `view.ts` draws it all with Three.js, and raycasts for what the crosshair is on.
+  - `view.ts` draws it all with Three.js, and raycasts for what the crosshair is on. It also draws the equipment
+    wheels' icons (`IconStudio`): a new one of each kind, drawn as in the lab, so there are no icons to keep up to date.
   - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room, what fluid a
     dipper's foot (a thermometer's bulb, a wicking strip's tip) is in (`bathAt`), which the engine hands each one every
     frame (`Tool.bath`, or for a strip `Tool.dipIn`, which also says whether it may drink), and where a dipper aimed at
@@ -95,7 +96,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     so it fades and pans with where it is relative to the player's head.
 - `src/intro/log.ts`: the intro's console script, deterministic from a seed. `src/components/Intro.tsx` plays it.
 - `src/components/`: the React UI around the canvas: the crosshair's hints, the equipment wheels, the corner
-  list of actions and the start hint (`Hud.tsx`), the wheel's icons (`icons.tsx`), the Chemistry and Appearance panels, the editor.
+  list of actions and the start hint (`Hud.tsx`), the Chemistry and Appearance panels, the editor.
 
 ## Invariants and gotchas
 
@@ -152,9 +153,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially.
   - A place on one of the equipment wheels (`WHEELS` in `wheel.ts`: 1's is for experimenting and learning, 2's for
-    mass production; ask the user which, if it isn't plain) and `ICONS` in `icons.tsx`, unless the tool is unique.
-    `wheel.test.ts` checks everything stocked is on one. There are no keys for particular tools: the wheels are the
-    only way to make one away from the cabinet.
+    mass production; ask the user which, if it isn't plain), unless the tool is unique. `wheel.test.ts` checks
+    everything stocked is on one. There are no keys for particular tools: the wheels are the only way to make one
+    away from the cabinet. Its icon there draws itself, from its `ToolView` (see `IconStudio` in `view.ts`); look at
+    it, and if it's too long and thin to make out whole, give it a pose in `ICON_POSES`.
   - Its place in the equipment cabinet: `STOCK` and a compartment in `BAYS` (`cabinet.ts`), and `ENDLESS` if it's
     used up. `cabinet.test.ts` checks it fits.
   - If it has state of its own that a save should keep, `Tool.memory` and `Tool.remember`.
