@@ -2053,12 +2053,12 @@ class ToolView {
     const label = sh.tanks[1].label;
     if (label) printed(art, label.join(' '), x, STATION.labelY, face + 0.1, 11);
     this.labels.push(new Label(art, v3(x, tankNoteY(t, 1))));
-    // the gauge beside the reservoir: an LCD stack of segments, as tall as the pane, on a dark strip
-    block(art, darkMat, g.x0 - 2, g.x1 + 2, -2, H + 2, face, face + 1);
+    // the gauge beside the reservoir: an LCD stack of segments, as tall as the pane, each set on its own into the
+    // station's face
     const seg = H / g.segments;
     for (let i = 0; i < g.segments; i++) {
       const mat = new THREE.MeshStandardMaterial({ color: SEGMENT_COLORS.off, roughness: 0.4 });
-      block(art, mat, g.x0, g.x1, H - (i + 1) * seg + 1, H - i * seg - 1, face + 1, face + 1.4).castShadow = false;
+      block(art, mat, g.x0, g.x1, H - (i + 1) * seg + 1, H - i * seg - 1, face, face + 0.4).castShadow = false;
       this.segments.push(mat);
     }
 
