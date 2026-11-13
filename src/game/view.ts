@@ -325,6 +325,8 @@ const v3 = (x: number, y: number, z = 0) => new THREE.Vector3(x, -y, z);
  * seen edge on; and the line along its surface, how far down it fades (by 1/e), in world units, and how opaque it is.
  */
 const FLUID_EDGE = { edge: 0.7, line: 1.2, lineAlpha: 0.8 };
+/** How far under the top of a vessel's fluid's solid it's cut off, at most, so a full one is drawn open (see FluidMesh). */
+const FLUID_TOP = 0.05;
 
 /**
  * How what's seen through a see-through fluid is bent, as through water in glass (see FluidMesh's `bent`): at most
@@ -385,8 +387,19 @@ class FluidMesh {
   private bent: THREE.MeshPhysicalMaterial;
   private bents: THREE.Mesh[] = [];
   private key = '';
+  /** Where its solid reaches up to in the room, as of the last update (see update). */
+  private reach = new THREE.Box3();
+  private piece = new THREE.Box3();
 
-  constructor(geoms: THREE.BufferGeometry[], parent: THREE.Object3D) {
+  /**
+   * `open`: whether it's always cut open at the top, as fluid in a vessel is, with no surface drawn, however full; not
+   * for a solid sized to the fluid itself, whose top is meant to be seen (the station's reservoir).
+   */
+  constructor(
+    geoms: THREE.BufferGeometry[],
+    parent: THREE.Object3D,
+    private open = true,
+  ) {
     this.mat = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide, clippingPlanes: [this.plane] });
     // a see-through fluid (one thinned by the solvent) thickens toward its edges, seen edge on, and shows a bright
     // line where its surface meets the glass, as clear liquid in glass does, so even pure solvent reads as a body of
@@ -409,6 +422,7 @@ class FluidMesh {
     this.mat.customProgramCacheKey = () => 'fluid';
     this.bent = bentMat(this.plane);
     for (const g of geoms) {
+      g.computeBoundingBox();
       const m = new THREE.Mesh(g, this.mat);
       m.castShadow = true;
       parent.add(m);
@@ -434,7 +448,19 @@ class FluidMesh {
     (this.bent.userData.shift as { value: number }).value = shift;
     for (const b of this.bents) b.visible = shift > 0.01;
     if (!rgb) return;
-    this.plane.constant = level;
+    // never at or over the top of its solid: that would draw the solid's top, a lid of fluid with the bright line
+    // along the surface (see FLUID_EDGE) lit all across it, so a full vessel would look capped where one a hair less
+    // full is open (see FLUID_TOP)
+    let cut = level;
+    if (this.open) {
+      this.reach.makeEmpty();
+      for (const m of this.meshes) {
+        m.updateWorldMatrix(true, false);
+        this.reach.union(this.piece.copy(m.geometry.boundingBox!).applyMatrix4(m.matrixWorld));
+      }
+      cut = Math.min(level, this.reach.max.y - FLUID_TOP);
+    }
+    this.plane.constant = cut;
     const key = `${rgb.map(Math.round)}:${a.toFixed(2)}`;
     if (key === this.key) return;
     this.key = key;
@@ -2145,7 +2171,7 @@ class ToolView {
     block(art, darkMat, x - paneW / 2, x + paneW / 2, 0, H, wall, wall + 0.5);
     // a box standing on the column's floor, as tall as the fluid stands, so it has a top surface; held a little off
     // the column's back and the pane, so where they'd meet they don't flicker into each other
-    const column = new FluidMesh([new THREE.BoxGeometry(paneW - 1, 1, plate - 4).translate(x, 0.5, wall + 1.5 + (plate - 4) / 2)], art);
+    const column = new FluidMesh([new THREE.BoxGeometry(paneW - 1, 1, plate - 4).translate(x, 0.5, wall + 1.5 + (plate - 4) / 2)], art, false);
     const [solid] = column.meshes;
     solid.position.y = -H;
     pick(solid, 'tank', 1);
