@@ -16,7 +16,7 @@ import { CAP, DELIVERY, FILL_RATE, HOME_H, HOME_W, POUR_RATE, TRACE } from './co
 import { cool, exposure, taper } from './cooling';
 import { FAUCETS, WALL_FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
-import { Flask, Vessel, fluidColor, roomFor, sustenance, transfer, volume, volumeUnit } from './flask';
+import { Flask, Vessel, roomFor, sustenance, transfer, volume, volumeUnit } from './flask';
 import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
@@ -43,10 +43,6 @@ import { WaterSounds } from './water';
 
 /** What the info panel shows for one vessel: all of it in god mode, otherwise just its color. */
 export interface Inspection {
-  /** Outside god mode: show only the color. */
-  brief: boolean;
-  /** The fluid's color, as drawn in the vessel; null if it's empty. */
-  color: string | null;
   T: number;
   /** How full it is, out of cap, in `unit` (atoms or molecules, see VOLUME). */
   volume: number;
@@ -136,7 +132,7 @@ export interface Action {
 }
 
 export interface EngineCallbacks {
-  /** Throttled to ~10 Hz; null when nothing is inspected. */
+  /** Throttled to ~10 Hz; null when nothing is inspected, as nothing is outside god mode. */
   onInspect(info: Inspection | null): void;
   /** Enter was pressed on a vessel in god mode; look it up with GameEngine.vessel(id). */
   onEdit(id: string): void;
@@ -2823,7 +2819,7 @@ export class GameEngine {
     return p?.kind === 'cabinet' ? null : p;
   }
 
-  /** The vessel the info panel is showing: what's held, if it's a flask, or else the flask or tank looked at. */
+  /** The vessel the info panel would show, in god mode: what's held, if it's a flask, or else the flask or tank looked at. */
   private inspectTarget(): Vessel | null {
     const h = this.held;
     if (h?.kind === 'flask') return h.f;
@@ -2834,7 +2830,8 @@ export class GameEngine {
   }
 
   private inspect(now: number): void {
-    const f = this.locked ? this.inspectTarget() : null;
+    // only in god mode: otherwise what's in a vessel is for the player to work out
+    const f = this.locked && this.god ? this.inspectTarget() : null;
     if (!f) {
       if (this.inspected) this.cb.onInspect(null);
       this.inspected = null;
@@ -2852,7 +2849,6 @@ export class GameEngine {
     const cx = this.viewW / 2;
     const cy = this.viewH / 2;
     this.cb.onInspect({
-      brief: !this.god, color: f.N > TRACE ? fluidColor(f) : null,
       T: temperature(f), volume: volume(f), cap: f.cap, unit: volumeUnit(), rows,
       // beside the crosshair
       x0: cx - 40, x1: cx + 40, y: cy - 30, stageW: this.viewW, stageH: this.viewH,

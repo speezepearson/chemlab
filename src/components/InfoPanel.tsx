@@ -6,11 +6,6 @@ import { fmtCount } from '../game/format';
 const PIE = 176; // backing pixels; drawn at half size
 const MAX_ROWS = 8;
 
-/** The hover readout for one vessel: in god mode its full contents, otherwise just a blotch of its color. */
-export function InfoPanel({ info }: { info: Inspection }) {
-  return info.brief ? <Blotch info={info} /> : <Contents info={info} />;
-}
-
 /** Where to put a panel: beside the vessel, inside the stage. */
 function usePlacement(info: Inspection) {
   const ref = useRef<HTMLDivElement>(null);
@@ -31,18 +26,11 @@ function usePlacement(info: Inspection) {
   return { ref, pos };
 }
 
-/** Outside god mode: the fluid's color, as it's drawn, and nothing more; a dashed outline if it's empty. */
-function Blotch({ info }: { info: Inspection }) {
-  const { ref, pos } = usePlacement(info);
-  return (
-    <div id="info" className="brief" ref={ref} style={pos}>
-      <i className={info.color ? 'blotch' : 'blotch empty'} style={info.color ? { background: info.color } : undefined} />
-    </div>
-  );
-}
-
-/** God-mode readout: temperature, fill, species pie and top species. */
-function Contents({ info }: { info: Inspection }) {
+/**
+ * The readout for the vessel looked at, in god mode (outside it, there's none): its temperature, fill, species pie and
+ * top species.
+ */
+export function InfoPanel({ info }: { info: Inspection }) {
   const { ref, pos } = usePlacement(info);
   const pieRef = useRef<HTMLCanvasElement>(null);
 
