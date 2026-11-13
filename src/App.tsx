@@ -60,7 +60,6 @@ export function App() {
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [speed, setSpeed] = useState(1);
   const [god, setGod] = useState(storedGod);
-  const [won, setWon] = useState(false);
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [hud, setHud] = useState<HudState | null>(null);
   const [saved] = useState(storedSave);
@@ -108,7 +107,6 @@ export function App() {
 
   useEffect(() => {
     const e = new GameEngine(canvasRef.current!, stageRef.current!, network, {
-      onWin: () => setWon(true),
       onInspect: setInspection,
       onEdit: setEditing,
       onLabel: setLabeling,
@@ -143,7 +141,6 @@ export function App() {
 
   const reset = () => {
     engine?.reset();
-    setWon(false);
   };
 
   const loadPreset = (id: string) => {
@@ -155,7 +152,6 @@ export function App() {
     }
     setPreset(p);
     engine?.load(p);
-    setWon(false);
   };
 
   const exportSave = async () => {
@@ -186,7 +182,6 @@ export function App() {
     engine.restore(s, p);
     storeSave(engine.snapshot());
     setChemVersion((v) => v + 1);
-    setWon(false);
   };
 
   return (
@@ -246,7 +241,6 @@ export function App() {
           {engine && labeling !== null && (
             <LabelEditor key={labeling} engine={engine} id={labeling} onClose={() => setLabeling(null)} />
           )}
-          {won && hud && !hud.inPod && <div id="win">Enough cryostabilizer to reach Mu Ceti.</div>}
           {hud && <SleepScreen hud={hud} />}
           {hud?.preview && <ArrivalPanel />}
           {engine && hud && (

@@ -10,7 +10,7 @@ import {
 } from './bodies';
 import { chime } from './chime';
 import { diverter, type Diverter } from './diverter';
-import { CAP, DELIVERY, FILL_RATE, FLASK_L, GOAL_TARGET, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
+import { CAP, DELIVERY, FILL_RATE, FLASK_L, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
 import { FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
@@ -116,8 +116,6 @@ export interface Action {
 }
 
 export interface EngineCallbacks {
-  /** The ship's reservoir holds GOAL_TARGET of the target. */
-  onWin(): void;
   /** Throttled to ~10 Hz; null when nothing is inspected. */
   onInspect(info: Inspection | null): void;
   /** N was pressed on a vessel in god mode; look it up with GameEngine.vessel(id). */
@@ -339,7 +337,6 @@ export class GameEngine {
   private target: (Pick & { point: Vec3; distance: number }) | null = null;
   /** A brief note on the display, like there being no room for something (see say). */
   private flash: { text: string; until: number } | null = null;
-  private won = false;
   /** Whether the alarms are silenced, by the button under the beacon (see hushAlarms). Saved, and kept through Reset. */
   private alarmsOff = false;
   /** Whether the porthole's blinds are shut, by the button beside it. Saved, and kept through Reset. */
@@ -551,7 +548,6 @@ export class GameEngine {
   }
 
   private afterLoad(): void {
-    this.won = false;
     // a lab loads with the airlock shut, until its station has been delivering steadily again, and anyone in it or
     // asleep in the pod wakes in the lab
     if (this.wake === 'open' || this.wake === 'settling' || this.wake === 'boarding' || this.wake === 'asleep' || this.arrival) {
@@ -2187,7 +2183,6 @@ export class GameEngine {
         t.flow.fill(0);
         t.streaming.fill(false);
       }
-      this.goal();
       return;
     }
 
@@ -2237,15 +2232,6 @@ export class GameEngine {
     }
     this.water.update(dt, this.landed.map((p) => this.hear(p)), streams);
 
-    this.goal();
-  }
-
-  /** The goal: enough of the target in the ship's reservoir. */
-  private goal(): void {
-    if (this.station().tanks[1].n[TARGET] >= GOAL_TARGET && !this.won) {
-      this.won = true;
-      this.cb.onWin();
-    }
   }
 
   /**
@@ -2756,8 +2742,6 @@ export class GameEngine {
       const r = s.run.next();
       if (!r.done) continue;
       s.woke = r.value;
-      // a jump can reach the goal, with no substep after it to see it
-      if (r.value === 'goal') this.goal();
       this.wakeFrom(r.value);
       return;
     }
