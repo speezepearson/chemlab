@@ -9,9 +9,10 @@ import {
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
 import { CABINET, endless, isStocked, putIn, stockWith, takeFrom, takeSlot, type Stock, type Stocked } from './cabinet';
+import { changeover, type ChangeoverSound } from './changeover';
 import { chime } from './chime';
 import { diverter, type Diverter } from './diverter';
-import { CAP, DELIVERY, FILL_RATE, FLASK_L, HOME_H, HOME_W, POUR_RATE, TRACE } from './config';
+import { CAP, DELIVERY, FILL_RATE, HOME_H, HOME_W, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
 import { FAUCETS, WALL_FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
@@ -21,6 +22,7 @@ import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
 import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
+import { CRYOSTABILIZER, FIRST_SUPPLY, litresOf, type Supply } from './supply';
 import { shatter } from './shatter';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
@@ -30,7 +32,7 @@ import {
   type Pose, type Vec3,
 } from './space';
 import {
-  ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
+  changeoverAt, ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
   TANK_H, TOOL_NAMES, isDipper, isThermometer, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
   type Mouth, type ToolKind,
 } from './tools';
@@ -83,12 +85,14 @@ export interface Hud {
   right: boolean;
   /** While a valve is being turned, where the pointer that aims its lever is, in CSS pixels. */
   aim: { x: number; y: number } | null;
-  /** Whether N would write a note about what the crosshair is on (see GameEngine.note). */
+  /** Whether Enter would write a note about what the crosshair is on (see GameEngine.note). */
   label: boolean;
   /** What the right button does now, in a word, for the touch screen's button that stands in for it. */
   hand: 'Pour' | 'Flow' | 'Dip' | 'Turn';
   /** A brief note, like there being no room for something. */
   note: string | null;
+  /** Whether the note is a tip, something the player can now do, not something they can't. */
+  tip: boolean;
   /** Everything the player can do just now besides walking and looking, with how (see Action), for a reminder. */
   actions: Action[];
   /** How far the screen has faded to black as the player falls asleep in the pod, or wakes, 0 to 1. */
@@ -99,10 +103,19 @@ export interface Hud {
   ended: boolean;
   /** Whether god mode's preview of the end's white void is up (see GameEngine.previewArrival). */
   preview: boolean;
-  /** While the player's asleep in the pod (see Wake), the whole sim seconds they've slept; otherwise null. */
+  /** While the player's asleep in the pod (see Wake) or napping (see GameEngine.nap), the whole sim seconds they've slept; otherwise null. */
   slept: number | null;
-  /** While they're asleep, the litres of cryostabilizer in the ship's reservoir, to two places; otherwise null. */
-  litres: number | null;
+  /**
+   * While they're asleep, what the station's reservoir is of (see Supply), the litres of it there, to two places, and
+   * the litres needed; otherwise null.
+   */
+  reservoir: { name: string; litres: number; goalL: number } | null;
+  /** How far shut the player's eyes are, for a nap (see GameEngine.nap): 0 open, 1 shut. */
+  lids: number;
+  /** Whether they're napping, their eyes shut: N wakes them. */
+  napping: boolean;
+  /** Whether N would start a nap just now. */
+  nap: boolean;
 }
 
 /**
@@ -119,9 +132,9 @@ export interface Action {
 export interface EngineCallbacks {
   /** Throttled to ~10 Hz; null when nothing is inspected. */
   onInspect(info: Inspection | null): void;
-  /** N was pressed on a vessel in god mode; look it up with GameEngine.vessel(id). */
+  /** Enter was pressed on a vessel in god mode; look it up with GameEngine.vessel(id). */
   onEdit(id: string): void;
-  /** N was pressed on something, to write a note about it: the note's id (see GameEngine.note). */
+  /** Enter was pressed on something, to write a note about it: the note's id (see GameEngine.note). */
   onLabel(id: string): void;
   /** Whenever the heads-up display changes. */
   onHud(hud: Hud): void;
@@ -197,7 +210,7 @@ export const ITEMS = [
 export type Item = (typeof ITEMS)[number];
 /**
  * The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0, - and =; and then, the number
- * row being full, along the bottom row of letters, from Z, then M (N writes notes) and the comma.
+ * row being full, along the bottom row of letters, from Z, then M (N naps) and the comma.
  */
 export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Z', 'X', 'C', 'V', 'B', 'M', ','] as const;
 /** The same keys, as KeyboardEvent codes, so they work whatever the keyboard layout's shift state. */
@@ -290,6 +303,10 @@ const ISLAND_FAUCET_OUT = CELL / 2;
 const RISER_R = 6;
 /** How long a note stays up, in ms. */
 const NOTE_MS = 1600;
+/** How long the note that she can nap stays up, in ms: long enough to read. */
+const NAP_HINT_MS = 9000;
+/** Real seconds the player's eyes take to close for a nap, and to open again as they wake (see GameEngine.nap). */
+const NAP_S = { close: 0.9, open: 0.6 };
 /** A flask's outline's area, in local units squared, for how exposed its fluid is (see exposures). */
 const FLASK_AREA = areaBelow(FLASK_OUTLINE, 0);
 /** Width of the stem a funnel-shaped tank narrows to, in local units. */
@@ -351,7 +368,7 @@ export class GameEngine {
   /** What the crosshair is on. */
   private target: (Pick & { point: Vec3; distance: number }) | null = null;
   /** A brief note on the display, like there being no room for something (see say). */
-  private flash: { text: string; until: number } | null = null;
+  private flash: { text: string; until: number; tip?: boolean } | null = null;
   /** Whether the alarms are silenced, by the button under the beacon (see hushAlarms). Saved, and kept through Reset. */
   private alarmsOff = false;
   /** Whether the porthole's blinds are shut, by the button beside it. Saved, and kept through Reset. */
@@ -372,8 +389,21 @@ export class GameEngine {
    * Mu Ceti, and what follows is the end (see Wake's arriving).
    */
   private arrival = false;
-  /** The litres of cryostabilizer the pod's message says are on board: how much there was when they were put in it. */
-  private podLitres = 0;
+  /**
+   * What the pod's message says is on board, as of when they were put in it: the litres of cryostabilizer, and while
+   * the station is still fitted for something before it (see SUPPLIES), the litres of that; else null.
+   */
+  private podNotice: { litres: number; first: number | null } = { litres: 0, first: null };
+  /**
+   * A nap under way (see nap): how far shut the player's eyes are, 0 to 1, and whether they're waking, their eyes
+   * opening again. With their eyes shut, the lab runs on as it does while they sleep in the pod (see sleeping).
+   */
+  private napping: { lids: number; waking: boolean } | null = null;
+  /**
+   * Whether the player has been told they can nap: the station has delivered steadily for DELIVERY.nap sim seconds on
+   * end, once. From then on N naps. It's saved with the lab.
+   */
+  private napKnown = false;
   /**
    * While previewing the end's white void (see previewArrival), how the player stood before, to put them back; null
    * otherwise.
@@ -383,8 +413,13 @@ export class GameEngine {
   private settling: { x: number; z: number; yaw: number; pitch: number; t: number } | null = null;
   /** Runs the sleeping lab a slice at a time (see pump), independent of frames. */
   private pumper = new MessageChannel();
-  /** The cryostabilizer station's diverter's sounds, while it's swinging or letting into the reservoir. */
+  /** The supply station's diverter's sounds, while it's swinging or letting into the reservoir. */
   private diverters = new Map<Tool, Diverter>();
+  /**
+   * The sounds of the station's changeover, while one's under way (see changeoverSounds), with the part of it and the
+   * supply the station was fitted for when last heard.
+   */
+  private changing: { sound: ChangeoverSound; part: string; supply: Supply } | null = null;
   /** Undo and redo, of the lab's arrangement (see history.ts). */
   private history = new History();
   private inspected: Vessel | null = null;
@@ -567,6 +602,9 @@ export class GameEngine {
       return t;
     });
     this.uniqueTools();
+    // a new lab's station is fitted for the first thing the ship is short of, and nobody has napped in it
+    this.station().stock(FIRST_SUPPLY);
+    this.napKnown = false;
     this.hoses = (preset.hoses ?? []).map(({ from, to }) => {
       const m = tankMouth(this.tools[to.tool], to.tank ?? 0);
       return new Hose({ tool: this.tools[from.tool], spout: from.spout }, { x: m.x, y: m.y + (to.up ?? 24), z: m.z }, NOZZLE_REACH.min);
@@ -624,8 +662,15 @@ export class GameEngine {
       const r = this.inRoom({ x: p.x, y: 0, z: p.z, yaw: p.yaw });
       [p.x, p.z] = [r.x, r.z];
     }
+    // and anyone napping wakes
+    if (this.napping) {
+      this.napping.waking = true;
+      this.sleeping = null;
+    }
     for (const d of this.diverters.values()) d.stop();
     this.diverters.clear();
+    this.changing?.sound.stop();
+    this.changing = null;
     this.falling = [];
     this.held = this.turning = this.tarePress = null;
     this.history.clear();
@@ -661,7 +706,7 @@ export class GameEngine {
    * (see putBack), as a carry isn't done until it's set down. Ctrl+Shift+Z or Ctrl+Y: redo.
    */
   undo(redo = false): void {
-    if (inPod(this.wake)) return;
+    if (inPod(this.wake) || this.dozing()) return;
     if (this.held) {
       if (!redo) this.putBack();
       return;
@@ -718,6 +763,7 @@ export class GameEngine {
       ),
       ...(this.alarmsOff ? { alarmsOff: true } : {}),
       ...(this.blindsShut ? { blindsShut: true } : {}),
+      ...(this.napKnown ? { nap: true } : {}),
       player: { x: this.player.x, z: this.player.z, yaw: this.player.yaw, pitch: this.player.pitch },
       chem: saveChem(this.chem.params),
     };
@@ -799,6 +845,7 @@ export class GameEngine {
     });
     this.setAlarmsOff(!!s.alarmsOff);
     this.blindsShut = !!s.blindsShut;
+    this.napKnown = !!s.nap;
     const pl = s.player;
     if (pl && [pl.x, pl.z, pl.yaw, pl.pitch].every(Number.isFinite)) {
       const p = this.inRoom({ x: pl.x, y: 0, z: pl.z, yaw: pl.yaw });
@@ -832,8 +879,9 @@ export class GameEngine {
 
   /**
    * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a composition analyzer, a
-   * spectroscope, a bond visualizer and a cryostabilizer station: if there's none, one is added where it starts, or as
-   * near there as it has room (see roomy), the station's reservoir holding what's left on board (see REFERENCE_FILL). The
+   * spectroscope, a bond visualizer and a station: if there's none, one is added where it starts, or as
+   * near there as it has room (see roomy), the station fitted for the cryostabilizer, its reservoir holding what's
+   * left on board (see Tool.stock), as a save from before it was fitted for anything else would have it. The
    * station is built into the wall, so it's always where it is.
    */
   private uniqueTools(): void {
@@ -844,7 +892,7 @@ export class GameEngine {
     const add = (kind: ToolKind, at: Pose) => {
       if (this.tools.some((t) => t.kind === kind)) return;
       const t = new Tool(kind, this.nextToolId++, at);
-      if (kind === 'receptacle') applyFill(t.tanks[1], REFERENCE_FILL);
+      if (kind === 'receptacle') t.stock(CRYOSTABILIZER);
       else t.pose = this.roomy(t);
       this.tools.push(t);
     };
@@ -876,13 +924,13 @@ export class GameEngine {
     return t.pose;
   }
 
-  /** The cryostabilizer station (see STATION): there's always exactly one. */
+  /** The station (see STATION): there's always exactly one. */
   private station(): Tool {
     return this.tools.find((t) => t.kind === 'receptacle')!;
   }
 
   /**
-   * A save from before the cryostabilizer station was a funnel over a diverter gets the station's reservoir filled
+   * A save from before the supply station was a funnel over a diverter gets the station's reservoir filled
    * with what its reservoir held: the third of the three columns it had (a buffer, a tester and the reservoir); or,
    * from before that (when the receptacle stood on an island and flushed what it took away, counting it as delivered,
    * and the reservoir was a tool of its own), what that held, or what it started with if it had none, plus what it
@@ -976,7 +1024,7 @@ export class GameEngine {
    * free (what's held passes through everything, so there's always room) and there's one left. Returns whether it did.
    */
   spawn(kind: Item): boolean {
-    if (inPod(this.wake)) return false;
+    if (inPod(this.wake) || this.dozing()) return false;
     if (this.held) {
       this.say('Hands full');
       return false;
@@ -1033,6 +1081,7 @@ export class GameEngine {
    * pulled out of its spouts rolled back up, and a hose's nozzle rolled back up into its spout or faucet.
    */
   private putAway(): void {
+    if (this.dozing()) return;
     const h = this.held;
     if (!h) return;
     if (h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind)) {
@@ -1199,9 +1248,15 @@ export class GameEngine {
     if (this.locked) this.grabOrRelease(false);
   }
 
-  /** N: write a note about what the crosshair is on. */
+  /** Enter: write a note about what the crosshair is on. */
   touchNote(): void {
     if (this.locked) this.writeNote();
+  }
+
+  /** N: nap, or wake from one. */
+  touchNap(): void {
+    if (this.dozing()) this.wakeNap();
+    else if (this.locked) this.nap();
   }
 
   /** Backspace: put away what's held. */
@@ -1301,6 +1356,11 @@ export class GameEngine {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       // Enter is OK on the message inside the cryopod, as it was on the notice it replaced
       if (e.code === 'Enter' && this.wake === 'pod') this.pressOk();
+      // napping, or nodding off, N wakes them, whether or not the mouse is captured, and nothing else does anything
+      if (this.dozing()) {
+        if (e.code === 'KeyN' && !e.repeat) this.wakeNap();
+        return;
+      }
       // in god mode, = shows the end's white void, or puts the lab back, rather than making anything
       if (e.code === 'Equal' && (this.god || this.previewing)) {
         if (!e.repeat) this.previewArrival(!this.previewing);
@@ -1311,11 +1371,12 @@ export class GameEngine {
       if (e.repeat || inPod(this.wake) || this.previewing) return;
       if (e.code === 'KeyE') this.grabOrRelease(e.shiftKey);
       if (e.code === 'KeyQ') this.putBack();
-      if (e.code === 'KeyN') {
-        // the note's text box opens at once, and N mustn't be typed into it
+      if (e.code === 'Enter') {
+        // the note's text box opens at once, and this Enter mustn't be taken as finishing it
         e.preventDefault();
         this.writeNote();
       }
+      if (e.code === 'KeyN') this.nap();
       const item = HOTKEY_CODES.indexOf(e.code);
       if (item >= 0) {
         this.spawn(ITEMS[item]);
@@ -1377,6 +1438,7 @@ export class GameEngine {
    * what it pours into and what pours into it (see keepPouring and gather); otherwise it's moved alone.
    */
   private grabOrRelease(linked: boolean): void {
+    if (this.dozing()) return;
     if (inPod(this.wake)) return;
     if (this.held) {
       if (this.intoCabinet()) this.putAway();
@@ -1649,7 +1711,8 @@ export class GameEngine {
   private mountAimed(): HoseMount | null {
     const p = this.target;
     if (p?.kind === 'faucet') return p.spout ? { faucet: p.i } : null;
-    if (p?.kind !== 'tool' || !p.t.shape.spouts.length) return null;
+    // nothing on the station can be worked through its changeover
+    if (p?.kind !== 'tool' || !p.t.shape.spouts.length || p.t.swap !== null) return null;
     if (p.part === 'spout') return { tool: p.t, spout: p.k };
     const l = toLocal(p.t.pose, p.point);
     const j = spoutNear(p.t, l.x, -l.y);
@@ -1713,6 +1776,7 @@ export class GameEngine {
    * away (see putAway); a hose just pulled out is rolled back up.
    */
   private putBack(): void {
+    if (this.dozing()) return;
     const h = this.held;
     if (!h || inPod(this.wake)) return;
     if (!h.from) return this.putAway();
@@ -1748,6 +1812,7 @@ export class GameEngine {
   }
 
   private leftDown(shift: boolean): void {
+    if (this.dozing()) return;
     const p = this.target;
     if (p?.kind === 'wake') {
       this.pressOk();
@@ -1788,6 +1853,7 @@ export class GameEngine {
    * In god mode a flask or tank opens the editor instead, which has a field for its label.
    */
   private writeNote(): void {
+    if (this.dozing()) return;
     const id = this.targetNote();
     if (!id || inPod(this.wake)) return;
     document.exitPointerLock();
@@ -1814,6 +1880,7 @@ export class GameEngine {
   }
 
   private rightDown(): void {
+    if (this.dozing()) return;
     if (inPod(this.wake)) return;
     this.rightHeld = true;
     const h = this.held;
@@ -1907,7 +1974,7 @@ export class GameEngine {
    */
   private valveAimed(): { t: Tool; k: number } | null {
     const p = this.target;
-    if (p?.kind !== 'tool' || p.t.shape.noValve) return null;
+    if (p?.kind !== 'tool' || p.t.shape.noValve || p.t.swap !== null) return null;
     if (p.part === 'valve') return { t: p.t, k: p.k };
     const l = toLocal(p.t.pose, p.point);
     const k = valveNear(p.t, l.x, -l.y);
@@ -1942,7 +2009,7 @@ export class GameEngine {
     return placement(h.x, h.y, h.z);
   }
 
-  /** Where a tool's machinery sounds from: the middle of its cabinet, or the cryostabilizer station's display. */
+  /** Where a tool's machinery sounds from: the middle of its cabinet, or the supply station's display. */
   private machineAt(t: Tool): Vec3 {
     if (t.shape.wall) {
       const d = STATION.display;
@@ -2014,7 +2081,8 @@ export class GameEngine {
   private mouths(): Mouth[] {
     const out: Mouth[] = [];
     for (const f of this.flasks) if (f.tilt < 0.05) out.push(flaskMouth(f));
-    for (const t of this.tools) t.tanks.forEach((_, k) => t.isOpen(k) && out.push(tankMouth(t, k)));
+    // (the station's funnel is back in the wall through a changeover)
+    for (const t of this.tools) if (!t.away) t.tanks.forEach((_, k) => t.isOpen(k) && out.push(tankMouth(t, k)));
     return out;
   }
 
@@ -2065,14 +2133,23 @@ export class GameEngine {
   private frame = (now: number): void => {
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
+    // a nap: their eyes close, or open again, in their own time
+    const nap = this.napping;
+    // (the alarm of the station's changeover wakes them, even as they nod off)
+    if (nap && !nap.waking && this.station().swap !== null) this.wakeNap();
+    if (nap) {
+      nap.lids = Math.max(0, Math.min(1, nap.lids + (nap.waking ? -dt / NAP_S.open : dt / NAP_S.close)));
+      if (nap.waking && nap.lids <= 0) this.napping = null;
+    }
     // asleep, the screen is black: nothing to draw, and the lab runs on its own (see fallAsleep)
-    if (this.wake === 'asleep') {
+    if (this.asleep()) {
       if (!this.sleeping) this.fallAsleep();
       this.hud(now);
       this.raf = requestAnimationFrame(this.frame);
       return;
     }
-    this.move(dt);
+    // nodding off, they stand where they are
+    if (!nap || nap.waking) this.move(dt);
     if (this.wake === 'settling') this.settleIn(dt);
     if (this.held) this.follow(this.held);
     this.view.look(this.eye(), this.player.yaw, this.player.pitch);
@@ -2224,6 +2301,7 @@ export class GameEngine {
       if (m && simDt > 0 && i !== stillFaucet) this.faucetFlows.push({ fa, from, m });
     });
 
+    this.clearStation();
     const gateFrom = this.tools.map((t) => t.gate);
     const steadyFrom = this.station().steady;
     const vessels = this.vessels();
@@ -2347,13 +2425,14 @@ export class GameEngine {
         d.stop(); // quiet a while, or the lab was replaced
         this.diverters.delete(t);
       }
+    this.changeoverSounds(simDt);
     // a thermometer whose bulb got too hot shatters, with a crack of glass, on sim time like what broke it
     this.tools.forEach((t, j) => {
       if (t.broken && whole[j]) shatter(this.hear(footAt(t)));
     });
     // and it chimes as it's been delivering steadily for long enough to open the airlock
     const st = this.station();
-    if (steadyFrom < DELIVERY.streak && st.steady >= DELIVERY.streak) chime(this.hear(this.machineAt(st)));
+    if (st.supply.airlock && steadyFrom < DELIVERY.streak && st.steady >= DELIVERY.streak) chime(this.hear(this.machineAt(st)));
 
     // fluid's sounds, each heard from where it lands: a stream from the mouth it runs into
     const streams = new Map<Vessel, { flow: number; full: number; at: Placement }>();
@@ -2363,6 +2442,64 @@ export class GameEngine {
     }
     this.water.update(dt, this.landed.map((p) => this.hear(p)), streams);
 
+    this.napHint();
+  }
+
+  /**
+   * The first time the station has delivered steadily for DELIVERY.nap, whatever it's fitted for, a note says the
+   * player can nap, as they can from then on (see nap).
+   */
+  private napHint(): void {
+    const st = this.station();
+    if (!this.napKnown && st.steady >= DELIVERY.nap) {
+      this.napKnown = true;
+      const text = 'Steady delivery. Press N to nap while it runs.';
+      this.flash = { text, until: performance.now() + NAP_HINT_MS, tip: true };
+    }
+  }
+
+  /**
+   * The station's changeover is heard on sim time too (see changeover.ts): its alarm sounding on and off; a rumble
+   * while the block or the door slides, and a duller one while the door's shut, with the next block being brought
+   * behind it; and a clunk as the block unlatches, as the door shuts, as it lifts again, as the next block is set
+   * down behind it, and as that seats in the wall.
+   */
+  private changeoverSounds(simDt: number): void {
+    const st = this.station();
+    if (st.swap === null) {
+      this.changing?.sound.stop();
+      this.changing = null;
+      return;
+    }
+    const at = changeoverAt(st.swap);
+    const from = this.hear(this.machineAt(st));
+    const c = (this.changing ??= { sound: changeover(from), part: at.part, supply: st.supply });
+    c.sound.place(from);
+    const { part } = at;
+    const rumble = part === 'retract' || part === 'extend' ? 0.8 : part === 'shut' || part === 'open' ? 0.5 : part === 'away' ? 0.35 : 0;
+    c.sound.run(simDt > 0 && at.alarm, simDt > 0 ? rumble : 0, part === 'away');
+    if (part !== c.part && (part === 'retract' || part === 'away' || part === 'open' || part === 'clear')) c.sound.clunk(false);
+    if (st.supply !== c.supply) c.sound.clunk(true);
+    c.part = part;
+    c.supply = st.supply;
+  }
+
+  /**
+   * Through the station's changeover (see CHANGEOVER), nothing of it can be worked: its hoses are rolled up, a hose of
+   * its in hand is let go of, and so is its valve if it's being turned.
+   */
+  private clearStation(): void {
+    const st = this.station();
+    if (st.swap === null) return;
+    const its = (h: Hose) => 'tool' in h.on && h.on.tool === st;
+    if (this.turning?.t === st) this.endTurn();
+    const held = this.held?.kind === 'hose' && its(this.held.h);
+    this.hoses = this.hoses.filter((h) => !its(h));
+    if (held) {
+      this.held = null;
+      this.pinned = null;
+      this.commit();
+    }
   }
 
   /**
@@ -2738,7 +2875,8 @@ export class GameEngine {
       if (this.hooked(p)) add(['Shift', 'LMB'], 'pick it up still hooked up');
     }
     const id = this.targetNote();
-    if (id) add(['N'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
+    if (id) add(['Enter'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
+    if (this.canNap()) add(['N'], 'nap');
     if (!h && this.history.canUndo) add([MOD, 'Z'], 'undo');
     if (!h && this.history.canRedo) add([MOD, 'Shift', 'Z'], 'redo');
     add(['Esc'], 'let go of the mouse');
@@ -2804,12 +2942,18 @@ export class GameEngine {
     this.sleeping = null;
     this.riseT = null;
     this.arrival = false;
-    this.podLitres = this.reservoirLitres();
+    this.podNotice = this.onBoard();
   }
 
-  /** The litres of cryostabilizer in the ship's reservoir. */
-  private reservoirLitres(): number {
-    return (this.station().tanks[1].n[TARGET] / CAP) * FLASK_L;
+  /**
+   * What's on board, for the pod's message: the litres of cryostabilizer (what the station's reservoir holds, once
+   * it's fitted for it; till then, what was left after the incident), and while the station is fitted for something
+   * before it, the litres of that in its reservoir.
+   */
+  private onBoard(): { litres: number; first: number | null } {
+    const st = this.station();
+    const held = litresOf(st.tanks[1].n[st.supply.species]);
+    return st.supply === CRYOSTABILIZER ? { litres: held, first: null } : { litres: CRYOSTABILIZER.startL, first: held };
   }
 
   /** Put the player in the pod, facing the lab, empty-handed (see emptyHanded). */
@@ -2865,8 +3009,10 @@ export class GameEngine {
     this.rumbles.clear();
     for (const d of this.diverters.values()) d.stop();
     this.diverters.clear();
+    this.changing?.sound.stop();
+    this.changing = null;
     const stats = { plain: 0, jumped: 0, jumps: 0 };
-    this.sleeping = { run: sleep(this.sleeper(), stats), stats, from: this.clock, woke: null };
+    this.sleeping = { run: sleep(this.sleeper(), stats, !!this.napping), stats, from: this.clock, woke: null };
     this.pumper.port1.onmessage = () => this.pump();
     this.pumper.port2.postMessage(null);
   }
@@ -2877,7 +3023,7 @@ export class GameEngine {
    */
   private pump(): void {
     const s = this.sleeping;
-    if (!s || s.woke || this.wake !== 'asleep') return;
+    if (!s || s.woke || !this.asleep()) return;
     if (this.speed === 0) {
       setTimeout(() => this.pumper.port2.postMessage(null), 100);
       return;
@@ -2887,7 +3033,8 @@ export class GameEngine {
       const r = s.run.next();
       if (!r.done) continue;
       s.woke = r.value;
-      this.wakeFrom(r.value);
+      if (this.napping) this.wakeNap();
+      else this.wakeFrom(r.value);
       return;
     }
     this.pumper.port2.postMessage(null);
@@ -2915,6 +3062,52 @@ export class GameEngine {
     };
   }
 
+  /** Whether the player is napping or nodding off (see nap): nothing they'd do does anything, but N, which wakes them. */
+  private dozing(): boolean {
+    return !!this.napping && !this.napping.waking;
+  }
+
+  /** Whether the player is asleep, in the pod or in a nap with their eyes shut: the lab runs on its own, undrawn. */
+  private asleep(): boolean {
+    const nap = this.napping;
+    return this.wake === 'asleep' || (!!nap && !nap.waking && nap.lids >= 1);
+  }
+
+  /**
+   * Whether N would start a nap: once the player's been told they can (see napKnown), out in the lab, with empty
+   * hands, and the station not in the middle of its changeover, whose alarm nobody could nap through.
+   */
+  private canNap(): boolean {
+    return (
+      this.napKnown && !this.napping && !inPod(this.wake) && !this.previewing && !this.held && !this.turning &&
+      this.station().swap === null
+    );
+  }
+
+  /**
+   * N: nap where they stand. Their eyes close, over NAP_S.close real seconds (it's their own doing, like
+   * walking), and then the lab runs on as fast as it can, as while they sleep in the pod (see fallAsleep), whether or
+   * not anything is being delivered, until N wakes them (see wakeNap), or the station's reservoir comes to hold enough
+   * of what it's fitted for.
+   */
+  private nap(): void {
+    if (!this.canNap()) {
+      if (this.napKnown && this.held && !inPod(this.wake)) this.say('Hands full');
+      return;
+    }
+    this.rightHeld = false;
+    this.keys.clear();
+    this.flash = null;
+    this.napping = { lids: 0, waking: false };
+  }
+
+  /** Wake from a nap: the lab runs as ever again, and their eyes open, over NAP_S.open real seconds. */
+  private wakeNap(): void {
+    if (!this.napping) return;
+    this.napping.waking = true;
+    this.sleeping = null;
+  }
+
   /** How far the screen has faded to black (see Hud.black). */
   private black(): number {
     const t = this.wakeT;
@@ -2935,7 +3128,7 @@ export class GameEngine {
     this.wakeT = 0;
     this.riseT = 0;
     this.arrival = why === 'goal';
-    this.podLitres = this.reservoirLitres();
+    this.podNotice = this.onBoard();
   }
 
   /**
@@ -2970,8 +3163,8 @@ export class GameEngine {
     else if (this.wake === 'arriving' && t >= WAKE_S.arrive) next('arrived');
     else if (this.wake === 'boarding' && t >= WAKE_S.open + WAKE_S.fade) next('asleep');
     else if (this.wake === 'out' && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
-    // steady delivery opens the doors again, and once it stops they close, when she's out in the lab
-    else if (this.wake === 'closed' && this.station().steady >= DELIVERY.streak) next('open');
+    // steady delivery of cryostabilizer opens the doors again, and once it stops they close, when she's out in the lab
+    else if (this.wake === 'closed' && this.station().supply.airlock && this.station().steady >= DELIVERY.streak) next('open');
     else if (this.wake === 'open' && this.station().steady === 0 && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
   }
 
@@ -2999,7 +3192,7 @@ export class GameEngine {
       // the room's light floods in as the front slides up, and is shut out as it slides down
       dark: 1 - up,
       message: w === 'pod' || flick,
-      notice: this.arrival ? { arrival: true } : { arrival: false, litres: this.podLitres },
+      notice: this.arrival ? { arrival: true } : { arrival: false, ...this.podNotice },
       okHot: w === 'pod' && this.target?.kind === 'wake',
       // flashing while the doors stand open to sleep, a second on and half a second off, on sim time
       lamp: w === 'open' && this.clock % 1.5 < 1,
@@ -3067,12 +3260,18 @@ export class GameEngine {
 
   /** Whether fluid would leave a tool's spouts if it ran. */
   private wouldFlow(t: Tool): boolean {
-    // the station's reservoir through its faucet, or its funnel through the diverter
-    if (t.kind === 'receptacle') return t.tanks.some((v, k) => v.N > TRACE && drains(t, k));
+    // the station's reservoir through its faucet, or its funnel through the diverter, unless its block is away
+    if (t.kind === 'receptacle') return !t.away && t.tanks.some((v, k) => v.N > TRACE && drains(t, k));
     // a column's dry bed drinks what's in its funnel, and lets nothing out
     if (t.kind === 'column') return t.soaked >= 1 && t.valves[0] > 0 && t.tanks[0].N > TRACE;
     // a heater's tube runs whatever its valves say
     return (t.shape.spouts.length > 0 && t.tanks.some((v, k) => v.N > TRACE && drains(t, k))) || t.tube.some((v) => v.N > TRACE);
+  }
+
+  /** What the station's reservoir is of, and the litres of it there, to two places, of the litres needed (see Hud.reservoir). */
+  private reservoirHud(): NonNullable<Hud['reservoir']> {
+    const { supply, tanks } = this.station();
+    return { name: supply.name, litres: Math.floor(100 * litresOf(tanks[1].n[supply.species])) / 100, goalL: supply.goalL };
   }
 
   private hud(now: number): void {
@@ -3091,6 +3290,7 @@ export class GameEngine {
       label: !inPod(this.wake) && !!this.targetNote(),
       hand: h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : h?.kind === 'tool' && isDipper(h.t.kind) ? 'Dip' : 'Turn',
       note: this.flash?.text ?? null,
+      tip: !!this.flash?.tip,
       actions: this.actions(),
       black: this.black(),
       // blinded a while by the white void once the pod's open, then all white
@@ -3101,7 +3301,10 @@ export class GameEngine {
       preview: !!this.previewing,
       ended: this.wake === 'arrived',
       slept: this.sleeping ? Math.floor(this.clock - this.sleeping.from) : null,
-      litres: this.sleeping ? Math.floor(100 * this.reservoirLitres()) / 100 : null,
+      reservoir: this.sleeping ? this.reservoirHud() : null,
+      lids: this.napping ? ease(this.napping.lids) : 0,
+      napping: this.dozing(),
+      nap: this.canNap(),
     };
     const key = JSON.stringify(hud);
     if (key === this.lastHud) return;

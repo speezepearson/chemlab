@@ -36,6 +36,7 @@ import { Vessel } from '../src/game/flask';
 import { DEFAULT_PRESET, type FlaskFill, type Preset } from '../src/game/presets';
 import { Hose, Tool } from '../src/game/tools';
 import { sleep, sleptFor } from '../src/game/sleep';
+import { CRYOSTABILIZER } from '../src/game/supply';
 import { stepFast } from './stepFast';
 
 /* ---------------- a deterministic Math.random ---------------- */
@@ -320,6 +321,8 @@ function makeEngine(scene: Scene, seed: number): { e: Engine; net: ReactionNetwo
   const net = new ReactionNetwork(params);
   const e = new GameEngine(canvas as any, stage as any, net, callbacks as any, scene.preset) as unknown as Engine;
   e.wake = 'closed';
+  // the scenes are of the cryostabilizer's making: a new lab's station is fitted for the antinucleant first
+  e.station().stock(CRYOSTABILIZER);
   if (LOADED) e.restore(LOADED, DEFAULT_PRESET);
   else scene.after?.(e);
   return { e, net };

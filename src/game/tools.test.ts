@@ -7,13 +7,14 @@ import { COOLING } from './cooling';
 import { Vessel, roomFor, transfer, volume } from './flask';
 import { FLASK_VOLUME, flaskRadius } from './flaskShape';
 import { STATION_POSE } from './presets';
+import { CRYOSTABILIZER, FIRST_SUPPLY, SUPPLIES, nextSupply } from './supply';
 import { CELL, WALL_PANEL } from './space';
 import { tankMouth } from './bodies';
 import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -258,7 +259,7 @@ describe('tank', () => {
   });
 });
 
-describe('cryostabilizer station', () => {
+describe('supply station', () => {
   /**
    * A station whose funnel holds `atoms` of the target and `impurity` atoms of R, run until its funnel is empty: what
    * came out its waste spigot, and how long it took.
@@ -277,18 +278,18 @@ describe('cryostabilizer station', () => {
 
   it('is built into the wall, with a funnel holding what it is drawn to, and a reservoir about three times the goal', () => {
     const r = new Tool('receptacle', 0);
-    expect(r.tanks.map((v) => v.cap)).toEqual([INTAKE_CAP, REFERENCE_CAP]);
+    expect(r.tanks.map((v) => v.cap)).toEqual([INTAKE_CAP, CRYOSTABILIZER.cap]);
     expect(INTAKE_CAP * SPACE_PER_ATOM).toBeCloseTo(spaceOf(STATION_FUNNEL), -2);
     expect(r.shape.fixed).toBe(true);
     expect(r.shape.wall).toBe(true);
     // the funnel is open, and the reservoir sealed
     expect(r.isOpen(0)).toBe(true);
     expect(r.isOpen(1)).toBe(false);
-    expect(REFERENCE_START).toBeLessThan(GOAL_TARGET);
-    expect(REFERENCE_CAP / GOAL_TARGET).toBeCloseTo(3, 1);
+    expect(CRYOSTABILIZER.start).toBeLessThan(GOAL_TARGET);
+    expect(CRYOSTABILIZER.cap / GOAL_TARGET).toBeCloseTo(3, 1);
     // even if all it's ever let in is only just pure enough, and the rest single atoms
     const target = GOAL_TARGET * roomFor(TARGET);
-    expect(target + (GOAL_TARGET * 3 * (1 / GOAL_PURITY - 1)) * roomFor(R)).toBeLessThan(REFERENCE_CAP);
+    expect(target + (GOAL_TARGET * 3 * (1 / GOAL_PURITY - 1)) * roomFor(R)).toBeLessThan(CRYOSTABILIZER.cap);
   });
 
   it(`lets what's more than ${100 * GOAL_PURITY}% target into the reservoir, as fast as the funnel drains`, () => {
@@ -425,7 +426,7 @@ describe('cryostabilizer station', () => {
   it("lets the reservoir out its faucet, as far as its valve is open, and slower than a tank at most", () => {
     const r = new Tool('receptacle', 0, undefined, [1]);
     const ref = r.tanks[1];
-    ref.setMolecules(TARGET, REFERENCE_START);
+    ref.setMolecules(TARGET, CRYOSTABILIZER.start);
     expect(REFERENCE_FLOW).toBeLessThan(MAX_FLOW);
     expect(volume(r.step(0.5)[1]!) / (REFERENCE_FLOW * 0.5)).toBeCloseTo(1, 3);
     r.valves[0] = 0.5;
@@ -468,6 +469,174 @@ describe('cryostabilizer station', () => {
     expect((d.x0 + d.x1) / 2).toBe((r.shape.tanks[0].x0 + r.shape.tanks[0].x1) / 2);
     expect(d.y0).toBeGreaterThan(f.y + f.h);
     expect(d.y1).toBeLessThan(r.shape.spoutY);
+  });
+});
+
+describe("the station's supplies and changeover", () => {
+  const RB = pairOf('R', 'B');
+  /** A station fitted for the first supply, as a new lab's is. */
+  const first = () => {
+    const r = new Tool('receptacle', 0);
+    r.stock(FIRST_SUPPLY);
+    return r;
+  };
+  /** Run it for t sim seconds, in substeps. */
+  const run = (r: Tool, t: number) => {
+    for (let s = 0; s < t - 1e-9; s += 0.02) r.step(0.02);
+  };
+
+  it('is fitted first for a little antinucleant, R–B, and then for the cryostabilizer, which is the last', () => {
+    expect(SUPPLIES.map((s) => s.name)).toEqual(['antinucleant', 'cryostabilizer']);
+    expect(FIRST_SUPPLY.species).toBe(RB);
+    expect(nextSupply(FIRST_SUPPLY)).toBe(CRYOSTABILIZER);
+    expect(nextSupply(CRYOSTABILIZER)).toBeNull();
+    expect(CRYOSTABILIZER.species).toBe(TARGET);
+    // 8.30 L of the 9.20 L needed; a reservoir about three times the goal, as the cryostabilizer's is
+    expect(FIRST_SUPPLY.startL.toFixed(2)).toBe('8.30');
+    expect(FIRST_SUPPLY.goalL.toFixed(2)).toBe('9.20');
+    for (const s of SUPPLIES) {
+      expect(Number.isInteger(s.start)).toBe(true);
+      expect(s.start).toBeLessThan(s.goal);
+      expect(s.start / s.goal).toBeCloseTo(s.startL / s.goalL, 6);
+      expect(s.cap / s.goal).toBeCloseTo(3, 0);
+    }
+    // only the cryostabilizer, which takes years to make enough of, opens the airlock
+    expect(SUPPLIES.map((s) => s.airlock)).toEqual([false, true]);
+  });
+
+  it('stocked for a supply, holds what is on board of it, in a reservoir as big as that supply needs', () => {
+    const r = first();
+    const [funnel, ref] = r.tanks;
+    expect(r.supply).toBe(FIRST_SUPPLY);
+    expect(ref.cap).toBe(FIRST_SUPPLY.cap);
+    expect(ref.n[RB]).toBe(FIRST_SUPPLY.start);
+    expect(ref.N).toBe(2 * FIRST_SUPPLY.start);
+    expect(temperature(ref)).toBeCloseTo(1, 6);
+    expect(funnel.N).toBe(0);
+    expect(new Tool('receptacle', 0).supply).toBe(CRYOSTABILIZER);
+  });
+
+  it('takes only what it is fitted for', () => {
+    const r = first();
+    const [funnel, ref] = r.tanks;
+    funnel.setMolecules(RB, 1000);
+    run(r, 0.1);
+    expect(r.gate).toBe('reservoir');
+    expect(ref.n[RB]).toBe(FIRST_SUPPLY.start + 1000);
+    expect(r.purity).toBeCloseTo(1, 6);
+    // the cryostabilizer is no good to it
+    funnel.setMolecules(TARGET, 1000);
+    let wasted = 0;
+    for (let i = 0; i < 5; i++) wasted += r.step(0.02)[0]?.n[TARGET] ?? 0;
+    expect(r.gate).toBe('waste');
+    expect(wasted).toBe(1000);
+    expect(ref.n[TARGET]).toBe(0);
+  });
+
+  it('counts steady delivery whatever it is fitted for', () => {
+    const r = first();
+    for (let t = 0; t < 10; t++) {
+      r.tanks[0].setMolecules(RB, 1000);
+      run(r, 1);
+    }
+    expect(r.steady).toBeCloseTo(10, 6);
+  });
+
+  it('is changed for the next once its reservoir holds enough, and not before', () => {
+    const r = first();
+    const [funnel, ref] = r.tanks;
+    ref.setMolecules(RB, FIRST_SUPPLY.goal - 1e6);
+    run(r, 1);
+    expect(r.swap).toBeNull();
+    // a little more than its open faucet lets out
+    r.valves[0] = 0.5;
+    funnel.setMolecules(RB, 1e7);
+    r.step(0.02);
+    // it starts at once, and shuts its faucet
+    expect(r.swap).toBe(0);
+    expect(r.valves[0]).toBe(0);
+    expect(r.away).toBe(false);
+    // it still works through the warning
+    funnel.setMolecules(RB, 1000);
+    const held = ref.n[RB];
+    run(r, CHANGEOVER.warn - 0.1);
+    expect(ref.n[RB]).toBe(held + 1000);
+    // then its block is away: nothing in its funnel moves, and nothing leaves its spouts, even with its valve open
+    run(r, 0.2);
+    expect(r.away).toBe(true);
+    funnel.setMolecules(RB, 1000);
+    r.valves[0] = 1;
+    expect(r.step(0.02)).toEqual([null, null]);
+    expect(funnel.n[RB]).toBe(1000);
+    expect(r.supply).toBe(FIRST_SUPPLY);
+    // halfway through its time away it's the next supply's, as new
+    run(r, CHANGEOVER.retract + CHANGEOVER.shut + CHANGEOVER.away / 2);
+    expect(r.supply).toBe(CRYOSTABILIZER);
+    expect(ref.cap).toBe(CRYOSTABILIZER.cap);
+    expect(ref.n[TARGET]).toBe(CRYOSTABILIZER.start);
+    expect(ref.n[RB]).toBe(0);
+    expect(funnel.N).toBe(0);
+    expect(r.away).toBe(true);
+    // and once it's out again it works, the changeover over a moment later
+    run(r, CHANGEOVER.away / 2 + CHANGEOVER.open + CHANGEOVER.extend);
+    expect(r.away).toBe(false);
+    expect(r.swap).not.toBeNull();
+    funnel.setMolecules(TARGET, 1000);
+    run(r, CHANGEOVER.clear + 0.1);
+    expect(r.swap).toBeNull();
+    expect(ref.n[TARGET]).toBe(CRYOSTABILIZER.start + 1000);
+  });
+
+  it('has nothing to be changed for once it has enough cryostabilizer', () => {
+    const r = new Tool('receptacle', 0);
+    r.tanks[1].setMolecules(TARGET, GOAL_TARGET + 1e6);
+    run(r, 1);
+    expect(r.swap).toBeNull();
+  });
+
+  it('slides its block back, shuts a door over it, and brings the next out the same way, alarm sounding', () => {
+    expect(CHANGEOVER_S).toBeCloseTo(Object.values(CHANGEOVER).reduce((a, b) => a + b, 0), 9);
+    expect(changeoverAt(null)).toMatchObject({ back: 0, door: 0, alarm: false });
+    const { warn, retract, shut, away, open, extend } = CHANGEOVER;
+    expect(changeoverAt(warn / 2)).toMatchObject({ part: 'warn', back: 0, door: 0 });
+    expect(changeoverAt(warn + retract / 2)).toMatchObject({ part: 'retract', back: 0.5, door: 0 });
+    // the door shuts only once the block is all the way back, and the block comes out only once it's open again
+    expect(changeoverAt(warn + retract + shut / 2)).toMatchObject({ part: 'shut', back: 1, door: 0.5 });
+    expect(changeoverAt(warn + retract + shut + away / 2)).toMatchObject({ part: 'away', back: 1, door: 1 });
+    expect(changeoverAt(warn + retract + shut + away + open / 2)).toMatchObject({ part: 'open', back: 1, door: 0.5 });
+    expect(changeoverAt(warn + retract + shut + away + open + extend / 2)).toMatchObject({ part: 'extend', back: 0.5, door: 0 });
+    expect(changeoverAt(CHANGEOVER_S - 0.01)).toMatchObject({ part: 'clear', back: 0, door: 0 });
+    // the alarm sounds on and off from the start to the end
+    expect(changeoverAt(0.01).alarm).toBe(true);
+    expect(changeoverAt(CHANGEOVER_ALARM.on + 0.01).alarm).toBe(false);
+    expect(changeoverAt(CHANGEOVER_ALARM.every + 0.01).alarm).toBe(true);
+    // far enough back that nothing of it sticks out past the door
+    expect(STATION.recess - STATION.door.back - STATION.door.thick).toBeGreaterThan(STATION.out + STATION.funnel.w);
+  });
+
+  it('keeps what it is fitted for, and how far through a changeover it is, in a save', () => {
+    const r = first();
+    expect(r.memory).toEqual([0, -1]);
+    const back = new Tool('receptacle', 1);
+    back.remember(r.memory);
+    expect(back.supply).toBe(FIRST_SUPPLY);
+    expect(back.tanks[1].cap).toBe(FIRST_SUPPLY.cap);
+    expect(back.swap).toBeNull();
+    // mid-changeover, before and after it's the next supply's
+    for (const [supply, swap] of [[0, 3], [1, CHANGEOVER_S - 2]]) {
+      const t = new Tool('receptacle', 2);
+      t.remember([supply, swap]);
+      expect(t.supply).toBe(SUPPLIES[supply]);
+      expect(t.swap).toBe(swap);
+      expect(t.memory).toEqual([supply, swap]);
+    }
+    // a save from before there was any supply but the cryostabilizer has no memory, and nonsense is ignored
+    const old = new Tool('receptacle', 3);
+    old.remember(undefined);
+    expect(old.supply).toBe(CRYOSTABILIZER);
+    old.remember([7, 3]);
+    expect(old.supply).toBe(CRYOSTABILIZER);
+    expect(old.swap).toBeNull();
   });
 });
 

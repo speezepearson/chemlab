@@ -13,6 +13,13 @@ export const FLASK_L = VOYAGE.presentL / 100;
 /** The cryostabilizer needed to reach Mu Ceti, in litres: the intro's sum, about 50.22 L. */
 export const GOAL_L = (VOYAGE.passengers * VOYAGE.mlPerPassengerDay * VOYAGE.days) / 1000;
 /**
+ * The same sum for the antinucleant, the little that's made first (see SUPPLIES): a trace of it a day for each
+ * passenger, 9.20 L in all, of which 8.30 L are left on board.
+ */
+export const ANTINUCLEANT = { mlPerPassengerDay: 0.0000641, presentL: 8.3 };
+/** The antinucleant needed to reach Mu Ceti, in litres: about 9.20 L. */
+export const ANTINUCLEANT_L = (VOYAGE.passengers * ANTINUCLEANT.mlPerPassengerDay * VOYAGE.days) / 1000;
+/**
  * The target to win, in molecules: GOAL_L, about 179 flasks of it, in the ship's reservoir, which starts with
  * a hundred (see REFERENCE_START).
  */
@@ -25,10 +32,11 @@ export const SUSTAIN = ((VOYAGE.passengers * VOYAGE.mlPerPassengerDay) / 1000 / 
 /** The station's diverter lets only fluid more than this pure in the target (by atoms) into the reservoir. */
 export const GOAL_PURITY = 0.95;
 /**
- * Steady delivery, which opens the airlock (see Wake): the station letting cryostabilizer into the reservoir at least
- * once every `gap` sim seconds, for `streak` sim seconds on end.
+ * Steady delivery: the station letting what it's fitted for into the reservoir at least once every `gap` sim seconds.
+ * `nap` sim seconds of it on end, and the player is told they can nap (see GameEngine.nap), as they can from then on;
+ * `streak` sim seconds of cryostabilizer, and the airlock opens (see Wake).
  */
-export const DELIVERY = { gap: 3, streak: 60 };
+export const DELIVERY = { gap: 3, streak: 60, nap: 20 };
 /** Amounts of fluid below this many atoms count as nothing: too little to see or pour. */
 export const TRACE = CAP * 1e-6;
 /**

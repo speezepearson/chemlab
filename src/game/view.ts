@@ -11,8 +11,8 @@ import { glowFalloff } from './appearance';
 import {
   NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
 } from './bodies';
-import { SPECIES, TARGET } from '../chem/species';
-import { CAP, DELIVERY, FLASK_L, GOAL_L, GOAL_PURITY, GOAL_TARGET, TRACE } from './config';
+import { SPECIES } from '../chem/species';
+import { CAP, DELIVERY, GOAL_PURITY, TRACE } from './config';
 import { Flask, Vessel, fluidAlpha, fluidRGB, volume } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, Scale } from './scale';
@@ -21,10 +21,11 @@ import { PORT_FRAC, PORT_WALL, porthole, type Porthole } from './porthole';
 import { AIRLOCK, POD } from './airlock';
 import { arrival, notice, type Block } from '../intro/notice';
 import { STATION_POSE } from './presets';
+import { litresOf, type Supply } from './supply';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import {
-  clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
-  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
+  clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
+  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, Tool,
 } from './tools';
 import { CABINET, CABINET_BUILD, type Stock, type Stocked } from './cabinet';
@@ -225,10 +226,14 @@ const rodMat = new THREE.MeshStandardMaterial({ color: 0xc8cfcd, metalness: 1, r
 const KNOB_ALPHA = 0.6;
 /** Polished chrome, for the faucets. */
 const chromeMat = new THREE.MeshStandardMaterial({ color: 0xe2e7e8, metalness: 1, roughness: 0.08 });
-/** The steel plate the cryostabilizer station's panes are set in, and the lines marked on it. */
+/** The steel plate the supply station's panes are set in, and the lines marked on it. */
 const plateMat = new THREE.MeshStandardMaterial({ color: 0x6f7975, metalness: 0.5, roughness: 0.45 });
-/** The rubber seam round the cryostabilizer station's block of the wall. */
+/** The rubber seam round the supply station's block of the wall. */
 const rubberMat = new THREE.MeshStandardMaterial({ color: 0x1a1d1c, roughness: 0.95, metalness: 0 });
+/** The inside of the recess the station's block slides back into, behind its hole in the wall: dark, dull metal. */
+const recessMat = new THREE.MeshStandardMaterial({ color: 0x15181a, metalness: 0.3, roughness: 0.8, side: THREE.BackSide });
+/** The door that shuts over the station's hole through a changeover: pale brushed steel, lighter than the block's plate. */
+const shutterMat = new THREE.MeshStandardMaterial({ color: 0xb4bcb9, metalness: 0.4, roughness: 0.5 });
 /**
  * How wide the hazard tape round the station's block is, and how far apart its stripes repeat, in world units; and how
  * far its inner edge is from the block's edge, across and up, at each corner (bottom left, bottom right, top right, top
@@ -643,7 +648,7 @@ class Screen {
 }
 
 /**
- * The cryostabilizer station's diverter's LCD: a pipe down from the funnel, branching off toward the reservoir, with
+ * The supply station's diverter's LCD: a pipe down from the funnel, branching off toward the reservoir, with
  * the diverter's flap across whichever way it isn't sending what comes through, and that way lit while anything's
  * going through: green into the reservoir, red down to the waste spigot, filling the pipe right up to its walls; the
  * rest of the pipes black inside. Only the pipes, the flap and what's in them are drawn, straight on the plate.
@@ -858,7 +863,7 @@ const DYING = 1.2;
 const NEEDLE_SWEEP = (140 * Math.PI) / 180;
 
 /**
- * The cryostabilizer station's needle: an enamel dial with no words or numbers, a needle swinging across it from its
+ * The supply station's needle: an enamel dial with no words or numbers, a needle swinging across it from its
  * left stop (see needleAt), evenly spaced ticks, and a red line where the diverter's line is, with a green band from
  * there to the right stop. `u` is how far across the needle stands, from 0 to 1 (see Tool.needle).
  */
@@ -1295,9 +1300,9 @@ class ToolView {
   private screen?: Screen;
   /** The station's screen showing how long it's been delivering steadily. */
   private steadyScreen?: Screen;
-  /** The cryostabilizer station's diverter's LCD (see drawDiverter). */
+  /** The supply station's diverter's LCD (see drawDiverter). */
   private diverter?: Screen;
-  /** The cryostabilizer station's purity needle's dial (see drawNeedle). */
+  /** The supply station's purity needle's dial (see drawNeedle). */
   private needle?: Screen;
   /** What's running down an inline instrument's tube, shown as a thin thread of its color. */
   private thread?: { m: THREE.Mesh; mat: THREE.MeshBasicMaterial };
@@ -1318,8 +1323,15 @@ class ToolView {
    * and its column), and the jagged end it's left with once it's shattered (see buildThermometer).
    */
   private spirit?: { column: THREE.Mesh; whole: THREE.Group; stump: THREE.Group };
-  /** The cryostabilizer station's gauge's segments, bottom up. */
+  /** The supply station's gauge's segments, bottom up. */
   private segments: THREE.MeshStandardMaterial[] = [];
+  /**
+   * What of the station stays on the wall through a changeover (see CHANGEOVER), while its block, `art`, slides back:
+   * the door that comes down over the hole, how far it travels, and the warning lamp above it with its glow.
+   */
+  private changeover?: { door: THREE.Group; travel: number; lamp: THREE.MeshStandardMaterial; glow: THREE.Sprite };
+  /** The station's reservoir's name printed on its plate: where, for which supply it was last printed, and the print. */
+  private plate?: { at: [number, number, number]; supply: Supply | null; label: THREE.Mesh | null };
 
   constructor(
     readonly t: Tool,
@@ -1967,13 +1979,15 @@ class ToolView {
   }
 
   /**
-   * The cryostabilizer station (see STATION): a steel plate, a block of the wall in a rubber seam, with a narrow glass
+   * The supply station (see STATION): a steel plate, a block of the wall in a rubber seam, with a narrow glass
    * pane for the reservoir's column, its fluid behind it filling it from the bottom as the column fills, and its name
    * printed above; a glass funnel low beside it, whose stem runs down and back into the plate, over the diverter's LCD
    * (see drawDiverter) and the waste spigot, whose valve has no handle, since only the diverter works it; a faucet
    * under the reservoir (its lever is built with the other valves); the gauge of LCD segments just right of the
    * reservoir (see gaugeSegments); and a green-on-black screen under its label showing the litres of cryostabilizer in
-   * it of the litres needed.
+   * it of the litres needed. All of that is the block, `art`, which slides back into the wall through a changeover
+   * (see slideStation). What stays on the wall is built apart: the seam and the tape round the hole, the recess
+   * behind it, the door that shuts over it, and the warning lamp above it.
    */
   private buildStation(pick: (m: THREE.Object3D, part: 'body' | 'tank' | 'spout', k?: number) => void): void {
     const { t, art } = this;
@@ -1996,9 +2010,12 @@ class ToolView {
     // another put in its place (the bevel grows the outline by 1 and shrinks the hole by 1)
     const seam = rectPath(...rect(-1), new THREE.Shape());
     seam.holes.push(rectPath(...rect(-7)));
+    // (it stays on the wall, round the hole, with the rest of what does: the block slides back without it)
+    const fixed = new THREE.Group();
+    this.body.add(fixed);
     const gasket = new THREE.Mesh(new THREE.ExtrudeGeometry(seam, { depth: 1.5, bevelEnabled: true, bevelThickness: 0.5, bevelSize: 1, bevelSegments: 2 }), rubberMat);
     gasket.position.z = face - 0.5;
-    art.add(gasket);
+    fixed.add(gasket);
     // and hazard tape on the wall round it, a little way outside the seam, laid on by hand: its inner edge is a few
     // units out from each corner, by TAPE.gaps, so each side runs not quite parallel to the seam
     const [cx, cy, bw, bh] = rect(0);
@@ -2017,7 +2034,8 @@ class ToolView {
     const tape = new THREE.Mesh(new THREE.ShapeGeometry(band), new THREE.MeshStandardMaterial({ map: tapeTexture(), roughness: 0.55 }));
     tape.position.z = face + 0.3;
     tape.receiveShadow = true;
-    art.add(tape);
+    fixed.add(tape);
+    this.buildChangeover(fixed, cx, cy, bw, bh, face);
     // no lids: the funnel is open, and the reservoir is sealed
     const noLid = () => {
       const lid = new THREE.Mesh();
@@ -2065,8 +2083,8 @@ class ToolView {
     pick(pane, 'tank', 1);
     this.flashFrom(art, art.children.length - 1, 1);
     noLid();
-    const label = sh.tanks[1].label;
-    if (label) printed(art, label.join(' '), x, STATION.labelY, face + 0.1, 11);
+    // its name, printed on the plate above it, is whatever the station is fitted for (see updateStation)
+    this.plate = { at: [x, STATION.labelY, face + 0.1], supply: null, label: null };
     this.labels.push(new Label(art, v3(x, tankNoteY(t, 1))));
     // the gauge beside the reservoir: an LCD stack of segments, as tall as the pane, each set on its own into the
     // station's face
@@ -2100,11 +2118,86 @@ class ToolView {
     this.steadyScreen = screen(STATION.steadyScreen);
   }
 
+  /**
+   * What the station's changeover needs on the wall (see CHANGEOVER), round a hole bw by bh with its middle at (cx,
+   * cy), in the wall's face at depth `face`: the recess behind the hole, lined in dark metal, deep enough for the
+   * block all the way back; a steel door as big as the hole, just behind the wall's face, parked up inside the wall
+   * above the hole, which slides down over it; and a warning lamp on the wall above, an amber dome on a dark base.
+   */
+  private buildChangeover(fixed: THREE.Group, cx: number, cy: number, bw: number, bh: number, face: number): void {
+    const { recess, plate, door: dr, lamp: lp } = STATION;
+    // the recess, seen from inside: a shade bigger than the hole, so the block's edges never lie in its walls
+    const depth = recess + plate + 8;
+    const lining = new THREE.Mesh(new THREE.BoxGeometry(bw + 1, bh + 1, depth), recessMat);
+    lining.position.set(cx, cy, face - depth / 2);
+    lining.receiveShadow = true;
+    fixed.add(lining);
+    // the door: a slab of slats, a rib standing out along the middle of each and a dark seam between each two, with a
+    // rubber foot, hanging in a group that slides down
+    const door = new THREE.Group();
+    const [z0, z1] = [face - dr.back - dr.thick, face - dr.back];
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(bw + 0.8, bh + 0.8, dr.thick), shutterMat);
+    slab.position.set(cx, cy, (z0 + z1) / 2);
+    slab.receiveShadow = true;
+    door.add(slab);
+    const slats = 6;
+    const slat = bh / slats;
+    for (let i = 0; i < slats; i++) {
+      const top = cy + bh / 2 - i * slat;
+      const rib = new THREE.Mesh(new THREE.BoxGeometry(bw - 16, 6, 1.2), shutterMat);
+      rib.position.set(cx, top - slat / 2, z1 + 0.6);
+      rib.receiveShadow = true;
+      door.add(rib);
+      if (!i) continue;
+      const seam = new THREE.Mesh(new THREE.BoxGeometry(bw + 0.8, 1.6, 0.4), rubberMat);
+      seam.position.set(cx, top, z1 + 0.2);
+      door.add(seam);
+    }
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(bw + 0.8, 7, 1.4), rubberMat);
+    foot.position.set(cx, cy - bh / 2 + 3.5, z1 + 0.7);
+    door.add(foot);
+    fixed.add(door);
+    // the lamp: its base on the wall, and its dome standing out from it, with a glow round it while it's lit (a glow,
+    // not a light, as the airlock's lamp's is)
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(lp.r + 3, lp.r + 3, 4, 24).rotateX(Math.PI / 2), darkMat);
+    base.position.set(lp.x, -lp.y, face + 2);
+    fixed.add(base);
+    const lamp = new THREE.MeshStandardMaterial({ color: 0x5c3a08, emissive: 0xffa21a, emissiveIntensity: 0, roughness: 0.3 });
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(lp.r, 24, 12, 0, 2 * Math.PI, 0, Math.PI / 2).rotateX(Math.PI / 2), lamp);
+    dome.scale.z = 0.8;
+    dome.position.set(lp.x, -lp.y, face + 4);
+    fixed.add(dome);
+    const glow = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: glowTexture(2), color: 0xffa21a, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }),
+    );
+    glow.scale.set(170, 170, 1);
+    glow.position.set(lp.x, -lp.y, face + 4 + lp.r);
+    glow.visible = false;
+    fixed.add(glow);
+    this.changeover = { door, travel: bh + 2, lamp, glow };
+    door.position.y = bh + 2;
+  }
+
+  /**
+   * Where the station's block and door are just now, through a changeover (see changeoverAt): the block slid back
+   * into the wall, the door down over the hole, and the lamp lit while the alarm sounds.
+   */
+  private slideStation(): void {
+    const co = this.changeover;
+    if (!co) return;
+    const { back, door, alarm } = changeoverAt(this.t.swap);
+    this.art.position.z = -STATION.recess * back;
+    co.door.position.y = (1 - door) * co.travel;
+    co.lamp.emissiveIntensity = alarm ? 2.2 : 0;
+    co.glow.visible = alarm;
+  }
+
   update(clock: number, energies: readonly number[], targets: ReadonlySet<Vessel>): void {
     const { t } = this;
     this.flashes.forEach((ms, k) => ms.forEach((m) => (m.visible = targets.has(t.tanks[k]))));
     this.root.position.set(t.pose.x, t.pose.y, t.pose.z);
     this.root.rotation.y = t.pose.yaw;
+    this.slideStation();
     this.body.updateMatrixWorld();
     t.tanks.forEach((v, k) => {
       const { fm, level, fit } = this.fluids[k];
@@ -2224,9 +2317,24 @@ class ToolView {
 
   private updateStation(clock: number): void {
     const { t } = this;
+    const { supply } = t;
+    const held = t.tanks[1].n[supply.species];
+    // the plate's print: the reservoir is of whatever the station is fitted for
+    const pl = this.plate!;
+    if (pl.supply !== supply) {
+      if (pl.label) {
+        pl.label.removeFromParent();
+        pl.label.geometry.dispose();
+        const m = pl.label.material as THREE.MeshBasicMaterial;
+        m.map?.dispose();
+        m.dispose();
+      }
+      pl.supply = supply;
+      pl.label = printed(this.art, `${supply.name} reservoir`, ...pl.at, 11);
+    }
     // the gauge: the reservoir's target, against the goal; what's still wanted flashes, a second on and half off
     const blink = clock % 1.5 < 1;
-    gaugeSegments(t.tanks[1].n[TARGET], GOAL_TARGET, REFERENCE_CAP).forEach((st, i) => {
+    gaugeSegments(held, supply.goal, supply.cap).forEach((st, i) => {
       const lit = st === 'held' || (st === 'wanted' && blink);
       const color = lit ? SEGMENT_COLORS[st] : SEGMENT_COLORS.off;
       this.segments[i].color.set(color);
@@ -2236,8 +2344,9 @@ class ToolView {
     drawNeedle(this.needle!, t.needle);
     // the screens: the cryostabilizer in the reservoir / what's needed, in litres; and how long it's been delivering
     // steadily
-    phosphor(this.screen!, STATION.screen, `${((t.tanks[1].n[TARGET] / CAP) * FLASK_L).toFixed(2)} L / ${GOAL_L.toFixed(2)} L`);
-    phosphor(this.steadyScreen!, STATION.steadyScreen, t.steady >= DELIVERY.streak ? 'AIRLOCK OPEN' : `STEADY ${clockText(t.steady)}`);
+    phosphor(this.screen!, STATION.screen, `${litresOf(held).toFixed(2)} L / ${supply.goalL.toFixed(2)} L`);
+    const open = supply.airlock && t.steady >= DELIVERY.streak;
+    phosphor(this.steadyScreen!, STATION.steadyScreen, open ? 'AIRLOCK OPEN' : `STEADY ${clockText(t.steady)}`);
   }
 
   dispose(): void {
@@ -2247,6 +2356,8 @@ class ToolView {
     this.screen?.tex.dispose();
     this.steadyScreen?.tex.dispose();
     this.needle?.tex.dispose();
+    this.changeover?.lamp.dispose();
+    this.changeover?.glow.material.dispose();
   }
 }
 
@@ -2713,7 +2824,7 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
   front.rotation.y = Math.PI;
   scene.add(front);
   // the left wall, with the porthole through it, is built apart (see buildPort)
-  // the right wall, with a hole for the cryostabilizer station's block (see ToolView.buildStation); turned to face in,
+  // the right wall, with a hole for the supply station's block (see ToolView.buildStation); turned to face in,
   // its own x runs toward +z
   const { block: bk, out } = STATION;
   const [a, b] = [toWorld(STATION_POSE, { x: bk.x0, y: -bk.y1, z: -out }), toWorld(STATION_POSE, { x: bk.x1, y: -bk.y0, z: -out })];
@@ -2942,10 +3053,10 @@ export interface AirlockLook {
   /** Whether the crosshair is on the OK button. */
   okHot: boolean;
   /**
-   * What the message says: the notice that wakes the player, with the litres of cryostabilizer on board; or, once
-   * there's enough, the one welcoming them to Mu Ceti.
+   * What the message says: the notice that wakes the player, with the litres of cryostabilizer on board, and of
+   * what's to be made first, while it is (`first`, else null); or, once there's enough, the one welcoming them to Mu Ceti.
    */
-  notice: { arrival: true } | { arrival: false; litres: number };
+  notice: { arrival: true } | { arrival: false; litres: number; first: number | null };
   /** Whether the green lamp over the doorway is lit: it flashes while the doors stand open to sleep. */
   lamp: boolean;
   /** Whether the pod is in the white void of Mu Ceti, at the end, with nothing of the lab to be seen (see ARRIVAL). */
@@ -3144,10 +3255,10 @@ class AirlockView {
   }
 
   update(a: AirlockLook): void {
-    const said = a.notice.arrival ? 'arrival' : a.notice.litres.toFixed(2);
+    const said = a.notice.arrival ? 'arrival' : `${a.notice.litres.toFixed(2)} ${a.notice.first?.toFixed(2)}`;
     if (said !== this.said) {
       this.said = said;
-      this.setMessage(a.notice.arrival ? arrival() : notice(a.notice.litres));
+      this.setMessage(a.notice.arrival ? arrival() : notice(a.notice.litres, a.notice.first));
     }
     const l = this.last;
     if (l && l.door === a.door && l.front === a.front && l.dark === a.dark && l.message === a.message && l.okHot === a.okHot && l.lamp === a.lamp) return;
@@ -3392,7 +3503,7 @@ function buildFaucets(
 
 /**
  * The thing a pick is part of, to outline all of it: a tool for any of its parts, a faucet for its knob or spout. The
- * cryostabilizer station, built into the wall, is outlined a part at a time: its funnel, its reservoir's window, or one
+ * supply station, built into the wall, is outlined a part at a time: its funnel, its reservoir's window, or one
  * of its two faucets (its spout's pipe, with its valve); its plate, nothing. Null for nothing.
  */
 function thingOf(p: Pick): unknown {

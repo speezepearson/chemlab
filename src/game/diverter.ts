@@ -2,7 +2,7 @@ import { Spot, audio, bus, whiteNoise } from './audio';
 import type { Placement } from './place';
 
 /**
- * The cryostabilizer station's diverter's sound, driven live by the engine as it runs (so it follows sim time, pauses
+ * The supply station's diverter's sound, driven live by the engine as it runs (so it follows sim time, pauses
  * included): a clunk as it swings to the reservoir or the waste. It plays on the receptacle channel (see audio.ts), from
  * where the station's display is, and without audio it is silent.
  */

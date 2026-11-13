@@ -1,13 +1,14 @@
 import { BOND_KEYS, BONDS, SOLVENT, type ColorAtom } from '../chem/atoms';
-import { THERMO } from '../chem/params';
+import { THERMO, T_ROOM } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
 import { END_WEIGHT, LOOSE_ENDS } from '../chem/shape';
-import { NS, SPECIES, TARGET } from '../chem/species';
+import { NS, SPECIES } from '../chem/species';
 import { CAP, DELIVERY, TRACE } from './config';
 import { COOLING } from './cooling';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
 import { CELL, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
+import { CRYOSTABILIZER, SUPPLIES, nextSupply, type Supply } from './supply';
 
 /** Capacity of each tank on a tool, in atoms. */
 export const TANK_CAP = 4 * CAP;
@@ -267,7 +268,10 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
 }
 
 /**
- * The cryostabilizer station, built into the right wall (see STATION_POSE in presets.ts): the ship's reservoir, a tall
+ * The station, built into the right wall (see STATION_POSE in presets.ts), for topping up what the ship is short of
+ * (see Supply): first the antinucleant, and once there's enough of that, its block of the wall is changed for the
+ * cryostabilizer's (see CHANGEOVER), the same but for what it takes and what's printed on it. It's the ship's
+ * reservoir, a tall
  * column in the wall seen through a narrow glass pane, with a faucet under it; and beside it, low down, a glass funnel
  * over a diverter, which sends what drains from the funnel up into the reservoir if it's pure enough, or else down
  * and out a waste spigot under it, with a little LCD between the funnel and the spigot showing which way it's going.
@@ -286,6 +290,12 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
  * - gauge: a stack of LCD segments just right of the reservoir, as tall as the pane, showing how far the reservoir is
  *   toward the goal (see gaugeSegments): x0..x1 across, and how many segments.
  * - screen: the readout of the litres in the reservoir, under its label.
+ * - recess: how far back into the wall the block is drawn during a changeover: far enough that its funnel, spouts and
+ *   valve are all behind the door that shuts over it.
+ * - door: the door that shuts over the hole, sliding down from inside the wall above it: how far behind the wall's
+ *   face its front is, and how thick it is.
+ * - lamp: the warning lamp on the wall above the block, which flashes through a changeover: its middle, across and
+ *   down (above the tape round the block), and its radius.
  */
 const STATION_TOP = LIFT + 400;
 export const STATION = {
@@ -309,7 +319,67 @@ export const STATION = {
   steadyScreen: { x0: 2 * CELL - 160, x1: 2 * CELL - 60, y0: -19, y1: -4 },
   /** The purity needle's dial (see needleAt), on the plate left of the diverter's LCD. */
   needle: { x0: CELL - 90, x1: CELL - 38, y0: 222, y1: 262 },
+  recess: 100,
+  door: { back: 2, thick: 6 },
+  lamp: { x: -CELL / 2 + WALL_PANEL.w, y: STATION_TOP - 2 * WALL_PANEL.h - 56, r: 11 },
 };
+
+/**
+ * The station's changeover, once its reservoir holds enough of what it's fitted for and the ship is short of
+ * something else (see nextSupply): how many sim seconds each part of it takes, in order.
+ * - warn: a warning lamp over the block starts flashing and an alarm sounding beside it, and go on to the end; the
+ *   block still works.
+ * - retract: the block slides back into the wall, funnel, spouts and all (STATION.recess).
+ * - shut: a metal door slides down over the hole.
+ * - away: behind the door, the block is taken away, and the next one brought: halfway through, the station is the
+ *   next supply's, as new (see Tool.stock).
+ * - open: the door slides back up.
+ * - extend: the new block slides out, flush with the wall.
+ * - clear: it's in place and works, and then the lamp and the alarm stop.
+ */
+export const CHANGEOVER = { warn: 1.5, retract: 3, shut: 2, away: 5, open: 2, extend: 3, clear: 0.6 };
+const CHANGEOVER_PARTS = Object.keys(CHANGEOVER) as (keyof typeof CHANGEOVER)[];
+/** How long the whole changeover takes, in sim seconds. */
+export const CHANGEOVER_S = CHANGEOVER_PARTS.reduce((t, k) => t + CHANGEOVER[k], 0);
+/** How the alarm beside the block sounds through a changeover: on for `on` of every `every` sim seconds; the lamp flashes with it. */
+export const CHANGEOVER_ALARM = { every: 0.9, on: 0.45 };
+
+/** A moment in the station's changeover (see changeoverAt). */
+export interface Changeover {
+  /** Which part of it this is (see CHANGEOVER), and how far through that part, 0 to 1. */
+  part: keyof typeof CHANGEOVER;
+  through: number;
+  /** How far back into the wall the block is, 0 (flush with the wall, as ever) to 1 (all the way, by STATION.recess). */
+  back: number;
+  /** How far shut the door over the hole is, 0 (up inside the wall, out of sight) to 1. */
+  door: number;
+  /** Whether the alarm is sounding and the lamp lit just now (see CHANGEOVER_ALARM). */
+  alarm: boolean;
+}
+
+/**
+ * Where the station's block and door are `t` sim seconds into a changeover (see Tool.swap), or with none under way,
+ * null: each slides easing in and out.
+ */
+export function changeoverAt(t: number | null): Changeover {
+  if (t === null) return { part: 'warn', through: 0, back: 0, door: 0, alarm: false };
+  let from = 0;
+  let part = CHANGEOVER_PARTS[0];
+  for (part of CHANGEOVER_PARTS) {
+    if (t < from + CHANGEOVER[part]) break;
+    from += CHANGEOVER[part];
+  }
+  const through = Math.max(0, Math.min(1, (t - from) / CHANGEOVER[part]));
+  const eased = through * through * (3 - 2 * through);
+  const i = CHANGEOVER_PARTS.indexOf(part);
+  return {
+    part,
+    through,
+    back: part === 'retract' ? eased : part === 'extend' ? 1 - eased : i > 1 && i < 5 ? 1 : 0,
+    door: part === 'shut' ? eased : part === 'open' ? 1 - eased : part === 'away' ? 1 : 0,
+    alarm: t < CHANGEOVER_S && t % CHANGEOVER_ALARM.every < CHANGEOVER_ALARM.on,
+  };
+}
 
 /**
  * How far along its dial the station's needle stands, from 0 (its left stop) to 1, for fluid that's `purity` target by
@@ -341,14 +411,8 @@ export function gaugeSegments(held: number, goal: number, cap: number, n = STATI
 }
 /** How much the station's funnel holds, by volume: as much as it's drawn to hold (see SPACE_PER_ATOM), about 0.6 flask. */
 export const INTAKE_CAP = Math.round(spaceOf(STATION_FUNNEL) / SPACE_PER_ATOM);
-/**
- * How much the ship's reservoir holds, by volume: about three times the goal (see GOAL_TARGET), so the goal is a third
- * of the way up its gauge, and there's room for it even if everything let into it is only just pure enough, and the
- * rest of it single atoms.
- */
-export const REFERENCE_CAP = 540 * CAP;
-/** The target the reservoir starts with, in molecules: the hundred flasks left on board (see VOYAGE). */
-export const REFERENCE_START = 100 * CAP;
+/** How far into its changeover the station becomes the next supply's (see Tool.stock): halfway through its time away, behind the door. */
+const STOCKED_AT = CHANGEOVER.warn + CHANGEOVER.retract + CHANGEOVER.shut + CHANGEOVER.away / 2;
 /** How fast the reservoir's faucet lets it out, fully open, in atoms per sim second: a fifth of a flask a second. */
 export const REFERENCE_FLOW = 0.2 * MAX_FLOW;
 /**
@@ -928,7 +992,7 @@ export interface ToolShape {
   round?: boolean;
   /** Whether it stays where it is: it can't be picked up and carried. */
   fixed?: boolean;
-  /** Whether it's built into a wall, with no stand: only the cryostabilizer station (see STATION). */
+  /** Whether it's built into a wall, with no stand: only the supply station (see STATION). */
   wall?: boolean;
   /** Whether the tanks are sealed on top, so nothing can be poured or fall into them. */
   sealed?: boolean;
@@ -1066,13 +1130,14 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -BIG_TANK_W / 2 - 4, x1: BIG_TANK_W / 2 + 4, y0: -6, y1: BIG_TANK_H + 46 },
   },
   receptacle: {
-    // the cryostabilizer station: a funnel, and the reservoir's column in the wall, behind a pane (see STATION); a waste
+    // the station: a funnel, and the reservoir's column in the wall, behind a pane (see STATION); a waste
     // spigot under the funnel and a faucet under the reservoir, a grid cell apart (see CELL)
     tanks: [
       { name: 'funnel', x0: CELL - STATION.funnel.w, x1: CELL + STATION.funnel.w, cap: INTAKE_CAP },
       {
-        name: 'cryostabilizer reservoir', x0: 2 * CELL - STATION.paneW / 2, x1: 2 * CELL + STATION.paneW / 2, cap: REFERENCE_CAP, sealed: true,
-        label: ['cryostabilizer reservoir'],
+        // its name, its label and how much it holds go by what the station is fitted for (see Tool.supply)
+        name: 'reservoir', x0: 2 * CELL - STATION.paneW / 2, x1: 2 * CELL + STATION.paneW / 2, cap: CRYOSTABILIZER.cap, sealed: true,
+        label: ['reservoir'],
       },
     ],
     tankH: STATION.paneH,
@@ -1456,10 +1521,12 @@ export function separatorShares(): number[][] {
  *   a spout, let fluid out sooner, less heated.
  * - A **tank** is a dispenser holding a hundred flasks, drawn as big as a hundred flasks, with ten faint
  *   graduations across it.
- * - A **receptacle** is the cryostabilizer station, built into the wall (see STATION): a funnel and the ship's
- *   reservoir. The funnel drains straight through (at FUNNEL_RATE) into a diverter, which sends what's more than
+ * - A **receptacle** is the station, built into the wall (see STATION): a funnel and the ship's
+ *   reservoir of whatever it's fitted for (see Supply). The funnel drains straight through (at FUNNEL_RATE) into a
+ *   diverter, which sends what's more than
  *   GOAL_PURITY target into the reservoir, and the rest out the waste spigot, the first spout. The reservoir lets out
- *   a trickle through its faucet, the second spout, as far as its one valve is open.
+ *   a trickle through its faucet, the second spout, as far as its one valve is open. With enough in its reservoir,
+ *   it's changed for the next supply's (see CHANGEOVER).
  * - A **flow meter** is an inline instrument (see INLINE_TOOLS): its tube drains straight through to one spout, and
  *   it shows what flows out, averaged over the recent past (see INSTRUMENT_TAU, rate and meterText).
  * - **Swell bulbs** are two little round tanks with narrow necks (see BULB), pressed together so the necks stand
@@ -1591,7 +1658,8 @@ export class Tool {
   sinceDelivery = Infinity;
   /**
    * Sim seconds a receptacle has been delivering steadily, letting cryostabilizer into the reservoir at least every
-   * DELIVERY.gap sim seconds; 0 while it isn't. Shown on its screen (see clockText), and it opens the airlock.
+   * DELIVERY.gap sim seconds; 0 while it isn't. Shown on its screen (see clockText); long enough, and the player can
+   * nap (see DELIVERY.nap), and the cryostabilizer's opens the airlock (see Supply.airlock).
    */
   steady = 0;
   /**
@@ -1601,6 +1669,16 @@ export class Tool {
   purity: number | null = null;
   /** Where a receptacle's needle stands on its dial, from 0 to 1: it swings toward its reading (see needleAt) over NEEDLE_TAU. */
   needle = 0;
+  /**
+   * What a receptacle is fitted for (see Supply): what its diverter lets into its reservoir, and what's wanted there.
+   * It's the cryostabilizer unless it's stocked with something else (see stock), as a new lab's is.
+   */
+  supply: Supply = CRYOSTABILIZER;
+  /**
+   * How many sim seconds into its changeover a receptacle is (see CHANGEOVER), or null while none is under way: it
+   * starts when its reservoir holds enough of what it's fitted for, if the ship is short of something else.
+   */
+  swap: number | null = null;
 
   constructor(
     readonly kind: ToolKind,
@@ -1878,12 +1956,14 @@ export class Tool {
    * What a save keeps of an instrument's own state, as numbers, or undefined if it has none: a thermometer's bulb's
    * temperature, and 1 if it's broken or 0 if not; how much a wicking strip's paper has drunk, how dry it is and how
    * scorched each stretch is (what's on its paper is saved as vessels, see paper); how much a column's bed has drunk (what's on it is
-   * saved as vessels, see bed); which of a sleeper culture's cells are dead (see dead).
+   * saved as vessels, see bed); which of a sleeper culture's cells are dead (see dead); which supply a receptacle is
+   * fitted for (its place in SUPPLIES), and how far into its changeover it is, or −1 if none is under way.
    */
   get memory(): number[] | undefined {
     if (this.kind === 'strip') return [this.soaked, this.dryness, ...this.scorch];
     if (this.kind === 'column') return [this.soaked];
     if (this.kind === 'culture') return Array.from(this.dead!);
+    if (this.kind === 'receptacle') return [SUPPLIES.indexOf(this.supply), this.swap ?? -1];
     return isThermometer(this.kind) ? [this.temp, +this.broken] : undefined;
   }
 
@@ -1904,6 +1984,47 @@ export class Tool {
     }
     if (this.kind === 'column') this.soaked = Math.max(0, Math.min(1, (m as number[])[0]));
     if (this.kind === 'culture') this.dead!.set((m as number[]).map((x) => +(x > 0)));
+    if (this.kind === 'receptacle') {
+      const [supply, swap] = m as number[];
+      this.supply = SUPPLIES[supply] ?? CRYOSTABILIZER;
+      this.tanks[1].cap = this.supply.cap;
+      // from halfway through a changeover, it's already the next supply's, and only has to come out
+      this.swap = swap >= 0 && swap < CHANGEOVER_S && (swap >= STOCKED_AT || nextSupply(this.supply)) ? swap : null;
+    }
+  }
+
+  /**
+   * Fit a receptacle for a supply, as new: its reservoir holding what's on board of it to start with, at room
+   * temperature, and as big as that supply's is; its funnel and spouts empty; its faucet shut; its diverter, needle
+   * and screens as if nothing had ever come through.
+   */
+  stock(supply: Supply): void {
+    const [funnel, ref] = this.tanks;
+    for (const v of [funnel, ref, ...this.drops]) {
+      v.n.fill(0);
+      v.N = v.Q = 0;
+    }
+    this.supply = supply;
+    this.valves[0] = 0;
+    ref.cap = supply.cap;
+    ref.n[supply.species] = supply.start;
+    ref.N = supply.start * SPECIES[supply.species].size;
+    ref.setTemperature(T_ROOM);
+    this.gate = 'waste';
+    this.sinceFlow = this.sinceDelivery = Infinity;
+    this.steady = 0;
+    this.purity = null;
+    this.needle = 0;
+    this.smoothed = null;
+  }
+
+  /**
+   * Whether a receptacle's block is away from where it works, during a changeover (see CHANGEOVER): from when it
+   * starts back into the wall until the next one is all the way out. Nothing goes into its funnel or comes out of its
+   * spouts, and nothing on it can be worked.
+   */
+  get away(): boolean {
+    return this.swap !== null && this.swap >= CHANGEOVER.warn && this.swap < CHANGEOVER_S - CHANGEOVER.clear;
   }
 
   /** Scratch fluid i (see scratch), emptied. */
@@ -1994,10 +2115,25 @@ export class Tool {
    * drains straight through at FUNNEL_RATE, however full it is, into the diverter, which judges what comes through: more
    * than GOAL_PURITY target (see sustenance), and it goes into the reservoir (as much as fits), else out the waste
    * spigot. Its needle reads how much of what's come through lately was the target (see purity). The reservoir's
-   * filter takes out what has a black atom in it (see filter).
+   * filter takes out what has a black atom in it (see filter). The target is whatever it's fitted for (see supply), and
+   * once the reservoir holds enough of that, if the ship is short of something else, its changeover starts (see
+   * CHANGEOVER): its faucet is shut, and while its block is away (see away) nothing moves in it; halfway through, behind
+   * the door, it's the next supply's (see stock).
    */
   private receive(h: number): (Vessel | null)[] {
     const [funnel, ref] = this.tanks;
+    if (this.swap !== null) {
+      const from = this.swap;
+      this.swap += h;
+      const next = nextSupply(this.supply);
+      if (from < STOCKED_AT && this.swap >= STOCKED_AT && next) this.stock(next);
+      if (this.swap >= CHANGEOVER_S) this.swap = null;
+    }
+    if (this.away) {
+      this.steady = 0;
+      return this.none();
+    }
+    const { species } = this.supply;
     const out: (Vessel | null)[] = [null, null];
     const tap = this.packet(0);
     transfer(ref, tap, this.valves[0] * REFERENCE_FLOW * h);
@@ -2007,17 +2143,21 @@ export class Tool {
     this.sinceFlow += h;
     this.sinceDelivery += h;
     // the needle reads what the diverter is judging, before it goes either way
-    const [passed, target] = this.smooth(h, [p.N, p.n[TARGET] * SPECIES[TARGET].size]);
+    const [passed, target] = this.smooth(h, [p.N, p.n[species] * SPECIES[species].size]);
     if (passed >= TRACE) this.purity = target / passed;
     this.needle += (needleAt(this.purity ?? 0) - this.needle) * (1 - Math.exp(-h / NEEDLE_TAU));
     if (p.N > 0) {
       this.sinceFlow = 0;
-      this.gate = sustenance(p) > 0 ? 'reservoir' : 'waste';
+      this.gate = sustenance(p, species) > 0 ? 'reservoir' : 'waste';
       if (this.gate === 'reservoir' && transfer(p, ref, volume(p)) > 0) this.sinceDelivery = 0;
       if (p.N > 0) out[0] = p;
     }
     this.steady = this.sinceDelivery <= DELIVERY.gap ? this.steady + h : 0;
     filter(ref, h);
+    if (this.swap === null && nextSupply(this.supply) && ref.n[species] >= this.supply.goal) {
+      this.swap = 0;
+      this.valves[0] = 0;
+    }
     this.out = out;
     this.flow = out.map((p) => (p ? volume(p) / (MAX_FLOW * h) : 0));
     return out;

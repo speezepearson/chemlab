@@ -39,7 +39,8 @@ export class Vessel implements Fluid {
   Q = 0;
 
   constructor(
-    readonly cap: number,
+    /** It's fixed, but for the station's reservoir, which is changed for another (see Tool.stock). */
+    public cap: number,
     public label = '',
   ) {}
 
@@ -86,11 +87,12 @@ export class Vessel implements Fluid {
 }
 
 /**
- * Atoms of the target in a fluid the cryostabilizer station's diverter lets into the reservoir: all of them if it's
- * more than GOAL_PURITY target, else none.
+ * Atoms of the target in a fluid the station's diverter lets into the reservoir: all of them if it's more than
+ * GOAL_PURITY target, else none. The target is the cryostabilizer, unless the station is fitted for something else
+ * (see Supply), `species`.
  */
-export function sustenance(f: Fluid): number {
-  const t = f.n[TARGET] * SPECIES[TARGET].size;
+export function sustenance(f: Fluid, species = TARGET): number {
+  const t = f.n[species] * SPECIES[species].size;
   return f.N > 0 && t > GOAL_PURITY * f.N ? t : 0;
 }
 
