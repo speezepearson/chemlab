@@ -88,23 +88,25 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
   flex-wrap:wrap;justify-content:center;width:max-content;max-width:calc(100% - 24px);box-sizing:border-box;
   background:rgba(20,26,24,.55);border:1px solid rgba(255,255,255,.12);border-radius:10px;z-index:2;
   user-select:none;-webkit-user-select:none;backdrop-filter:blur(4px);
-  --glass:rgba(227,232,227,.7);--glasshi:rgba(255,255,255,.1);--pipe:#8d9a93;--bench:#2b3230;
 }
+/* the icons' colors, for the hotbar and the wheel */
+.palette,.wheel{--glass:rgba(227,232,227,.7);--glasshi:rgba(255,255,255,.1);--pipe:#8d9a93;--bench:#2b3230}
 .palette button{
   position:relative;padding:3px;display:flex;justify-content:center;background:rgba(255,255,255,.06);
   border-color:rgba(255,255,255,.14);
 }
-.palette svg{width:34px;height:34px;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.palette svg{width:34px;height:34px}
+.palette svg,.wheel .icon{fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .palette kbd{
   position:absolute;left:1px;top:1px;font:600 10px/12px "Schibsted Grotesk",sans-serif;color:#d6dfda;
   /* opaque, so the icon under it can't make it hard to read */
   background:#3a4541;border-radius:3px;padding:0 3px;z-index:1;
 }
-.palette .glass{fill:var(--glasshi);stroke:var(--glass)}
-.palette .pipe{stroke:var(--pipe);stroke-width:3}
-.palette .valve{fill:var(--bench);stroke:var(--pipe)}
-.palette .lcd{fill:#26302b;stroke:none}
-.palette .digits{stroke:#9fe0b8;stroke-width:1.5}
+.palette .glass,.wheel .glass{fill:var(--glasshi);stroke:var(--glass)}
+.palette .pipe,.wheel .pipe{stroke:var(--pipe);stroke-width:3}
+.palette .valve,.wheel .valve{fill:var(--bench);stroke:var(--pipe)}
+.palette .lcd,.wheel .lcd{fill:#26302b;stroke:none}
+.palette .digits,.wheel .digits{stroke:#9fe0b8;stroke-width:1.5}
 /* smaller, in a window too narrow for the hotbar as it is, before it has to wrap */
 @media (max-width:860px){
   .palette{gap:3px;padding:4px}
@@ -119,6 +121,15 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
   .touch-buttons{bottom:228px}
   .palette svg{width:24px;height:24px}
 }
+/* the equipment wheel, round the middle of the view while its key's held; smaller, in a view too small for it */
+.wheel{
+  position:absolute;left:50%;top:50%;width:468px;height:468px;max-width:calc(100% - 16px);max-height:calc(100% - 16px);
+  transform:translate(-50%,-50%);pointer-events:none;z-index:3;
+}
+.wheel .sector{fill:rgba(20,26,24,.62);stroke:rgba(255,255,255,.22);stroke-width:1.2}
+.wheel .picked .sector{fill:rgba(47,106,86,.85);stroke:rgba(255,255,255,.5)}
+.wheel .none .icon{opacity:.25}
+.wheel .pointer{fill:#fff;stroke:rgba(0,0,0,.6);stroke-width:1.2}
 .crosshair{
   position:absolute;left:50%;top:50%;width:14px;height:14px;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
   background:

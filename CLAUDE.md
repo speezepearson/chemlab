@@ -75,6 +75,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `history.ts` is undo and redo of the lab's arrangement (never fluids). An action that changes the arrangement calls
     the engine's `mark()` as it starts and `commit()` as it ends (or `change()` around it, if it's instant); a carry is
     marked at pick-up and committed at set-down.
+  - `wheel.ts` is the equipment wheel's geometry: where the mouse puts its pointer while C is held, and which sector
+    that picks. The engine holds its state (`wheel`, `openWheel`, `closeWheel`) and `Wheel` in `Hud.tsx` draws it.
   - `outline.ts` is the player's settings for the outline round what the crosshair is on; the view's `Outliner` draws
     it over the finished frame, from a mask of the meshes registered as that thing's parts.
   - `cabinet.ts` is the equipment cabinet: its layout (each kind's slots on its shelves) and its stock, which the
@@ -88,8 +90,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     in the lab goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),
     so it fades and pans with where it is relative to the player's head.
 - `src/intro/log.ts`: the intro's console script, deterministic from a seed. `src/components/Intro.tsx` plays it.
-- `src/components/`: the React UI around the canvas: the hotbar (`Palette.tsx`), the crosshair's hints, the corner list of
-  actions and the start hint (`Hud.tsx`), the Chemistry and Appearance panels, the editor.
+- `src/components/`: the React UI around the canvas: the hotbar (`Palette.tsx`), the crosshair's hints, the equipment
+  wheel, the corner list of actions and the start hint (`Hud.tsx`), the Chemistry and Appearance panels, the editor.
 
 ## Invariants and gotchas
 
@@ -146,7 +148,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially.
   - `ITEMS` and `HOTKEYS` in `engine.ts` (the hotbar's order and keys) and `ICONS` in `Palette.tsx`, unless the tool is
-    unique. The number row is full, through =, so new ones go along the bottom row of letters, from Z, skipping C (the equipment wheel) and N (notes): it's taken through the period.
+    unique. The number row is full, through =, so new ones go along the bottom row of letters, from Z, skipping C (the equipment wheel) and N (notes): it's taken through the period. The wheel takes its sectors and icons from `ITEMS` and `ICONS`, so a new one is on it at once.
   - Its place in the equipment cabinet: `STOCK` and a compartment in `BAYS` (`cabinet.ts`), and `ENDLESS` if it's
     used up. `cabinet.test.ts` checks it fits.
   - If it has state of its own that a save should keep, `Tool.memory` and `Tool.remember`.

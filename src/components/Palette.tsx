@@ -16,7 +16,7 @@ function thermometerIcon(gap: number, top: number): ReactNode {
 }
 
 /** Small drawings of each item, echoing how the bench draws it, in a 40 × 40 box. */
-const ICONS: Record<string, ReactNode> = {
+export const ICONS: Record<string, ReactNode> = {
   flask: <path className="glass" d="M16 6 H24 L23 15 L31 32 Q32 35 29 35 H11 Q8 35 9 32 L17 15 Z" />,
   dispenser: (
     <>
@@ -156,6 +156,7 @@ const ICONS: Record<string, ReactNode> = {
 /**
  * The equipment that can be made, along the bottom of the view: a key (along the number row, and then from Z along
  * the bottom row of letters) makes one in the player's hands, if they're empty. Clicking one does the same, when the mouse isn't captured.
+ * The equipment wheel (see Wheel in Hud.tsx) makes the same things, in the same order.
  */
 export function Palette({ engine }: { engine: GameEngine }) {
   return (

@@ -22,6 +22,7 @@ import { CENTER, placement, type Placement } from './place';
 import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
 import { shatter } from './shatter';
+import { wheelMove, wheelPick, type WheelAim } from './wheel';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
 import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
@@ -99,6 +100,11 @@ export interface Hud {
   ended: boolean;
   /** Whether god mode's preview of the end's white void is up (see GameEngine.previewArrival). */
   preview: boolean;
+  /**
+   * While the equipment wheel is held open (see wheel.ts): where its pointer is, which of ITEMS it picks, if any, and
+   * which of them there are none left of in the cabinet. Otherwise null.
+   */
+  wheel: (WheelAim & { pick: number | null; none: boolean[] }) | null;
   /** While the player's asleep in the pod (see Wake), the whole sim seconds they've slept; otherwise null. */
   slept: number | null;
   /** While they're asleep, the litres of cryostabilizer in the ship's reservoir, to two places; otherwise null. */
@@ -197,8 +203,8 @@ export const ITEMS = [
 export type Item = (typeof ITEMS)[number];
 /**
  * The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0, - and =; and then, the number
- * row being full, along the bottom row of letters, from Z, skipping C (kept free for the equipment wheel) and N
- * (which writes notes), through the comma and the period.
+ * row being full, along the bottom row of letters, from Z, skipping C (which holds the equipment wheel open, see
+ * WHEEL_CODE) and N (which writes notes), through the comma and the period.
  */
 export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Z', 'X', 'V', 'B', 'M', ',', '.'] as const;
 /** The same keys, as KeyboardEvent codes, so they work whatever the keyboard layout's shift state. */
@@ -206,6 +212,8 @@ const HOTKEY_CODES = [
   'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal',
   'KeyZ', 'KeyX', 'KeyV', 'KeyB', 'KeyM', 'Comma', 'Period',
 ];
+/** The key that, held, opens the equipment wheel (see wheel.ts): let go, it makes what the wheel's pointer picks. */
+const WHEEL_CODE = 'KeyC';
 
 /** How tipped a flask held to pour is: past the horizontal, mouth down. */
 const POUR_ANG = Math.PI * 0.61;
@@ -322,6 +330,8 @@ export class GameEngine {
   private rightHeld = false;
   /** A valve being turned with the right button, and where on screen the pointer aiming its lever is. */
   private turning: { t: Tool; k: number; aim: { x: number; y: number } } | null = null;
+  /** While the equipment wheel is held open, where its pointer is; the mouse moves it, rather than looking around. */
+  private wheel: WheelAim | null = null;
   /** The scale whose tare key is held down, to draw it pressed. */
   private tarePress: Scale | null = null;
   private locked = false;
@@ -996,6 +1006,28 @@ export class GameEngine {
     return true;
   }
 
+  /**
+   * Open the equipment wheel, its pointer in its middle, if there'd be any use in it: with hands free, and the mouse
+   * not busy turning a valve.
+   */
+  private openWheel(): void {
+    if (this.turning) return;
+    if (this.held) {
+      this.say('Hands full');
+      return;
+    }
+    this.wheel = { x: 0, y: 0 };
+  }
+
+  /** Close the equipment wheel, making what its pointer picks, if anything. */
+  private closeWheel(): void {
+    const w = this.wheel;
+    if (!w) return;
+    this.wheel = null;
+    const pick = wheelPick(w, ITEMS.length);
+    if (pick !== null) this.spawn(ITEMS[pick]);
+  }
+
   /** Take the one in a slot of the cabinet out of it, held just where it stood, as anything's picked up. */
   private takeOut(kind: Stocked, slot: number): void {
     if (!this.stock[kind][slot]) return;
@@ -1254,6 +1286,7 @@ export class GameEngine {
         this.rightHeld = false;
         this.endTurn();
         this.tarePress = null;
+        this.wheel = null;
       }
     };
     document.addEventListener('pointerlockchange', onLock);
@@ -1271,6 +1304,8 @@ export class GameEngine {
         return;
       }
       e.preventDefault();
+      // the wheel has the mouse while it's open
+      if (this.wheel) return;
       if (e.button === 0) this.leftDown(e.shiftKey);
       if (e.button === 2) this.rightDown();
     });
@@ -1283,7 +1318,9 @@ export class GameEngine {
     });
     on(c, 'contextmenu', (e) => e.preventDefault());
     on(window, 'mousemove', (e) => {
-      if (this.locked) this.look(e.movementX, e.movementY, e.shiftKey);
+      if (!this.locked) return;
+      if (this.wheel) this.wheel = wheelMove(this.wheel, e.movementX, e.movementY);
+      else this.look(e.movementX, e.movementY, e.shiftKey);
     });
     on(c, 'wheel', (e) => {
       e.preventDefault();
@@ -1322,14 +1359,21 @@ export class GameEngine {
         this.spawn(ITEMS[item]);
         e.preventDefault();
       }
+      if (e.code === WHEEL_CODE) this.openWheel();
       if (e.code === 'Backspace' || e.code === 'Delete') {
         this.putAway();
         e.preventDefault();
       }
       if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
     });
-    on(window, 'keyup', (e) => this.keys.delete(e.code));
-    on(window, 'blur', () => this.keys.clear());
+    on(window, 'keyup', (e) => {
+      this.keys.delete(e.code);
+      if (e.code === WHEEL_CODE) this.closeWheel();
+    });
+    on(window, 'blur', () => {
+      this.keys.clear();
+      this.wheel = null;
+    });
   }
 
   private clampDist(h: Held, d: number): number {
@@ -2692,6 +2736,12 @@ export class GameEngine {
       add(['RMB'], 'let go when it’s set');
       return out;
     }
+    // and so does the equipment wheel, until its key's let go
+    if (this.wheel) {
+      add(['Mouse'], 'point at what to take');
+      add(['C'], 'let go to take it');
+      return out;
+    }
     const p = this.target;
     const h = this.held;
     if (inPod(this.wake)) {
@@ -2726,7 +2776,8 @@ export class GameEngine {
       add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it back in the cabinet') : 'put it back');
     } else {
       if (this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
-      add(['1–0, -, =, Z, X, V, B, M, ,, .'], 'take equipment from the cabinet');
+      add(['C'], 'hold, point and let go to take equipment from the cabinet');
+      add(['1–0, -, =, Z, X, V, B, M, ,, .'], 'or take it with its key');
     }
     if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
     else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
@@ -3100,6 +3151,11 @@ export class GameEngine {
         : this.wake === 'arrived' ? 1
         : 0,
       preview: !!this.previewing,
+      wheel: this.wheel && {
+        ...this.wheel,
+        pick: wheelPick(this.wheel, ITEMS.length),
+        none: ITEMS.map((k) => !endless(k) && !this.stock[k].includes(true)),
+      },
       ended: this.wake === 'arrived',
       slept: this.sleeping ? Math.floor(this.clock - this.sleeping.from) : null,
       litres: this.sleeping ? Math.floor(100 * this.reservoirLitres()) / 100 : null,
