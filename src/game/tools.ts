@@ -2,7 +2,7 @@ import { BOND_KEYS, BONDS, SOLVENT, type ColorAtom } from '../chem/atoms';
 import { THERMO, T_ROOM } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
 import { END_WEIGHT, LOOSE_ENDS } from '../chem/shape';
-import { NS, SPECIES } from '../chem/species';
+import { NS, SOLVENT_SPECIES, SPECIES } from '../chem/species';
 import { CAP, DELIVERY, TRACE } from './config';
 import { COOLING } from './cooling';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
@@ -692,12 +692,13 @@ export const STRIP_RUN: readonly number[] = SPECIES.map((sp, s) => Math.max(0, 1
  * How opaque n molecules of species s make one cell of a wicking strip's paper (see STRIP.cells) in that species' own
  * color: 1 − e^(−ink · v / spot), for their volume v. So a band of what's a twentieth of a full spot shows clearly at
  * its peak after a full run, while what's most of the spot is as dark as it gets: the paper shows what's there more
- * than how much. Single atoms, the carrier, only tint it, at STRIP.tint of that; and they dry off the paper, so their
- * tint fades as it dries, from 0 (wet) to 1 (dry).
+ * than how much. Single atoms only tint it, at STRIP.tint of that. The solvent alone dries off the paper, so its tint
+ * fades as the paper dries, from 0 (wet) to 1 (dry); whatever else is on it stays as it is.
  */
 export function stripInk(s: number, n: number, dryness: number): number {
   const ink = 1 - Math.exp((-STRIP.ink * n * roomFor(s)) / STRIP.spot);
-  return SPECIES[s].size === 1 ? ink * STRIP.tint * (1 - dryness) : ink;
+  if (SPECIES[s].size > 1) return ink;
+  return ink * STRIP.tint * (s === SOLVENT_SPECIES ? 1 - dryness : 1);
 }
 
 /**
@@ -1852,8 +1853,8 @@ export class Tool {
    * from it. What it draws goes into the foot of the paper, and what's in the fluid scorches if that's hot (see char). As it soaks a
    * share d, the liquid, at the pace of what it drew (see leadOf), carries what's on the paper d · STRIP.cells
    * stretches' worth up it (see Bed), never past that share of its length. Lifted out, it stops where it is, and put
-   * back, it goes on. Once it's soaked through, the paper dries over STRIP.dry, and is done: single atoms dry off it,
-   * and it takes up nothing more. Nothing leaves it.
+   * back, it goes on. Once it's soaked through, the paper dries over STRIP.dry, and is done: the solvent dries off it,
+   * and it takes up nothing more. Nothing else leaves it.
    */
   private wick(h: number): (Vessel | null)[] {
     const bath = this.bath;
@@ -1861,13 +1862,12 @@ export class Tool {
     if (this.soaked >= 1) {
       if (this.dryness < 1) {
         this.dryness = Math.min(1, this.dryness + h / STRIP.dry);
+        // only the solvent dries off: everything else stays where it ran to
         if (this.dryness >= 1)
-          for (const v of paper)
-            for (let s = 0; s < NS; s++)
-              if (v.n[s] && SPECIES[s].size === 1) {
-                v.N -= v.n[s];
-                v.n[s] = 0;
-              }
+          for (const v of paper) {
+            v.N -= v.n[SOLVENT_SPECIES];
+            v.n[SOLVENT_SPECIES] = 0;
+          }
       }
       return this.none();
     }

@@ -995,7 +995,7 @@ describe('wicking strip', () => {
     expect(wetness(30, 100, 10)).toBe(1);
   });
 
-  it('shows a twentieth of the spot clearly, as bands apart on clean paper, and most of it dark only near its middle, whatever single atom carries it', () => {
+  it('shows a twentieth of the spot clearly, as bands apart with only its carrier between them, and most of it dark only near its middle, whatever single atom carries it', () => {
     const minor = [chain('R', 'G', 'B'), chain('G', 'R', 'B'), pairOf('R', 'G')];
     for (const carrier of [G, R, SOLVENT_SPECIES]) {
       const { t } = spotted([[TARGET, 0.85], ...minor.map((s): [number, number] => [s, 0.05])], carrier);
@@ -1010,40 +1010,69 @@ describe('wicking strip', () => {
       // the triangle is as dark as it gets, but only over a few stretches round its middle
       expect(peak(t, TARGET)).toBeGreaterThan(0.99);
       expect(t.paper.filter((v) => stripInk(TARGET, v.n[TARGET], 1) > 0.9).length).toBeLessThan(8);
-      // and midway between its band and the nearest below it, the paper's clean
+      // and midway between its band and the nearest below it, there's nothing on the paper but its carrier: clean,
+      // if that's the solvent, which has dried off, and tinted by it if not
       const below = Math.max(...minor.map((s) => centre(t, s)));
       expect(below).toBeLessThan(centre(t, TARGET));
       const mid = t.paper[Math.floor((below + centre(t, TARGET)) / 2)];
       expect(stripInk(TARGET, mid.n[TARGET], 1)).toBeLessThan(0.05);
-      const clear = SPECIES.reduce((a, sp) => a * (1 - stripInk(sp.i, mid.n[sp.i], 1)), 1);
+      const clear = SPECIES.reduce((a, sp) => (sp.i === carrier ? a : a * (1 - stripInk(sp.i, mid.n[sp.i], 1))), 1);
       expect(1 - clear).toBeLessThan(0.1);
+      if (carrier === SOLVENT_SPECIES) expect(mid.n[carrier]).toBe(0);
+      else expect(stripInk(carrier, mid.n[carrier], 1)).toBeGreaterThan(0.5 * STRIP.tint);
     }
     expect(stripInk(TARGET, 0, 0)).toBe(0);
   });
 
-  it('dries clean of its carrier: single atoms leave no ink', () => {
-    const { t } = spotted([[TARGET, 1]]);
-    run(t, STRIP.time / 2);
-    // wet, the carrier tints it
-    const tint = peak(t, G);
-    expect(tint).toBeGreaterThan(0.5 * STRIP.tint);
-    expect(tint).toBeLessThanOrEqual(STRIP.tint);
-    run(t, STRIP.time);
-    // drying, its tint fades
-    run(t, STRIP.dry / 2);
-    expect(peak(t, G)).toBeLessThanOrEqual(0.5 * STRIP.tint + 0.01);
-    run(t, STRIP.dry);
+  it('dries clean of the solvent and of nothing else: other single atoms stay where they ran to, tinting it', () => {
+    const count = (t: Tool, s: number) => t.paper.reduce((a, v) => a + v.n[s], 0);
+    for (const carrier of [SOLVENT_SPECIES, G]) {
+      const { t } = spotted([[TARGET, 1]], carrier);
+      run(t, STRIP.time / 2);
+      // wet, the carrier tints it
+      const tint = peak(t, carrier);
+      expect(tint).toBeGreaterThan(0.5 * STRIP.tint);
+      expect(tint).toBeLessThanOrEqual(STRIP.tint);
+      while (t.soaked < 1) t.step(0.02);
+      const [carried, target] = [count(t, carrier), count(t, TARGET)];
+      const wet = peak(t, carrier);
+      // drying, the solvent's tint fades, and nothing else's does
+      run(t, STRIP.dry / 2);
+      if (carrier === SOLVENT_SPECIES) expect(peak(t, carrier)).toBeLessThanOrEqual(0.5 * STRIP.tint + 0.01);
+      else expect(peak(t, carrier)).toBe(wet);
+      run(t, STRIP.dry);
+      expect(t.dryness).toBe(1);
+      // dry, the solvent's gone, and everything else is as it was
+      expect(count(t, TARGET)).toBe(target);
+      expect(count(t, carrier)).toBe(carrier === SOLVENT_SPECIES ? 0 : carried);
+      expect(peak(t, carrier)).toBe(carrier === SOLVENT_SPECIES ? 0 : wet);
+      // and done, it takes up nothing more, stood in anything
+      const before = t.paper.map((v) => [...v.n]);
+      t.dipIn(null, false);
+      t.dipIn(carrierOf(R), true);
+      run(t, 5);
+      expect(t.paper.map((v) => [...v.n])).toEqual(before);
+      expect(t.step(0.02)).toEqual([]);
+    }
+    expect(stripInk(SOLVENT_SPECIES, STRIP.spot, 1)).toBe(0);
+    expect(stripInk(G, STRIP.spot, 1)).toBe(stripInk(G, STRIP.spot, 0));
+    expect(stripInk(G, STRIP.spot, 1)).toBeGreaterThan(0);
+  });
+
+  it('keeps a sample of nothing but single atoms: soaked through and dried, their bands are still on it', () => {
+    // as much of each as of the other, in the solvent
+    const bath = new Vessel(Infinity);
+    for (const [s, share] of [[R, 0.1], [G, 0.1], [SOLVENT_SPECIES, 0.8]]) bath.setMolecules(s, share * 3 * STRIP.cap);
+    bath.setTemperature(1);
+    const t = new Tool('strip', 0);
+    t.dipIn(bath, true);
+    run(t, STRIP.time + STRIP.dry + 1);
     expect(t.dryness).toBe(1);
-    for (const v of t.paper) for (const sp of SPECIES) if (sp.size === 1) expect(v.n[sp.i]).toBe(0);
-    expect(peak(t, G)).toBe(0);
-    expect(stripInk(G, STRIP.spot, 1)).toBe(0);
-    // and done, it takes up nothing more, stood in anything
-    const before = t.paper.map((v) => [...v.n]);
-    t.dipIn(null, false);
-    t.dipIn(carrierOf(R), true);
-    run(t, 5);
-    expect(t.paper.map((v) => [...v.n])).toEqual(before);
-    expect(t.step(0.02)).toEqual([]);
+    for (const s of [R, G]) {
+      expect(t.paper.reduce((a, v) => a + v.n[s], 0)).toBeGreaterThan(0);
+      expect(peak(t, s)).toBeGreaterThan(0.1);
+    }
+    expect(t.paper.every((v) => v.n[SOLVENT_SPECIES] === 0)).toBe(true);
   });
 
   it('gives a staircase of fronts, not bands, stood fresh in the sample itself', () => {
