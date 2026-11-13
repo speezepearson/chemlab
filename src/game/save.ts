@@ -73,8 +73,8 @@ export interface SavedTool extends SavedDepth {
   reading?: number[];
   /**
    * An instrument's own state, if it has any (see Tool.memory): a thermometer's bulb's temperature, and whether it's
-   * broken; how far a wicking strip's front has climbed, how dry it is and how scorched; how far a column's bed has
-   * soaked; which of a sleeper culture's cells are dead.
+   * broken; how much a wicking strip's paper has drunk, how dry it is and how scorched; how much a column's bed has
+   * drunk; which of a sleeper culture's cells are dead.
    */
   memory?: number[];
   /** What's on a wicking strip's paper, stretch by stretch from its foot (see Tool.paper). */

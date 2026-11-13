@@ -2877,7 +2877,7 @@ export class GameEngine {
     // the station's reservoir through its faucet, or its funnel through the diverter
     if (t.kind === 'receptacle') return t.tanks.some((v, k) => v.N > TRACE && drains(t, k));
     // a column's dry bed drinks what's in its funnel, and lets nothing out
-    if (t.kind === 'column') return t.front >= 1 && t.valves[0] > 0 && t.tanks[0].N > TRACE;
+    if (t.kind === 'column') return t.soaked >= 1 && t.valves[0] > 0 && t.tanks[0].N > TRACE;
     // a heater's tube runs whatever its valves say
     return (t.shape.spouts.length > 0 && t.tanks.some((v, k) => v.N > TRACE && drains(t, k))) || t.tube.some((v) => v.N > TRACE);
   }
@@ -2926,7 +2926,7 @@ function drains(t: Tool, k: number): boolean {
   if (t.kind === 'receptacle') return k === 0 || t.valves[0] > 0;
   if (t.kind === 'multiplexer') return k ? t.valves[0] > 0 : t.valves[0] < 1;
   // a dry column's bed drinks from its funnel, its tap open or not
-  if (t.kind === 'column') return t.front < 1 || t.valves[0] > 0;
+  if (t.kind === 'column') return t.soaked < 1 || t.valves[0] > 0;
   return t.kind === 'splitter' || t.kind === 'sorter' || t.kind === 'heater' || INLINE_TOOLS.includes(t.kind) || t.valves[k] > 0;
 }
 

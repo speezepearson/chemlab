@@ -23,7 +23,7 @@ import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import {
   clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
-  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, STRIP_ORIGIN, stripInk, COLUMN, columnInk, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
+  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, STRIP_ORIGIN, stripInk, COLUMN, columnInk, wetness, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
 
@@ -672,35 +672,65 @@ function drawDiverter(sc: Screen, gate: 'reservoir' | 'waste', flowing: boolean)
 }
 
 /**
- * A wicking strip's paper, foot at the bottom: cream, darker where it's wet, below the front, until it's dry; a faint
- * pencil line across its origin; each species on each stretch of it (see Tool.paper) as ink of its own color, as
- * opaque as stripInk says, single atoms first, so what's left in bands lies over the carrier's tint; blended smoothly
- * from one stretch's middle to the next, except for a spot the front has yet to reach, a round blot on the line; and
- * browned over, as far as it's wet, by how scorched it is.
+ * A gradient down a canvas L tall through C stretches of a strip's paper or a column's bed, each `color(c)` at its
+ * middle, `at(c)` of the way down, blended smoothly between them, and the ends held out to the canvas's.
+ */
+function cellGradient(ctx: CanvasRenderingContext2D, L: number, C: number, at: (c: number) => number, color: (c: number) => string): CanvasGradient {
+  const g = ctx.createLinearGradient(0, 0, 0, L);
+  const order = Array.from({ length: C }, (_, c) => c).sort((a, b) => at(a) - at(b));
+  order.forEach((c, i) => {
+    if (i === 0) g.addColorStop(0, color(c));
+    g.addColorStop(at(c), color(c));
+    if (i === C - 1) g.addColorStop(1, color(c));
+  });
+  return g;
+}
+
+/**
+ * How wet the stretches of a strip's paper or a column's bed look, from how wet each is (see wetness), but the one the
+ * liquid comes in at drawn as wet as the next: it fills as liquid comes in and empties each time what's on it moves on
+ * (see Bed), which would otherwise show as a flicker.
+ */
+function entryWet(wet: number[]): number[] {
+  if (wet.length > 1) wet[0] = Math.max(wet[0], wet[1]);
+  return wet;
+}
+
+/**
+ * A wicking strip's paper, foot at the bottom: cream, darker as far as each stretch of it is wet (see wetness), by
+ * what's on it, until it's dry; a faint pencil line across its origin; each species on each stretch of it (see
+ * Tool.paper) as ink of its own color, as opaque as stripInk says, single atoms first, so what's left in bands lies
+ * over the carrier's tint; both blended smoothly from one stretch's middle to the next, except for a spot that has yet
+ * to move, a round blot on the line; and browned over by how scorched it is, where it's wet, or all over once it's
+ * drying, since by then it's all been wet.
  */
 function drawStrip(sc: Screen, t: Tool): void {
   const { paper } = t;
-  const key = `${t.front.toFixed(4)} ${t.dryness.toFixed(2)} ${t.scorch.toFixed(2)} ${paper[STRIP.origin].N}`;
+  const C = paper.length;
+  let sum = 0;
+  paper.forEach((v, c) => (sum += v.N * (c + 1)));
+  const key = `${sum} ${t.dryness.toFixed(2)} ${t.scorch.toFixed(2)}`;
   if (key === sc.key) return;
   sc.key = key;
   const { ctx, ppu } = sc;
   const [W, L] = [2 * STRIP.paper.w, STRIP.paper.len];
-  const C = paper.length;
   // the canvas's y down from the paper's top, of a share of the way up from its foot
   const y = (up: number) => L * (1 - up);
+  const at = (c: number) => 1 - (c + 0.5) / C;
+  const wet = entryWet(paper.map((v) => wetness(volume(v), STRIP.cap, C)));
   ctx.setTransform(ppu, 0, 0, ppu, 0, 0);
   ctx.fillStyle = '#e6dfc8';
   ctx.fillRect(0, 0, W, L);
-  const wet = y(t.front);
-  if (t.front > 0 && t.dryness < 1) {
-    ctx.fillStyle = `rgba(96, 92, 78, ${0.28 * (1 - t.dryness)})`;
-    ctx.fillRect(0, wet, W, L - wet);
+  if (t.dryness < 1 && wet.some((w) => w > 0)) {
+    ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(96, 92, 78, ${0.28 * wet[c] * (1 - t.dryness)})`);
+    ctx.fillRect(0, 0, W, L);
   }
   ctx.fillStyle = 'rgba(70, 70, 76, 0.35)';
   ctx.fillRect(1, y(STRIP_ORIGIN) - 0.12, W - 2, 0.24);
   const here = SPECIES.map((_, s) => s).filter((s) => paper.some((v) => v.n[s] > 0));
   here.sort((a, b) => SPECIES[a].size - SPECIES[b].size);
-  const blot = t.front * C < STRIP.origin + 1;
+  // the spot's a blot till anything's moved on from it
+  const blot = paper[STRIP.origin].N > 0 && paper.every((v, c) => c <= STRIP.origin || v.N === 0);
   for (const s of here) {
     const rgb = SPECIES[s].color.slice(4, -1);
     if (blot) {
@@ -710,21 +740,12 @@ function drawStrip(sc: Screen, t: Tool): void {
       ctx.ellipse(W / 2, y(STRIP_ORIGIN), W / 4, W / 5, 0, 0, 2 * Math.PI);
       ctx.fill();
     }
-    const g = ctx.createLinearGradient(0, 0, 0, L);
-    // bottom up is top down on the canvas: stops at each stretch's middle, and its ends held out to the paper's
-    for (let c = C - 1; c >= 0; c--) {
-      const a = blot && c === STRIP.origin ? 0 : stripInk(s, paper[c].n[s], t.dryness);
-      const at = 1 - (c + 0.5) / C;
-      if (c === C - 1) g.addColorStop(0, `rgba(${rgb}, ${a})`);
-      g.addColorStop(at, `rgba(${rgb}, ${a})`);
-      if (c === 0) g.addColorStop(1, `rgba(${rgb}, ${a})`);
-    }
-    ctx.fillStyle = g;
+    ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(${rgb}, ${blot && c === STRIP.origin ? 0 : stripInk(s, paper[c].n[s], t.dryness)})`);
     ctx.fillRect(0, 0, W, L);
   }
   if (t.scorch > 0) {
-    ctx.fillStyle = `rgba(46, 28, 14, ${0.92 * t.scorch})`;
-    ctx.fillRect(0, wet, W, L - wet);
+    ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(46, 28, 14, ${0.92 * t.scorch * (t.dryness > 0 ? 1 : wet[c])})`);
+    ctx.fillRect(0, 0, W, L);
   }
   sc.tex.needsUpdate = true;
 }
@@ -733,40 +754,34 @@ function drawStrip(sc: Screen, t: Tool): void {
 const CAPILLARY_X = -1.4;
 
 /**
- * A column's bed, its top at the top: the paper's cream, a little darker as far down as it's wet; each species on each
- * stretch of it (see Tool.bed) as ink of its own color, as opaque as columnInk says, single atoms first, so bands lie
- * over the carrier's tint; blended smoothly from one stretch's middle to the next.
+ * A column's bed, its top at the top: the paper's cream, darker as far as each stretch of it is wet (see wetness), by
+ * what's on it; each species on each stretch (see Tool.bed) as ink of its own color, as opaque as columnInk says,
+ * single atoms first, so bands lie over the carrier's tint; both blended smoothly from one stretch's middle to the next.
  */
 function drawColumn(sc: Screen, t: Tool): void {
   const { bed } = t;
   const C = bed.length;
   let sum = 0;
   bed.forEach((v, c) => (sum += v.N * (c + 1)));
-  const key = `${t.front.toFixed(4)} ${sum}`;
+  const key = `${sum}`;
   if (key === sc.key) return;
   sc.key = key;
   const { ctx, ppu } = sc;
   const [W, L] = [sc.canvas.width / ppu, sc.canvas.height / ppu];
+  const at = (c: number) => (c + 0.5) / C;
   ctx.setTransform(ppu, 0, 0, ppu, 0, 0);
   ctx.fillStyle = '#e6dfc8';
   ctx.fillRect(0, 0, W, L);
-  if (t.front > 0) {
-    ctx.fillStyle = 'rgba(96, 92, 78, 0.28)';
-    ctx.fillRect(0, 0, W, L * t.front);
+  const wet = entryWet(bed.map((v) => wetness(volume(v), COLUMN.cap, C)));
+  if (wet.some((w) => w > 0)) {
+    ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(96, 92, 78, ${0.28 * wet[c]})`);
+    ctx.fillRect(0, 0, W, L);
   }
   const here = SPECIES.map((_, s) => s).filter((s) => bed.some((v) => v.n[s] > 0));
   here.sort((a, b) => SPECIES[a].size - SPECIES[b].size);
   for (const s of here) {
     const rgb = SPECIES[s].color.slice(4, -1);
-    const g = ctx.createLinearGradient(0, 0, 0, L);
-    // stops at each stretch's middle, and its ends held out to the bed's
-    for (let c = 0; c < C; c++) {
-      const color = `rgba(${rgb}, ${columnInk(s, bed[c].n[s])})`;
-      if (c === 0) g.addColorStop(0, color);
-      g.addColorStop((c + 0.5) / C, color);
-      if (c === C - 1) g.addColorStop(1, color);
-    }
-    ctx.fillStyle = g;
+    ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(${rgb}, ${columnInk(s, bed[c].n[s])})`);
     ctx.fillRect(0, 0, W, L);
   }
   sc.tex.needsUpdate = true;
