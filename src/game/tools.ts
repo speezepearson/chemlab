@@ -2,7 +2,7 @@ import { BOND_KEYS, BONDS, SOLVENT, type ColorAtom } from '../chem/atoms';
 import { THERMO, T_ROOM } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
 import { END_WEIGHT, LOOSE_ENDS } from '../chem/shape';
-import { NS, SOLVENT_SPECIES, SPECIES } from '../chem/species';
+import { NS, SPECIES } from '../chem/species';
 import { CAP, DELIVERY, TRACE } from './config';
 import { COOLING } from './cooling';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
@@ -633,7 +633,6 @@ export function neckShare(vol: number): number {
  * - time: how long the paper takes to soak through, in sim seconds, with carrier enough: quickly at first and ever
  *   more slowly, as paper wicks, as the square root of the time;
  * - drag: the drag at which a molecule doesn't move at all (see STRIP_RUN);
- * - dry: how long the paper takes to dry once it's soaked through, in sim seconds;
  * - cells: how many stretches the paper is modelled as, from its foot to its top, one local unit each (see Tool.paper);
  *   the spot goes on the first of them, those in the fluid;
  * - spread: the share of a species on each stretch that's left behind each time it moves on a stretch (see Tool.wick),
@@ -647,7 +646,7 @@ export function neckShare(vol: number): number {
  *   back: what its stand holds.
  */
 export const STRIP = {
-  cap: CAP / 100, spot: CAP / 1000, spots: 3, time: 20, drag: 34, dry: 3, cells: 108, spread: 0.05, ink: 33, tint: 0.4,
+  cap: CAP / 100, spot: CAP / 1000, spots: 3, time: 20, drag: 34, cells: 108, spread: 0.05, ink: 33, tint: 0.4,
   scorch: { from: 2, to: 6 },
   paper: { w: 6, top: 10, len: 108, point: 6 },
   clip: { w: 4.5, h: 15, d: 4 },
@@ -692,13 +691,11 @@ export const STRIP_RUN: readonly number[] = SPECIES.map((sp, s) => Math.max(0, 1
  * How opaque n molecules of species s make one cell of a wicking strip's paper (see STRIP.cells) in that species' own
  * color: 1 − e^(−ink · v / spot), for their volume v. So a band of what's a twentieth of a full spot shows clearly at
  * its peak after a full run, while what's most of the spot is as dark as it gets: the paper shows what's there more
- * than how much. Single atoms only tint it, at STRIP.tint of that. The solvent alone dries off the paper, so its tint
- * fades as the paper dries, from 0 (wet) to 1 (dry); whatever else is on it stays as it is.
+ * than how much. Single atoms only tint it, at STRIP.tint of that.
  */
-export function stripInk(s: number, n: number, dryness: number): number {
+export function stripInk(s: number, n: number): number {
   const ink = 1 - Math.exp((-STRIP.ink * n * roomFor(s)) / STRIP.spot);
-  if (SPECIES[s].size > 1) return ink;
-  return ink * STRIP.tint * (s === SOLVENT_SPECIES ? 1 - dryness : 1);
+  return SPECIES[s].size === 1 ? ink * STRIP.tint : ink;
 }
 
 /**
@@ -800,11 +797,11 @@ export const COLUMN = {
 
 /**
  * How opaque n molecules of species s make one cell of a column's bed (see COLUMN.cells), in that species' own color:
- * as stripInk says, wet, for what would take up as much of a cell of a strip's paper as they take up of one of the
+ * as stripInk says, for what would take up as much of a cell of a strip's paper as they take up of one of the
  * bed's. So single atoms only tint it, and a clear carrier leaves it pale.
  */
 export function columnInk(s: number, n: number): number {
-  return stripInk(s, (n * STRIP.cap * COLUMN.cells) / (COLUMN.cap * STRIP.cells), 0);
+  return stripInk(s, (n * STRIP.cap * COLUMN.cells) / (COLUMN.cap * STRIP.cells));
 }
 
 /** How scorched fluid at temperature T leaves the paper of a wicking strip that's in it, from 0 (not at all) to 1 (charred through). */
@@ -1618,8 +1615,6 @@ export class Tool {
   soaked = 0;
   /** What a wicking strip's foot was in when it was last told (see dipIn), if anything: it touches what it comes into. */
   private wasIn: Vessel | null = null;
-  /** How far a wicking strip's paper has dried since it soaked through, from 0 to 1, where it's done. */
-  dryness = 0;
   /** How what's on a wicking strip's paper or a column's bed is carried along it (see Bed); null for any other tool. */
   private readonly packing: Bed | null;
   /**
@@ -1853,25 +1848,13 @@ export class Tool {
    * from it. What it draws goes into the foot of the paper, and what's in the fluid scorches if that's hot (see char). As it soaks a
    * share d, the liquid, at the pace of what it drew (see leadOf), carries what's on the paper d · STRIP.cells
    * stretches' worth up it (see Bed), never past that share of its length. Lifted out, it stops where it is, and put
-   * back, it goes on. Once it's soaked through, the paper dries over STRIP.dry, and is done: the solvent dries off it,
-   * and it takes up nothing more. Nothing else leaves it.
+   * back, it goes on. Once it's soaked through, it's done: it takes up nothing more, and stays as it is, wet, for
+   * good. Nothing leaves it.
    */
   private wick(h: number): (Vessel | null)[] {
     const bath = this.bath;
     const { paper } = this;
-    if (this.soaked >= 1) {
-      if (this.dryness < 1) {
-        this.dryness = Math.min(1, this.dryness + h / STRIP.dry);
-        // only the solvent dries off: everything else stays where it ran to
-        if (this.dryness >= 1)
-          for (const v of paper) {
-            v.N -= v.n[SOLVENT_SPECIES];
-            v.n[SOLVENT_SPECIES] = 0;
-          }
-      }
-      return this.none();
-    }
-    if (!bath || bath.N <= 0) return this.none();
+    if (this.soaked >= 1 || !bath || bath.N <= 0) return this.none();
     const C = STRIP.cells;
     const d = Math.min(Math.min(1, Math.sqrt(this.soaked ** 2 + h / STRIP.time)) - this.soaked, volume(bath) / STRIP.cap);
     if (d <= 0) return this.none();
@@ -1954,13 +1937,13 @@ export class Tool {
 
   /**
    * What a save keeps of an instrument's own state, as numbers, or undefined if it has none: a thermometer's bulb's
-   * temperature, and 1 if it's broken or 0 if not; how much a wicking strip's paper has drunk, how dry it is and how
-   * scorched each stretch is (what's on its paper is saved as vessels, see paper); how much a column's bed has drunk (what's on it is
+   * temperature, and 1 if it's broken or 0 if not; how much a wicking strip's paper has drunk, a 0 where how dry it
+   * was used to be, when strips dried, and how scorched each stretch is (what's on its paper is saved as vessels, see paper); how much a column's bed has drunk (what's on it is
    * saved as vessels, see bed); which of a sleeper culture's cells are dead (see dead); which supply a receptacle is
    * fitted for (its place in SUPPLIES), and how far into its changeover it is, or −1 if none is under way.
    */
   get memory(): number[] | undefined {
-    if (this.kind === 'strip') return [this.soaked, this.dryness, ...this.scorch];
+    if (this.kind === 'strip') return [this.soaked, 0, ...this.scorch];
     if (this.kind === 'column') return [this.soaked];
     if (this.kind === 'culture') return Array.from(this.dead!);
     if (this.kind === 'receptacle') return [SUPPLIES.indexOf(this.supply), this.swap ?? -1];
@@ -1977,8 +1960,9 @@ export class Tool {
     if (!Array.isArray(m) || (m.length !== want && !old) || !m.every((x) => typeof x === 'number' && Number.isFinite(x))) return;
     if (isThermometer(this.kind)) [this.temp, this.broken] = [m[0] as number, (m[1] as number) > 0];
     if (this.kind === 'strip') {
-      const [soaked, dryness, ...scorch] = (m as number[]).map((x) => Math.max(0, Math.min(1, x)));
-      [this.soaked, this.dryness] = [soaked, dryness];
+      // the second was how dry it was, when strips dried
+      const [soaked, , ...scorch] = (m as number[]).map((x) => Math.max(0, Math.min(1, x)));
+      this.soaked = soaked;
       if (old) this.scorch.fill(scorch[0], 0, Math.ceil(soaked * STRIP.cells));
       else this.scorch.set(scorch);
     }

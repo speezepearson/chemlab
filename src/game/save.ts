@@ -80,7 +80,7 @@ export interface SavedTool extends SavedDepth {
   reading?: number[];
   /**
    * An instrument's own state, if it has any (see Tool.memory): a thermometer's bulb's temperature, and whether it's
-   * broken; how much a wicking strip's paper has drunk, how dry it is and how scorched; how much a column's bed has
+   * broken; how much a wicking strip's paper has drunk and how scorched it is; how much a column's bed has
    * drunk; which of a sleeper culture's cells are dead; what the station is fitted for, and how far into its
    * changeover it is (a save from before it was fitted for anything but the cryostabilizer has none).
    */

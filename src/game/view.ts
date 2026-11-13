@@ -733,7 +733,7 @@ function paperOutline(ctx: CanvasRenderingContext2D, W: number, L: number): void
 
 /**
  * A wicking strip's paper, foot at the bottom, cut to a point there: cream, darker as far as each stretch of it is wet
- * (see wetness), by what's on it, until it's dry; each species on each stretch of it (see Tool.paper) as ink of its own
+ * (see wetness), by what's on it; each species on each stretch of it (see Tool.paper) as ink of its own
  * color, as opaque as stripInk says, single atoms first, so what's left in bands lies over the carrier's tint; both
  * blended smoothly from one stretch's middle to the next, except for a spot that has yet to move, which is drawn
  * stretch by stretch, so its top is a line, where the fluid's surface was; and each stretch browned over by how
@@ -747,7 +747,7 @@ function drawStrip(sc: Screen, t: Tool): void {
   paper.forEach((v, c) => (sum += v.N * (c + 1)));
   let char = 0;
   t.scorch.forEach((x, c) => (char += x * (c + 1)));
-  const key = `${sum} ${t.soaked > 0} ${t.dryness.toFixed(2)} ${char.toFixed(2)}`;
+  const key = `${sum} ${t.soaked > 0} ${char.toFixed(2)}`;
   if (key === sc.key) return;
   sc.key = key;
   const { ctx, ppu } = sc;
@@ -778,10 +778,10 @@ function drawStrip(sc: Screen, t: Tool): void {
     ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(${rgb}, ${alpha(c)})`);
     ctx.fillRect(0, 0, W, L);
   };
-  if (t.dryness < 1 && wet.some((w) => w > 0)) lay((c) => 0.28 * wet[c] * (1 - t.dryness), '96, 92, 78');
+  if (wet.some((w) => w > 0)) lay((c) => 0.28 * wet[c], '96, 92, 78');
   const here = SPECIES.map((_, s) => s).filter((s) => paper.some((v) => v.n[s] > 0));
   here.sort((a, b) => SPECIES[a].size - SPECIES[b].size);
-  for (const s of here) lay((c) => stripInk(s, paper[c].n[s], t.dryness), SPECIES[s].color.slice(4, -1));
+  for (const s of here) lay((c) => stripInk(s, paper[c].n[s]), SPECIES[s].color.slice(4, -1));
   cells((c) => 0.92 * t.scorch[c], '46, 28, 14');
   ctx.restore();
   sc.tex.needsUpdate = true;
