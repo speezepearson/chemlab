@@ -16,15 +16,19 @@ export interface Faucet {
 /** A faucet of one atom, pure. */
 const pure = (a: Atom): Faucet => ({ start: singleOf(a) });
 
-/** One faucet for each of the four atoms, pure, at room temperature, left to right. Every pair has to be made by mixing. */
-export const FAUCETS: readonly Faucet[] = [pure('R'), pure('G'), pure('B'), pure('K')];
+/**
+ * One faucet for each of the five atoms, pure, at room temperature, left to right: the four colors, then the clear
+ * solvent, S. Every pair has to be made by mixing.
+ */
+export const FAUCETS: readonly Faucet[] = [pure('R'), pure('G'), pure('B'), pure('K'), pure('S')];
 
 /**
- * Older saves' faucets, by how many there were, as places among the new ones (null for one that's gone): from when
- * there were six atoms, R, Y, G, C, B and M; and from before that, when the twelve pairs that could bond had faucets
+ * Older saves' faucets, by how many there were, as places among the new ones (null for one that's gone): from before
+ * the solvent, when there were the four colors' alone, in the same order; from when there were six atoms, R, Y, G, C, B and M; and from before that, when the twelve pairs that could bond had faucets
  * too, 18, with the six atoms' at 3, 5, 7, 9, 11 and 13 (see faucetIndex).
  */
 const OLD: Record<number, readonly (number | null)[]> = {
+  4: [0, 1, 2, 3],
   6: [0, null, 1, null, 2, null],
   18: Array.from({ length: 18 }, (_, i) => ({ 3: 0, 7: 1, 11: 2 } as Record<number, number>)[i] ?? null),
 };

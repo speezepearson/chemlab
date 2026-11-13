@@ -1,8 +1,10 @@
-import { BOND_KEYS, BONDS, type Atom } from '../chem/atoms';
+import { BOND_KEYS, BONDS, SOLVENT, type ColorAtom } from '../chem/atoms';
 import { THERMO } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
-import { NS, SPECIES } from '../chem/species';
+import { END_WEIGHT, LOOSE_ENDS } from '../chem/shape';
+import { NS, SPECIES, TARGET } from '../chem/species';
 import { CAP, DELIVERY, TRACE } from './config';
+import { COOLING } from './cooling';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
 import { CELL, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
@@ -81,15 +83,20 @@ export const FUNNEL_TIP = 6;
 
 /**
  * Tank k of a shape's inside, `d` deep front to back, as it's drawn, bottom up: a sump under its floor, then the
- * tank; a funnel narrowing to its stem; a tube with a little funnel on top; or an upright cylinder.
+ * tank; a funnel narrowing to its stem; a tube with a little funnel on top; or an upright cylinder, with a narrow neck
+ * on top of it if it has one.
  */
 export function tankPieces(sh: ToolShape, k: number, d: number): Piece[] {
-  const w = sh.tanks[k].x1 - sh.tanks[k].x0;
+  // a tank with a neck is filled through an inlet off to one side, and is as wide as its neck says (see ToolShape.neck)
+  const w = sh.neck ? sh.neck.body : sh.tanks[k].x1 - sh.tanks[k].x0;
   const h = sh.tankH ?? TANK_H;
   if (sh.round) {
     const s = sh.sump;
     const tank = { h, w0: w, d0: w, w1: w, d1: w, round: true };
-    return s ? [{ h: s.h, w0: SUMP_TIP, d0: SUMP_TIP, w1: s.w, d1: s.w, round: true }, tank] : [tank];
+    const pieces: Piece[] = s ? [{ h: s.h, w0: SUMP_TIP, d0: SUMP_TIP, w1: s.w, d1: s.w, round: true }, tank] : [tank];
+    const n = sh.neck;
+    if (n) pieces.push({ h: n.h, w0: n.w, d0: n.w, w1: n.w, d1: n.w, round: true });
+    return pieces;
   }
   if (sh.funnel) return [{ h, w0: FUNNEL_TIP, d0: FUNNEL_TIP, w1: w, d1: d }];
   const box = { h, w0: w, d0: d, w1: w, d1: d };
@@ -103,14 +110,16 @@ const depths = new Map<ToolKind, number>();
 
 /**
  * How deep front to back a kind of tool's tanks are inside: deep enough to hold what they hold (see SPACE_PER_ATOM),
- * given how wide and tall they're drawn. A round tank is as deep as it's wide.
+ * given how wide and tall they're drawn. A round tank is as deep as it's wide; a tool with no tanks has no depth inside.
  */
 export function tankDepth(kind: ToolKind): number {
   let d = depths.get(kind);
   if (d !== undefined) return d;
   const sh = SHAPES[kind];
   const want = (sh.tankCap ?? TANK_CAP) * SPACE_PER_ATOM;
-  if (sh.round) d = sh.tanks[0].x1 - sh.tanks[0].x0;
+  // a tool with no tanks (a thermometer) has no inside
+  if (!sh.tanks.length) d = 0;
+  else if (sh.round) d = sh.neck ? sh.neck.body : sh.tanks[0].x1 - sh.tanks[0].x0;
   else {
     let [lo, hi] = [0.1, 5000];
     for (let i = 0; i < 60; i++) {
@@ -298,7 +307,20 @@ export const STATION = {
   screen: { x0: 2 * CELL - 50, x1: 2 * CELL + 50, y0: -19, y1: -4 },
   /** The screen showing how long it's been delivering steadily (see Tool.steady), left of the reservoir's. */
   steadyScreen: { x0: 2 * CELL - 160, x1: 2 * CELL - 60, y0: -19, y1: -4 },
+  /** The purity needle's dial (see needleAt), on the plate left of the diverter's LCD. */
+  needle: { x0: CELL - 90, x1: CELL - 38, y0: 222, y1: 262 },
 };
+
+/**
+ * How far along its dial the station's needle stands, from 0 (its left stop) to 1, for fluid that's `purity` target by
+ * atoms: 1 − √(1 − purity), so it moves all the way up from nothing, and moves furthest for the last few percent, where
+ * the diverter's line is. Half target is 0.29 of the way, 90% is 0.68, and 99% is 0.9.
+ */
+export function needleAt(purity: number): number {
+  return 1 - Math.sqrt(1 - Math.max(0, Math.min(1, purity)));
+}
+/** How quickly the station's needle swings to its reading, in sim seconds: it closes all but 1/e of the gap in this. */
+export const NEEDLE_TAU = 0.25;
 
 /** The station's funnel's inside, as drawn (see Piece): a square funnel narrowing from its mouth to its stem. */
 export const STATION_FUNNEL: Piece[] = [
@@ -455,6 +477,348 @@ export function heatBy(f: Fluid, wireT: number, h: number): void {
   f.Q += roundRandom((heatAt(wireT, f.N) - f.Q) * (1 - Math.exp(-HEATER.rate * h)));
 }
 
+/**
+ * How a thermometer behaves (see Tool.warm):
+ * - tau: how quickly its bulb takes the temperature of the fluid it's in, in sim seconds: it closes all but 1/e of the
+ *   gap in this;
+ * - roomTau: how quickly it takes the room's, in the air, in sim seconds;
+ * - burst: how far past the top of its scale, as a multiple of the top, its bulb can be before it shatters; the
+ *   capillary runs up that far past the top, so that's where the column stops.
+ */
+export const THERMOMETER = { tau: 1, roomTau: 8, burst: 1.1 };
+
+/**
+ * The two kinds of thermometer, and their scales: each reads from 0 at its scale's foot to `top` at its top, with a
+ * tick every `tick`, a longer one every `long`, and a number every `num`.
+ */
+export const THERMOMETERS = {
+  thermometer: { top: 5, tick: 0.1, long: 0.5, num: 1 },
+  thermometerWide: { top: 25, tick: 0.5, long: 2.5, num: 5 },
+} as const;
+export type ThermometerKind = keyof typeof THERMOMETERS;
+
+/** Whether a kind of tool is a thermometer. */
+export const isThermometer = (kind: ToolKind): kind is ThermometerKind => kind in THERMOMETERS;
+
+/**
+ * How far up its scale a thermometer of a kind stands at temperature T: from 0 at the scale's foot to 1 at its top,
+ * evenly; never below the foot, nor above the top of the capillary (see THERMOMETER.burst).
+ */
+export function thermometerAt(kind: ThermometerKind, T: number): number {
+  return Math.max(0, Math.min(THERMOMETER.burst, T / THERMOMETERS[kind].top));
+}
+
+/**
+ * A thermometer's rod, in its own frame (x right, y down from its top, the middle of its top end at the origin): a
+ * glass rod `h` long and `r` in radius, upright; the bulb of spirit at its foot, from `bulb.y0` to `bulb.y1`, `bulb.r`
+ * in radius; a white enamel backing inside the glass, `backing.w` across, from `backing.y0` to `backing.y1`, carrying
+ * the scale, whose 0 is at `foot` and whose top is at `top`; the capillary up it from the bulb to
+ * THERMOMETER.burst of the scale's length above its foot; and where it snaps, when it shatters, a little way up from
+ * its foot.
+ */
+export const THERMOMETER_ROD = {
+  h: 150, r: 2.5,
+  bulb: { y0: 138, y1: 147, r: 1.7 },
+  backing: { y0: 14, y1: 110, w: 4.2 },
+  foot: 106, top: 26,
+  snap: 126,
+};
+/** Where a thermometer's bulb is, in its own frame (as THERMOMETER_ROD's, y down): its middle, which is what's dipped. */
+export const BULB_Y = (THERMOMETER_ROD.bulb.y0 + THERMOMETER_ROD.bulb.y1) / 2;
+
+/**
+ * The tools that are dipped (see Tool.bath): a wicking strip and the thermometers. They have no tanks; held with the
+ * crosshair on an open top, one hovers upright over it, the right button lowers it in, and the left stands it in it.
+ */
+export const DIPPERS: readonly ToolKind[] = ['strip', 'thermometer', 'thermometerWide'];
+export const isDipper = (kind: ToolKind): boolean => DIPPERS.includes(kind);
+
+/**
+ * A swell bulb (see SHAPES.dilatometer): a squat round bulb `w` across and `h` tall, over a little sump, under a
+ * narrow neck (see ToolShape.neck). The neck holds about a fifth of what the bulb does, so fluid that fills the bulb
+ * and swells by a twentieth climbs a quarter of the neck. The two bulbs stand pressed together like the letters
+ * "db": their necks side by side in the middle, `gap` apart, each up from the inner edge of its bulb, with `marks`
+ * graduations across both. Above the marks the necks part: each carries on as a thin tube leaning out and up,
+ * `inlet.rise` higher, to a little funnel (reaching `inlet.w` either side of its middle, `inlet.h` deep) at its top,
+ * the two funnels a grid cell apart, which is where each bulb is filled.
+ */
+export const BULB = { w: 34, h: 20, sump: { w: 10, h: 5 }, neck: { w: 7, h: 90 }, marks: 20, gap: 1, inlet: { w: 7, h: 8, rise: 32 } };
+const BULB_BODY: Piece[] = [
+  { h: BULB.sump.h, w0: SUMP_TIP, d0: SUMP_TIP, w1: BULB.sump.w, d1: BULB.sump.w, round: true },
+  { h: BULB.h, w0: BULB.w, d0: BULB.w, w1: BULB.w, d1: BULB.w, round: true },
+];
+/** How much a swell bulb holds below its neck, by volume: as much as it's drawn to hold (see SPACE_PER_ATOM), about 0.29 flask. */
+export const BULB_BODY_CAP = Math.round(spaceOf(BULB_BODY) / SPACE_PER_ATOM);
+/** How much a swell bulb's neck holds, by volume: about 0.055 flask. */
+export const BULB_NECK_CAP = Math.round((((Math.PI / 4) * BULB.neck.w ** 2 * BULB.neck.h) / SPACE_PER_ATOM));
+/** How much of its neck a swell bulb holding `vol` (by volume) fills: 0 while the bulb itself isn't full, 1 at the brim. */
+export function neckShare(vol: number): number {
+  return Math.max(0, Math.min(1, (vol - BULB_BODY_CAP) / BULB_NECK_CAP));
+}
+
+/**
+ * How a wicking strip behaves (see SHAPES.strip and Tool.wick). It's bare paper, hanging from a clip, its foot cut to
+ * a point. Touched to a fluid, its foot takes a spot of it (see Tool.touch); stood in a fluid, it drinks it, the
+ * carrier, up the paper, carrying what's on it along at each species' own pace (see Bed):
+ * - cap: how much the paper holds wet from end to end, by volume: a hundredth of a flask. Soaking a share d of it
+ *   (see Tool.soaked) draws d times this from what its foot is in;
+ * - spot: what a touch puts on it, by volume, over as much of it as is in the fluid: a tenth of cap; and spots, how
+ *   many spots' worth it takes in all;
+ * - time: how long the paper takes to soak through, in sim seconds, with carrier enough: quickly at first and ever
+ *   more slowly, as paper wicks, as the square root of the time;
+ * - drag: the drag at which a molecule doesn't move at all (see STRIP_RUN);
+ * - dry: how long the paper takes to dry once it's soaked through, in sim seconds;
+ * - cells: how many stretches the paper is modelled as, from its foot to its top, one local unit each (see Tool.paper);
+ *   the spot goes on the first of them, those in the fluid;
+ * - spread: the share of a species on each stretch that's left behind each time it moves on a stretch (see Tool.wick),
+ *   which is all that widens a band: after n moves it's about √(n · spread · (1 − spread)) stretches wide;
+ * - ink: how strongly what's on it shows (see stripInk), and tint, how much less strongly single atoms do;
+ * - scorch: the temperatures from which a fluid starts to brown the paper that's in it, and at which it chars it
+ *   through;
+ * - paper: the paper itself, in local units, y down from the top of its clip: reaching w either side of the middle,
+ *   from `top` down `len` to its foot, the last `point` of it narrowing to a point there;
+ * - clip: the clip it hangs from, at its top, reaching w either side of the middle, h down from its top, d front to
+ *   back: what its stand holds.
+ */
+export const STRIP = {
+  cap: CAP / 100, spot: CAP / 1000, spots: 3, time: 20, drag: 34, dry: 3, cells: 108, spread: 0.05, ink: 33, tint: 0.4,
+  scorch: { from: 2, to: 6 },
+  paper: { w: 6, top: 10, len: 108, point: 6 },
+  clip: { w: 4.5, h: 15, d: 4 },
+};
+
+/** Where a wicking strip's foot is, in its own frame (y down from its top): the tip of its paper. */
+export const STRIP_FOOT = STRIP.paper.top + STRIP.paper.len;
+
+/**
+ * Where a dipper's foot is, in its own frame (y down from its top): what's dipped, and what's in a fluid or not (see
+ * bathAt): a thermometer's bulb's middle, or the middle of a wicking strip's first stretch, at the tip of its paper.
+ */
+export const footY = (kind: ToolKind): number => (kind === 'strip' ? STRIP_FOOT - 0.5 : BULB_Y);
+
+/**
+ * How far under a fluid's surface a dipper's foot (see footY) goes when it's dipped in by hand (see dipPoses), which is
+ * no further than it takes to touch it: a wicking strip's, so that the lower half of its point is in; a thermometer's,
+ * so that its bulb is just covered.
+ */
+export const dipUnder = (kind: ToolKind): number =>
+  kind === 'strip' ? STRIP.paper.point / 2 - 0.5 : (THERMOMETER_ROD.bulb.y1 - THERMOMETER_ROD.bulb.y0) / 2 + 1;
+
+/**
+ * The dish (see SHAPES.dish): a shallow open glass tray, reaching w either side of its middle, h deep and d front to
+ * back inside, on a little base `base` tall, for its stand to clamp.
+ */
+export const DISH = { w: 20, h: 5, d: 16, base: 13 };
+
+/** How much the dish holds, by volume: as much as it's drawn to hold (see SPACE_PER_ATOM), about 0.05 flask. */
+export const DISH_CAP = Math.round((2 * DISH.w * DISH.d * DISH.h) / SPACE_PER_ATOM);
+
+/**
+ * How freely each species runs along a wicking strip's paper or a column's bed: 1 − drag / STRIP.drag, where a
+ * molecule's drag is its weight, plus the weight of its loose ends again (see LOOSE_ENDS), which snag in the paper.
+ * A liquid runs at the mean of its own (see leadOf), and each species on the paper min(1, its own over the liquid's)
+ * as far as the liquid does (see Bed). So light single atoms run freest, a ring runs further than a chain of the same
+ * atoms, and a chain with heavy ends lags one with light ends.
+ */
+export const STRIP_RUN: readonly number[] = SPECIES.map((sp, s) => Math.max(0, 1 - (sp.weight + END_WEIGHT[s]) / STRIP.drag));
+
+/**
+ * How opaque n molecules of species s make one cell of a wicking strip's paper (see STRIP.cells) in that species' own
+ * color: 1 − e^(−ink · v / spot), for their volume v. So a band of what's a twentieth of a full spot shows clearly at
+ * its peak after a full run, while what's most of the spot is as dark as it gets: the paper shows what's there more
+ * than how much. Single atoms, the carrier, only tint it, at STRIP.tint of that; and they dry off the paper, so their
+ * tint fades as it dries, from 0 (wet) to 1 (dry).
+ */
+export function stripInk(s: number, n: number, dryness: number): number {
+  const ink = 1 - Math.exp((-STRIP.ink * n * roomFor(s)) / STRIP.spot);
+  return SPECIES[s].size === 1 ? ink * STRIP.tint * (1 - dryness) : ink;
+}
+
+/**
+ * How fast fluid f runs along a bed as a liquid, its lead (see Bed): the mean STRIP_RUN of what's in it, weighted by
+ * volume; 0 if it's empty.
+ */
+export function leadOf(f: Fluid): number {
+  let run = 0;
+  let vol = 0;
+  for (let s = 0; s < NS; s++) {
+    if (!f.n[s]) continue;
+    run += f.n[s] * roomFor(s) * STRIP_RUN[s];
+    vol += f.n[s] * roomFor(s);
+  }
+  return vol > 0 ? run / vol : 0;
+}
+
+/**
+ * How wet a stretch of a wicking strip's paper or a column's bed looks, from 0 (dry) to 1 (wet through), holding vol
+ * (by volume) when the whole of it holds `holds` wet through over `cells` stretches: what it holds over its share of
+ * that, as far as 1. A liquid is its molecules, so the paper's wet where they are, and only there.
+ */
+export function wetness(vol: number, holds: number, cells: number): number {
+  return Math.max(0, Math.min(1, (vol * cells) / holds));
+}
+
+/**
+ * A bed of packing that a liquid runs through cell by cell: a wicking strip's paper, from its foot up, or a column's
+ * bed, from its top down. The liquid is what's coming in, and it runs at its own pace, its lead (see leadOf); each
+ * species on the bed travels min(1, STRIP_RUN / lead) of the liquid's way, so the carrier itself runs with the
+ * liquid, what drags more lags it in proportion, and nothing outruns it. For each 1 − STRIP.spread of a cell a
+ * species travels, all but STRIP.spread of it on each cell moves on into the next, in whole molecules with their
+ * share of the heat; what's left behind moves on later. So it moves a whole cell at a time, and it spreads only by
+ * what's left behind, into a band √(n · spread · (1 − spread)) cells wide (its standard deviation) after n moves.
+ * Moving a little of each cell at every step instead would smear it far wider.
+ */
+export class Bed {
+  /**
+   * Per species, how far it has travelled along the bed, in cells, since it last moved on one (see carry). Not saved:
+   * a bed loaded mid-run loses less than a cell of it.
+   */
+  private readonly drift = new Float64Array(NS);
+
+  constructor(readonly cells: readonly Vessel[]) {}
+
+  /**
+   * The liquid, running at `lead` (see leadOf), running `dist` cells along the bed, at most half a cell: each species
+   * travels min(1, STRIP_RUN / lead) of that, and what moves on, moves from each cell from `last` back to the first
+   * into the next, last first, so nothing moves twice; what moves on from the bed's last cell goes into `out`.
+   */
+  carry(dist: number, last: number, lead: number, out: Vessel | null = null): void {
+    const { cells } = this;
+    if (lead <= 0) return;
+    for (let s = 0; s < NS; s++) {
+      this.drift[s] += Math.min(1, STRIP_RUN[s] / lead) * dist;
+      // what's left behind makes it lag, so it moves on a cell for each 1 − spread it travels
+      if (this.drift[s] < 1 - STRIP.spread) continue;
+      this.drift[s] -= 1 - STRIP.spread;
+      const size = SPECIES[s].size;
+      for (let c = last; c >= 0; c--) {
+        const a = cells[c];
+        const b = c + 1 < cells.length ? cells[c + 1] : out!;
+        const m = a.n[s] && a.n[s] - roundRandom(a.n[s] * STRIP.spread);
+        if (!m) continue;
+        if (a.Q > 0) {
+          const q = Math.min(a.Q, roundRandom((a.Q * m * size) / a.N));
+          a.Q -= q;
+          b.Q += q;
+        }
+        a.n[s] -= m;
+        b.n[s] += m;
+        a.N -= m * size;
+        b.N += m * size;
+      }
+    }
+  }
+}
+
+/**
+ * How a column behaves (see SHAPES.column and Tool.elute). A small funnel on top drains into a glass tube packed with
+ * the strips' blotting stuff, its bed, over a tap and a spout. A dry bed drinks from the funnel, tap open or not; once
+ * it's wet through, what's poured in runs through it only while the tap's open, carrying each species down at its own
+ * pace, as on a strip's paper (see Bed), and out the spout:
+ * - cells: how many stretches the bed is modelled as, from its top to its foot (see Tool.bed);
+ * - cap: how much the bed holds wet through, by volume: a fifth of a flask;
+ * - soak: how fast a dry bed drinks from the funnel, by volume per sim second, the tap open or not: it's wet through
+ *   in 4 sim s;
+ * - flow: how fast liquid runs through a wet bed with the tap fully open, by volume per sim second: a fiftieth of a
+ *   flask, a bed's worth in 10 sim s; in proportion to how far the tap's open;
+ * - funnel: the funnel, reaching w either side of its middle, h deep, holding cap (by volume) as drawn;
+ * - tube: the glass tube under the funnel's stem, w across, from y0 to y1 down from the funnel's mouth, its bed
+ *   filling it.
+ */
+export const COLUMN = {
+  cells: 80, cap: CAP / 5, soak: CAP / 20, flow: CAP / 50,
+  funnel: { w: 11, h: 20, cap: 0.06 * CAP },
+  tube: { w: 16, y0: 26, y1: 186 },
+};
+
+/**
+ * How opaque n molecules of species s make one cell of a column's bed (see COLUMN.cells), in that species' own color:
+ * as stripInk says, wet, for what would take up as much of a cell of a strip's paper as they take up of one of the
+ * bed's. So single atoms only tint it, and a clear carrier leaves it pale.
+ */
+export function columnInk(s: number, n: number): number {
+  return stripInk(s, (n * STRIP.cap * COLUMN.cells) / (COLUMN.cap * STRIP.cells), 0);
+}
+
+/** How scorched fluid at temperature T leaves the paper of a wicking strip that's in it, from 0 (not at all) to 1 (charred through). */
+export function scorchAt(T: number): number {
+  const { from, to } = STRIP.scorch;
+  return Math.max(0, Math.min(1, (T - from) / (to - from)));
+}
+
+/**
+ * How a sleeper culture behaves (see SHAPES.culture and Tool.sicken):
+ * - rate: how fast its cells die, per sim second, in fluid that does them one unit of harm (see harm): each cell in
+ *   the fluid dies at random, at this times the fluid's harm, whatever the others do. So half of those in fluid of
+ *   harm 0.1 are dead in 30 sim s, and in fluid of harm 1, in 3;
+ * - heat: fluid hotter than `from` harms them too, as `per` of a loose end per molecule for each unit of temperature
+ *   above it;
+ * - pitch: how far apart the cells are, in local units, in rows half a step out of line with each other;
+ * - drain: how fast its plate drains, full and with its valve fully open, by volume per sim second: a fifth of a
+ *   flask, so it's empty in a few seconds, leaving its cells as they are.
+ */
+export const CULTURE = { rate: Math.LN2 / 3, heat: { from: 2, per: 0.2 }, pitch: 3.2, drain: CAP / 5 };
+
+/**
+ * How loose a molecule of each species is, to a sleeper culture: its loose ends (see LOOSE_ENDS), or 1 for a lone atom,
+ * but none for the solvent, which does the cells no harm.
+ */
+const LOOSENESS: readonly number[] = SPECIES.map((sp, s) =>
+  sp.size === 1 ? +(sp.atoms[0] !== SOLVENT) : LOOSE_ENDS[s].length,
+);
+
+/**
+ * What a fluid does to a sleeper culture: its loose ends per molecule (a lone atom counting as one), plus, if it's
+ * hotter than CULTURE.heat.from, CULTURE.heat.per for each unit of temperature above that. Nothing, if there's none.
+ */
+export function harm(f: Fluid): number {
+  let ends = 0;
+  let molecules = 0;
+  for (let s = 0; s < NS; s++) {
+    if (!f.n[s]) continue;
+    ends += f.n[s] * LOOSENESS[s];
+    molecules += f.n[s];
+  }
+  if (molecules <= 0) return 0;
+  return ends / molecules + CULTURE.heat.per * Math.max(0, temperature(f) - CULTURE.heat.from);
+}
+
+let cultureLayout: { x: number; y: number }[] | null = null;
+
+/**
+ * Where a sleeper culture's cells are on its plate, in local units, top row first: in rows CULTURE.pitch apart, each
+ * row half a step out of line with the last. The same on every plate.
+ */
+export function cultureCells(): readonly { x: number; y: number }[] {
+  if (cultureLayout) return cultureLayout;
+  const tk = SHAPES.culture.tanks[0];
+  const H = SHAPES.culture.tankH ?? TANK_H;
+  const p = CULTURE.pitch;
+  const cells: { x: number; y: number }[] = [];
+  const dy = (p * Math.sqrt(3)) / 2;
+  const rows = Math.floor((H - p) / dy) + 1;
+  const y0 = (H - (rows - 1) * dy) / 2;
+  const across = Math.floor((tk.x1 - tk.x0 - p) / p) + 1;
+  for (let r = 0; r < rows; r++) {
+    // every other row has one fewer, so, centered, it's half a step out of line
+    const cols = across - (r % 2);
+    const x0 = (tk.x0 + tk.x1) / 2 - ((cols - 1) * p) / 2;
+    for (let c = 0; c < cols; c++) cells.push({ x: x0 + c * p, y: y0 + r * dy });
+  }
+  return (cultureLayout = cells);
+}
+
+let cultureInside: Piece[] | null = null;
+
+/**
+ * How high above the floor of a sleeper culture's plate fluid filling `share` of it stands, as it's drawn (see
+ * tankPieces): a cell is in the fluid if it's below that.
+ */
+export function cultureLevel(share: number): number {
+  cultureInside ??= tankPieces(SHAPES.culture, 0, tankDepth('culture'));
+  return levelIn(cultureInside, share);
+}
+
 /** How many digits the meter's display has. */
 export const METER_DIGITS = 4;
 
@@ -471,15 +835,18 @@ export function meterText(rate: number): string {
   return '9'.repeat(METER_DIGITS);
 }
 
-/** The order of an analyzer triangle's sectors in its reading, and of the bond visualizer's points. */
-export const SECTOR_ATOMS: readonly Atom[] = ['R', 'G', 'B', 'K'];
+/**
+ * The order of an analyzer triangle's sectors in its reading, and of the bond visualizer's points: the four colors.
+ * There's none for the solvent, which the instruments are blind to.
+ */
+export const SECTOR_ATOMS: readonly ColorAtom[] = ['R', 'G', 'B', 'K'];
 
 /**
  * Where each atom is on the instruments' screens, the composition analyzer's and the bond visualizer's alike: a
  * triangle standing on its base, G at the top, R at the bottom left, B at the bottom right, and K in the middle. As
  * offsets from the triangle's middle, x right and y down, its corners 1 away.
  */
-export const ATOM_PLACE: Record<Atom, readonly [number, number]> = {
+export const ATOM_PLACE: Record<ColorAtom, readonly [number, number]> = {
   G: [0, -1],
   R: [-Math.sqrt(3) / 2, 0.5],
   B: [Math.sqrt(3) / 2, 0.5],
@@ -491,7 +858,7 @@ export const ATOM_PLACE: Record<Atom, readonly [number, number]> = {
  * four through the middles of its sides, so each corner's atom has the small triangle at that corner, and K the
  * upside-down one in the middle.
  */
-export function analyzerSector(atom: Atom): (readonly [number, number])[] {
+export function analyzerSector(atom: ColorAtom): (readonly [number, number])[] {
   const corners = (['G', 'B', 'R'] as const).map((a) => ATOM_PLACE[a]);
   const mid = (p: readonly [number, number], q: readonly [number, number]) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2] as const;
   if (atom === 'K') return corners.map((p, i) => mid(p, corners[(i + 1) % 3]));
@@ -501,7 +868,8 @@ export function analyzerSector(atom: Atom): (readonly [number, number])[] {
 
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater' | 'analyzer'
-  | 'spectroscope' | 'visualizer' | 'meter' | 'tank' | 'receptacle';
+  | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'dish' | 'column' | 'culture' | 'tank'
+  | 'receptacle';
 
 /**
  * Tools there's only ever one of: not in the palette, and never put away. The receptacle is the whole cryostabilizer
@@ -539,6 +907,15 @@ export interface ToolShape {
    * trickling out ever more slowly.
    */
   sump?: { w: number; h: number };
+  /**
+   * A narrow neck on top of each tank (a round one, `body` across), `w` across and `h` tall. The tank fills first,
+   * then its neck, so a small change in how much it holds shows as a big change in how high it stands. Such a tank
+   * isn't under its opening: `bodies` and `necks` are where each tank's middle and its neck's are, across, and the
+   * tank's own x0 and x1 are its inlet's, a little funnel `inlet.h` deep with its mouth at height `inlet.y`, above the
+   * neck's top, which a thin tube leans down and in to: that's where fluid goes in, and where what no longer fits
+   * spills from.
+   */
+  neck?: { w: number; h: number; body: number; bodies: number[]; necks: number[]; inlet: { h: number; y: number } };
   /** Whether the tool has no valves to turn. */
   noValve?: boolean;
   /** Where the valves are, if not one under each tank's center at valveY: then there's one valve per entry. */
@@ -564,6 +941,16 @@ export interface ToolShape {
   spoutY: number;
   box: { x0: number; x1: number; y0: number; y1: number };
 }
+
+/** A thermometer's shape: no tanks, spouts or valves, just its rod's box (see THERMOMETER_ROD). */
+const THERMOMETER_SHAPE: ToolShape = {
+  tanks: [],
+  noValve: true,
+  spouts: [],
+  valveY: 0,
+  spoutY: THERMOMETER_ROD.h,
+  box: { x0: -THERMOMETER_ROD.r - 0.5, x1: THERMOMETER_ROD.r + 0.5, y0: -0.5, y1: THERMOMETER_ROD.h + 0.5 },
+};
 
 export const SHAPES: Record<ToolKind, ToolShape> = {
   dispenser: {
@@ -709,6 +1096,81 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: TUBE_H + 32,
     box: { x0: -15, x1: 15, y0: -6, y1: TUBE_H + 34 },
   },
+  dilatometer: {
+    // two swell bulbs (see BULB) pressed together like "db", necks side by side in the middle; each filled through a
+    // funnel at the top of its neck, where the necks lean apart, a grid cell from the other, and draining slowly
+    // through its own valve to a spout under that; one wire wound round both, from a box under them whose dial sets
+    // its heat
+    tanks: [
+      { name: 'A', x0: -CELL / 2 - BULB.inlet.w, x1: -CELL / 2 + BULB.inlet.w },
+      { name: 'B', x0: CELL / 2 - BULB.inlet.w, x1: CELL / 2 + BULB.inlet.w },
+    ],
+    tankH: BULB.h,
+    tankCap: BULB_BODY_CAP + BULB_NECK_CAP,
+    round: true,
+    sump: BULB.sump,
+    neck: {
+      ...BULB.neck,
+      body: BULB.w,
+      bodies: [-(BULB.gap + BULB.w) / 2, (BULB.gap + BULB.w) / 2],
+      necks: [-(BULB.gap + BULB.neck.w) / 2, (BULB.gap + BULB.neck.w) / 2],
+      inlet: { h: BULB.inlet.h, y: -(BULB.neck.h + BULB.inlet.rise + BULB.inlet.h) },
+    },
+    valves: [{ x: -CELL / 2, y: 42 }, { x: CELL / 2, y: 42 }, { x: 0, y: 46 }],
+    dial: 2,
+    maxFlow: PIPETTE_FLOW,
+    spouts: [-CELL / 2, CELL / 2],
+    valveY: 42,
+    spoutY: 58,
+    box: { x0: -CELL / 2 - 14, x1: CELL / 2 + 14, y0: -(BULB.neck.h + BULB.inlet.rise + BULB.inlet.h) - 6, y1: 62 },
+  },
+  strip: {
+    // bare paper hanging from a clip (see STRIP.paper), its foot cut to a point, with no tanks, spouts or valves
+    tanks: [],
+    noValve: true,
+    spouts: [],
+    valveY: 0,
+    spoutY: STRIP_FOOT,
+    box: { x0: -STRIP.paper.w - 0.5, x1: STRIP.paper.w + 0.5, y0: -0.5, y1: STRIP_FOOT + 0.5 },
+  },
+  dish: {
+    // a shallow open glass tray (see DISH) on a little base for its stand to clamp; nothing drains from it
+    tanks: [{ name: 'dish', x0: -DISH.w, x1: DISH.w }],
+    tankH: DISH.h,
+    tankCap: DISH_CAP,
+    noValve: true,
+    spouts: [],
+    valveY: DISH.h,
+    spoutY: DISH.h + DISH.base,
+    box: { x0: -DISH.w - 2, x1: DISH.w + 2, y0: -6, y1: DISH.h + DISH.base },
+  },
+  column: {
+    // a small glass funnel over a tall glass tube, packed (see COLUMN), over a tap and a spout, all on one line
+    tanks: [{ name: 'funnel', x0: -COLUMN.funnel.w, x1: COLUMN.funnel.w }],
+    tankH: COLUMN.funnel.h,
+    tankCap: COLUMN.funnel.cap,
+    funnel: true,
+    spouts: [0],
+    valveY: COLUMN.tube.y1 + 12,
+    spoutY: COLUMN.tube.y1 + 28,
+    box: { x0: -COLUMN.funnel.w - 2, x1: COLUMN.funnel.w + 2, y0: -6, y1: COLUMN.tube.y1 + 30 },
+  },
+  culture: {
+    // a flat glass cell, the plate, filled through a funnel on top and drained through a valve under it; the cells
+    // stand on the inside of its front (see cultureCells)
+    tanks: [{ name: 'plate', x0: -20, x1: 20 }],
+    tankH: 46,
+    tankCap: CAP / 10,
+    cup: { w: 10, h: 8 },
+    maxFlow: CULTURE.drain,
+    spouts: [0],
+    valveY: 58,
+    spoutY: 74,
+    box: { x0: -24, x1: 24, y0: -14, y1: 76 },
+  },
+  // the thermometers: a glass rod each (see THERMOMETER_ROD), with no tanks, spouts or valves
+  thermometer: THERMOMETER_SHAPE,
+  thermometerWide: THERMOMETER_SHAPE,
   analyzer: {
     // a glass tube straight down to a spout, and a cabinet beside it with a screen (see ANALYZER), which takes its
     // sample from the tube's foot and lets it out a waste spout on its far side, two grid cells along
@@ -860,7 +1322,7 @@ export function bondPoint(i: number): { x: number; y: number } {
 
 /** For each bond (in BOND_KEYS order), its two atoms' places in SECTOR_ATOMS, the ends of the line it lights. */
 export const BOND_ENDS: readonly (readonly [number, number])[] = BOND_KEYS.map(
-  (k) => [SECTOR_ATOMS.indexOf(k[0] as Atom), SECTOR_ATOMS.indexOf(k[1] as Atom)] as const,
+  (k) => [SECTOR_ATOMS.indexOf(k[0] as ColorAtom), SECTOR_ATOMS.indexOf(k[1] as ColorAtom)] as const,
 );
 
 /**
@@ -895,6 +1357,9 @@ export const tankX = (tk: { x0: number; x1: number }) => (tk.x0 + tk.x1) / 2;
  */
 export const HELIX = { x0: -CELL / 2, x1: CELL / 2, y: 110, r: 6, halfTwists: 9 };
 
+/** The inside of a tank with a neck, by kind of tool (see Tool.level): every tank of a kind is alike. */
+const necked = new Map<ToolKind, Piece[]>();
+
 export const TOOL_NAMES: Record<ToolKind, string> = {
   dispenser: 'Dispenser',
   pipette: 'Pipette',
@@ -905,6 +1370,13 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   sorter: 'Size sorter',
   heater: 'Resistive heater',
   meter: 'Flow meter',
+  thermometer: 'Fine thermometer',
+  thermometerWide: 'Wide thermometer',
+  dilatometer: 'Swell bulbs',
+  strip: 'Wicking strip',
+  dish: 'Dish',
+  column: 'Column',
+  culture: 'Sleeper culture',
   tank: 'Tank',
   receptacle: 'Cryostabilizer',
   analyzer: 'Composition analyzer',
@@ -988,6 +1460,23 @@ export function separatorShares(): number[][] {
  *   a trickle through its faucet, the second spout, as far as its one valve is open.
  * - A **flow meter** is an inline instrument (see INLINE_TOOLS): its tube drains straight through to one spout, and
  *   it shows what flows out, averaged over the recent past (see INSTRUMENT_TAU, rate and meterText).
+ * - **Swell bulbs** are two little round tanks with narrow necks (see BULB), pressed together so the necks stand
+ *   side by side, each draining at up to PIPETTE_FLOW, heated alike by one wire whose temperature a dial sets (see
+ *   wireTemperature and heatBy), so how much each swells shows side by side.
+ * - A **wicking strip** is bare paper, with no tanks. Its foot touched to a fluid takes a spot of it (see touch), and
+ *   stood in a fluid, it drinks it up (see bath), carrying each species of the spot along at its own pace (see wick
+ *   and STRIP_RUN), to leave it as a band once the paper's dry. It's used once.
+ * - A **dish** is a shallow open tray with no valve or spout, to stand a strip in.
+ * - A **column** is a small funnel over a tall tube packed with the strips' paper, its bed, over a tap and a spout. A
+ *   dry bed drinks from the funnel until it's wet through; then what's poured in runs through it as far as the tap's
+ *   open, carrying each species down it at its own pace, as on a strip, and out the spout (see elute).
+ * - A **sleeper culture** is a flat glass plate of living cells, filled through a funnel on top. What's in it harms
+ *   those of them it covers, by its loose ends and its heat (see harm): each dies at random, for good, the sooner the
+ *   more harmful the fluid (see sicken). It drains through a valve under it, leaving its cells as they are, as a
+ *   record of what was tried on them.
+ * - A **thermometer** (fine or wide, see THERMOMETERS) has no tanks at all: it's a glass rod whose bulb takes the
+ *   temperature of whatever fluid it's dipped in, or the room's (see warm and bath), and which shatters, for good, if
+ *   that's too hot for it.
  * - A **composition analyzer** is an inline instrument too, and it draws off ANALYZER_SAMPLE of what passes, out its waste spout, reading that (see
  *   composition) onto a screen, averaged over the recent past (see INSTRUMENT_TAU).
  * - A **spectroscope** is an inline instrument too, which lets everything through, counting the bonds that pass over
@@ -1039,11 +1528,54 @@ export class Tool {
    * once that's down to less than TRACE a sim second.
    */
   rate = 0;
+  /**
+   * A wicking strip's paper, stretch by stretch from its foot to its top (see STRIP.cells), each holding what's on
+   * that stretch; it doesn't react or cool, having lost its heat as the paper took it up (see scorch). Empty for any
+   * other tool.
+   */
+  readonly paper: Vessel[];
+  /**
+   * A column's bed, stretch by stretch from its top to its foot (see COLUMN.cells), each holding what's on that
+   * stretch; it doesn't react or cool. Empty for any other tool.
+   */
+  readonly bed: Vessel[];
+  /**
+   * How much a wicking strip's paper or a column's bed has drunk, as a share of what it holds wet through (STRIP.cap,
+   * COLUMN.cap), from 0 to 1. It sets how fast more is drawn in, and nothing on it moves past that share of its length
+   * (see Bed); but it isn't a waterline, and nothing is drawn from it: how wet each stretch looks is what's on it (see
+   * wetness).
+   */
+  soaked = 0;
+  /** What a wicking strip's foot was in when it was last told (see dipIn), if anything: it touches what it comes into. */
+  private wasIn: Vessel | null = null;
+  /** How far a wicking strip's paper has dried since it soaked through, from 0 to 1, where it's done. */
+  dryness = 0;
+  /** How what's on a wicking strip's paper or a column's bed is carried along it (see Bed); null for any other tool. */
+  private readonly packing: Bed | null;
+  /**
+   * How scorched each stretch of a wicking strip's paper is, from its foot (see scorchAt): by the hottest fluid that
+   * stretch has been in. Only what's in the fluid scorches (see dipIn), since what the paper takes up cools at once.
+   * Empty for any other tool.
+   */
+  readonly scorch: Float32Array;
+  /** How many of a wicking strip's stretches, from its foot, are in what it's in, as it was last told (see dipIn). */
+  private under = 1;
+  /** Which of a sleeper culture's cells are dead, 1 for each that is, in cultureCells' order; null for any other tool. */
+  readonly dead: Uint8Array | null;
+  /** A thermometer's bulb's temperature (see warm), which its column shows; the room's to start with. */
+  temp = COOLING.ambient;
+  /**
+   * The vessel a dipper's foot is in (see footY), if any, which whoever runs it sets before each step: the fluid a
+   * thermometer's bulb is in (see warm), or what a wicking strip drinks from, only while it may (see wick).
+   */
+  bath: Vessel | null = null;
+  /** Whether a thermometer has shattered (see warm): for good, reading nothing. */
+  broken = false;
   /** An inline instrument's exponentially weighted average of what it's measured, per sim second (see smooth). */
   private smoothed: number[] | null = null;
   /**
-   * The player's note about the whole tool, written above it; empty for none. Only a tool with more than one tank
-   * has one: on a tool with one tank, its tank's label (Vessel.label) does the job.
+   * The player's note about the whole tool, written above it; empty for none. Only a tool with no tank, or more than
+   * one, has one: on a tool with one tank, its tank's label (Vessel.label) does the job.
    */
   note = '';
   /**
@@ -1060,6 +1592,13 @@ export class Tool {
    * DELIVERY.gap sim seconds; 0 while it isn't. Shown on its screen (see clockText), and it opens the airlock.
    */
   steady = 0;
+  /**
+   * A receptacle's needle's reading: the share, by atoms, of what went through its diverter in the recent past (see
+   * INSTRUMENT_TAU) that was the target. It stays where it was once nothing's going through; null until anything has.
+   */
+  purity: number | null = null;
+  /** Where a receptacle's needle stands on its dial, from 0 to 1: it swings toward its reading (see needleAt) over NEEDLE_TAU. */
+  needle = 0;
 
   constructor(
     readonly kind: ToolKind,
@@ -1071,6 +1610,11 @@ export class Tool {
   ) {
     this.tanks = SHAPES[kind].tanks.map((tk) => new Vessel(tk.cap ?? SHAPES[kind].tankCap ?? TANK_CAP));
     this.tube = Array.from({ length: kind === 'heater' ? HEATER_CELLS : 0 }, () => new Vessel(Infinity));
+    this.paper = Array.from({ length: kind === 'strip' ? STRIP.cells : 0 }, () => new Vessel(Infinity));
+    this.scorch = new Float32Array(this.paper.length);
+    this.bed = Array.from({ length: kind === 'column' ? COLUMN.cells : 0 }, () => new Vessel(Infinity));
+    this.packing = kind === 'strip' ? new Bed(this.paper) : kind === 'column' ? new Bed(this.bed) : null;
+    this.dead = kind === 'culture' ? new Uint8Array(cultureCells().length) : null;
     const nValves = SHAPES[kind].valves?.length ?? this.tanks.length;
     this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' ? 0.5 : 0));
     this.out = this.shape.spouts.map(() => null);
@@ -1090,6 +1634,16 @@ export class Tool {
   step(h: number): (Vessel | null)[] {
     if (this.kind === 'heater') return this.heat(h);
     if (this.kind === 'receptacle') return this.receive(h);
+    if (this.kind === 'strip') return this.wick(h);
+    if (isThermometer(this.kind)) {
+      this.warm(h);
+      return this.none();
+    }
+    if (this.kind === 'column') return this.elute(h);
+    // a culture's cells sicken in what's in the plate, which then drains like any tank
+    if (this.kind === 'culture') this.sicken(h);
+    // nothing drains from a tool with no spouts (a dish)
+    if (!this.shape.spouts.length) return this.none();
     // with nothing in it and its readings faded to nothing, a step would do nothing; an instrument's smoothing starts
     // again from nothing measured, as it would have to within less than TRACE
     if (this.tanks.every((tk) => tk.N <= 0) && this.rate === 0 && !this.reading && !this.links && this.bonds.every((b) => b === 0)) {
@@ -1098,6 +1652,10 @@ export class Tool {
     }
     const T = this.tanks.length;
     const parts = (n: number) => Array.from({ length: n }, (_, j) => this.packet(T + j));
+    if (this.kind === 'dilatometer') {
+      const wireT = wireTemperature(this.valves[this.shape.dial!]);
+      for (const v of this.tanks) heatBy(v, wireT, h);
+    }
     let packets = this.tanks.map((tank, k) => {
       const p = this.packet(k);
       // a valve, or a funnel without one, lets out in proportion to how high the fluid stands; an instrument's tube
@@ -1139,6 +1697,211 @@ export class Tool {
       this.links = v >= TRACE ? shares.map((x) => x / v) : null;
     }
     return this.out;
+  }
+
+  /**
+   * A sleeper culture's step: each living cell that the fluid in the plate covers dies with probability
+   * 1 − e^(−CULTURE.rate · harm · h), whatever the others do, and stays dead. How many do in a step is their number
+   * times that, rounded at random, and which is drawn evenly from among them. Cells above the fluid are untouched.
+   */
+  private sicken(h: number): void {
+    const plate = this.tanks[0];
+    const dead = this.dead!;
+    const rate = CULTURE.rate * harm(plate);
+    if (rate > 0) {
+      const H = this.shape.tankH ?? TANK_H;
+      const surface = cultureLevel(Math.min(1, volume(plate) / plate.cap));
+      const at: number[] = [];
+      cultureCells().forEach((c, i) => {
+        if (!dead[i] && H - c.y < surface) at.push(i);
+      });
+      for (let n = Math.min(at.length, roundRandom(at.length * (1 - Math.exp(-rate * h)))); n > 0; n--) {
+        const j = Math.floor(Math.random() * at.length);
+        dead[at[j]] = 1;
+        at[j] = at[at.length - 1];
+        at.pop();
+      }
+    }
+  }
+
+  /**
+   * Tell a wicking strip what its foot is in now, if it counts as in anything (null if not), whether it may drink it,
+   * and how far under its surface the foot is (see footY), in stretches, before it's stepped (whoever runs it decides
+   * all three): the stretches under the surface are in the fluid, the first at least, and scorch if it's hot (see
+   * char); coming into a fluid from none, they touch it (see touch); and it drinks from it (see bath and wick) only
+   * while it may.
+   */
+  dipIn(v: Vessel | null, soak: boolean, depth = 0): void {
+    this.under = Math.max(1, Math.min(this.paper.length, Math.ceil(depth)));
+    if (v) this.char(v);
+    if (v && !this.wasIn) this.touch(v);
+    this.wasIn = v;
+    this.bath = v && soak ? v : null;
+  }
+
+  /** The stretches of a wicking strip's paper that are in v's fluid (see dipIn), scorched by it if it's hot (see scorchAt). */
+  private char(v: Vessel): void {
+    if (v.N <= 0) return;
+    const by = scorchAt(temperature(v));
+    if (by > 0) for (let c = 0; c < this.under; c++) this.scorch[c] = Math.max(this.scorch[c], by);
+  }
+
+  /**
+   * A wicking strip touched to v, as its foot comes into v's fluid: unused paper, nothing yet drunk up it, takes a spot
+   * of it, STRIP.spot, or what v has if that's less, spread evenly over the stretches that are in the fluid (see
+   * dipIn), so the spot's top is where the surface was; up to STRIP.spots spots' worth in all. Returns the atoms it
+   * took.
+   */
+  touch(v: Vessel): number {
+    if (this.kind !== 'strip' || this.soaked > 0 || v.N <= 0) return 0;
+    const on = this.paper.reduce((a, p) => a + volume(p), 0);
+    const room = Math.min(STRIP.spot, STRIP.spots * STRIP.spot - on);
+    if (room <= 0) return 0;
+    let moved = 0;
+    for (let c = 0; c < this.under; c++) {
+      moved += transfer(v, this.paper[c], room / this.under);
+      this.paper[c].Q = 0;
+    }
+    return moved;
+  }
+
+  /**
+   * A wicking strip's step. While it may drink from what its foot is in (see bath), and the paper hasn't soaked
+   * through, the paper draws it up: what it's drunk grows as the square root of the time (its square grows steadily),
+   * all it holds in STRIP.time, but only as far as the vessel can supply, since soaking a share d takes d · STRIP.cap
+   * from it. What it draws goes into the foot of the paper, and what's in the fluid scorches if that's hot (see char). As it soaks a
+   * share d, the liquid, at the pace of what it drew (see leadOf), carries what's on the paper d · STRIP.cells
+   * stretches' worth up it (see Bed), never past that share of its length. Lifted out, it stops where it is, and put
+   * back, it goes on. Once it's soaked through, the paper dries over STRIP.dry, and is done: single atoms dry off it,
+   * and it takes up nothing more. Nothing leaves it.
+   */
+  private wick(h: number): (Vessel | null)[] {
+    const bath = this.bath;
+    const { paper } = this;
+    if (this.soaked >= 1) {
+      if (this.dryness < 1) {
+        this.dryness = Math.min(1, this.dryness + h / STRIP.dry);
+        if (this.dryness >= 1)
+          for (const v of paper)
+            for (let s = 0; s < NS; s++)
+              if (v.n[s] && SPECIES[s].size === 1) {
+                v.N -= v.n[s];
+                v.n[s] = 0;
+              }
+      }
+      return this.none();
+    }
+    if (!bath || bath.N <= 0) return this.none();
+    const C = STRIP.cells;
+    const d = Math.min(Math.min(1, Math.sqrt(this.soaked ** 2 + h / STRIP.time)) - this.soaked, volume(bath) / STRIP.cap);
+    if (d <= 0) return this.none();
+    this.char(bath);
+    // what it draws this step, which runs at its own pace
+    const drawn = this.packet(0);
+    transfer(bath, drawn, d * STRIP.cap);
+    const lead = leadOf(drawn);
+    // in passes of at most a twentieth of a stretch, so that what comes in lands evenly between moves, and the
+    // paper's evenly wet (see wetness)
+    const passes = Math.ceil(20 * d * C);
+    const from = this.soaked;
+    for (let k = 1; k <= passes; k++) {
+      transfer(drawn, paper[0], k === passes ? volume(drawn) : (d / passes) * STRIP.cap);
+      paper[0].Q = 0;
+      this.soaked = Math.min(1, from + (d * k) / passes);
+      // from the stretch under the soaked one's at most into it
+      this.packing!.carry((d / passes) * C, Math.min(C, Math.ceil(this.soaked * C)) - 2, lead);
+    }
+    if (this.soaked > 1 - 1e-9) this.soaked = 1;
+    return this.none();
+  }
+
+  /**
+   * A column's step. Until its bed is wet through, it drinks from the funnel at COLUMN.soak, tap open or not, until
+   * it's drunk COLUMN.cap; nothing leaves it till then. Once it's wet through, liquid runs from the funnel into it at
+   * COLUMN.flow, as far as the tap's open. Either way only while the funnel has any: what comes in goes into the bed's
+   * top stretch, and as a share d of COLUMN.cap does, the liquid, at the pace of what came in (see leadOf), carries
+   * what's on the bed d · COLUMN.cells stretches' worth down it (see Bed), while it's soaking never past the share of
+   * its length it's drunk, and once it's wet through, out the spout. With the funnel empty or the tap shut, everything on the bed stays where it is.
+   */
+  private elute(h: number): (Vessel | null)[] {
+    const funnel = this.tanks[0];
+    const soaking = this.soaked < 1;
+    const rate = soaking ? COLUMN.soak : this.valves[0] * COLUMN.flow;
+    if (funnel.N <= 0 || rate <= 0) return this.none();
+    const C = COLUMN.cells;
+    const amount = Math.min(rate * h, volume(funnel), soaking ? (1 - this.soaked) * COLUMN.cap : Infinity);
+    const d = amount / COLUMN.cap;
+    if (d <= 0) return this.none();
+    const out = soaking ? null : this.packet(0);
+    // what runs in this step, which runs at its own pace
+    const poured = this.packet(1);
+    transfer(funnel, poured, amount);
+    const lead = leadOf(poured);
+    // in passes of at most a twentieth of a stretch, as on a strip (see wick)
+    const passes = Math.ceil(20 * d * C);
+    const from = this.soaked;
+    for (let k = 1; k <= passes; k++) {
+      transfer(poured, this.bed[0], k === passes ? volume(poured) : amount / passes);
+      if (soaking) this.soaked = Math.min(1, from + (d * k) / passes);
+      this.packing!.carry((d / passes) * C, soaking ? Math.ceil(this.soaked * C) - 2 : C - 1, lead, out);
+    }
+    if (this.soaked > 1 - 1e-9) this.soaked = 1;
+    this.out[0] = out && out.N > 0 ? out : null;
+    this.flow[0] = out ? volume(out) / (MAX_FLOW * h) : 0;
+    return this.out;
+  }
+
+  /**
+   * A thermometer's bulb over a step of h sim seconds: it closes on the temperature of the fluid it's in (see bath)
+   * over THERMOMETER.tau, or in the air, on the room's over THERMOMETER.roomTau. Once it's past THERMOMETER.burst times
+   * the top of its scale, the spirit has nowhere left to go, and it shatters, for good. A broken one does nothing.
+   */
+  private warm(h: number): void {
+    if (this.broken) return;
+    const f = this.bath && this.bath.N > 0 ? this.bath : null;
+    const T = f ? temperature(f) : COOLING.ambient;
+    if (this.temp === T) return;
+    this.temp += (T - this.temp) * (1 - Math.exp(-h / (f ? THERMOMETER.tau : THERMOMETER.roomTau)));
+    // once it's as good as there, it's there, so a thermometer standing in the air comes to rest
+    if (Math.abs(this.temp - T) < 1e-6) this.temp = T;
+    if (this.temp > THERMOMETER.burst * THERMOMETERS[this.kind as ThermometerKind].top) this.broken = true;
+  }
+
+  /** What a thermometer reads: its bulb's temperature, or null once it's broken (or for any other tool). */
+  get reads(): number | null {
+    return isThermometer(this.kind) && !this.broken ? this.temp : null;
+  }
+
+  /**
+   * What a save keeps of an instrument's own state, as numbers, or undefined if it has none: a thermometer's bulb's
+   * temperature, and 1 if it's broken or 0 if not; how much a wicking strip's paper has drunk, how dry it is and how
+   * scorched each stretch is (what's on its paper is saved as vessels, see paper); how much a column's bed has drunk (what's on it is
+   * saved as vessels, see bed); which of a sleeper culture's cells are dead (see dead).
+   */
+  get memory(): number[] | undefined {
+    if (this.kind === 'strip') return [this.soaked, this.dryness, ...this.scorch];
+    if (this.kind === 'column') return [this.soaked];
+    if (this.kind === 'culture') return Array.from(this.dead!);
+    return isThermometer(this.kind) ? [this.temp, +this.broken] : undefined;
+  }
+
+  /**
+   * Put back what a save kept (see memory), wherever it's the right length and all finite numbers. An older save's
+   * strip kept one number for how scorched it was, all over: that goes for as much of it as it had soaked.
+   */
+  remember(m: unknown): void {
+    const want = this.memory?.length;
+    const old = this.kind === 'strip' && Array.isArray(m) && m.length === 3;
+    if (!Array.isArray(m) || (m.length !== want && !old) || !m.every((x) => typeof x === 'number' && Number.isFinite(x))) return;
+    if (isThermometer(this.kind)) [this.temp, this.broken] = [m[0] as number, (m[1] as number) > 0];
+    if (this.kind === 'strip') {
+      const [soaked, dryness, ...scorch] = (m as number[]).map((x) => Math.max(0, Math.min(1, x)));
+      [this.soaked, this.dryness] = [soaked, dryness];
+      if (old) this.scorch.fill(scorch[0], 0, Math.ceil(soaked * STRIP.cells));
+      else this.scorch.set(scorch);
+    }
+    if (this.kind === 'column') this.soaked = Math.max(0, Math.min(1, (m as number[])[0]));
+    if (this.kind === 'culture') this.dead!.set((m as number[]).map((x) => +(x > 0)));
   }
 
   /** Scratch fluid i (see scratch), emptied. */
@@ -1195,13 +1958,20 @@ export class Tool {
    * How high the fluid in tank k stands, as a share of the tank's full height, for how fast it drains: in step with
    * how full it is, except in a tank with a cup on top (see cupFillHeight), whose narrow tube fills first, or a sump
    * below (see sumpFillHeight), which fills first and is measured from its tip. This goes by the tank's flat outline,
-   * as the game has always drained, not by how it's drawn in the room (see tankPieces), so flows stay as they were.
+   * as the game has always drained, not by how it's drawn in the room (see tankPieces), so flows stay as they were;
+   * but a tank with a neck goes by how it's drawn, from its sump's tip to its neck's top.
    */
   level(k: number): number {
     const v = this.tanks[k];
     const share = Math.min(1, volume(v) / v.cap);
-    const { cup, sump, tanks, tankH = TANK_H } = this.shape;
+    const { cup, sump, neck, tanks, tankH = TANK_H } = this.shape;
     const w = tanks[k].x1 - tanks[k].x0;
+    if (neck) {
+      // a newer shape, with no flows to keep as they were: by how it's drawn (its outline worked out once per kind)
+      let pieces = necked.get(this.kind);
+      if (!pieces) necked.set(this.kind, (pieces = tankPieces(this.shape, k, w)));
+      return levelIn(pieces, share) / heightOf(pieces);
+    }
     if (sump) return sumpFillHeight(share, w, tankH, sump) / (tankH + sump.h);
     if (cup) return cupFillHeight(share, w, tankH, 2 * cup.w, cup.h) / (tankH + cup.h);
     return share;
@@ -1221,7 +1991,8 @@ export class Tool {
    * A receptacle's step. Its reservoir's faucet lets out as far as its valve is open, at REFERENCE_FLOW. Its funnel
    * drains straight through at FUNNEL_RATE, however full it is, into the diverter, which judges what comes through: more
    * than GOAL_PURITY target (see sustenance), and it goes into the reservoir (as much as fits), else out the waste
-   * spigot. The reservoir's filter takes out what has a black atom in it (see filter).
+   * spigot. Its needle reads how much of what's come through lately was the target (see purity). The reservoir's
+   * filter takes out what has a black atom in it (see filter).
    */
   private receive(h: number): (Vessel | null)[] {
     const [funnel, ref] = this.tanks;
@@ -1233,6 +2004,10 @@ export class Tool {
     transfer(funnel, p, FUNNEL_RATE * h);
     this.sinceFlow += h;
     this.sinceDelivery += h;
+    // the needle reads what the diverter is judging, before it goes either way
+    const [passed, target] = this.smooth(h, [p.N, p.n[TARGET] * SPECIES[TARGET].size]);
+    if (passed >= TRACE) this.purity = target / passed;
+    this.needle += (needleAt(this.purity ?? 0) - this.needle) * (1 - Math.exp(-h / NEEDLE_TAU));
     if (p.N > 0) {
       this.sinceFlow = 0;
       this.gate = sustenance(p) > 0 ? 'reservoir' : 'waste';
@@ -1251,7 +2026,8 @@ export class Tool {
  * What an analyzer shows for a sample, against `cap`: for each molecule size w (1–4 atoms) and atom color c, in
  * SECTOR_ATOMS order, at index (w − 1)·4 + c, how much of `cap` molecules of size w with a c atom in them make up
  * (by volume, see VOLUME). So against the sample's own volume, R lights 1R fully, and R–G both 2R and 2G fully; and
- * half R, half G lights 1R and 1G half as bright.
+ * half R, half G lights 1R and 1G half as bright. It has no sector for the solvent, which lights nothing, but takes up
+ * room all the same, so half R, half S lights 1R half as bright too.
  */
 export function composition(f: Fluid, cap: number): number[] {
   const n = SECTOR_ATOMS.length;
@@ -1259,7 +2035,10 @@ export function composition(f: Fluid, cap: number): number[] {
   for (let s = 0; s < NS; s++) {
     if (!f.n[s]) continue;
     const sp = SPECIES[s];
-    for (const a of sp.atoms) out[(sp.size - 1) * n + SECTOR_ATOMS.indexOf(a)] += (f.n[s] * roomFor(s)) / cap;
+    for (const a of sp.atoms) {
+      const c = SECTOR_ATOMS.indexOf(a as ColorAtom);
+      if (c >= 0) out[(sp.size - 1) * n + c] += (f.n[s] * roomFor(s)) / cap;
+    }
   }
   return out;
 }

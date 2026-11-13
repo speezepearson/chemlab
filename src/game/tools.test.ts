@@ -1,16 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { SPECIES, TARGET, bondMask, pairOf, singleOf, speciesIndex } from '../chem/species';
-import { CAP, DELIVERY, GOAL_PURITY, GOAL_TARGET } from './config';
-import { heatAt, temperature } from '../chem/reactions';
+import { SOLVENT_SPECIES, SPECIES, TARGET, bondMask, pairOf, singleOf, speciesIndex } from '../chem/species';
+import { CAP, DELIVERY, GOAL_PURITY, GOAL_TARGET, TRACE } from './config';
+import { ReactionNetwork, heatAt, temperature } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
-import { Vessel, roomFor, volume } from './flask';
-import { FLASK_VOLUME } from './flaskShape';
+import { COOLING } from './cooling';
+import { Vessel, roomFor, transfer, volume } from './flask';
+import { FLASK_VOLUME, flaskRadius } from './flaskShape';
 import { STATION_POSE } from './presets';
-import { WALL_PANEL } from './space';
+import { CELL, WALL_PANEL } from './space';
+import { tankMouth } from './bodies';
+import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_CAP, REFERENCE_FLOW, REFERENCE_START, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -326,6 +329,43 @@ describe('cryostabilizer station', () => {
     expect(r.sinceFlow).toBeCloseTo(0.02, 9);
   });
 
+  it('reads how much of what went through lately was the target on its needle, which stays there afterwards', () => {
+    const r = new Tool('receptacle', 0);
+    const [funnel] = r.tanks;
+    expect(r.purity).toBeNull();
+    // 80% target by atoms: turned away, but the needle says how near it was
+    funnel.setMolecules(TARGET, 0.08 * CAP);
+    funnel.setMolecules(R, 0.06 * CAP);
+    for (let t = 0; funnel.N > 0 && t < 5; t += 0.02) r.step(0.02);
+    expect(r.gate).toBe('waste');
+    expect(r.purity).toBeCloseTo(0.8, 3);
+    // with nothing going through, it stays where it was, and the needle has swung there from its left stop
+    for (let t = 0; t < 30; t += 0.02) r.step(0.02);
+    expect(r.purity).toBeCloseTo(0.8, 3);
+    expect(r.needle).toBeCloseTo(needleAt(0.8), 3);
+    // and the needle swings on to what goes through next, not all at once
+    funnel.setMolecules(TARGET, 0.2 * CAP);
+    r.step(0.02);
+    expect(r.purity).toBe(1);
+    expect(r.needle).toBeGreaterThan(needleAt(0.8));
+    expect(r.needle).toBeLessThan(0.7);
+    for (let t = 0; t < 5; t += 0.02) r.step(0.02);
+    expect(r.needle).toBeCloseTo(1, 3);
+  });
+
+  it('swings its needle from its left stop to its right, furthest for the last few percent', () => {
+    expect(needleAt(0)).toBe(0);
+    expect(needleAt(1)).toBe(1);
+    expect(needleAt(0.75)).toBeCloseTo(0.5);
+    for (let p = 0; p < 1; p += 0.05) expect(needleAt(p + 0.05)).toBeGreaterThan(needleAt(p));
+    // the last five percent swing it further than the first thirty
+    expect(1 - needleAt(0.95)).toBeGreaterThan(needleAt(0.3));
+    // the dial is on the plate, clear of the diverter's display and the funnel
+    const { needle: n, display: d, block } = STATION;
+    expect(n.x1).toBeLessThan(d.x0);
+    expect(n.x0).toBeGreaterThan(block.x0);
+  });
+
   it(`keeps time it's been delivering steadily, at least every ${DELIVERY.gap} sim s`, () => {
     const r = new Tool('receptacle', 0);
     const funnel = r.tanks[0];
@@ -424,6 +464,1028 @@ describe('cryostabilizer station', () => {
     expect((d.x0 + d.x1) / 2).toBe((r.shape.tanks[0].x0 + r.shape.tanks[0].x1) / 2);
     expect(d.y0).toBeGreaterThan(f.y + f.h);
     expect(d.y1).toBeLessThan(r.shape.spoutY);
+  });
+});
+
+describe('swell bulbs', () => {
+  const chain = (...atoms: ('R' | 'G' | 'B')[]) =>
+    speciesIndex(atoms, bondMask([atoms[0], atoms[1]], [atoms[1], atoms[2]]));
+
+  it('are two bulbs with narrow necks, drawn as big as what they hold', () => {
+    const d = new Tool('dilatometer', 0);
+    expect(d.tanks.map((v) => v.cap)).toEqual([BULB_BODY_CAP + BULB_NECK_CAP, BULB_BODY_CAP + BULB_NECK_CAP]);
+    const pieces = tankPieces(d.shape, 0, tankDepth('dilatometer'));
+    expect(spaceOf(pieces) / SPACE_PER_ATOM / d.tanks[0].cap).toBeCloseTo(1, 6);
+    expect(heightOf(pieces)).toBe(BULB.sump.h + BULB.h + BULB.neck.h);
+    // the neck is narrow next to the bulb, so a little more fluid stands a lot higher in it
+    expect(BULB_NECK_CAP / BULB_BODY_CAP).toBeGreaterThan(1 / 8);
+    expect(BULB_NECK_CAP / BULB_BODY_CAP).toBeLessThan(1 / 4);
+    expect(BULB.neck.h / BULB.h).toBeGreaterThan(3);
+  });
+
+  it('stand pressed together, their necks side by side, each filled through a funnel a grid cell from the other', () => {
+    const d = new Tool('dilatometer', 0);
+    const { neck, tanks, spouts } = d.shape;
+    // the necks are a hair apart in the middle, each up from the inner edge of its bulb, and the bulbs don't overlap
+    expect(neck!.necks[1] - neck!.necks[0]).toBeCloseTo(neck!.w + BULB.gap, 9);
+    expect(neck!.necks[0]).toBe(-neck!.necks[1]);
+    neck!.bodies.forEach((bx, k) => {
+      expect(Math.abs(neck!.necks[k] - bx) + neck!.w / 2).toBeCloseTo(neck!.body / 2, 9);
+      expect(Math.abs(neck!.necks[k])).toBeLessThan(Math.abs(bx));
+    });
+    expect(neck!.bodies[1] - neck!.bodies[0]).toBeGreaterThanOrEqual(neck!.body);
+    // its inlets and spouts are a grid cell apart, outside the bulbs, and each spout is under its inlet
+    const inlets = tanks.map((tk) => (tk.x0 + tk.x1) / 2);
+    expect(inlets[1] - inlets[0]).toBe(CELL);
+    expect(spouts).toEqual(inlets);
+    inlets.forEach((x, k) => expect(Math.abs(x)).toBeGreaterThan(Math.abs(neck!.bodies[k]) + neck!.body / 2));
+    // each inlet is at the top of its neck, wholly above it, so nothing stands in a funnel below the fluid's level;
+    // fluid goes in there, and what no longer fits spills over its lip
+    expect(-(neck!.inlet.y + neck!.inlet.h)).toBeGreaterThan(neck!.h);
+    const m = tankMouth(d, 0);
+    expect(m.x).toBeCloseTo(inlets[0], 9);
+    expect(m.y).toBeCloseTo(-neck!.inlet.y, 9);
+    expect(m.rim!.y).toBeCloseTo(m.y, 9);
+  });
+
+  it('show how much each holds by how far up its neck it stands', () => {
+    expect(neckShare(0)).toBe(0);
+    expect(neckShare(BULB_BODY_CAP)).toBe(0);
+    expect(neckShare(BULB_BODY_CAP + BULB_NECK_CAP / 4)).toBeCloseTo(0.25, 9);
+    expect(neckShare(BULB_BODY_CAP + BULB_NECK_CAP)).toBe(1);
+    expect(neckShare(2 * (BULB_BODY_CAP + BULB_NECK_CAP))).toBe(1);
+    // a bulb that's just full, swelling by a twentieth, climbs its neck by that much of the bulb over the neck
+    expect(neckShare(1.05 * BULB_BODY_CAP)).toBeCloseTo((0.05 * BULB_BODY_CAP) / BULB_NECK_CAP, 9);
+    // and its level, for how fast it drains, follows it up the neck
+    const d = new Tool('dilatometer', 0);
+    filled(d.tanks[0], R, BULB_BODY_CAP, 1);
+    const foot = d.level(0);
+    expect(foot).toBeCloseTo((BULB.sump.h + BULB.h) / (BULB.sump.h + BULB.h + BULB.neck.h), 3);
+    filled(d.tanks[0], R, BULB_BODY_CAP + BULB_NECK_CAP / 2, 1);
+    expect(d.level(0)).toBeCloseTo(foot + (1 - foot) / 2, 3);
+  });
+
+  it('heat both bulbs alike toward the wire, as far as the dial is turned, and not at all with it off', () => {
+    const d = new Tool('dilatometer', 0);
+    for (const v of d.tanks) filled(v, R, BULB_BODY_CAP, 1);
+    for (let i = 0; i < 500; i++) d.step(0.02);
+    expect(d.tanks.map(temperature)).toEqual([1, 1]);
+    d.valves[d.shape.dial!] = 0.5;
+    const wire = wireTemperature(0.5);
+    for (let i = 0; i < 5000; i++) d.step(0.02);
+    for (const v of d.tanks) expect(temperature(v) / wire).toBeCloseTo(1, 3);
+    // nothing leaves with its valves shut
+    expect(d.tanks.map((v) => v.N)).toEqual([BULB_BODY_CAP, BULB_BODY_CAP]);
+  });
+
+  it('drain slowly, each through its own valve', () => {
+    const d = new Tool('dilatometer', 0, undefined, [1, 0, 0]);
+    for (const v of d.tanks) filled(v, R, BULB_BODY_CAP + BULB_NECK_CAP, 1);
+    const out = d.step(0.1);
+    expect(out[0]!.N / (PIPETTE_FLOW * 0.1)).toBeCloseTo(1, 6);
+    expect(out[1]).toBeNull();
+  });
+
+  it('show chains among triangles: heated, a chain splits in two, and a triangle only opens', () => {
+    // the fixed test chemistry: its R–G bond breaks at the wire's hottest, and its blue bonds never do
+    const net = new ReactionNetwork(testChemParams());
+    const d = new Tool('dilatometer', 0);
+    const [pure, mixed] = d.tanks;
+    pure.setMolecules(TARGET, BULB_BODY_CAP);
+    mixed.setMolecules(TARGET, 0.8 * BULB_BODY_CAP);
+    mixed.setMolecules(chain('R', 'G', 'B'), 0.1 * BULB_BODY_CAP);
+    mixed.setMolecules(chain('G', 'R', 'B'), 0.1 * BULB_BODY_CAP);
+    for (const v of d.tanks) v.setTemperature(1);
+    d.valves[d.shape.dial!] = 1;
+    for (let i = 0; i < 2000; i++) {
+      d.step(0.01);
+      for (const v of d.tanks) net.step(v, 0.01);
+    }
+    expect(volume(pure)).toBe(BULB_BODY_CAP);
+    expect(neckShare(volume(pure))).toBe(0);
+    expect(volume(mixed)).toBeGreaterThan(BULB_BODY_CAP);
+    expect(neckShare(volume(mixed))).toBeGreaterThan(0);
+  });
+});
+
+describe('wicking strip', () => {
+  const chain = (...atoms: ('R' | 'G' | 'B')[]) =>
+    speciesIndex(atoms, bondMask([atoms[0], atoms[1]], [atoms[1], atoms[2]]));
+  const run = (t: Tool, seconds: number) => {
+    for (let i = 0; i < Math.round(seconds / 0.02); i++) t.step(0.02);
+  };
+  const C = STRIP.cells;
+  /** A vessel holding `total` molecules, in the given shares, at temperature T. */
+  const mix = (parts: [number, number][], total = 3 * STRIP.spot, T = 1) => {
+    const v = new Vessel(Infinity);
+    for (const [s, share] of parts) v.setMolecules(s, share * total);
+    v.setTemperature(T);
+    return v;
+  };
+  /** A vessel holding `amount` molecules of `carrier`, to stand a strip in: three paperfuls unless said. */
+  const carrierOf = (carrier: number, amount = 3 * STRIP.cap, T = 1) => filled(new Vessel(Infinity), carrier, amount * SPECIES[carrier].size, T);
+  /** A strip touched to a spot of `parts`, then stood in `carrier`, single green atoms unless said. */
+  const spotted = (parts: [number, number][], carrier = G) => {
+    const t = new Tool('strip', 0);
+    t.dipIn(mix(parts), false);
+    t.dipIn(null, false);
+    const bath = carrierOf(carrier);
+    t.dipIn(bath, true);
+    return { t, bath };
+  };
+  /** Where species s's band ends up with a pure carrier, in stretches from the foot: as far as it runs with it. */
+  const want = (s: number, carrier: number) => Math.min(1, STRIP_RUN[s] / STRIP_RUN[carrier]) * C;
+  /** Where species s is on the paper, on average, in stretches from its foot. */
+  const centre = (t: Tool, s: number) => {
+    const total = t.paper.reduce((a, v) => a + v.n[s], 0);
+    return t.paper.reduce((a, v, c) => a + v.n[s] * (c + 0.5), 0) / total;
+  };
+  const peak = (t: Tool, s: number) => Math.max(...t.paper.map((v) => stripInk(s, v.n[s], t.dryness)));
+  const onPaper = (t: Tool) => t.paper.reduce((a, v) => a + atomTotal(v), 0);
+
+  it('is bare paper: no tanks, spouts or valves, and a dipper, its foot at the tip of its paper', () => {
+    const t = new Tool('strip', 0);
+    expect(t.tanks).toEqual([]);
+    expect(t.shape.spouts).toEqual([]);
+    expect(t.shape.noValve).toBe(true);
+    expect(isDipper('strip')).toBe(true);
+    expect(footY('strip')).toBeCloseTo(STRIP_FOOT - 0.5, 9);
+    expect(STRIP_FOOT).toBeLessThanOrEqual(t.shape.box.y1);
+    // and narrow enough to go down a flask's neck, with room to spare
+    expect(2 * STRIP.paper.w).toBeLessThan(2 * flaskRadius(22) - 4);
+  });
+
+  it('runs each species some way along it: lighter further, and a ring further than a chain of the same atoms', () => {
+    for (const r of STRIP_RUN) {
+      expect(r).toBeGreaterThan(0);
+      expect(r).toBeLessThan(1);
+    }
+    // single atoms, lightest first, ahead of everything else
+    const singles = SPECIES.filter((sp) => sp.size === 1).sort((a, b) => a.weight - b.weight);
+    for (let i = 1; i < singles.length; i++) expect(STRIP_RUN[singles[i].i]).toBeLessThan(STRIP_RUN[singles[i - 1].i]);
+    for (const sp of SPECIES) if (sp.size > 1) expect(STRIP_RUN[sp.i]).toBeLessThan(STRIP_RUN[singles[singles.length - 1].i]);
+    // the triangle, with no loose ends, well ahead of all three chains of its atoms, which each end up somewhere of
+    // their own, more than a stretch of the paper apart after a full run
+    const cells = (r: number) => r * C;
+    const chains = [chain('R', 'G', 'B'), chain('G', 'R', 'B'), chain('R', 'B', 'G')];
+    for (const c of chains) expect(cells(STRIP_RUN[TARGET] - STRIP_RUN[c])).toBeGreaterThan(16);
+    const at = chains.map((c) => STRIP_RUN[c]).sort((a, b) => a - b);
+    expect(cells(at[1] - at[0])).toBeGreaterThan(2);
+    expect(cells(at[2] - at[1])).toBeGreaterThan(2);
+  });
+
+  it('takes one spot from what its foot comes into onto its foot, up to three in all', () => {
+    const t = new Tool('strip', 0);
+    const v = mix([[TARGET, 1]], 10 * STRIP.spot);
+    const atoms = atomTotal(v);
+    t.dipIn(v, false);
+    expect(volume(t.paper[0])).toBe(STRIP.spot);
+    expect(atomTotal(v) + onPaper(t)).toBe(atoms);
+    t.paper.forEach((p, c) => c > 0 && expect(p.N).toBe(0));
+    // only as it comes into it: staying in, it takes no more
+    t.dipIn(v, false);
+    run(t, 1);
+    t.dipIn(v, false);
+    expect(volume(t.paper[0])).toBe(STRIP.spot);
+    // lifted out and touched again, it takes another, and a third, and then no more
+    for (let k = 2; k <= 4; k++) {
+      t.dipIn(null, false);
+      t.dipIn(v, false);
+      expect(volume(t.paper[0])).toBe(Math.min(k, STRIP.spots) * STRIP.spot);
+    }
+    expect(STRIP.spots).toBe(3);
+    expect(atomTotal(v) + onPaper(t)).toBe(atoms);
+    // a little vessel gives what it has
+    const u = new Tool('strip', 0);
+    const small = mix([[TARGET, 1]], STRIP.spot / 2);
+    u.dipIn(small, false);
+    expect(small.N).toBe(0);
+    expect(volume(u.paper[0])).toBe(STRIP.spot / 2);
+  });
+
+  it('takes its spot over as much of it as is in the fluid, evenly, so its top is where the surface was', () => {
+    const t = new Tool('strip', 0);
+    const v = mix([[TARGET, 1]], 10 * STRIP.spot);
+    const atoms = atomTotal(v);
+    // its foot, the middle of its first stretch, 2.5 under: its first three stretches' middles are under
+    t.dipIn(v, false, 2.5);
+    for (let c = 0; c < 3; c++) expect(Math.abs(volume(t.paper[c]) - STRIP.spot / 3)).toBeLessThanOrEqual(1);
+    t.paper.forEach((p, c) => c >= 3 && expect(p.N).toBe(0));
+    expect(atomTotal(v) + onPaper(t)).toBe(atoms);
+    // a second touch, no deeper, goes over the same stretches, and it's still at most three spots in all
+    for (let k = 2; k <= 4; k++) {
+      t.dipIn(null, false);
+      t.dipIn(v, false, 2.5);
+    }
+    expect(Math.abs(t.paper.reduce((a, p) => a + volume(p), 0) - STRIP.spots * STRIP.spot)).toBeLessThanOrEqual(STRIP.spots * 3);
+    t.paper.forEach((p, c) => c >= 3 && expect(p.N).toBe(0));
+    // barely in, it's its first stretch; and however deep, no more of it than there is
+    const u = new Tool('strip', 1);
+    u.dipIn(mix([[TARGET, 1]]), false, 0.01);
+    expect(volume(u.paper[0])).toBe(STRIP.spot);
+    const w = new Tool('strip', 2);
+    w.dipIn(mix([[TARGET, 1]]), false, 10 * C);
+    expect(w.paper.every((p) => p.N > 0)).toBe(true);
+  });
+
+  it('takes no spot once it has begun to drink', () => {
+    const t = new Tool('strip', 0);
+    t.dipIn(carrierOf(G), true);
+    run(t, 0.1);
+    expect(t.soaked).toBeGreaterThan(0);
+    t.dipIn(null, false);
+    const v = mix([[TARGET, 1]]);
+    const n = v.N;
+    t.dipIn(v, false);
+    expect(v.N).toBe(n);
+    expect(t.touch(v)).toBe(0);
+    expect(t.paper.every((p) => p.n[TARGET] === 0)).toBe(true);
+  });
+
+  it('drinks nothing while it may not (a tap), only its spot', () => {
+    const t = new Tool('strip', 0);
+    const bath = carrierOf(G);
+    t.dipIn(bath, false);
+    const n = bath.N;
+    const before = t.paper.map((v) => [...v.n]);
+    run(t, 5);
+    expect(t.soaked).toBe(0);
+    expect(bath.N).toBe(n);
+    expect(t.paper.map((v) => [...v.n])).toEqual(before);
+  });
+
+  it('drinks from what its foot is in as the square root of the time, stops when out of it, and goes on when back', () => {
+    const t = new Tool('strip', 0);
+    const bath = carrierOf(G);
+    t.dipIn(bath, true);
+    const atoms = bath.N + onPaper(t);
+    run(t, STRIP.time / 4);
+    expect(t.soaked).toBeCloseTo(0.5, 2);
+    // what it's drunk is what it's soaked, all on the paper, and none lost
+    expect(volume(bath)).toBeCloseTo(3 * STRIP.cap - STRIP.spot - 0.5 * STRIP.cap, -4);
+    expect(Math.abs(bath.N + onPaper(t) - atoms)).toBeLessThanOrEqual(TRACE);
+    run(t, STRIP.time / 4);
+    expect(t.soaked).toBeCloseTo(Math.SQRT1_2, 2);
+    // lifted out, it stops where it is
+    t.dipIn(null, false);
+    const paper = t.paper.map((v) => [...v.n]);
+    run(t, 5);
+    expect(t.soaked).toBeCloseTo(Math.SQRT1_2, 2);
+    expect(t.paper.map((v) => [...v.n])).toEqual(paper);
+    // and put back, it goes on, taking no new spot
+    const n = bath.N;
+    t.dipIn(bath, true);
+    expect(bath.N).toBe(n);
+    run(t, STRIP.time / 2 + 0.1);
+    expect(t.soaked).toBe(1);
+    expect(Math.abs(bath.N + onPaper(t) - atoms)).toBeLessThanOrEqual(TRACE);
+    run(t, STRIP.dry + 0.1);
+    expect(t.dryness).toBe(1);
+  });
+
+  it('stops where it is when what it stands in runs dry, and goes on when there is more', () => {
+    const t = new Tool('strip', 0);
+    const bath = carrierOf(G, 0.3 * STRIP.cap);
+    t.dipIn(bath, true);
+    run(t, 5);
+    expect(bath.N).toBe(0);
+    // its touch took a spot's worth of it first
+    expect(t.soaked).toBeCloseTo(0.3 - STRIP.spot / STRIP.cap, 3);
+    run(t, 5);
+    expect(t.soaked).toBeCloseTo(0.3 - STRIP.spot / STRIP.cap, 3);
+    filled(bath, G, STRIP.cap, 1);
+    run(t, STRIP.time);
+    expect(t.soaked).toBe(1);
+  });
+
+  it('separates what a spot holds into bands, each where its species runs to from the foot beside the carrier', () => {
+    const chainRGB = chain('R', 'G', 'B');
+    for (const carrier of [G, R, SOLVENT_SPECIES]) {
+      const { t, bath } = spotted([[TARGET, 0.5], [chainRGB, 0.5]], carrier);
+      const atoms = bath.N + onPaper(t);
+      run(t, STRIP.time + 1);
+      expect(t.soaked).toBe(1);
+      expect(Math.abs(bath.N + onPaper(t) - atoms)).toBeLessThanOrEqual(TRACE);
+      for (const s of [TARGET, chainRGB]) expect(Math.abs(centre(t, s) - want(s, carrier))).toBeLessThan(1.5);
+      expect(centre(t, TARGET) - centre(t, chainRGB)).toBeGreaterThan(16);
+      // as bands, nearly all of each within eight stretches of its middle
+      for (const s of [TARGET, chainRGB]) {
+        const m = Math.floor(centre(t, s));
+        const near = t.paper.slice(m - 8, m + 9).reduce((a, v) => a + v.n[s], 0);
+        expect(near / t.paper.reduce((a, v) => a + v.n[s], 0)).toBeGreaterThan(0.95);
+      }
+    }
+  });
+
+  it('carries a pure carrier at the pace it is drawn up, so it is wet where the carrier is, and only there', () => {
+    for (const carrier of [R, SOLVENT_SPECIES]) {
+      const t = new Tool('strip', 0);
+      const bath = carrierOf(carrier);
+      t.dipIn(bath, true);
+      const atoms = bath.N + onPaper(t);
+      const cell = STRIP.cap / C;
+      for (const seconds of [STRIP.time / 16, STRIP.time / 4, STRIP.time / 2]) {
+        run(t, seconds - STRIP.time * (t.soaked ** 2));
+        expect(t.soaked).toBeLessThan(1);
+        // the carrier's on every stretch up to nearly as far as the paper's soaked, about a stretch's worth on each,
+        // so it's wet there (but the foot, which fills as it's drawn up and empties each time what's on it moves on)
+        const reach = Math.floor(0.95 * t.soaked * C);
+        for (let c = 1; c <= reach; c++) expect(volume(t.paper[c])).toBeGreaterThan(0.5 * cell);
+        expect(wetness(volume(t.paper[reach]), STRIP.cap, C)).toBeGreaterThan(0.5);
+        // and there's nothing past that share of its length, so it's dry there
+        t.paper.forEach((v, c) => c >= Math.ceil(t.soaked * C) && expect(wetness(volume(v), STRIP.cap, C)).toBe(0));
+        expect(Math.abs(bath.N + onPaper(t) - atoms)).toBeLessThanOrEqual(TRACE);
+      }
+    }
+  });
+
+  it('carries what is faster than its carrier with the liquid, never ahead of it', () => {
+    // green runs more freely than red
+    expect(STRIP_RUN[G]).toBeGreaterThan(STRIP_RUN[R]);
+    const { t } = spotted([[G, 1]], R);
+    const top = (s: number) => t.paper.reduce((a, v, c) => (v.n[s] > 0 ? c : a), -1);
+    for (let i = 0; i < (STRIP.time + 1) / 0.02; i++) {
+      t.step(0.02);
+      expect(top(G)).toBeLessThanOrEqual(Math.max(top(R), 0));
+      if (top(G) > 0) expect(t.paper[top(G)].n[R]).toBeGreaterThan(0);
+    }
+    // so it ends up at the top, with the carrier's leading edge
+    expect(t.soaked).toBe(1);
+    expect(want(G, R)).toBe(C);
+    expect(centre(t, G)).toBeGreaterThan(C - 3);
+  });
+
+  it('shows how wet a stretch is by how much is on it, as a share of its part of what the whole holds wet through', () => {
+    expect(wetness(0, 100, 10)).toBe(0);
+    expect(wetness(5, 100, 10)).toBeCloseTo(0.5, 12);
+    expect(wetness(10, 100, 10)).toBe(1);
+    expect(wetness(30, 100, 10)).toBe(1);
+  });
+
+  it('shows a twentieth of the spot clearly, as bands apart on clean paper, and most of it dark only near its middle, whatever single atom carries it', () => {
+    const minor = [chain('R', 'G', 'B'), chain('G', 'R', 'B'), pairOf('R', 'G')];
+    for (const carrier of [G, R, SOLVENT_SPECIES]) {
+      const { t } = spotted([[TARGET, 0.85], ...minor.map((s): [number, number] => [s, 0.05])], carrier);
+      run(t, STRIP.time + STRIP.dry + 1);
+      expect(t.dryness).toBe(1);
+      for (const s of [TARGET, ...minor]) expect(Math.abs(centre(t, s) - want(s, carrier))).toBeLessThan(1.5);
+      // each of the others shows clearly at its peak
+      for (const s of minor) {
+        expect(peak(t, s)).toBeGreaterThan(0.3);
+        expect(peak(t, s)).toBeLessThan(0.6);
+      }
+      // the triangle is as dark as it gets, but only over a few stretches round its middle
+      expect(peak(t, TARGET)).toBeGreaterThan(0.99);
+      expect(t.paper.filter((v) => stripInk(TARGET, v.n[TARGET], 1) > 0.9).length).toBeLessThan(8);
+      // and midway between its band and the nearest below it, the paper's clean
+      const below = Math.max(...minor.map((s) => centre(t, s)));
+      expect(below).toBeLessThan(centre(t, TARGET));
+      const mid = t.paper[Math.floor((below + centre(t, TARGET)) / 2)];
+      expect(stripInk(TARGET, mid.n[TARGET], 1)).toBeLessThan(0.05);
+      const clear = SPECIES.reduce((a, sp) => a * (1 - stripInk(sp.i, mid.n[sp.i], 1)), 1);
+      expect(1 - clear).toBeLessThan(0.1);
+    }
+    expect(stripInk(TARGET, 0, 0)).toBe(0);
+  });
+
+  it('dries clean of its carrier: single atoms leave no ink', () => {
+    const { t } = spotted([[TARGET, 1]]);
+    run(t, STRIP.time / 2);
+    // wet, the carrier tints it
+    const tint = peak(t, G);
+    expect(tint).toBeGreaterThan(0.5 * STRIP.tint);
+    expect(tint).toBeLessThanOrEqual(STRIP.tint);
+    run(t, STRIP.time);
+    // drying, its tint fades
+    run(t, STRIP.dry / 2);
+    expect(peak(t, G)).toBeLessThanOrEqual(0.5 * STRIP.tint + 0.01);
+    run(t, STRIP.dry);
+    expect(t.dryness).toBe(1);
+    for (const v of t.paper) for (const sp of SPECIES) if (sp.size === 1) expect(v.n[sp.i]).toBe(0);
+    expect(peak(t, G)).toBe(0);
+    expect(stripInk(G, STRIP.spot, 1)).toBe(0);
+    // and done, it takes up nothing more, stood in anything
+    const before = t.paper.map((v) => [...v.n]);
+    t.dipIn(null, false);
+    t.dipIn(carrierOf(R), true);
+    run(t, 5);
+    expect(t.paper.map((v) => [...v.n])).toEqual(before);
+    expect(t.step(0.02)).toEqual([]);
+  });
+
+  it('gives a staircase of fronts, not bands, stood fresh in the sample itself', () => {
+    const chainRGB = chain('R', 'G', 'B');
+    const t = new Tool('strip', 0);
+    const sample = mix([[TARGET, 0.5], [chainRGB, 0.5]], 3 * STRIP.cap);
+    // the liquid runs at the mean of the two, the triangle with it and the chain behind
+    const lead = leadOf(sample);
+    t.dipIn(sample, true);
+    run(t, STRIP.time + 1);
+    expect(t.soaked).toBe(1);
+    for (const s of [TARGET, chainRGB]) {
+      const reach = Math.floor(Math.min(1, STRIP_RUN[s] / lead) * C) - 3;
+      for (let c = 0; c < reach; c++) expect(t.paper[c].n[s]).toBeGreaterThan(0);
+    }
+  });
+
+  it('is scorched where it has been in hot fluid, and nowhere else', () => {
+    const { from, to } = STRIP.scorch;
+    expect(scorchAt(from)).toBe(0);
+    expect(scorchAt((from + to) / 2)).toBeCloseTo(0.5, 9);
+    expect(scorchAt(2 * to)).toBe(1);
+    const scorched = (t: Tool) => [...t.scorch].map((x) => +x.toFixed(2));
+    const upTo = (n: number, by: number) => Array.from({ length: C }, (_, c) => (c < n ? by : 0));
+    // by a hot fluid it's touched to, as far up as it's in it: the same stretches as its spot
+    const t = new Tool('strip', 0);
+    t.dipIn(mix([[TARGET, 1]], STRIP.spot, (from + to) / 2), false, 2.5);
+    expect(scorched(t)).toEqual(upTo(3, 0.5));
+    expect(t.paper.map((p) => p.N > 0)).toEqual(upTo(3, 1).map(Boolean));
+    // and no further, though a cool carrier then wets it to its top, deeper in than it was
+    t.dipIn(null, false);
+    t.dipIn(carrierOf(R, 2 * STRIP.cap, from), true, 5.5);
+    run(t, STRIP.time + 1);
+    expect(t.soaked).toBe(1);
+    expect(scorched(t)).toEqual(upTo(3, 0.5));
+    // a hot carrier chars what stands in it, and only that, however far it's drawn up
+    const u = new Tool('strip', 0);
+    u.dipIn(carrierOf(R, 2 * STRIP.cap, to), true, 5.5);
+    run(u, STRIP.time / 2);
+    expect(u.soaked).toBeGreaterThan(0.5);
+    expect(scorched(u)).toEqual(upTo(6, 1));
+    // even paper that's done, or that isn't let drink, scorches in hot fluid; in none, nothing does
+    const w = new Tool('strip', 0);
+    w.dipIn(carrierOf(R, STRIP.cap, to), false);
+    expect(scorched(w)).toEqual(upTo(1, 1));
+    const x = new Tool('strip', 0);
+    x.dipIn(null, true, 5.5);
+    run(x, 1);
+    expect(scorched(x)).toEqual(upTo(0, 0));
+  });
+
+  it('keeps how far it has run, how dry it is and how scorched in a save, and what is on its paper', () => {
+    const t = new Tool('strip', 0);
+    const upTo = (n: number, by: number) => Array.from({ length: C }, (_, c) => (c < n ? by : 0));
+    t.remember([0.4, 0.2, ...upTo(3, 0.25)]);
+    expect(t.memory).toEqual([0.4, 0.2, ...upTo(3, 0.25)]);
+    t.remember([7, -3, ...upTo(C, 0.5)]);
+    expect(t.memory).toEqual([1, 0, ...upTo(C, 0.5)]);
+    // what was saved before, of the pad's paper, isn't
+    t.remember([0.3, 0.1]);
+    expect(t.memory).toEqual([1, 0, ...upTo(C, 0.5)]);
+    // an older save's strip, scorched alike all over what was wet: as far as it had soaked
+    const o = new Tool('strip', 2);
+    o.remember([0.5, 0, 0.25]);
+    expect(o.memory).toEqual([0.5, 0, ...upTo(C / 2, 0.25)]);
+    // and its paper, stretch by stretch
+    const { t: u } = spotted([[TARGET, 1]], R);
+    run(u, STRIP.time / 2);
+    const v = new Tool('strip', 1);
+    v.remember(u.memory);
+    u.paper.forEach((p, c) => loadVessel(v.paper[c], saveVessel(p)));
+    expect(v.memory).toEqual(u.memory);
+    expect(v.paper.map((p) => [...p.n])).toEqual(u.paper.map((p) => [...p.n]));
+  });
+});
+
+describe('dish', () => {
+  it('is a shallow open tray, holding as much as it is drawn to, with no valve or spout', () => {
+    const t = new Tool('dish', 0);
+    expect(t.tanks.length).toBe(1);
+    expect(t.isOpen(0)).toBe(true);
+    expect(t.shape.spouts).toEqual([]);
+    expect(t.shape.noValve).toBe(true);
+    expect(t.shape.tankH).toBe(DISH.h);
+    expect(t.tanks[0].cap * SPACE_PER_ATOM).toBeCloseTo(2 * DISH.w * DISH.d * DISH.h, -1);
+    expect(tankDepth('dish')).toBeCloseTo(DISH.d, 0);
+    expect(DISH_CAP / CAP).toBeCloseTo(0.05, 2);
+    // room for a strip to drink its fill from it, several times over
+    expect(DISH_CAP).toBeGreaterThan(4 * STRIP.cap);
+    expect(t.memory).toBeUndefined();
+  });
+
+  it('keeps what is in it: nothing drains from it', () => {
+    const t = new Tool('dish', 0);
+    filled(t.tanks[0], SOLVENT_SPECIES, t.tanks[0].cap, 1);
+    const n = [...t.tanks[0].n];
+    for (let i = 0; i < 100; i++) expect(t.step(0.02)).toEqual([]);
+    expect([...t.tanks[0].n]).toEqual(n);
+  });
+});
+
+describe('column', () => {
+  const triangle = speciesIndex(['R', 'G', 'B'], bondMask(['R', 'G'], ['G', 'B'], ['R', 'B']));
+  const chainRGB = speciesIndex(['R', 'G', 'B'], bondMask(['R', 'G'], ['G', 'B']));
+  const C = COLUMN.cells;
+  const H = 0.02;
+  /** Run a column for `seconds`, catching what comes out of its spout in `into`, if given. */
+  const run = (t: Tool, seconds: number, into?: Vessel) => {
+    let out = false;
+    for (let i = 0; i < Math.round(seconds / H); i++) {
+      const [o] = t.step(H);
+      if (!o) continue;
+      out = true;
+      if (into) transfer(o, into, volume(o));
+    }
+    return out;
+  };
+  const onBed = (t: Tool) => t.bed.reduce((a, v) => a + atomTotal(v), 0);
+  /** A column whose bed has soaked through with single green atoms, its funnel empty and its tap shut. */
+  const wet = () => {
+    const t = new Tool('column', 0);
+    while (t.soaked < 1) {
+      filled(t.tanks[0], G, t.tanks[0].cap, 1);
+      run(t, 0.5);
+    }
+    t.tanks[0].setMolecules(G, 0);
+    return t;
+  };
+  /** Top a column's funnel up with the given shares (by molecules) of the given species. */
+  const topUp = (t: Tool, parts: [number, number][], share = 1) => {
+    const f = t.tanks[0];
+    for (const [s, sh] of parts) f.setMolecules(s, f.n[s] + (sh * share * (f.cap - volume(f))) / roomFor(s));
+    f.setTemperature(1);
+  };
+
+  it('stands on one line, its funnel holding a little', () => {
+    const sh = SHAPES.column;
+    expect(sh.spouts).toEqual([0]);
+    expect(tankX(sh.tanks[0])).toBe(0);
+    expect(sh.tankCap! / CAP).toBeGreaterThan(0.04);
+    expect(sh.tankCap! / CAP).toBeLessThan(0.08);
+    const t = new Tool('column', 0);
+    expect(t.bed.length).toBe(C);
+    expect(t.isOpen(0)).toBe(true);
+  });
+
+  it('soaks a dry bed whether its tap is open or not, letting nothing out until it is wet through', () => {
+    const t = new Tool('column', 0);
+    const [funnel] = t.tanks;
+    filled(funnel, G, funnel.cap, 1);
+    const atoms = funnel.N;
+    expect(run(t, 0.5)).toBe(false);
+    expect(t.soaked).toBeCloseTo((0.5 * COLUMN.soak) / COLUMN.cap, 3);
+    expect(Math.abs(volume(funnel) - (funnel.cap - 0.5 * COLUMN.soak))).toBeLessThanOrEqual(TRACE);
+    // what it's drunk is on its bed, behind the front
+    expect(funnel.N + onBed(t)).toBe(atoms);
+    t.bed.forEach((v, c) => c >= Math.ceil(t.soaked * C) && expect(v.N).toBe(0));
+    // it stops when the funnel's dry, and goes on when there's more
+    expect(run(t, 5)).toBe(false);
+    expect(funnel.N).toBe(0);
+    expect(t.soaked).toBeCloseTo(funnel.cap / COLUMN.cap, 3);
+    for (let i = 0; i < 20 && t.soaked < 1; i++) {
+      filled(funnel, G, funnel.cap, 1);
+      expect(run(t, 1)).toBe(false);
+    }
+    expect(t.soaked).toBe(1);
+    expect(Math.abs(onBed(t) - COLUMN.cap)).toBeLessThanOrEqual(TRACE);
+  });
+
+  it('holds everything where it is with its tap shut once wet', () => {
+    const t = wet();
+    topUp(t, [[triangle, 1]]);
+    const funnel = [...t.tanks[0].n];
+    const bed = t.bed.map((v) => [...v.n]);
+    expect(run(t, 5)).toBe(false);
+    expect([...t.tanks[0].n]).toEqual(funnel);
+    expect(t.bed.map((v) => [...v.n])).toEqual(bed);
+  });
+
+  it('lets liquid through as far as its tap is open, and stops when its funnel is empty', () => {
+    for (const open of [1, 0.5]) {
+      const t = wet();
+      t.valves[0] = open;
+      filled(t.tanks[0], G, t.tanks[0].cap, 1);
+      const before = volume(t.tanks[0]);
+      run(t, 1);
+      expect((before - volume(t.tanks[0])) / (open * COLUMN.flow)).toBeCloseTo(1, 3);
+    }
+    const t = wet();
+    t.valves[0] = 1;
+    filled(t.tanks[0], R, 0.01 * CAP, 1);
+    run(t, 2);
+    expect(t.tanks[0].N).toBe(0);
+    // with the funnel empty, everything stays where it is, a band parked partway down
+    const bed = t.bed.map((v) => [...v.n]);
+    expect(run(t, 5)).toBe(false);
+    expect(t.bed.map((v) => [...v.n])).toEqual(bed);
+    expect(t.bed.slice(0, C / 2).some((v) => v.n[R] > 0)).toBe(true);
+  });
+
+  it('lets a pure carrier through a bed wet with it as fast as it goes in, from the moment its tap opens', () => {
+    for (const carrier of [G, SOLVENT_SPECIES]) {
+      for (const open of [1, 0.5]) {
+        const t = new Tool('column', 0);
+        while (t.soaked < 1) {
+          filled(t.tanks[0], carrier, t.tanks[0].cap, 1);
+          run(t, 0.5);
+        }
+        t.valves[0] = open;
+        // what goes in and what comes out over each second, with the funnel kept topped up
+        let fed = 0;
+        let out = 0;
+        for (let s = 0; s < 4 / open; s++) {
+          filled(t.tanks[0], carrier, t.tanks[0].cap, 1);
+          const before = volume(t.tanks[0]);
+          const caught = new Vessel(Infinity);
+          run(t, 1, caught);
+          fed += before - volume(t.tanks[0]);
+          out += volume(caught);
+          // fully open, the first second's as much as went in, give or take what's on a stretch or so of the bed
+          if (s === 0 && open === 1) expect(Math.abs(out / fed - 1)).toBeLessThan(0.05);
+        }
+        // and all told, it's as much as went in
+        expect(Math.abs(out / fed - 1)).toBeLessThan(0.02);
+      }
+    }
+  });
+
+  /**
+   * A wet column fed a slug of `slug` of the bed's volume of the triangle and a chain of the same atoms, half and
+   * half by molecules, then carrier, with its tap open, catching what comes out in slices of `slice` sim seconds.
+   */
+  const fractions = (slug: number, seconds: number, slice = 0.5) => {
+    const t = wet();
+    t.valves[0] = 1;
+    topUp(t, [[triangle, 0.5], [chainRGB, 0.5]], (slug * COLUMN.cap) / t.tanks[0].cap);
+    const fed = { tri: t.tanks[0].n[triangle], chain: t.tanks[0].n[chainRGB] };
+    const atoms = atomTotal(t.tanks[0]) + onBed(t);
+    const slices: Vessel[] = [];
+    const caught = new Vessel(Infinity);
+    let poured = 0;
+    for (let s = 0; s < seconds / slice; s++) {
+      // the carrier goes in once the sample's gone in
+      if (t.tanks[0].N === 0 || t.tanks[0].n[G] > 0) {
+        const before = atomTotal(t.tanks[0]);
+        filled(t.tanks[0], G, t.tanks[0].cap, 1);
+        poured += atomTotal(t.tanks[0]) - before;
+      }
+      const v = new Vessel(Infinity);
+      run(t, slice, v);
+      slices.push(v);
+      caught.addFrom(v, volume(v), true);
+    }
+    return { t, fed, slices, caught, atoms: atoms + poured };
+  };
+
+  it('keeps every atom: in its funnel, on its bed, or out its spout', () => {
+    const { t, caught, atoms } = fractions(0.1, 20);
+    expect(caught.N).toBeGreaterThan(0);
+    expect(atomTotal(t.tanks[0]) + onBed(t) + atomTotal(caught)).toBe(atoms);
+  });
+
+  it('lets a slug of the triangle out ahead of a chain of the same atoms, the first of it pure, and in the end all of both', () => {
+    expect(STRIP_RUN[triangle]).toBeGreaterThan(STRIP_RUN[chainRGB]);
+    const { fed, slices, caught } = fractions(0.1, 120);
+    const tri = slices.map((v) => v.n[triangle]);
+    const chain = slices.map((v) => v.n[chainRGB]);
+    // where the chain's main part comes out: the slice by which half of it has
+    let sum = 0;
+    const chainMid = chain.findIndex((n) => (sum += n) >= fed.chain / 2);
+    // most of the triangle has come out before then, in slices that are, of the two, all triangle
+    const pure = tri.reduce((a, n, i) => (i < chainMid && n > 0 && chain[i] <= 0.001 * n ? a + n : a), 0);
+    expect(pure / fed.tri).toBeGreaterThan(0.5);
+    // and both come out in full, give or take a few molecules
+    expect(caught.n[triangle] / fed.tri).toBeGreaterThan(0.9999);
+    expect(caught.n[chainRGB] / fed.chain).toBeGreaterThan(0.9999);
+  });
+
+  it('fed the mixture continuously, lets the triangle out alone first', () => {
+    const t = wet();
+    t.valves[0] = 1;
+    const slices: Vessel[] = [];
+    for (let s = 0; s < 120; s++) {
+      topUp(t, [[triangle, 0.5], [chainRGB, 0.5]]);
+      const v = new Vessel(Infinity);
+      run(t, 0.5, v);
+      slices.push(v);
+    }
+    const first = (s: number) => slices.findIndex((v) => v.n[s] > 0);
+    expect(first(triangle)).toBeGreaterThanOrEqual(0);
+    expect(first(chainRGB)).toBeGreaterThan(first(triangle) + 4);
+    expect(slices.slice(first(triangle), first(chainRGB)).every((v) => v.n[chainRGB] === 0 && v.n[triangle] > 0)).toBe(true);
+  });
+
+  it('keeps how far its bed has soaked, and what is on it, in a save', () => {
+    const t = new Tool('column', 0);
+    t.remember([0.4]);
+    expect(t.memory).toEqual([0.4]);
+    t.remember([7]);
+    expect(t.memory).toEqual([1]);
+    t.remember([0.3, 0.1]);
+    t.remember(['x']);
+    expect(t.memory).toEqual([1]);
+    const u = wet();
+    topUp(u, [[triangle, 1]], 0.5);
+    u.valves[0] = 1;
+    run(u, 2);
+    const v = new Tool('column', 1);
+    u.bed.forEach((c, k) => loadVessel(v.bed[k], saveVessel(c)));
+    v.remember(u.memory);
+    expect(v.soaked).toBe(1);
+    expect(v.bed.map((c) => [...c.n])).toEqual(u.bed.map((c) => [...c.n]));
+    expect(v.bed.map((c) => c.Q)).toEqual(u.bed.map((c) => c.Q));
+  });
+
+  it('shows what is on its bed as the strip would, wet: a clear carrier only tints it', () => {
+    expect(columnInk(triangle, 0)).toBe(0);
+    const cell = COLUMN.cap / C;
+    expect(columnInk(G, cell / roomFor(G))).toBeLessThanOrEqual(STRIP.tint);
+    expect(columnInk(triangle, (0.1 * cell) / roomFor(triangle))).toBeGreaterThan(0.2);
+    expect(columnInk(triangle, cell / roomFor(triangle))).toBeGreaterThan(0.9);
+  });
+});
+
+describe('sleeper culture', () => {
+  const chain = speciesIndex(['R', 'G', 'B'], bondMask(['R', 'G'], ['G', 'B']));
+  const ring4 = speciesIndex(['R', 'G', 'B', 'K'], bondMask(['R', 'G'], ['G', 'B'], ['B', 'K'], ['R', 'K']));
+  const run = (t: Tool, seconds: number) => {
+    for (let i = 0; i < Math.round(seconds / 0.02); i++) t.step(0.02);
+  };
+  const count = (t: Tool) => t.dead!.reduce((n, d) => n + d, 0);
+  /** A plate holding `share` of what it can, all of species `s`, at room temperature. */
+  const plate = (s: number, share = 1) => {
+    const t = new Tool('culture', 0);
+    t.tanks[0].setMolecules(s, share * t.tanks[0].cap);
+    t.tanks[0].setTemperature(1);
+    return t;
+  };
+
+  it('is harmed by loose ends and lone atoms, not by rings', () => {
+    const v = new Vessel(Infinity);
+    expect(harm(v)).toBe(0);
+    v.setMolecules(TARGET, 950);
+    v.setMolecules(ring4, 50);
+    v.setTemperature(1);
+    expect(harm(v)).toBe(0);
+    // a chain has two loose ends: a twentieth of the molecules chains is a tenth of a loose end each
+    v.setMolecules(ring4, 0);
+    v.setMolecules(chain, 50);
+    expect(harm(v)).toBeCloseTo(0.1, 12);
+    const pair = new Vessel(Infinity);
+    pair.setMolecules(pairOf('R', 'G'), 1000);
+    expect(harm(pair)).toBe(2);
+    const atoms = new Vessel(Infinity);
+    atoms.setMolecules(R, 1000);
+    expect(harm(atoms)).toBe(1);
+  });
+
+  it('is not harmed by the solvent, which dilutes what does harm it', () => {
+    const v = new Vessel(Infinity);
+    v.setMolecules(SOLVENT_SPECIES, 1000);
+    v.setTemperature(1);
+    expect(harm(v)).toBe(0);
+    // a pair's two loose ends, among as many molecules again of solvent, are one per molecule
+    v.setMolecules(pairOf('R', 'G'), 1000);
+    expect(harm(v)).toBe(1);
+  });
+
+  it('is harmed by heat too', () => {
+    const v = new Vessel(Infinity);
+    v.setMolecules(TARGET, 1000);
+    const { from, per } = CULTURE.heat;
+    v.setTemperature(from);
+    expect(harm(v)).toBe(0);
+    v.setTemperature(from + 3);
+    expect(harm(v)).toBeCloseTo(3 * per, 6);
+  });
+
+  it('has its cells in rows on the plate, each row half a step out of line with the next', () => {
+    const cells = cultureCells();
+    const tk = SHAPES.culture.tanks[0];
+    expect(cells.length).toBeGreaterThan(100);
+    for (const c of cells) {
+      expect(c.x).toBeGreaterThan(tk.x0);
+      expect(c.x).toBeLessThan(tk.x1);
+      expect(c.y).toBeGreaterThan(0);
+      expect(c.y).toBeLessThan(SHAPES.culture.tankH!);
+    }
+    const rows = [...new Set(cells.map((c) => c.y))].sort((a, b) => a - b);
+    const firstX = (y: number) => Math.min(...cells.filter((c) => c.y === y).map((c) => c.x));
+    expect(Math.abs(firstX(rows[1]) - firstX(rows[0]))).toBeCloseTo(CULTURE.pitch / 2, 9);
+    expect(new Tool('culture', 0).dead).toHaveLength(cells.length);
+    expect(new Tool('dispenser', 0).dead).toBeNull();
+  });
+
+  it('is never harmed by the target, however long it stands in it', () => {
+    const t = plate(TARGET);
+    run(t, 600);
+    expect(count(t)).toBe(0);
+  });
+
+  it('drains through its valve, keeping its cells as they are, for a record', () => {
+    const t = plate(R);
+    expect(t.shape.spouts).toEqual([0]);
+    // shut, nothing leaves
+    expect(t.step(0.02)[0]).toBeNull();
+    run(t, Math.LN2 / CULTURE.rate);
+    // open, it's empty in a few seconds, and what was in it came out its spout
+    const held = t.tanks[0].N;
+    t.valves[0] = 1;
+    let out = 0;
+    for (let i = 0; i < 1500 && t.tanks[0].N > 0; i++) out += t.step(0.02)[0]?.N ?? 0;
+    expect(t.tanks[0].N).toBe(0);
+    // but for the last trace of it, which counts as nothing
+    expect(held - out).toBeLessThan(TRACE);
+    // some died while it stood and drained, not all; and dry, the plate stays as it is
+    const dead = Array.from(t.dead!);
+    expect(count(t)).toBeGreaterThan(0);
+    expect(count(t)).toBeLessThan(dead.length);
+    run(t, 600);
+    expect(Array.from(t.dead!)).toEqual(dead);
+  });
+
+  it('loses its cells at random, half of them in the time its rate and the harm give', () => {
+    // lone atoms do one unit of harm
+    const halfLife = Math.LN2 / (CULTURE.rate * 1);
+    let dead = 0;
+    let all = 0;
+    for (let i = 0; i < 8; i++) {
+      const t = plate(R);
+      run(t, halfLife);
+      dead += count(t);
+      all += t.dead!.length;
+    }
+    // over a thousand cells: within a few percent of half
+    expect(dead / all).toBeGreaterThan(0.43);
+    expect(dead / all).toBeLessThan(0.57);
+    // and in the end, all of them, for good
+    const t = plate(R);
+    run(t, 40 * halfLife);
+    expect(count(t)).toBe(t.dead!.length);
+    t.tanks[0].setMolecules(R, 0);
+    run(t, 10);
+    expect(count(t)).toBe(t.dead!.length);
+  });
+
+  it('loses them sooner the more harmful the fluid', () => {
+    const after = (s: number, seconds: number) => {
+      let n = 0;
+      for (let i = 0; i < 6; i++) {
+        const t = plate(s);
+        run(t, seconds);
+        n += count(t);
+      }
+      return n;
+    };
+    const seconds = 1 / CULTURE.rate;
+    // a pair has two loose ends to a lone atom's one
+    expect(after(pairOf('R', 'G'), seconds)).toBeGreaterThan(after(R, seconds));
+  });
+
+  it('only loses the cells the fluid covers', () => {
+    // a third full, the fluid stands partway up the plate, and no cell above it dies
+    const t = plate(R, 1 / 3);
+    const H = SHAPES.culture.tankH!;
+    const surface = cultureLevel(1 / 3);
+    expect(surface).toBeGreaterThan(0.2 * H);
+    expect(surface).toBeLessThan(0.8 * H);
+    run(t, 60 / CULTURE.rate);
+    const cells = cultureCells();
+    const under = cells.map((c) => H - c.y < surface);
+    expect(under.some((u) => u)).toBe(true);
+    expect(under.some((u) => !u)).toBe(true);
+    cells.forEach((_, i) => expect(t.dead![i]).toBe(under[i] ? 1 : 0));
+    // and an empty plate loses none
+    const dry = new Tool('culture', 0);
+    run(dry, 60);
+    expect(count(dry)).toBe(0);
+  });
+
+  it('keeps which cells are dead in a save', () => {
+    const t = new Tool('culture', 0);
+    const m = Array.from(t.dead!, (_, i) => +(i % 3 === 0));
+    t.remember(m);
+    expect(t.memory).toEqual(m);
+    // a list of another length isn't its cells
+    t.remember([1, 1]);
+    expect(t.memory).toEqual(m);
+  });
+});
+
+describe('thermometers', () => {
+  const KINDS = Object.keys(THERMOMETERS) as ThermometerKind[];
+  /** Run `t` for `seconds` with its bulb in `bath` (null for the air). */
+  function soak(t: Tool, seconds: number, bath: Vessel | null): void {
+    t.bath = bath;
+    for (let i = 0; i < Math.round(seconds / 0.02); i++) t.step(0.02);
+  }
+  const bath = (T: number) => filled(new Vessel(CAP), R, CAP / 2, T);
+
+  it('are glass rods, with no tanks, spouts or valves', () => {
+    for (const kind of KINDS) {
+      const t = new Tool(kind, 0);
+      expect(isThermometer(kind)).toBe(true);
+      expect([t.tanks.length, t.shape.spouts.length, t.valves.length]).toEqual([0, 0, 0]);
+      expect(INLINE_TOOLS).not.toContain(kind);
+      expect(t.step(0.02)).toEqual([]);
+    }
+    expect(isThermometer('meter')).toBe(false);
+  });
+
+  it("start at the room's temperature, and take that of the fluid their bulb is in, with a lag", () => {
+    for (const kind of KINDS) {
+      const t = new Tool(kind, 0);
+      expect(t.temp).toBe(COOLING.ambient);
+      expect(t.reads).toBe(COOLING.ambient);
+      const b = bath(0.8 * THERMOMETERS[kind].top);
+      const T = temperature(b);
+      soak(t, THERMOMETER.tau, b);
+      // all but 1/e of the way there after tau
+      expect((t.temp - COOLING.ambient) / (T - COOLING.ambient)).toBeCloseTo(1 - 1 / Math.E, 3);
+      soak(t, 20 * THERMOMETER.tau, b);
+      expect(t.temp).toBeCloseTo(T, 6);
+      expect(t.reads).toBe(t.temp);
+    }
+  });
+
+  it("drift back to the room's temperature in the air, or in an empty vessel, more slowly", () => {
+    const t = new Tool('thermometerWide', 0);
+    const T = temperature(bath(0.8 * THERMOMETERS.thermometerWide.top));
+    soak(t, 30 * THERMOMETER.tau, bath(T));
+    soak(t, THERMOMETER.roomTau, null);
+    expect((t.temp - COOLING.ambient) / (T - COOLING.ambient)).toBeCloseTo(1 / Math.E, 3);
+    soak(t, 40 * THERMOMETER.roomTau, new Vessel(CAP));
+    expect(t.temp).toBe(COOLING.ambient);
+  });
+
+  it('have linear scales, from 0 at the foot to their top, the column stopping at the top of the capillary', () => {
+    for (const kind of KINDS) {
+      const { top } = THERMOMETERS[kind];
+      expect(thermometerAt(kind, 0)).toBe(0);
+      expect(thermometerAt(kind, -1)).toBe(0);
+      expect(thermometerAt(kind, top / 4)).toBeCloseTo(0.25, 12);
+      expect(thermometerAt(kind, top / 2)).toBeCloseTo(0.5, 12);
+      expect(thermometerAt(kind, top)).toBeCloseTo(1, 12);
+      expect(thermometerAt(kind, 10 * top)).toBe(THERMOMETER.burst);
+    }
+    // the wide one's scale is the wider
+    expect(THERMOMETERS.thermometerWide.top).toBeGreaterThan(THERMOMETERS.thermometer.top);
+  });
+
+  it('shatter for good once the bulb passes THERMOMETER.burst times their top, and read nothing after', () => {
+    for (const kind of KINDS) {
+      const { top } = THERMOMETERS[kind];
+      const t = new Tool(kind, 0);
+      const hot = bath(2 * top);
+      t.bath = hot;
+      while (!t.broken) {
+        const before = t.temp;
+        t.step(0.02);
+        // whole, it never read more than the burst
+        if (!t.broken) expect(t.temp).toBeLessThanOrEqual(THERMOMETER.burst * top);
+        else expect(before).toBeLessThanOrEqual(THERMOMETER.burst * top);
+      }
+      expect(t.temp).toBeGreaterThan(THERMOMETER.burst * top);
+      expect(t.reads).toBeNull();
+      const at = t.temp;
+      soak(t, 20 * THERMOMETER.tau, bath(top / 2));
+      soak(t, 20 * THERMOMETER.roomTau, null);
+      expect(t.broken).toBe(true);
+      expect(t.reads).toBeNull();
+      expect(t.temp).toBe(at);
+    }
+  });
+
+  it('survive a dip in something too hot for them, shorter than their bulb takes to get that hot', () => {
+    for (const kind of KINDS) {
+      const { top } = THERMOMETERS[kind];
+      const hot = bath(2 * top);
+      const T = temperature(hot);
+      // how long the bulb takes to pass the burst, from the room's temperature
+      const burst = THERMOMETER.tau * Math.log((T - COOLING.ambient) / (T - THERMOMETER.burst * top));
+      const t = new Tool(kind, 0);
+      soak(t, burst / 2, hot);
+      soak(t, 30 * THERMOMETER.roomTau, null);
+      expect(t.broken).toBe(false);
+      expect(t.reads).toBe(COOLING.ambient);
+      // but not one twice as long
+      const u = new Tool(kind, 1);
+      soak(u, 2 * burst, hot);
+      expect(u.broken).toBe(true);
+    }
+  });
+
+  it('keep their bulb\'s temperature and whether they\'re broken in a save, and ignore a bad one', () => {
+    for (const kind of KINDS) {
+      const t = new Tool(kind, 0);
+      expect(t.memory).toEqual([COOLING.ambient, 0]);
+      t.remember([3, 0]);
+      expect(t.memory).toEqual([3, 0]);
+      expect(t.reads).toBe(3);
+      const u = new Tool(kind, 1);
+      u.remember(t.memory);
+      expect(u.memory).toEqual([3, 0]);
+      t.remember([2.5, 1]);
+      expect(t.broken).toBe(true);
+      expect(t.reads).toBeNull();
+      expect(t.memory).toEqual([2.5, 1]);
+      // the wrong length (as an old inline thermometer's reading and markers), not a list, or not all numbers
+      t.remember([1, 2, 3]);
+      t.remember('x');
+      t.remember([1, NaN]);
+      expect(t.memory).toEqual([2.5, 1]);
+    }
+    expect(new Tool('dispenser', 1).memory).toBeUndefined();
   });
 });
 
@@ -586,6 +1648,14 @@ describe('multiplexer', () => {
 describe('size sorter', () => {
   const RG = pairOf('R', 'G');
 
+  it('sorts the solvent as it does any single atom', () => {
+    const f = new Vessel(Infinity);
+    f.setMolecules(R, 1e9);
+    f.setMolecules(SOLVENT_SPECIES, 1e9);
+    f.setTemperature(1);
+    for (const v of sieve(f)) expect(v.n[SOLVENT_SPECIES] / 1e9).toBeCloseTo(v.n[R] / 1e9, 3);
+  });
+
   const withStrength = (k: number, fn: () => void) => {
     const before = SORTER.strength;
     SORTER.strength = k;
@@ -699,6 +1769,15 @@ describe('composition analyzer', () => {
     for (const a of ['R', 'G', 'B'] as const) expect(t[at(3, a)]).toBeCloseTo(1, 6);
     const four = read([[speciesIndex(['R', 'G', 'B', 'K'], 63), CUP]]);
     for (const a of ['R', 'G', 'B', 'K'] as const) expect(four[at(4, a)]).toBeCloseTo(1, 6);
+  });
+
+  it('has no sector for the solvent, but counts the room it takes', () => {
+    const S = SOLVENT_SPECIES;
+    expect(read([[S, CUP]]).every((x) => x === 0)).toBe(true);
+    // half R, half S: R's sector half lit, against the whole sample, as for half R, half G
+    const r = read([[R, 0.5 * CUP], [S, 0.5 * CUP]]);
+    expect(r[at(1, 'R')]).toBeCloseTo(0.5, 9);
+    expect(r.reduce((t, x) => t + x, 0)).toBeCloseTo(0.5, 9);
   });
 
   it('reads a half share half as bright, and nothing dark', () => {
@@ -1046,6 +2125,7 @@ describe('separator', () => {
 
   it('gives each molecule its own outlet by its share of black atoms: none, ¼, ⅓, ½, all', () => {
     expect(SEPARATOR_OUTLET[R]).toBe(0);
+    expect(SEPARATOR_OUTLET[SOLVENT_SPECIES]).toBe(0);
     expect(SEPARATOR_OUTLET[tri('△RGB')]).toBe(0);
     expect(SEPARATOR_OUTLET[pair('R–G')]).toBe(0);
     expect(SEPARATOR_OUTLET[tri('⊠RGBK')]).toBe(1);

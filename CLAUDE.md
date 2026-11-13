@@ -29,9 +29,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   the click that lets sound play), and the lab stays paused under it, so click `.intro-start` first.
 - Headless Chromium won't capture the mouse, and WebGL needs a software renderer. Launch with
   `args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']`, then in dev builds the engine is
-  `window.lab`: `lab.debug({ locked: true, x, z, yaw, pitch })` acts as if the mouse were captured, so keys (E, F, P,
+  `window.lab`: `lab.debug({ locked: true, x, z, yaw, pitch })` acts as if the mouse were captured, so keys (E,
   the number row, WASD) and mouse buttons work, and puts the player somewhere. Yaw 0 faces the back wall; pitch is up,
-  in radians. Its private fields (`held`, `target`, `tools`, `cursor`, ...) are reachable from `page.evaluate`.
+  in radians. Its private fields (`held`, `target`, `tools`, `turning`, ...) are reachable from `page.evaluate`.
 - Software rendering is slow, a few frames a second, so wait longer than you'd think, and remember that a screenshot
   takes real time during which the sim runs on.
 - Pass `ignoreHTTPSErrors: true` to `browser.newContext`, or the Google font (Schibsted Grotesk) fails to load through
@@ -43,25 +43,27 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 ## Architecture
 
 - `src/chem/`: the chemistry.
-  - `atoms.ts` is the four atoms (R, G, B, K) and the six bonds between them; `species.ts` defines the 64 species
+  - `atoms.ts` is the five atoms, the four colors (R, G, B, K) and the clear solvent S, which bonds with nothing, last, and
+    the six bonds between the colors; `species.ts` defines the 65 species
     (every connected graph on a set of distinct colors) and their names, which saves store.
   - `params.ts` holds the bond parameters.
+  - `shape.ts` is what follows from a molecule's shape alone: each atom's bonds, and its loose ends.
   - `reactions.ts` is Arrhenius kinetics on whole molecules. The engine steps vessels through `tick`, never `step`.
   - `equilibrium.ts` is the exact full-equilibrium solver, for the editor's Equilibrate button and the bench's settled mixes. Faucets
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
 - `src/game/`: everything else in the game.
-  - `engine.ts` owns the lab: what's in it, the player, input, carrying, the pencil and the sim loop.
+  - `engine.ts` owns the lab: what's in it, the player, input, carrying and the sim loop.
   - `view.ts` draws it all with Three.js, and raycasts for what the crosshair is on.
-  - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room.
+  - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room, what fluid a
+    dipper's foot (a thermometer's bulb, a wicking strip's tip) is in (`bathAt`), which the engine hands each one every
+    frame (`Tool.bath`, or for a strip `Tool.dipIn`, which also says whether it may drink), and where a dipper aimed at
+    a mouth hovers and dips (`dipPoses`).
   - `physics.ts` is the collisions: yawed boxes, the player's cylinder and `walk`. What's held collides with nothing; only
     where it would be set down is checked (the engine's `placement` and `rest`).
   - `space.ts` is the room, poses, and the mapping from the old flat bench to its back wall.
-  - `tools.ts` holds tool shapes (flat outlines, y down) and per-step logic, plus drips and the instruments' readings (the spectroscope's graph is `spectroscopeAt`).
+  - `tools.ts` holds tool shapes (flat outlines, y down) and per-step logic, plus drips and the instruments' readings (the spectroscope's graph is `spectroscopeAt`), and `Bed`, the cell-by-cell carrying that the wicking strip's paper and the column's bed share.
   - `flask.ts` has `Vessel`, `transfer`, volume and colors.
   - `cooling.ts` is Newtonian cooling to the room; the engine works out each vessel's exposure from its flat outline.
-  - `paper.ts` is sticky notes: the sheets, their strokes and text, in old-bench coordinates. They hang on the back
-    wall. While the pencil is in hand, the mouse moves `cursor` rather than the view, and both buttons go to
-    `pencilDown`, which works where the cursor's ray meets the wall (`wallAt`).
   - `airlock.ts` is the airlock and cryopod where the player wakes: their size, collisions, and the `Wake` states.
     `sleep.ts` is sleeping in the pod: the lab run in windows, measured, and jumped ahead while it's steady.
     `src/intro/notice.ts` is the messages projected inside the pod: the notice she wakes to (its litres as of then),
@@ -77,7 +79,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     it over the finished frame, from a mask of the meshes registered as that thing's parts.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
-    `volumes.ts`); `rumble.ts` is the composition analyzer, `diverter.ts` the cryostabilizer station, `ambience.ts` the ship, `water.ts` drips and streams.
+    `volumes.ts`); `rumble.ts` is the composition analyzer, `diverter.ts` the cryostabilizer station, `ambience.ts` the ship, `water.ts` drips and streams, `shatter.ts` a thermometer
+    shattering.
     New sounds play into a channel's `bus()`, never straight to the destination, so the sliders reach them. A sound
     in the lab goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),
     so it fades and pans with where it is relative to the player's head.
@@ -92,7 +95,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Volume isn't atoms.** Capacities and flows are in `volume()` units: molecules by default, or atoms when the
   "volume counts molecules" toggle is off. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
 - **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
-  chemistry, cooling, the composition analyzer's reading and hum, the cryostabilizer station's diverter and display, and the drip and stream sounds. All of it
+  chemistry, cooling, the composition analyzer's reading and hum, the cryostabilizer station's diverter, display and needle, a thermometer's bulb and its crack as it shatters, and the drip and stream sounds. All of it
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The one exception to the
   substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
@@ -132,14 +135,24 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   `outletAt` and `faucetOutlet`, not `spoutAt` or `fa.spout`.
 - **What's drawn is what's hit.** Every mesh a `ToolView` builds is registered as part of the tool for the crosshair's
   raycast, so empty space around it isn't. Register a mesh yourself only to make it a specific part (a tank, valve
-  or button); sprites (labels) aren't hit.
+  or button); sprites (labels) aren't hit. The one exception is each `FluidMesh`'s bent copy of what's behind a clear
+  fluid (`bentMat` in `view.ts`), on a layer of its own (`REFRACT_LAYER`) drawn only in the frame's main render. It's
+  the only thing using three.js's `transmission`, whose extra pass runs whenever anything transmissive is in view, so
+  don't give other materials `transmission` lightly.
 - **Adding a tool kind** touches all of these:
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially.
   - `ITEMS` and `HOTKEYS` in `engine.ts` (the hotbar's order and keys) and `ICONS` in `Palette.tsx`, unless the tool is
-    unique. The number row is full, through =.
+    unique. The number row is full, through =, so new ones go along the bottom row of letters, from Z, skipping N (notes): it's taken through the comma.
+  - If it has state of its own that a save should keep, `Tool.memory` and `Tool.remember`.
   - Tests and the README.
-  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
+  - A tool needn't have tanks at all: the thermometers and the wicking strip (the `DIPPERS`) have none, nor spouts nor
+    valves. Then its grid anchor is its middle (`toolAnchor`), N writes its own `note`, and its collision is whatever
+    `toolParts` gives it (a thermometer's, only the top of its rod; a strip's, its clip), so code that reaches for
+    `tanks[0]` must allow for there being none. Nor need a tool with tanks have spouts (the dish): nothing drains from it.
+  - A tank needn't be under its opening: one with a `neck` (the swell bulbs') has its bulb and neck where the flag
+    says, and its own `x0` and `x1` are its inlet's, since it's the openings and spouts that go on the grid.
+  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `neck`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
 - **Unique tools** (`UNIQUE_TOOLS`: the composition analyzer, the spectroscope, the bond visualizer and the receptacle) aren't on
   the hotbar and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
   whole cryostabilizer station (`STATION` in `tools.ts`): its tanks are the funnel and the ship's reservoir, in that
@@ -156,8 +169,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 ## Design preferences
 
 - Don't give away the chemistry. The player is meant to work it out. The composition analyzer has no text and no
-  divider lines between its sectors, nor the bond visualizer, whose points are unlabeled, the size sorter's screens look plain, the hotbar has no names, and the faucets aren't labeled (they're the four pure
-  atoms, which the user chose). The spectroscope's axes are labeled E (uB) and f (in S, with an SI prefix to suit the range, as mS), at the user's request: both on log scales with
+  divider lines between its sectors, nor the bond visualizer, whose points are unlabeled, the size sorter's screens look plain, the hotbar has no names, and the faucets aren't labeled (they're the five pure
+  atoms, the four colors and the solvent, which the user chose). The spectroscope's axes are labeled E (uB) and f (in S, with an SI prefix to suit the range, as mS), at the user's request: both on log scales with
   base-10 log-paper ticks, only the powers of ten numbered, f's ranging itself to the tallest line, and no peak labeled. It plots each bond at the size of its
   energy, a stable one as a peak above the baseline and an uphill one as a dip below it, at the user's request. Ask before adding any visual cue that reveals how a tool or reaction works.
 - The game's text matches the intro's premise. The player is Nadia Hassan, the target species is the cryostabilizer,

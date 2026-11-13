@@ -10,21 +10,20 @@ import { glowFalloff } from './appearance';
 import {
   NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
 } from './bodies';
-import { TARGET } from '../chem/species';
-import { CAP, DELIVERY, FLASK_L, GOAL_L, GOAL_TARGET, TRACE } from './config';
+import { SPECIES, TARGET } from '../chem/species';
+import { CAP, DELIVERY, FLASK_L, GOAL_L, GOAL_PURITY, GOAL_TARGET, TRACE } from './config';
 import { Vessel, fluidAlpha, fluidRGB, volume, type Flask } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, type Scale } from './scale';
-import { COUNTERS, LIFT, PAPER_Z, ROOM, groundAt, toWorld, type Vec3 } from './space';
+import { COUNTERS, LIFT, ROOM, groundAt, toWorld, type Vec3 } from './space';
 import { PORT_FRAC, PORT_WALL, porthole, type Porthole } from './porthole';
 import { AIRLOCK, POD } from './airlock';
 import { arrival, notice, type Block } from '../intro/notice';
 import { STATION_POSE } from './presets';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
-import { PAPER_HANDLE, PAPER_HEADER, PAPER_TEXT, type Paper } from './paper';
 import {
   clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, REFERENCE_CAP,
-  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, TANK_H, chuteY, levelIn, meterText, tankPieces, tankX,
+  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, type Tool,
 } from './tools';
 
@@ -101,15 +100,6 @@ export interface Frame {
   airlock: AirlockLook;
   /** How far the ship has turned, in radians, which turns the stars about the axis straight out of the porthole. */
   spin: number;
-  /**
-   * The sticky notes on the back wall: each sheet with its top left corner, on the old flat bench (x across, y down);
-   * whether the pencil's in hand (so each shows its handles); and a sheet being marked out, if one is.
-   */
-  papers: {
-    sheets: readonly { paper: Paper; at: { x: number; y: number } }[];
-    pencil: boolean;
-    draft: { x0: number; y0: number; x1: number; y1: number } | null;
-  };
 }
 
 export type GuideLook = 'solid' | 'snap';
@@ -204,14 +194,20 @@ const pipeMat = new THREE.MeshStandardMaterial({ color: 0xa4adac, metalness: 0.9
 const darkMat = new THREE.MeshStandardMaterial({ color: 0x30373a, metalness: 0.6, roughness: 0.42 });
 const panelMat = new THREE.MeshPhysicalMaterial({ color: 0xc4cbc7, metalness: 0.1, roughness: 0.5, clearcoat: 0.4, clearcoatRoughness: 0.35 });
 const leverMat = new THREE.MeshPhysicalMaterial({ color: 0x15191a, metalness: 0, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.2 });
+/** A thermometer's white enamel backing (see THERMOMETER_ROD). */
+const enamelMat = new THREE.MeshStandardMaterial({ color: 0xf1efe6, roughness: 0.4 });
 const keyMats = {
   up: new THREE.MeshStandardMaterial({ color: 0xd8443b, roughness: 0.45 }),
   hot: new THREE.MeshStandardMaterial({ color: 0xf06358, roughness: 0.45, emissive: 0x401010 }),
   down: new THREE.MeshStandardMaterial({ color: 0x9c2d28, roughness: 0.6 }),
 };
+/** Blotting paper, for the wicking strip. */
+const paperMat = new THREE.MeshStandardMaterial({ color: 0xe6dfc8, roughness: 0.95, metalness: 0 });
 const hidden = new THREE.MeshBasicMaterial({ visible: false });
 const faintMat = new THREE.MeshBasicMaterial({ color: 0xd6ecf2, transparent: true, opacity: 0.3, depthWrite: false });
 const rodMat = new THREE.MeshStandardMaterial({ color: 0xc8cfcd, metalness: 1, roughness: 0.18 });
+/** How see-through a faucet's knob is at the most, for a clear fluid's (the solvent's). */
+const KNOB_ALPHA = 0.6;
 /** Polished chrome, for the faucets. */
 const chromeMat = new THREE.MeshStandardMaterial({ color: 0xe2e7e8, metalness: 1, roughness: 0.08 });
 /** The steel plate the cryostabilizer station's panes are set in, and the lines marked on it. */
@@ -297,20 +293,107 @@ function printed(parent: THREE.Object3D, text: string, x: number, y: number, z: 
 /** Points in a flat frame (x right, y down), placed at depth z, as a vector in an object's own frame (y up). */
 const v3 = (x: number, y: number, z = 0) => new THREE.Vector3(x, -y, z);
 
+/**
+ * How a see-through fluid shows its body and surface (see FluidMesh): how much it thickens toward opaque where it's
+ * seen edge on; and the line along its surface, how far down it fades (by 1/e), in world units, and how opaque it is.
+ */
+const FLUID_EDGE = { edge: 0.7, line: 1.2, lineAlpha: 0.8 };
+
+/**
+ * How what's seen through a see-through fluid is bent, as through water in glass (see FluidMesh's `bent`): at most
+ * `shift` world units sideways at the fluid's own distance, where the fluid's far side is seen edge on, and less as it
+ * faces the eye, so a round flask acts as a lens; at full strength from opacity 1 − `fade` down, and fading to nothing
+ * as the fluid turns opaque. What's behind is drawn again for it, at `scale` of the screen's resolution each way, once
+ * a frame and only while some see-through fluid is in view.
+ */
+export const REFRACT = { shift: 14, fade: 0.3, scale: 0.5 };
+/** The layer the bent views behind see-through fluids are on, drawn only in the frame itself (see View.render). */
+const REFRACT_LAYER = 6;
+/** The drawing buffer's size in pixels, shared by every `bent` material, set each frame (see View.render). */
+const refractScreen = { value: new THREE.Vector2(1, 1) };
+
+/**
+ * What's behind a see-through fluid, bent: each pixel of the fluid's far side (its back faces, which cover all of it
+ * from any side, the open top included) shows what's behind the fluid a little toward the fluid's middle, by how far
+ * its surface there turns away from the eye. It uses three.js's transmission, which draws everything opaque to a
+ * texture once a frame whenever something transmissive is in view; this then replaces what's behind with that
+ * texture, shifted, and the fluid itself is blended over it as ever. Glass and other see-through things are drawn
+ * after it, so they're seen straight.
+ */
+function bentMat(plane: THREE.Plane): THREE.MeshPhysicalMaterial {
+  const mat = new THREE.MeshPhysicalMaterial({ transmission: 1, side: THREE.BackSide, depthWrite: false, clippingPlanes: [plane] });
+  const shift = { value: 0 };
+  mat.userData.shift = shift;
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.refractScreen = refractScreen;
+    sh.uniforms.refractShift = shift;
+    sh.fragmentShader = /* glsl */ `
+      uniform sampler2D transmissionSamplerMap;
+      uniform mat4 projectionMatrix;
+      uniform vec2 refractScreen;
+      uniform float refractShift;
+      varying vec3 vViewPosition;
+      varying vec3 vNormal;
+      #include <clipping_planes_pars_fragment>
+      void main() {
+        #include <clipping_planes_fragment>
+        // the far side's normal, turned to face the eye (three.js flips it for a back side): toward the fluid's middle
+        vec3 n = normalize( vNormal );
+        vec2 perUnit = 0.5 * vec2( projectionMatrix[ 0 ][ 0 ], projectionMatrix[ 1 ][ 1 ] ) / max( vViewPosition.z, 1.0 );
+        vec2 uv = gl_FragCoord.xy / refractScreen + n.xy * refractShift * perUnit;
+        gl_FragColor = vec4( textureLod( transmissionSamplerMap, uv, 0.0 ).rgb, 1.0 );
+        #include <colorspace_fragment>
+      }`;
+  };
+  mat.customProgramCacheKey = () => 'bent';
+  return mat;
+}
+
 /** The fluid in a vessel: drawn from a solid the shape of its inside, cut off at the fluid's level. */
 class FluidMesh {
   readonly mat: THREE.MeshLambertMaterial;
   readonly plane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
   readonly meshes: THREE.Mesh[] = [];
+  /** What's behind it, bent, while it's see-through (see bentMat). */
+  private bent: THREE.MeshPhysicalMaterial;
+  private bents: THREE.Mesh[] = [];
   private key = '';
 
   constructor(geoms: THREE.BufferGeometry[], parent: THREE.Object3D) {
     this.mat = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide, clippingPlanes: [this.plane] });
+    // a see-through fluid (one thinned by the solvent) thickens toward its edges, seen edge on, and shows a bright
+    // line where its surface meets the glass, as clear liquid in glass does, so even pure solvent reads as a body of
+    // liquid with a surface rather than nothing; an opaque one is unchanged
+    this.mat.onBeforeCompile = (sh) => {
+      sh.fragmentShader = sh.fragmentShader.replace(
+        '#include <opaque_fragment>',
+        `float edgeOn = 1.0 - abs(dot(normalize(normal), normalize(vViewPosition)));
+        float clear = 1.0 - diffuseColor.a;
+        diffuseColor.a += clear * ${FLUID_EDGE.edge.toFixed(2)} * edgeOn * edgeOn * edgeOn;
+        #if NUM_CLIPPING_PLANES > 0
+          float under = clippingPlanes[ 0 ].w - dot( vClipPosition, clippingPlanes[ 0 ].xyz );
+          float line = exp( -max( under, 0.0 ) / ${FLUID_EDGE.line.toFixed(2)} );
+          diffuseColor.a += clear * ${FLUID_EDGE.lineAlpha.toFixed(2)} * line;
+          outgoingLight = mix( outgoingLight, vec3( 1.0 ), clear * 0.5 * line );
+        #endif
+        #include <opaque_fragment>`,
+      );
+    };
+    this.mat.customProgramCacheKey = () => 'fluid';
+    this.bent = bentMat(this.plane);
     for (const g of geoms) {
       const m = new THREE.Mesh(g, this.mat);
       m.castShadow = true;
       parent.add(m);
       this.meshes.push(m);
+      // drawn only in the frame itself: never hit, outlined, reflected or in the end's white void
+      const b = new THREE.Mesh(g, this.bent);
+      b.layers.set(REFRACT_LAYER);
+      b.raycast = () => {};
+      b.userData.bent = true;
+      b.visible = false;
+      parent.add(b);
+      this.bents.push(b);
     }
   }
 
@@ -318,9 +401,13 @@ class FluidMesh {
   update(f: Fluid, level: number): void {
     const rgb = f.N > TRACE ? fluidRGB(f) : null;
     for (const m of this.meshes) m.visible = !!rgb;
+    const a = rgb ? fluidAlpha(f) : 1;
+    // bent as far as it's clear (see REFRACT), and not at all, nor drawn, once it's all but opaque
+    const shift = REFRACT.shift * Math.min(1, (1 - a) / REFRACT.fade);
+    (this.bent.userData.shift as { value: number }).value = shift;
+    for (const b of this.bents) b.visible = shift > 0.01;
     if (!rgb) return;
     this.plane.constant = level;
-    const a = fluidAlpha(f);
     const key = `${rgb.map(Math.round)}:${a.toFixed(2)}`;
     if (key === this.key) return;
     this.key = key;
@@ -339,6 +426,7 @@ class FluidMesh {
 
   dispose(): void {
     this.mat.dispose();
+    this.bent.dispose();
   }
 }
 
@@ -580,6 +668,230 @@ function drawDiverter(sc: Screen, gate: 'reservoir' | 'waste', flowing: boolean)
   // the flap: along the branch's lower wall, across the pipe below it; or across the branch's mouth
   ctx.lineCap = 'round';
   stroke(gate === 'reservoir' ? [[x - 3, j + 1.2], [x + 3, j + 7.2]] : [[x + 2.9, j + 7.1], [x + 7.1, j + 2.9]], 1.6, wallColor);
+  sc.tex.needsUpdate = true;
+}
+
+/**
+ * A gradient down a canvas L tall through C stretches of a strip's paper or a column's bed, each `color(c)` at its
+ * middle, `at(c)` of the way down, blended smoothly between them, and the ends held out to the canvas's.
+ */
+function cellGradient(ctx: CanvasRenderingContext2D, L: number, C: number, at: (c: number) => number, color: (c: number) => string): CanvasGradient {
+  const g = ctx.createLinearGradient(0, 0, 0, L);
+  const order = Array.from({ length: C }, (_, c) => c).sort((a, b) => at(a) - at(b));
+  order.forEach((c, i) => {
+    if (i === 0) g.addColorStop(0, color(c));
+    g.addColorStop(at(c), color(c));
+    if (i === C - 1) g.addColorStop(1, color(c));
+  });
+  return g;
+}
+
+/**
+ * How wet the stretches of a strip's paper or a column's bed look, from how wet each is (see wetness), but the one the
+ * liquid comes in at drawn as wet as the next: it fills as liquid comes in and empties each time what's on it moves on
+ * (see Bed), which would otherwise show as a flicker.
+ */
+function entryWet(wet: number[]): number[] {
+  if (wet.length > 1) wet[0] = Math.max(wet[0], wet[1]);
+  return wet;
+}
+
+/**
+ * A wicking strip's paper's outline on its canvas, W across and L tall, foot at the bottom: its sides straight down,
+ * and its last STRIP.paper.point narrowing to a point at its foot.
+ */
+function paperOutline(ctx: CanvasRenderingContext2D, W: number, L: number): void {
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(W, 0);
+  ctx.lineTo(W, L - STRIP.paper.point);
+  ctx.lineTo(W / 2, L);
+  ctx.lineTo(0, L - STRIP.paper.point);
+  ctx.closePath();
+}
+
+/**
+ * A wicking strip's paper, foot at the bottom, cut to a point there: cream, darker as far as each stretch of it is wet
+ * (see wetness), by what's on it, until it's dry; each species on each stretch of it (see Tool.paper) as ink of its own
+ * color, as opaque as stripInk says, single atoms first, so what's left in bands lies over the carrier's tint; both
+ * blended smoothly from one stretch's middle to the next, except for a spot that has yet to move, which is drawn
+ * stretch by stretch, so its top is a line, where the fluid's surface was; and each stretch browned over by how
+ * scorched it is (see Tool.scorch), stretch by stretch too, so that ends at a line as well. Nothing's drawn outside
+ * its outline.
+ */
+function drawStrip(sc: Screen, t: Tool): void {
+  const { paper } = t;
+  const C = paper.length;
+  let sum = 0;
+  paper.forEach((v, c) => (sum += v.N * (c + 1)));
+  let char = 0;
+  t.scorch.forEach((x, c) => (char += x * (c + 1)));
+  const key = `${sum} ${t.soaked > 0} ${t.dryness.toFixed(2)} ${char.toFixed(2)}`;
+  if (key === sc.key) return;
+  sc.key = key;
+  const { ctx, ppu } = sc;
+  const [W, L] = [2 * STRIP.paper.w, STRIP.paper.len];
+  const at = (c: number) => 1 - (c + 0.5) / C;
+  // till the paper's drunk anything, what's on it is a spot, just where it was dipped: nothing's run to blend
+  const spot = t.soaked === 0;
+  const wet = spot ? paper.map((v) => wetness(volume(v), STRIP.cap, C)) : entryWet(paper.map((v) => wetness(volume(v), STRIP.cap, C)));
+  ctx.setTransform(ppu, 0, 0, ppu, 0, 0);
+  ctx.clearRect(0, 0, W, L);
+  ctx.save();
+  paperOutline(ctx, W, L);
+  ctx.clip();
+  ctx.fillStyle = '#e6dfc8';
+  ctx.fillRect(0, 0, W, L);
+  // each stretch's own part of the paper, filled edge to edge, wherever it's to show at all
+  const cells = (alpha: (c: number) => number, rgb: string) => {
+    for (let c = 0; c < C; c++) {
+      const a = alpha(c);
+      if (a <= 0) continue;
+      ctx.fillStyle = `rgba(${rgb}, ${a})`;
+      ctx.fillRect(0, L * (1 - (c + 1) / C), W, L / C);
+    }
+  };
+  // blended from each stretch's middle to the next's, or, for a spot, stretch by stretch
+  const lay = (alpha: (c: number) => number, rgb: string) => {
+    if (spot) return cells(alpha, rgb);
+    ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(${rgb}, ${alpha(c)})`);
+    ctx.fillRect(0, 0, W, L);
+  };
+  if (t.dryness < 1 && wet.some((w) => w > 0)) lay((c) => 0.28 * wet[c] * (1 - t.dryness), '96, 92, 78');
+  const here = SPECIES.map((_, s) => s).filter((s) => paper.some((v) => v.n[s] > 0));
+  here.sort((a, b) => SPECIES[a].size - SPECIES[b].size);
+  for (const s of here) lay((c) => stripInk(s, paper[c].n[s], t.dryness), SPECIES[s].color.slice(4, -1));
+  cells((c) => 0.92 * t.scorch[c], '46, 28, 14');
+  ctx.restore();
+  sc.tex.needsUpdate = true;
+}
+
+/** Where a thermometer's capillary runs across its rod, in its own frame, left of the middle, with its scale's ticks right of it. */
+const CAPILLARY_X = -1.4;
+
+/**
+ * A column's bed, its top at the top: the paper's cream, darker as far as each stretch of it is wet (see wetness), by
+ * what's on it; each species on each stretch (see Tool.bed) as ink of its own color, as opaque as columnInk says,
+ * single atoms first, so bands lie over the carrier's tint; both blended smoothly from one stretch's middle to the next.
+ */
+function drawColumn(sc: Screen, t: Tool): void {
+  const { bed } = t;
+  const C = bed.length;
+  let sum = 0;
+  bed.forEach((v, c) => (sum += v.N * (c + 1)));
+  const key = `${sum}`;
+  if (key === sc.key) return;
+  sc.key = key;
+  const { ctx, ppu } = sc;
+  const [W, L] = [sc.canvas.width / ppu, sc.canvas.height / ppu];
+  const at = (c: number) => (c + 0.5) / C;
+  ctx.setTransform(ppu, 0, 0, ppu, 0, 0);
+  ctx.fillStyle = '#e6dfc8';
+  ctx.fillRect(0, 0, W, L);
+  const wet = entryWet(bed.map((v) => wetness(volume(v), COLUMN.cap, C)));
+  if (wet.some((w) => w > 0)) {
+    ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(96, 92, 78, ${0.28 * wet[c]})`);
+    ctx.fillRect(0, 0, W, L);
+  }
+  const here = SPECIES.map((_, s) => s).filter((s) => bed.some((v) => v.n[s] > 0));
+  here.sort((a, b) => SPECIES[a].size - SPECIES[b].size);
+  for (const s of here) {
+    const rgb = SPECIES[s].color.slice(4, -1);
+    ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(${rgb}, ${columnInk(s, bed[c].n[s])})`);
+    ctx.fillRect(0, 0, W, L);
+  }
+  sc.tex.needsUpdate = true;
+}
+
+/**
+ * A thermometer's scale, on the white enamel backing inside its rod (see THERMOMETER_ROD): from 0 at its foot to the
+ * kind's top at its top, evenly (see thermometerAt), a tick every `tick` right of where the capillary runs, those at
+ * every `long` longer, and those at every `num` numbered at the backing's right edge (see THERMOMETERS). It's drawn
+ * once.
+ */
+function drawThermometerScale(sc: Screen, kind: ThermometerKind): void {
+  const { ctx, ppu } = sc;
+  const { backing: b, foot, top: y1 } = THERMOMETER_ROD;
+  const { top, tick, long, num } = THERMOMETERS[kind];
+  // the screen covers the backing, in the rod's own frame
+  ctx.setTransform(ppu, 0, 0, ppu, (b.w / 2) * ppu, -b.y0 * ppu);
+  ctx.fillStyle = '#f1efe6';
+  ctx.fillRect(-b.w / 2, b.y0, b.w, b.y1 - b.y0);
+  ctx.strokeStyle = ctx.fillStyle = '#1e201f';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.font = '700 3.2px "Schibsted Grotesk", sans-serif';
+  const x = CAPILLARY_X + 0.45;
+  const [L, M] = [Math.round(long / tick), Math.round(num / tick)];
+  for (let i = 0; i <= Math.round(top / tick); i++) {
+    const y = foot - ((i * tick) / top) * (foot - y1);
+    ctx.lineWidth = i % L ? 0.2 : 0.3;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + (i % L ? 0.55 : 1.1), y);
+    ctx.stroke();
+    // squeezed to fit beside the ticks, if it has to be
+    if (i % M === 0) ctx.fillText(String(Math.round(i * tick)), b.w / 2 - 0.05, y + 0.15, b.w / 2 - 0.05 - (x + 1.3));
+  }
+  sc.tex.needsUpdate = true;
+}
+
+/** How long a sleeper culture's cell is shown dying, swollen and amber, in sim seconds. */
+const DYING = 1.2;
+
+/** How far the station's needle swings, from its left stop to its right, in radians, about straight up. */
+const NEEDLE_SWEEP = (140 * Math.PI) / 180;
+
+/**
+ * The cryostabilizer station's needle: an enamel dial with no words or numbers, a needle swinging across it from its
+ * left stop (see needleAt), evenly spaced ticks, and a red line where the diverter's line is, with a green band from
+ * there to the right stop. `u` is how far across the needle stands, from 0 to 1 (see Tool.needle).
+ */
+function drawNeedle(sc: Screen, u: number): void {
+  const key = u.toFixed(3);
+  if (key === sc.key) return;
+  sc.key = key;
+  const { ctx, ppu } = sc;
+  const d = STATION.needle;
+  const [w, h] = [d.x1 - d.x0, d.y1 - d.y0];
+  ctx.setTransform(ppu, 0, 0, ppu, 0, 0);
+  ctx.fillStyle = '#d6d1be';
+  ctx.fillRect(0, 0, w, h);
+  const [cx, cy] = [w / 2, h - 7];
+  const r = Math.min(w / 2 - 4, cy - 5);
+  // where on the dial u is, at radius q: from the pivot, swung (u − ½) of the sweep from straight up
+  const at = (v: number, q: number): [number, number] => {
+    const a = (v - 0.5) * NEEDLE_SWEEP;
+    return [cx + q * Math.sin(a), cy - q * Math.cos(a)];
+  };
+  const arc = (from: number, to: number, q: number, width: number, color: string) => {
+    ctx.beginPath();
+    ctx.arc(cx, cy, q, -Math.PI / 2 + (from - 0.5) * NEEDLE_SWEEP, -Math.PI / 2 + (to - 0.5) * NEEDLE_SWEEP);
+    ctx.lineWidth = width;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+  };
+  const line = (a: [number, number], b: [number, number], width: number, color: string) => {
+    ctx.beginPath();
+    ctx.moveTo(...a);
+    ctx.lineTo(...b);
+    ctx.lineWidth = width;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+  };
+  ctx.lineCap = 'butt';
+  const pass = needleAt(GOAL_PURITY);
+  arc(0, 1, r, 0.5, '#3b3a34');
+  arc(pass, 1, r - 2, 3, '#3f9a55');
+  for (let i = 0; i <= 10; i++) line(at(i / 10, r), at(i / 10, r - (i % 5 ? 2.5 : 4)), 0.5, '#3b3a34');
+  line(at(pass, r + 1.5), at(pass, r - 5.5), 1.1, '#c8372d');
+  // the needle, over a little round cap on its pivot
+  ctx.lineCap = 'round';
+  line(at(u, -3), at(u, r - 1), 0.9, '#17161a');
+  ctx.beginPath();
+  ctx.arc(cx, cy, 2.2, 0, 2 * Math.PI);
+  ctx.fillStyle = '#17161a';
+  ctx.fill();
   sc.tex.needsUpdate = true;
 }
 
@@ -931,6 +1243,20 @@ function wireColor(d: number): number[] {
 const setRGB = (c: THREE.Color, rgb: readonly number[]) => c.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
 
 /**
+ * Make a material as see-through as fluid f looks (see fluidAlpha: the solvent thins it), turning it transparent only
+ * while it needs to be, since that rebuilds its shader.
+ */
+function fluidOpacity(mat: THREE.Material, f: Fluid): void {
+  const a = fluidAlpha(f);
+  mat.opacity = a;
+  if (mat.transparent !== a < 1) {
+    mat.transparent = a < 1;
+    mat.depthWrite = a >= 1;
+    mat.needsUpdate = true;
+  }
+}
+
+/**
  * A tool, built from its flat outline with depth, in `art`. Every mesh of it can be hit, glass included, but not the
  * empty space around it.
  */
@@ -956,6 +1282,8 @@ class ToolView {
   private steadyScreen?: Screen;
   /** The cryostabilizer station's diverter's LCD (see drawDiverter). */
   private diverter?: Screen;
+  /** The cryostabilizer station's purity needle's dial (see drawNeedle). */
+  private needle?: Screen;
   /** What's running down an inline instrument's tube, shown as a thin thread of its color. */
   private thread?: { m: THREE.Mesh; mat: THREE.MeshBasicMaterial };
   private helix?: { geom: THREE.TubeGeometry; colors: THREE.BufferAttribute; k: number }[];
@@ -963,6 +1291,18 @@ class ToolView {
   private filmMats: THREE.MeshBasicMaterial[] = [];
   private cells: { m: THREE.Mesh; mat: THREE.MeshBasicMaterial }[] = [];
   private wire?: THREE.MeshStandardMaterial;
+  /** The floats in the swell bulbs' necks, and how high each rides, in the tool's own frame, for what its tank holds. */
+  private floats: { m: THREE.Mesh; at: (v: Vessel) => number }[] = [];
+  /**
+   * A sleeper culture's cells (see cultureCells), and the sim time each was first seen dead, so it can be shown dying;
+   * those dead when the plate was first drawn (as when a save loads) are just dead.
+   */
+  private culture?: { cells: ReturnType<typeof cultureCells>; died: number[]; seen: boolean };
+  /**
+   * A thermometer's column of spirit, what's drawn of it only while it's whole (its rod below where it snaps, its bulb
+   * and its column), and the jagged end it's left with once it's shattered (see buildThermometer).
+   */
+  private spirit?: { column: THREE.Mesh; whole: THREE.Group; stump: THREE.Group };
   /** The cryostabilizer station's gauge's segments, bottom up. */
   private segments: THREE.MeshStandardMaterial[] = [];
 
@@ -1027,7 +1367,28 @@ class ToolView {
         const x = sh.spouts[1];
         pipes(art, [[b.x1, ANALYZER.wasteY], [x, ANALYZER.wasteY], [x, sh.spoutY - 4]]);
       }
-    } else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);
+    } else if (sh.neck) {
+      // from under each bulb, out to its spout, under its inlet
+      sh.neck.bodies.forEach((bx, k) => pipes(art, [[bx, floor], [bx, floor + 4], [sh.spouts[k], floor + 4], [sh.spouts[k], sh.spoutY - 4]]));
+    }
+    else if (t.kind === 'strip') this.buildStrip();
+    else if (t.kind === 'dish') {
+      // a little base under the dish, for its stand to clamp
+      block(art, darkMat, -12, 12, TH + 0.6, sh.box.y1, -D.body / 2, D.body / 2, 1);
+    }
+    else if (isThermometer(t.kind)) this.buildThermometer(t.kind);
+    else if (t.kind === 'column') {
+      this.buildColumn();
+      // the funnel's stem down into the tube, and from the tube's foot down through the tap to the spout
+      pipes(art, [[0, TH], [0, COLUMN.tube.y0]]);
+      pipes(art, [[0, COLUMN.tube.y1], [0, sh.spoutY - 4]]);
+    }
+    else if (t.kind === 'culture') {
+      this.buildCulture();
+      // its drain, down from under the plate's frame
+      pipes(art, [[0, floor + 2.5], [0, sh.spoutY - 4]]);
+    }
+    else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);
     sh.spouts.forEach((x, k) => pick(block(art, pipeMat, x - 4, x + 4, sh.spoutY - 6, sh.spoutY, -4, 4), 'spout', k));
 
     // tanks, with their fluid (the station's are built in buildStation)
@@ -1044,14 +1405,15 @@ class ToolView {
       const pieces = tankPieces(sh, k, d);
       const bottom = r.y1 + (sh.cup || sh.funnel ? 0 : (sh.sump?.h ?? 0));
       const level = (v: Vessel) => onTool(t, 0, bottom - levelIn(pieces, share(v))).y;
-      if (sh.cup) {
+      if (sh.neck) geoms = this.buildBulb(k, bottom, pieces, share);
+      else if (sh.cup) {
         openBox(art, r.x0, r.x1, r.y0, r.y1, d);
         glassFrom(art, frustum(cx, o.y, r.y0, 2 * sh.cup.w, 2 * sh.cup.w, w, d, true));
         geoms = [
           new THREE.BoxGeometry(w - 1, r.y1 - r.y0, d - 1).translate(cx, -(r.y0 + r.y1) / 2, 0),
           frustum(cx, o.y, r.y0, 2 * sh.cup.w - 1, 2 * sh.cup.w - 1, w - 1, d - 1, false),
         ];
-        this.graduations(r, o, sh.cup, d, pieces);
+        if (t.kind === 'pipette') this.graduations(r, o, sh.cup, d, pieces);
       } else if (sh.funnel) {
         glassFrom(art, frustum(cx, r.y0, r.y1, w, d, FUNNEL_TIP, FUNNEL_TIP, true));
         geoms = [frustum(cx, r.y0 + 0.5, r.y1 - 0.5, w - 1.5, d - 1.5, FUNNEL_TIP - 1, FUNNEL_TIP - 1, false)];
@@ -1061,9 +1423,9 @@ class ToolView {
         const mid = -(r.y0 + r.y1) / 2;
         glassFrom(art, new THREE.CylinderGeometry(rr, rr, r.y1 - r.y0, 48, 1, true).translate(cx, mid, 0));
         art.add(new THREE.Mesh(new THREE.CircleGeometry(rr, 48).rotateX(Math.PI / 2).translate(cx, -r.y1, 0), glassMat));
+        geoms = [new THREE.CylinderGeometry(rr - 0.5, rr - 0.5, r.y1 - r.y0 - 0.5, 48).translate(cx, mid - 0.25, 0)];
         const rim = new THREE.Mesh(new THREE.TorusGeometry(rr + 0.6, 0.8, 6, 48).rotateX(Math.PI / 2).translate(cx, 0, 0), pipeMat);
         art.add(rim);
-        geoms = [new THREE.CylinderGeometry(rr - 0.5, rr - 0.5, r.y1 - r.y0 - 0.5, 48).translate(cx, mid - 0.25, 0)];
         const sump = sh.sump;
         if (sump) {
           const sm = -(r.y1 + sump.h / 2);
@@ -1107,10 +1469,10 @@ class ToolView {
       art.add(s);
     }
     if (t.tanks.length > 1 && !sh.wall)
-      sh.tanks.forEach((tk) => {
+      sh.tanks.forEach((tk, k) => {
         const s = textSprite([tk.name], '#e6ece8');
         s.scale.multiplyScalar(0.9);
-        s.position.copy(v3(tankX(tk), 14, D.tank / 2 + 1));
+        s.position.copy(v3(sh.neck ? sh.neck.bodies[k] : tankX(tk), 14, D.tank / 2 + 1));
         art.add(s);
       });
     // a note about the whole tool, centered over it, above its tanks' labels
@@ -1125,6 +1487,7 @@ class ToolView {
       this.buildThread(TH);
     }
     if (t.kind === 'heater') this.buildHeater();
+    if (t.kind === 'dilatometer') this.buildBulbs();
 
     // valves: a round core on the front face, and a lever that points where it was turned; or a dial
     if (!sh.noValve)
@@ -1155,7 +1518,7 @@ class ToolView {
 
     // everything else that's drawn is the tool's body, to grab it by
     this.body.traverse((m) => {
-      if (m instanceof THREE.Mesh && !pickables.has(m)) pick(m, 'body');
+      if (m instanceof THREE.Mesh && !pickables.has(m) && !m.userData.bent) pick(m, 'body');
     });
     scene.add(this.root);
   }
@@ -1315,6 +1678,195 @@ class ToolView {
     this.art.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), pts.length, 0.65, 5), this.wire));
   }
 
+  /**
+   * A wicking strip: its paper hanging from a little clip at its top (which its stand holds), its foot cut to a point,
+   * with what's on it shown on its front (see drawStrip).
+   */
+  private buildStrip(): void {
+    const { w, top, len, point } = STRIP.paper;
+    const c = STRIP.clip;
+    const foot = top + len;
+    // the paper, a thin sheet of its outline, flat side to the front
+    const shape = new THREE.Shape([
+      new THREE.Vector2(-w, -top), new THREE.Vector2(w, -top), new THREE.Vector2(w, -(foot - point)),
+      new THREE.Vector2(0, -foot), new THREE.Vector2(-w, -(foot - point)),
+    ]);
+    const sheet = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.6, bevelEnabled: false }).translate(0, 0, -0.3), paperMat);
+    sheet.castShadow = true;
+    this.art.add(sheet);
+    // the clip: two jaws over the paper's top, and a bar across above them
+    block(this.art, darkMat, -c.w, c.w, top - 1, c.h, -c.d / 2, -0.35, 0.4);
+    block(this.art, darkMat, -c.w, c.w, top - 1, c.h, 0.35, c.d / 2, 0.4);
+    block(this.art, darkMat, -c.w, c.w, 0, top - 1, -c.d / 2, c.d / 2, 0.6);
+    this.screen = new Screen(this.art, -w, w, top, foot, 0.31, 6, true);
+  }
+
+  /**
+   * A column's tube: glass, with a metal collar at each end, and its bed filling it, what's on it shown round it (see
+   * drawColumn).
+   */
+  private buildColumn(): void {
+    const { w, y0, y1 } = COLUMN.tube;
+    const r = w / 2;
+    const mid = -(y0 + y1) / 2;
+    glassFrom(this.art, new THREE.CylinderGeometry(r, r, y1 - y0, 32, 1, true).translate(0, mid, 0));
+    for (const y of [y0, y1]) rod(this.art, pipeMat, v3(0, y - 1.5, 0), v3(0, y + 1.5, 0), r + 0.8);
+    // its canvas runs round the bed and down it, the top of the canvas at the bed's top
+    const ppu = 4;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(4 * ppu);
+    canvas.height = Math.round((y1 - y0) * ppu);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const bed = new THREE.Mesh(
+      new THREE.CylinderGeometry(r - 0.8, r - 0.8, y1 - y0 - 3, 32).translate(0, mid, 0),
+      new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, metalness: 0 }),
+    );
+    bed.receiveShadow = true;
+    this.art.add(bed);
+    this.screen = { canvas, ctx: canvas.getContext('2d')!, tex, key: '', ppu };
+  }
+
+  /**
+   * A sleeper culture's plate: a dark backing behind the glass, in a frame, and the cells drawn over its front (see
+   * drawCulture), so they show against the dark through whatever's in with them.
+   */
+  private buildCulture(): void {
+    const r = tankRect(this.t, 0);
+    const d = TOOL_DEPTH[this.t.kind].tank;
+    block(this.art, darkMat, r.x0 - 2.5, r.x1 + 2.5, r.y0, r.y1 + 2.5, -d / 2 - 1.6, -d / 2 - 0.3, 0.6);
+    for (const x of [r.x0 - 2.5, r.x1 + 0.5]) block(this.art, darkMat, x, x + 2, r.y0, r.y1 + 2.5, -d / 2 - 0.3, d / 2 + 0.8, 0.6);
+    block(this.art, darkMat, r.x0 - 2.5, r.x1 + 2.5, r.y1 + 0.5, r.y1 + 2.5, -d / 2 - 0.3, d / 2 + 0.8, 0.6);
+    this.screen = new Screen(this.art, r.x0, r.x1, r.y0, r.y1, d / 2 + 0.3, 10, true);
+    this.culture = { cells: cultureCells(), died: [], seen: false };
+  }
+
+  /**
+   * A sleeper culture's cells: each a pale blue dot with a bright middle while it's alive; swollen and amber for
+   * DYING sim seconds from when it dies; and a small brown dot from then on.
+   */
+  private drawCulture(clock: number): void {
+    const { t } = this;
+    const sc = this.screen!;
+    const cu = this.culture!;
+    const dead = t.dead!;
+    let dying = false;
+    let count = 0;
+    cu.cells.forEach((_, i) => {
+      if (!dead[i]) return;
+      count++;
+      cu.died[i] ??= cu.seen ? clock : -Infinity;
+      if (clock - cu.died[i] < DYING) dying = true;
+    });
+    cu.seen = true;
+    const key = dying ? `dying ${clock.toFixed(2)}` : `${count}`;
+    if (key === sc.key) return;
+    sc.key = key;
+    const { ctx, ppu } = sc;
+    const r = tankRect(t, 0);
+    ctx.setTransform(ppu, 0, 0, ppu, -r.x0 * ppu, -r.y0 * ppu);
+    ctx.clearRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
+    const dot = (x: number, y: number, rad: number, color: string) => {
+      ctx.beginPath();
+      ctx.arc(x, y, rad, 0, 2 * Math.PI);
+      ctx.fillStyle = color;
+      ctx.fill();
+    };
+    cu.cells.forEach((c, i) => {
+      const since = dead[i] ? clock - cu.died[i] : -1;
+      if (since < 0) {
+        dot(c.x, c.y, 1.15, 'rgba(150, 214, 255, 0.92)');
+        dot(c.x - 0.3, c.y - 0.3, 0.42, 'rgba(240, 250, 255, 0.95)');
+      } else if (since < DYING) {
+        // it swells, amber, then shrinks to what's left of it
+        const u = since / DYING;
+        dot(c.x, c.y, 1.15 + 0.75 * Math.sin(Math.PI * Math.min(1, 1.4 * u)), `rgba(242, 176, 58, ${0.95 - 0.3 * u})`);
+      } else dot(c.x, c.y, 0.8, 'rgba(92, 58, 34, 0.95)');
+    });
+    sc.tex.needsUpdate = true;
+  }
+
+  /**
+   * Tank k of a tool whose tanks have necks (see ToolShape.neck), a swell bulb: a closed glass bulb over its sump; its
+   * neck up from where it is on the bulb's top, open on top, with a little black float riding the fluid in it, so its
+   * level is plain whatever its color; and its inlet, a little funnel up and out from the neck's top, on a thin tube
+   * leaning down and in to it. With the first, the marks across all the necks' fronts, every fifth one longer.
+   * Returns the solids its fluid is drawn from.
+   */
+  private buildBulb(k: number, bottom: number, pieces: Piece[], share: (v: Vessel) => number): THREE.BufferGeometry[] {
+    const { art, t } = this;
+    const sh = t.shape;
+    const neck = sh.neck!;
+    const H = sh.tankH ?? TANK_H;
+    const [bx, nx, ix] = [neck.bodies[k], neck.necks[k], tankX(sh.tanks[k])];
+    const [rr, nr] = [neck.body / 2, neck.w / 2];
+    glassFrom(art, new THREE.CylinderGeometry(rr, rr, H, 48, 1, true).translate(bx, -H / 2, 0));
+    for (const y of [0, H]) art.add(new THREE.Mesh(new THREE.CircleGeometry(rr, 48).rotateX(Math.PI / 2).translate(bx, -y, 0), glassMat));
+    glassFrom(art, new THREE.CylinderGeometry(nr, nr, neck.h, 20, 1, true).translate(nx, neck.h / 2, 0));
+    const geoms = [
+      new THREE.CylinderGeometry(rr - 0.5, rr - 0.5, H - 0.5, 48).translate(bx, -H / 2 - 0.25, 0),
+      new THREE.CylinderGeometry(nr - 0.4, nr - 0.4, neck.h, 16).translate(nx, neck.h / 2, 0),
+    ];
+    const sump = sh.sump;
+    if (sump) {
+      const sm = -(H + sump.h / 2);
+      glassFrom(art, new THREE.CylinderGeometry(sump.w / 2, SUMP_TIP / 2, sump.h, 24, 1, true).translate(bx, sm, 0));
+      geoms.push(new THREE.CylinderGeometry(sump.w / 2 - 0.5, SUMP_TIP / 2 - 0.3, sump.h - 0.3, 24).translate(bx, sm, 0));
+    }
+    // the inlet's funnel, and the tube from it leaning down and in to the neck's top
+    const { h: ih, y: iy } = neck.inlet;
+    const iw = sh.tanks[k].x1 - sh.tanks[k].x0;
+    glassFrom(art, frustum(ix, iy, iy + ih, iw, iw, 3, 3, true));
+    rod(art, glassMat, v3(ix, iy + ih), v3(nx, -neck.h), 1.6);
+    const float = new THREE.Mesh(new THREE.CylinderGeometry(nr - 0.7, nr - 0.7, 1.6, 16), leverMat);
+    float.position.x = nx;
+    art.add(float);
+    this.floats.push({ m: float, at: (v) => -Math.min(0, bottom - levelIn(pieces, share(v))) + 0.8 });
+    if (k === 0) {
+      const [x0, x1] = [Math.min(...neck.necks) - nr, Math.max(...neck.necks) + nr];
+      for (let i = 0; i <= BULB.marks; i++) {
+        const y = -(i / BULB.marks) * neck.h;
+        const out = i % 5 === 0 ? 3 : 0;
+        block(art, darkMat, x0 - out, x1 + out, y - 0.22, y + 0.22, nr - 0.1, nr + 0.25).castShadow = false;
+      }
+    }
+    return geoms;
+  }
+
+  /**
+   * The swell bulbs' heating: a box under the bulbs with the dial on its face, and one wire up from it wound three
+   * times round both bulbs together, from copper to white-hot as the dial turns up.
+   */
+  private buildBulbs(): void {
+    const { t } = this;
+    const sh = t.shape;
+    const neck = sh.neck!;
+    const dial = valveLocal(t, sh.dial!);
+    block(this.art, panelMat, dial.x - 14, dial.x + 14, dial.y - 14, dial.y + 14, -10, valveZ(t) - 3, 2.5);
+    this.wire = new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.6 });
+    // round both: along the front, round the right bulb's far side, along the back, round the left bulb's, and on
+    const R = neck.body / 2 + 1.3;
+    const a = Math.max(...neck.bodies);
+    const lap = 4 * a + 2 * Math.PI * R;
+    const at = (d: number): [number, number] => {
+      if (d < a) return [d, R];
+      if (d < a + Math.PI * R) return [a + R * Math.sin((d - a) / R), R * Math.cos((d - a) / R)];
+      if (d < 3 * a + Math.PI * R) return [a - (d - a - Math.PI * R), -R];
+      if (d < 3 * a + 2 * Math.PI * R) return [-a - R * Math.sin((d - 3 * a - Math.PI * R) / R), -R * Math.cos((d - 3 * a - Math.PI * R) / R)];
+      return [-a + (d - 3 * a - 2 * Math.PI * R), R];
+    };
+    const H = sh.tankH ?? TANK_H;
+    const [turns, n] = [3, 64];
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i <= turns * n; i++) {
+      const [x, z] = at(((i % n) / n) * lap);
+      pts.push(v3(x, 3 + (i / (turns * n)) * (H - 6), z));
+    }
+    // and down from its low end, at the front, into the top of the box
+    pts.push(v3(0, dial.y - 14, R - 1));
+    this.art.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), pts.length * 3, 0.7, 5), this.wire));
+  }
+
   /** A dial on the face of a box: a knob on a ring of ticks running clockwise from down-left (off) to down-right (full). */
   private buildDial(vc: { x: number; y: number }, z: number): THREE.Group {
     const at = (d: number) => -0.75 * Math.PI + 1.5 * Math.PI * d; // clockwise from straight up
@@ -1348,6 +1900,55 @@ class ToolView {
     block(this.art, panelMat, b.x0, b.x1, b.y0, b.y1, -hz, hz, 1.5);
     block(this.art, darkMat, d.x0, d.x1, d.y0, d.y1, hz, hz + 0.3);
     this.screen = new Screen(this.art, d.x0, d.x1, d.y0, d.y1, hz + 0.4, 16);
+  }
+
+  /**
+   * A thermometer: an upright glass rod with rounded ends (see THERMOMETER_ROD), a white enamel backing inside it
+   * along its upper part with its scale printed on it (see drawThermometerScale), a fine glass capillary up it in front
+   * of the backing, from a bulb of red spirit at its foot, and the column of spirit in the capillary, as long as its
+   * reading (see thermometerAt). Shattered, it's the rod snapped off short, a little way up from its foot, its end
+   * jagged, with no bulb and no column.
+   */
+  private buildThermometer(kind: ThermometerKind): void {
+    const { h, r, bulb, backing: b, foot, top, snap } = THERMOMETER_ROD;
+    const art = this.art;
+    const whole = new THREE.Group();
+    const stump = new THREE.Group();
+    art.add(whole, stump);
+    const cap = (y: number, up: boolean) =>
+      new THREE.SphereGeometry(r, 20, 6, 0, 2 * Math.PI, up ? 0 : Math.PI / 2, Math.PI / 2).translate(0, -y, 0);
+    const tube = (y0: number, y1: number) => new THREE.CylinderGeometry(r, r, y1 - y0, 20, 1, true).translate(0, -(y0 + y1) / 2, 0);
+    glassFrom(art, tube(r, snap));
+    art.add(new THREE.Mesh(cap(r, true), glassMat));
+    glassFrom(whole, tube(snap, h - r));
+    whole.add(new THREE.Mesh(cap(h - r, false), glassMat));
+    // the backing, white enamel all round behind its printed face
+    block(art, enamelMat, -b.w / 2, b.w / 2, b.y0, b.y1, -0.75, -0.35).castShadow = false;
+    const sc = new Screen(art, -b.w / 2, b.w / 2, b.y0, b.y1, -0.3, 28);
+    drawThermometerScale(sc, kind);
+    // the capillary, up to the burst point above the scale's top (see THERMOMETER.burst), and its spirit
+    const capTop = foot - THERMOMETER.burst * (foot - top);
+    const z = 0.25;
+    rod(art, glassMat, v3(CAPILLARY_X, capTop, z), v3(CAPILLARY_X, snap, z), 0.55);
+    rod(whole, glassMat, v3(CAPILLARY_X, snap, z), v3(CAPILLARY_X, bulb.y0 + 1, z), 0.55);
+    const spiritMat = new THREE.MeshStandardMaterial({ color: 0xc92f27, roughness: 0.3, emissive: 0x300806 });
+    const ball = new THREE.Mesh(new THREE.CapsuleGeometry(bulb.r, bulb.y1 - bulb.y0 - 2 * bulb.r, 4, 12), spiritMat);
+    ball.position.copy(v3(0, (bulb.y0 + bulb.y1) / 2));
+    whole.add(ball);
+    const column = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 1, 8).translate(0, 0.5, 0), spiritMat);
+    column.position.copy(v3(CAPILLARY_X, bulb.y0 + 1, z));
+    whole.add(column);
+    // the jagged end it snaps to: shards of the glass round where it broke, of uneven lengths
+    for (let i = 0; i < 7; i++) {
+      const a = (2 * Math.PI * i) / 7;
+      const len = 1.5 + 2.5 * Math.abs(Math.sin(i * 2.3 + 1));
+      const shard = new THREE.Mesh(new THREE.ConeGeometry(1.1, len, 3).rotateX(Math.PI).translate(0, -len / 2, 0), glassMat);
+      shard.position.copy(v3(r * 0.85 * Math.cos(a), snap, r * 0.85 * Math.sin(a)));
+      shard.rotation.y = -a;
+      stump.add(shard);
+    }
+    stump.visible = false;
+    this.spirit = { column, whole, stump };
   }
 
   /**
@@ -1424,6 +2025,10 @@ class ToolView {
     rod(art, glassMat, v3(fx, stem, 0), v3(fx, stem, face), FUNNEL_TIP / 2);
     block(art, pipeMat, fx - 5, fx + 5, stem - 5, stem + 5, face, face + 1.5);
     this.diverter = new Screen(art, dp.x0, dp.x1, dp.y0, dp.y1, face + 0.3, 8, true);
+    // the purity needle's dial, beside it: an enamel face in a dark bezel
+    const nd = STATION.needle;
+    block(art, darkMat, nd.x0 - 2, nd.x1 + 2, nd.y0 - 2, nd.y1 + 2, face, face + 0.8, 1.5);
+    this.needle = new Screen(art, nd.x0, nd.x1, nd.y0, nd.y1, face + 0.9, 10);
 
     // the reservoir's column: its back, its fluid, and the glass in front
     block(art, darkMat, x - paneW / 2, x + paneW / 2, 0, H, wall, wall + 0.5);
@@ -1511,6 +2116,7 @@ class ToolView {
         const tank = t.tanks[k];
         const ca = setRGB(new THREE.Color(), fluidRGB(tank.N > TRACE ? tank : out)!);
         const cb = setRGB(new THREE.Color(), fluidRGB(out)!);
+        fluidOpacity((m as THREE.Mesh).material as THREE.Material, out);
         // the tube's vertices run ring by ring along it, from the inlet
         const rings = geom.parameters.tubularSegments + 1;
         const per = colors.count / rings;
@@ -1526,7 +2132,9 @@ class ToolView {
       for (const v of t.out.slice(k)) if (v) on.addFrom(v, volume(v));
       const rgb = on.N > 0 ? fluidRGB(on) : null;
       m.visible = !!rgb;
-      if (rgb) setRGB(this.filmMats[k].color, rgb);
+      if (!rgb) return;
+      setRGB(this.filmMats[k].color, rgb);
+      fluidOpacity(this.filmMats[k], on);
     });
     if (this.cells.length) {
       const full = (HEATER.feed * HEATER.transit) / HEATER_CELLS;
@@ -1537,14 +2145,17 @@ class ToolView {
         m.visible = !!rgb;
         if (!rgb) return;
         setRGB(mat.color, rgb);
+        fluidOpacity(mat, v);
         const d = Math.max(0.3, 2 * r * Math.min(1, volume(v) / full));
         m.scale.y = d;
         m.position.y = -(y + r);
       });
+    }
+    if (this.wire) {
       const dial = t.valves[t.shape.dial!];
       const rgb = wireColor(dial);
-      setRGB(this.wire!.color, rgb);
-      setRGB(this.wire!.emissive, rgb).multiplyScalar(Math.min(1, 1.3 * dial));
+      setRGB(this.wire.color, rgb);
+      setRGB(this.wire.emissive, rgb).multiplyScalar(Math.min(1, 1.3 * dial));
     }
     if (t.kind === 'analyzer' && this.screen) drawAnalysis(this.screen, t);
     if (t.kind === 'spectroscope' && this.screen) drawSpectroscope(this.screen, t, energies);
@@ -1554,8 +2165,28 @@ class ToolView {
       for (const v of t.out) if (v) through.addFrom(v, volume(v));
       const rgb = through.N > 0 ? fluidRGB(through) : null;
       this.thread.m.visible = !!rgb;
-      if (rgb) setRGB(this.thread.mat.color, rgb);
+      if (rgb) {
+        setRGB(this.thread.mat.color, rgb);
+        fluidOpacity(this.thread.mat, through);
+      }
     }
+    this.floats.forEach((f, k) => (f.m.position.y = f.at(t.tanks[k])));
+    if (this.spirit) {
+      const { column, whole, stump } = this.spirit;
+      if (t.broken && whole.visible) {
+        // shattered: only the stump is left, and what's gone can't be looked at
+        whole.visible = false;
+        whole.traverse((m) => (m.raycast = () => {}));
+        stump.visible = true;
+      }
+      // the column runs from the bulb up to its reading on the scale
+      const { bulb, foot, top } = THERMOMETER_ROD;
+      const T = t.reads;
+      if (T !== null) column.scale.y = bulb.y0 + 1 - foot + (foot - top) * thermometerAt(t.kind as ThermometerKind, T);
+    }
+    if (t.kind === 'strip' && this.screen) drawStrip(this.screen, t);
+    if (t.kind === 'column' && this.screen) drawColumn(this.screen, t);
+    if (t.kind === 'culture') this.drawCulture(clock);
     if (t.kind === 'meter' && this.screen) {
       const s = this.screen;
       const text = meterText(t.rate);
@@ -1587,6 +2218,7 @@ class ToolView {
       this.segments[i].emissive.set(lit ? color : 0x000000);
     });
     drawDiverter(this.diverter!, t.gate, t.sinceFlow < DIVERTER_HOLD);
+    drawNeedle(this.needle!, t.needle);
     // the screens: the cryostabilizer in the reservoir / what's needed, in litres; and how long it's been delivering
     // steadily
     phosphor(this.screen!, STATION.screen, `${((t.tanks[1].n[TARGET] / CAP) * FLASK_L).toFixed(2)} L / ${GOAL_L.toFixed(2)} L`);
@@ -1599,6 +2231,7 @@ class ToolView {
     for (const { fm } of this.fluids) fm.dispose();
     this.screen?.tex.dispose();
     this.steadyScreen?.tex.dispose();
+    this.needle?.tex.dispose();
   }
 }
 
@@ -1726,104 +2359,16 @@ class HoseView {
     }
     const rgb = fluid && fluid.N > 0 ? fluidRGB(fluid) : null;
     this.core.visible = !!rgb;
-    if (rgb) this.coreMat.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+    if (rgb && fluid) {
+      this.coreMat.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+      fluidOpacity(this.coreMat, fluid);
+    }
   }
 
   dispose(): void {
     for (const o of [this.outlet, this.tube, this.core]) o.removeFromParent();
     this.tube.geometry.dispose();
     this.core.geometry.dispose();
-  }
-}
-
-/* ---------------- sticky notes ---------------- */
-
-/** Pixels per world unit a sticky note is drawn at, and the most pixels across it can have. */
-const PAPER_PPU = 4;
-const PAPER_MAX_PX = 2048;
-
-/**
- * A sticky note on the back wall: yellow paper with its pencil strokes and text. With the pencil in hand it shows the
- * strip it's moved by, the × that throws it away and the corner it's resized by.
- */
-class PaperView {
-  private canvas = document.createElement('canvas');
-  private tex = new THREE.CanvasTexture(this.canvas);
-  private mesh: THREE.Mesh;
-  private key = '';
-
-  constructor(
-    readonly paper: Paper,
-    scene: THREE.Object3D,
-  ) {
-    this.tex.colorSpace = THREE.SRGBColorSpace;
-    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial({ map: this.tex, roughness: 0.9 }));
-    this.mesh.receiveShadow = true;
-    scene.add(this.mesh);
-  }
-
-  update(at: { x: number; y: number }, pencil: boolean): void {
-    const pa = this.paper;
-    this.mesh.position.set(at.x + pa.w / 2, -(at.y + pa.h / 2), PAPER_Z);
-    this.mesh.scale.set(pa.w, pa.h, 1);
-    const points = pa.strokes.reduce((t, st) => t + st.length, 0);
-    const key = `${pa.w}x${pa.h}|${pa.strokes.length}:${points}|${pa.texts.map((t) => t.text).join('\n')}|${pencil}`;
-    if (key === this.key) return;
-    this.key = key;
-    const ppu = Math.min(PAPER_PPU, PAPER_MAX_PX / Math.max(pa.w, pa.h));
-    const c = this.canvas;
-    c.width = Math.ceil(pa.w * ppu);
-    c.height = Math.ceil(pa.h * ppu);
-    const ctx = c.getContext('2d')!;
-    ctx.setTransform(ppu, 0, 0, ppu, 0, 0);
-    ctx.fillStyle = '#fbf0a2';
-    ctx.fillRect(0, 0, pa.w, pa.h);
-    ctx.strokeStyle = '#3b3a36';
-    ctx.lineWidth = 1.2;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    for (const st of pa.strokes) {
-      ctx.beginPath();
-      ctx.moveTo(st[0], st[1]);
-      // a lone point is a dot
-      if (st.length === 2) ctx.lineTo(st[0] + 0.01, st[1]);
-      for (let i = 2; i < st.length; i += 2) ctx.lineTo(st[i], st[i + 1]);
-      ctx.stroke();
-    }
-    ctx.fillStyle = '#2d2c29';
-    ctx.font = `${PAPER_TEXT}px "Schibsted Grotesk", sans-serif`;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-    for (const t of pa.texts) ctx.fillText(t.text, t.x, t.y);
-    if (pencil) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
-      ctx.fillRect(0, 0, pa.w, PAPER_HEADER);
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
-      ctx.lineWidth = 1;
-      const H = PAPER_HANDLE;
-      ctx.beginPath();
-      ctx.moveTo(pa.w - H + 2.5, 2.5);
-      ctx.lineTo(pa.w - 2.5, H - 2.5);
-      ctx.moveTo(pa.w - 2.5, 2.5);
-      ctx.lineTo(pa.w - H + 2.5, H - 2.5);
-      for (const k of [3, 6]) {
-        ctx.moveTo(pa.w - k, pa.h - 1);
-        ctx.lineTo(pa.w - 1, pa.h - k);
-      }
-      ctx.stroke();
-    }
-    this.tex.dispose();
-    this.tex = new THREE.CanvasTexture(c);
-    this.tex.colorSpace = THREE.SRGBColorSpace;
-    (this.mesh.material as THREE.MeshStandardMaterial).map = this.tex;
-    (this.mesh.material as THREE.MeshStandardMaterial).needsUpdate = true;
-  }
-
-  dispose(): void {
-    this.mesh.removeFromParent();
-    this.mesh.geometry.dispose();
-    (this.mesh.material as THREE.Material).dispose();
-    this.tex.dispose();
   }
 }
 
@@ -2746,7 +3291,10 @@ class BlindsButton {
   }
 }
 
-/** The faucets: a manifold along a wall, and each faucet a pipe out over the counter, a knob of its color, and a spout. */
+/**
+ * The faucets: a manifold along a wall, and each faucet a pipe out over the counter, a knob of its color (the
+ * solvent's clear, see View.update), and a spout.
+ */
 function buildFaucets(
   scene: THREE.Scene,
   faucets: readonly FaucetSpot[],
@@ -2975,9 +3523,6 @@ export class View {
   private tools = new Map<Tool, ToolView>();
   private scales = new Map<Scale, ScaleView>();
   private hoses = new Map<Hose, HoseView>();
-  private papers = new Map<Paper, PaperView>();
-  /** A sticky note being marked out with the pencil. */
-  private draft: THREE.LineLoop;
   private stands: StandView[] = [];
   private faucetMats: THREE.MeshStandardMaterial[] = [];
   private faucetNotes: Label[] = [];
@@ -3041,12 +3586,6 @@ export class View {
     };
     reflect();
     whenSurfaced(reflect);
-    this.draft = new THREE.LineLoop(
-      new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(12), 3)),
-      new THREE.LineDashedMaterial({ color: 0x8ccbb0, dashSize: 4, gapSize: 3 }),
-    );
-    this.draft.visible = false;
-    this.scene.add(this.draft);
     const fs = buildFaucets(this.scene, faucets, this.pickables);
     this.faucetMats = fs.mats;
     this.faucetNotes = fs.notes;
@@ -3099,22 +3638,18 @@ export class View {
     for (const { h, from, fluid } of fr.hoses) this.hoses.get(h)!.update(from, fluid);
     fr.faucets.forEach((fa, i) => {
       const rgb = fluidRGB(fa.output);
-      if (rgb && this.faucetMats[i]) setRGB(this.faucetMats[i].color, rgb);
+      const mat = this.faucetMats[i];
+      if (rgb && mat) {
+        setRGB(mat.color, rgb);
+        // a knob for a clear fluid is clear too, like glossy acrylic, but never so clear it's hard to see
+        mat.opacity = Math.max(KNOB_ALPHA, fluidAlpha(fa.output));
+        if (mat.transparent !== mat.opacity < 1) {
+          mat.transparent = mat.opacity < 1;
+          mat.needsUpdate = true;
+        }
+      }
       this.faucetNotes[i]?.set(fa.note);
     });
-
-    this.sync(this.papers, fr.papers.sheets.map((s) => s.paper), (p) => new PaperView(p, scene));
-    fr.papers.sheets.forEach(({ paper, at }) => this.papers.get(paper)!.update(at, fr.papers.pencil));
-    const d = fr.papers.draft;
-    this.draft.visible = !!d;
-    if (d) {
-      const pos = this.draft.geometry.attributes.position as THREE.BufferAttribute;
-      const z = PAPER_Z + 0.4;
-      [[d.x0, d.y0], [d.x1, d.y0], [d.x1, d.y1], [d.x0, d.y1]].forEach(([x, y], i) => pos.setXYZ(i, x, -y, z));
-      pos.needsUpdate = true;
-      this.draft.computeLineDistances();
-      this.draft.geometry.computeBoundingSphere();
-    }
 
     this.updateStands(fr);
     this.updateStreams(fr);
@@ -3135,7 +3670,12 @@ export class View {
       this.renderArrival(fr.airlock.front);
       return;
     }
+    // the views behind see-through fluids, bent (see bentMat), are on a layer of their own, drawn only here
+    this.renderer.getDrawingBufferSize(refractScreen.value);
+    this.renderer.transmissionResolutionScale = REFRACT.scale;
+    this.camera.layers.enable(REFRACT_LAYER);
     this.renderer.render(scene, this.camera);
+    this.camera.layers.disable(REFRACT_LAYER);
     this.renderGuides();
     this.renderOutline(fr.hot);
   }

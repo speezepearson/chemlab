@@ -2,7 +2,6 @@ import { THERMO, defaultChemParams, type ChemParams } from '../chem/params';
 import { NS, SPECIES } from '../chem/species';
 import { roomFor, volume, type Vessel } from './flask';
 import type { ToolKind } from './tools';
-import type { SavedPaper } from './paper';
 
 /**
  * A saved lab: everything in it, plus the chemistry parameters. Across and up are stored as they were on the old
@@ -29,8 +28,8 @@ export interface SaveState {
   alarmsOff?: boolean;
   /** Whether the porthole's blinds are shut (see GameEngine); not if left out. */
   blindsShut?: boolean;
-  /** The player's sticky notes, the one on top last; none if left out. */
-  papers?: SavedPaper[];
+  /** The sticky notes of saves from when there was a pencil to write them with; no longer written, and ignored. */
+  papers?: unknown;
   /** Where the player stood and looked (see GameEngine); where they start if left out. */
   player?: { x: number; z: number; yaw: number; pitch: number };
 }
@@ -72,6 +71,18 @@ export interface SavedTool extends SavedDepth {
   note?: string;
   /** A spectrometer's last reading, if it's been run (see spectrum). */
   reading?: number[];
+  /**
+   * An instrument's own state, if it has any (see Tool.memory): a thermometer's bulb's temperature, and whether it's
+   * broken; how much a wicking strip's paper has drunk, how dry it is and how scorched; how much a column's bed has
+   * drunk; which of a sleeper culture's cells are dead.
+   */
+  memory?: number[];
+  /** What's on a wicking strip's paper, stretch by stretch from its foot (see Tool.paper). */
+  paper?: SavedVessel[];
+  /** What's on a column's bed, stretch by stretch from its top (see Tool.bed). */
+  bed?: SavedVessel[];
+  /** From when a wicking strip's paper took up a sample from a pad on top of it, as one vessel; ignored now. */
+  sample?: SavedVessel;
 }
 
 export interface SavedScale extends SavedDepth {

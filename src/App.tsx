@@ -7,7 +7,6 @@ import { ChemistryPanel } from './components/ChemistryPanel';
 import { FlaskEditor } from './components/FlaskEditor';
 import { Hud, StartHint, TouchControls } from './components/Hud';
 import { LabelEditor } from './components/LabelEditor';
-import { PaperTextEditor } from './components/PaperTextEditor';
 import { Ending, SleepScreen } from './components/Sleep';
 import { SoundPanel } from './components/SoundPanel';
 import { Intro } from './components/Intro';
@@ -15,7 +14,7 @@ import { InfoPanel } from './components/InfoPanel';
 import { Palette } from './components/Palette';
 import { SpeedControl } from './components/SpeedControl';
 import { ambience } from './game/ambience';
-import { GameEngine, type Hud as HudState, type Inspection, type PaperEdit } from './game/engine';
+import { GameEngine, type Hud as HudState, type Inspection } from './game/engine';
 import { DEFAULT_PRESET, PRESETS } from './game/presets';
 import { typingIn } from './game/typing';
 import { decodeSave, encodeSave, storeGod, storeSave, storedGod, storedSave, type SaveState } from './game/save';
@@ -71,10 +70,6 @@ export function App() {
   const [editing, setEditing] = useState<string | null>(null);
   /** The flask whose label is being typed, outside god mode. */
   const [labeling, setLabeling] = useState<string | null>(null);
-  /** Whether the pencil is in hand, for sticky notes. */
-  const [pencil, setPencil] = useState(false);
-  /** The line of text on a sticky note being typed, and a fresh key for each one. */
-  const [paperEdit, setPaperEdit] = useState<{ edit: PaperEdit; key: number } | null>(null);
   /**
    * The intro, if it's showing: from its start button the first time, straight into the log on a replay, and
    * just the start button for a returning player, so there's a click to turn the sound on.
@@ -117,8 +112,6 @@ export function App() {
       onInspect: setInspection,
       onEdit: setEditing,
       onLabel: setLabeling,
-      onPencil: setPencil,
-      onPaperText: (edit) => setPaperEdit((was) => edit && { edit, key: (was?.key ?? 0) + 1 }),
       onHud: setHud,
       onAwake: markIntroSeen,
     }, presetRef.current);
@@ -245,14 +238,11 @@ export function App() {
           {hud && <Hud hud={hud} help={help} />}
           {engine && hud && <TouchControls engine={engine} hud={hud} />}
           {inspection && <InfoPanel info={inspection} />}
-          {engine && <Palette engine={engine} pencil={pencil} />}
-          {hud && !hud.locked && !hud.inPod && !hud.preview && !intro && editing === null && labeling === null && !paperEdit && (
+          {engine && <Palette engine={engine} />}
+          {hud && !hud.locked && !hud.inPod && !hud.preview && !intro && editing === null && labeling === null && (
             <StartHint />
           )}
           {engine && editing !== null && <FlaskEditor engine={engine} id={editing} onClose={() => setEditing(null)} />}
-          {engine && paperEdit && (
-            <PaperTextEditor key={paperEdit.key} engine={engine} edit={paperEdit.edit} onClose={() => setPaperEdit(null)} />
-          )}
           {engine && labeling !== null && (
             <LabelEditor key={labeling} engine={engine} id={labeling} onClose={() => setLabeling(null)} />
           )}

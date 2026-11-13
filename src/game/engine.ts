@@ -4,8 +4,8 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
-  FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, flaskBox, flaskLip, flaskMouth, nozzleBox,
-  docked, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
+  FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
+  flaskLip, flaskMouth, nozzleBox, tankFluid, docked, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
 import { chime } from './chime';
@@ -14,29 +14,26 @@ import { CAP, DELIVERY, FILL_RATE, FLASK_L, GOAL_TARGET, HOME_H, HOME_W, N_FLASK
 import { cool, exposure, taper } from './cooling';
 import { FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
-import { Flask, Vessel, fluidColor, roomFor, sustenance, transfer, volume, volumeUnit, type Point } from './flask';
+import { Flask, Vessel, fluidColor, roomFor, sustenance, transfer, volume, volumeUnit } from './flask';
 import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
 import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
+import { shatter } from './shatter';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
 import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
 import {
-  CELL, COUNTERS, LIFT, PAPER_Z, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toCardinal, toFrac, toLocal, toWorld, wrapAngle,
+  CELL, COUNTERS, LIFT, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toCardinal, toFrac, toLocal, toWorld, wrapAngle,
   type Pose, type Vec3,
 } from './space';
 import {
-  ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, SUMP_TIP, TANK_H,
-  TOOL_NAMES, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, tankX,
+  ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
+  TANK_H, TOOL_NAMES, isDipper, isThermometer, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
   type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
-import {
-  PAPER_HANDLE, PAPER_HEADER, PAPER_MIN, PAPER_TEXT, PAPER_TEXT_MAX, Paper, eraseAt, extend, loadPaper, savePaper,
-  textAt,
-} from './paper';
 import { ARRIVAL, View, type AirlockLook, type FaucetSpot, type Frame, type GuideLook, type Pick } from './view';
 import { WaterSounds } from './water';
 
@@ -78,16 +75,17 @@ export interface Hud {
    * or set down what's held or pick up what's looked at.
    */
   press: boolean;
-  /** Whether the right button would do something: turn the valve looked at, or let fluid out of what's held. */
+  /**
+   * Whether the right button would do something: turn the valve looked at, let fluid out of what's held, or dip a held
+   * wicking strip or thermometer into what's looked at.
+   */
   right: boolean;
-  /** While a valve is being turned, where the pointer that aims its lever is, in CSS pixels; or with the pencil, where it points. */
+  /** While a valve is being turned, where the pointer that aims its lever is, in CSS pixels. */
   aim: { x: number; y: number } | null;
-  /** Whether the pencil is in hand. */
-  pencil: boolean;
   /** Whether N would write a note about what the crosshair is on (see GameEngine.note). */
   label: boolean;
   /** What the right button does now, in a word, for the touch screen's button that stands in for it. */
-  hand: 'Pour' | 'Flow' | 'Turn' | 'Erase';
+  hand: 'Pour' | 'Flow' | 'Dip' | 'Turn';
   /** A brief note, like there being no room for something. */
   note: string | null;
   /** Everything the player can do just now besides walking and looking, with how (see Action), for a reminder. */
@@ -126,10 +124,6 @@ export interface EngineCallbacks {
   onEdit(id: string): void;
   /** N was pressed on something, to write a note about it: the note's id (see GameEngine.note). */
   onLabel(id: string): void;
-  /** The pencil was picked up or put down (see setPencil). */
-  onPencil(on: boolean): void;
-  /** A line of text on a sticky note is to be typed, or null when there's none to type any more. */
-  onPaperText(edit: PaperEdit | null): void;
   /** Whenever the heads-up display changes. */
   onHud(hud: Hud): void;
   /** OK was pressed on the message inside the cryopod: the player is awake. */
@@ -196,26 +190,22 @@ type Held = (
   follow?: Follower[];
 };
 
-/**
- * A line of text on a sticky note being typed: a new one (index −1) with the left end of its baseline at (x, y) on
- * the sheet, or an old one, by its index in the sheet's texts.
- */
-export interface PaperEdit {
-  paper: Paper;
-  index: number;
-  x: number;
-  y: number;
-}
-
 /** Things that can be made from the hotbar, in its order. */
 export const ITEMS = [
   'flask', 'dispenser', 'pipette', 'exchanger', 'separator', 'splitter', 'sorter', 'heater', 'scale', 'tank', 'meter', 'multiplexer',
+  'thermometer', 'thermometerWide', 'dilatometer', 'strip', 'culture', 'column', 'dish',
 ] as const;
 export type Item = (typeof ITEMS)[number];
-/** The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0, - and =. */
-export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '='] as const;
+/**
+ * The key that makes each item, in ITEMS order: along the number row, 1 to 9, then 0, - and =; and then, the number
+ * row being full, along the bottom row of letters, from Z, then M (N writes notes) and the comma.
+ */
+export const HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 'Z', 'X', 'C', 'V', 'B', 'M', ','] as const;
 /** The same keys, as KeyboardEvent codes, so they work whatever the keyboard layout's shift state. */
-const HOTKEY_CODES = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal'];
+const HOTKEY_CODES = [
+  'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal',
+  'KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyM', 'Comma',
+];
 
 /** How tipped a flask held to pour is: past the horizontal, mouth down. */
 const POUR_ANG = Math.PI * 0.61;
@@ -229,6 +219,13 @@ const POUR_GAP = 20;
 const POUR_RISE = 300;
 /** How far above a mouth, at least, a held nozzle goes with the crosshair on it (see nozzleOver), up to POUR_RISE. */
 const NOZZLE_GAP = 15;
+/** How long a dipper takes to lower into what it's aimed at, or rise back out, in real seconds (see dipAim). */
+const DIP_S = 0.2;
+/**
+ * How long a wicking strip has to be held dipped in a fluid, in real seconds from its foot touching it, before it
+ * drinks it: a shorter tap only takes a spot (see Tool.touch).
+ */
+const DIP_SOAK = 0.35;
 /** How fast a falling drop speeds up, in world units per sim second squared: a 500-unit fall takes 0.7 s. */
 const GRAVITY = 2000;
 /** The player's eyes, and their body's radius. */
@@ -306,8 +303,6 @@ export class GameEngine {
   private keys = new Set<string>();
   /** Where the on-screen sticks are pushed (see stick). */
   private sticks = { move: { x: 0, y: 0 }, look: { x: 0, y: 0 } };
-  /** When the pencil last drew by touch, so the mouse events a browser makes up from a touch are ignored. */
-  private lastTouch = -Infinity;
   private held: Held | null = null;
   /** Whether the right button is held: a held flask tips and pours, and a held tool or hose lets fluid out, only while it is. */
   private rightHeld = false;
@@ -327,6 +322,15 @@ export class GameEngine {
   private faucetFlows: { fa: FaucetSpot; from: Vec3; m: Mouth }[] = [];
   /** Where the held flask is kept, over the mouth the right button was pressed on, while it's held (see pourPose). */
   private pinned: Pose | null = null;
+  /** How far a held dipper aimed at an open top is lowered into it, from 0 (hovering) to 1 (dipped; see dipAim). */
+  private dip = 0;
+  /** Real seconds the held wicking strip has been dipped in a fluid since its foot touched it (see DIP_SOAK). */
+  private dipFor = 0;
+  /**
+   * Whether the held wicking strip is still on its way in from a press of the right button: a tap, however brief, takes
+   * it all the way in before it rises, so its foot always touches what it's dipped in (see dipping).
+   */
+  private tapping = false;
   /** Where the held flask poured this frame, if it did: its lip, and what it poured into (null: the sink). */
   private pour: { from: Vec3; into: Mouth | null } | null = null;
   /** Where what's held would come to rest if let go, as of the last frame drawn (see placement). */
@@ -369,20 +373,6 @@ export class GameEngine {
   private pumper = new MessageChannel();
   /** The cryostabilizer station's diverter's sounds, while it's swinging or letting into the reservoir. */
   private diverters = new Map<Tool, Diverter>();
-  /** The player's sticky notes, on the back wall, the one on top last (see paper.ts). They're notes, not lab, so Reset keeps them. */
-  papers: Paper[] = [];
-  /** Whether the pencil is in hand: then the mouse moves a pointer (see `cursor`) that draws on sticky notes. */
-  private pencil = false;
-  /** Where the pencil points, on the canvas in CSS pixels, while it's in hand. */
-  private cursor = { x: 0, y: 0 };
-  /** What the pencil is doing while a button's held: marking out a new sheet, drawing, moving or resizing one, or erasing. */
-  private paperDrag:
-    | { kind: 'new'; from: Point }
-    | { kind: 'draw'; paper: Paper; stroke: number[]; from: Point; moved: boolean }
-    | { kind: 'move'; paper: Paper; off: Point }
-    | { kind: 'resize'; paper: Paper }
-    | { kind: 'erase' }
-    | null = null;
   /** Undo and redo, of the lab's arrangement (see history.ts). */
   private history = new History();
   private inspected: Vessel | null = null;
@@ -485,7 +475,7 @@ export class GameEngine {
 
   /**
    * The note an id names, to read and change: a flask's label (`f3`, by index), a tank's (`t2.0`, by tool id and
-   * tank), a tool's own note (`t2`; only a tool with more than one tank has one), a scale's (`s1`) or a faucet's
+   * tank), a tool's own note (`t2`; only a tool with no tank, or more than one, has one), a scale's (`s1`) or a faucet's
    * (`F5`), by index. Things are replaced on reset and load, so look this up each time.
    */
   note(id: string): { text: string; set(text: string): void } | null {
@@ -498,7 +488,7 @@ export class GameEngine {
     const i = +m[2];
     const found =
       m[1] === 'f' ? label(this.flasks[i])
-      : m[1] === 't' ? note(this.tools.find((t) => t.id === i && t.tanks.length > 1))
+      : m[1] === 't' ? note(this.tools.find((t) => t.id === i && t.tanks.length !== 1))
       : m[1] === 's' ? note(this.scales[i])
       : note(this.faucets[i]);
     return found ?? null;
@@ -648,6 +638,9 @@ export class GameEngine {
         drops: t.drops.map(saveVessel),
         ...(t.tube.length ? { tube: t.tube.map(saveVessel) } : {}),
         ...(t.note ? { note: t.note } : {}),
+        ...(t.memory ? { memory: t.memory } : {}),
+        ...(t.paper.length ? { paper: t.paper.map(saveVessel) } : {}),
+        ...(t.bed.length ? { bed: t.bed.map(saveVessel) } : {}),
       })),
       scales: this.scales.map((sc) => ({
         ...this.frac(sc.pose), ...depth(sc.pose), tare: sc.tare,
@@ -662,7 +655,6 @@ export class GameEngine {
       faucets: this.faucets.map((fa, i, all) => ({ x: (i + 0.5) / all.length, y: 30 / HOME_H, ...(fa.note ? { note: fa.note } : {}) })),
       ...(this.alarmsOff ? { alarmsOff: true } : {}),
       ...(this.blindsShut ? { blindsShut: true } : {}),
-      ...(this.papers.length ? { papers: this.papers.map(savePaper) } : {}),
       player: { x: this.player.x, z: this.player.z, yaw: this.player.yaw, pitch: this.player.pitch },
       chem: saveChem(this.chem.params),
     };
@@ -695,6 +687,17 @@ export class GameEngine {
         t.drops.forEach((v, k) => st.drops?.[k] && loadVessel(v, st.drops[k]));
         t.tube.forEach((v, k) => st.tube?.[k] && loadVessel(v, st.tube[k]));
         if (typeof st.note === 'string') t.note = st.note;
+        t.remember(st.memory);
+        t.paper.forEach((v, k) => st.paper?.[k] && loadVessel(v, st.paper[k]));
+        t.bed.forEach((v, k) => st.bed?.[k] && loadVessel(v, st.bed[k]));
+        // an older save's strip stood in a tray, posed at the tray's top, 4 above its paper's foot: it's bare paper now,
+        // so it goes up to keep its paper where it was (its tray, and what was in it, are gone), and the tray's label
+        // is its note
+        if (st.kind === 'strip' && st.tanks?.length) {
+          t.pose = { ...t.pose, y: t.pose.y + STRIP_FOOT - 4 };
+          const label = st.tanks[0]?.label;
+          if (!t.note && typeof label === 'string') t.note = label;
+        }
         return t;
       });
     this.nextToolId = Math.max(-1, ...this.tools.map((t) => t.id)) + 1;
@@ -733,9 +736,6 @@ export class GameEngine {
     });
     this.setAlarmsOff(!!s.alarmsOff);
     this.blindsShut = !!s.blindsShut;
-    this.papers = (Array.isArray(s.papers) ? s.papers : []).map(loadPaper).filter((p): p is Paper => !!p);
-    this.paperDrag = null;
-    this.cb.onPaperText(null);
     const pl = s.player;
     if (pl && [pl.x, pl.z, pl.yaw, pl.pitch].every(Number.isFinite)) {
       const p = this.inRoom({ x: pl.x, y: 0, z: pl.z, yaw: pl.yaw });
@@ -1083,12 +1083,6 @@ export class GameEngine {
 
   /* On a touch screen, the on-screen buttons stand in for the keys and the right button (see TouchControls). */
 
-  /** Where a pointer event happened on the canvas, in CSS pixels. */
-  private screenPt(e: PointerEvent): { x: number; y: number } {
-    const r = this.canvas.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
-  }
-
   /** E: pick up what the crosshair is on, or let go of what's held. */
   touchGrab(): void {
     if (this.locked) this.grabOrRelease(false);
@@ -1104,16 +1098,12 @@ export class GameEngine {
     if (this.locked) this.putAway();
   }
 
-  /**
-   * The right button, pressed or let go: it pours, lets fluid out, or turns the valve looked at; with the pencil in
-   * hand, touches on the view erase while it's held.
-   */
+  /** The right button, pressed or let go: it pours, lets fluid out, dips a strip or a thermometer, or turns the valve looked at. */
   hand(down: boolean): void {
     if (!down) {
       this.rightHeld = false;
       this.endTurn();
-    } else if (this.pencil) this.rightHeld = true;
-    else if (this.locked) this.rightDown();
+    } else if (this.locked) this.rightDown();
   }
 
   /** A finger dragged (dx, dy) pixels on the right button's stand-in: while a valve turns, it moves the aim. */
@@ -1156,32 +1146,7 @@ export class GameEngine {
     };
     document.addEventListener('pointerlockchange', onLock);
     this.cleanups.push(() => document.removeEventListener('pointerlockchange', onLock));
-    // with the pencil in hand on a touch screen, the finger is the pencil's point, and erases while the right
-    // button's stand-in is held
-    on(c, 'pointerdown', (e) => {
-      if (e.pointerType !== 'touch' || !this.pencil || !this.locked) return;
-      this.lastTouch = performance.now();
-      this.cursor = this.screenPt(e);
-      const at = this.wallAt();
-      if (at) this.pencilDown(at, this.rightHeld ? 2 : 0);
-      c.setPointerCapture(e.pointerId);
-    });
-    on(c, 'pointermove', (e) => {
-      if (e.pointerType !== 'touch' || !this.paperDrag) return;
-      this.lastTouch = performance.now();
-      this.cursor = this.screenPt(e);
-      const at = this.wallAt();
-      if (at) this.pencilMove(at);
-    });
-    const touchUp = (e: PointerEvent) => {
-      if (e.pointerType !== 'touch' || !this.paperDrag) return;
-      this.lastTouch = performance.now();
-      this.pencilUp(this.wallAt());
-    };
-    on(c, 'pointerup', touchUp);
-    on(c, 'pointercancel', touchUp);
     on(c, 'mousedown', (e) => {
-      if (this.pencil && performance.now() - this.lastTouch < 1000) return;
       if (!this.locked) {
         if (e.button !== 0) return;
         // the mouse is free, so it can press OK in the pod where it points, as well as capturing the mouse
@@ -1194,20 +1159,10 @@ export class GameEngine {
         return;
       }
       e.preventDefault();
-      if (this.pencil) {
-        const at = this.wallAt();
-        if (at) this.pencilDown(at, e.button);
-        return;
-      }
       if (e.button === 0) this.leftDown(e.shiftKey);
       if (e.button === 2) this.rightDown();
     });
     on(window, 'mouseup', (e) => {
-      if (this.pencil && performance.now() - this.lastTouch < 1000) return;
-      if (this.paperDrag) {
-        this.pencilUp(this.wallAt());
-        return;
-      }
       if (e.button === 0) this.tarePress = null;
       if (e.button === 2) {
         this.rightHeld = false;
@@ -1245,7 +1200,6 @@ export class GameEngine {
       if (e.repeat || inPod(this.wake) || this.previewing) return;
       if (e.code === 'KeyE') this.grabOrRelease(e.shiftKey);
       if (e.code === 'KeyQ') this.putBack();
-      if (e.code === 'KeyP') this.setPencil(!this.pencil);
       if (e.code === 'KeyN') {
         // the note's text box opens at once, and N mustn't be typed into it
         e.preventDefault();
@@ -1274,20 +1228,6 @@ export class GameEngine {
 
   /** The mouse moved by (dx, dy) pixels: aim a valve's lever, turn what's held (with Shift), or look around. */
   private look(dx: number, dy: number, shift: boolean): void {
-    if (this.pencil) {
-      // the pointer moves, and pushed past the edge of the view, turns it
-      const c = this.cursor;
-      const x = c.x + dx;
-      const y = c.y + dy;
-      c.x = Math.max(0, Math.min(this.viewW, x));
-      c.y = Math.max(0, Math.min(this.viewH, y));
-      const p = this.player;
-      p.yaw = wrapAngle(p.yaw - (x - c.x) * LOOK_SENS);
-      p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch - (y - c.y) * LOOK_SENS));
-      const at = this.wallAt();
-      if (at) this.pencilMove(at);
-      return;
-    }
     if (this.turning) {
       const a = this.turning.aim;
       a.x = Math.max(0, Math.min(this.viewW, a.x + dx));
@@ -1654,10 +1594,9 @@ export class GameEngine {
 
   /**
    * Q: put back what's held where it was picked up from (see Held.from), as it was, or if it was made in hand, put it
-   * away (see putAway); a hose just pulled out is rolled back up. With the pencil in hand, Q puts that down instead.
+   * away (see putAway); a hose just pulled out is rolled back up.
    */
   private putBack(): void {
-    if (this.pencil) return this.setPencil(false);
     const h = this.held;
     if (!h || inPod(this.wake)) return;
     if (!h.from) return this.putAway();
@@ -1742,7 +1681,7 @@ export class GameEngine {
 
   /**
    * The id of the note (see note) for what the crosshair is on: a tool, by the tank looked at, or the one tank it has,
-   * or else its own note; a flask; a scale; or a faucet. A hose has none.
+   * or else (with no tank, or more than one) its own note; a flask; a scale; or a faucet. A hose has none.
    */
   private targetNote(): string | null {
     const p = this.target;
@@ -1771,6 +1710,8 @@ export class GameEngine {
         this.faceFlask(h.f);
       }
     }
+    // a strip aimed at an open top goes all the way in, however soon the button's let go
+    if (h?.kind === 'tool' && h.t.kind === 'strip' && this.mouthAimed()) this.tapping = true;
     if (h) return;
     const k = this.valveAimed();
     if (!k) return;
@@ -1823,6 +1764,28 @@ export class GameEngine {
   }
 
   /**
+   * Where a held dipper (see DIPPERS) goes with the crosshair on an open top (see mouthAimed): upright, facing as it's
+   * held, over the middle of the mouth, on the grid, hovering a little above it, or dipped into it, its foot just
+   * under the fluid's surface (see dipPoses); and where it would be set down standing in it, deeper (see dipPoses and
+   * rest), or why it can't be. Null if the crosshair is on no open top.
+   */
+  private dipAim(h: Held & { kind: 'tool' }): { hover: Pose; dipped: Pose; rest: { rest: Rest } | { why: string } } | null {
+    const p = this.target;
+    const m = this.mouthAimed();
+    if (!m || (p?.kind !== 'flask' && p?.kind !== 'tool')) return null;
+    const fluid = p.kind === 'flask' ? flaskFluid(p.f) : tankFluid(p.t, p.k);
+    const { hover, dipped, stood } = dipPoses(h.t, m, fluid, toCardinal(this.player.yaw + h.relYaw));
+    const r = this.rest(h, stood, [...this.obstacles(h), this.me()], [...this.obstacles(h, false), this.me()]);
+    return { hover, dipped, rest: typeof r === 'string' ? { why: r } : { rest: r } };
+  }
+
+  /** The player's body, as a box, which what's set down mustn't overlap. */
+  private me(): Box {
+    const { x, z } = this.player;
+    return { x, y: (EYE + 20) / 2, z, yaw: 0, hx: PLAYER_R, hy: (EYE + 20) / 2, hz: PLAYER_R, round: true };
+  }
+
+  /**
    * The valve the crosshair is on, or within VALVE_REACH of on its tool's front face (see valveNear), if any. Where
    * valves crowd together, the nearest.
    */
@@ -1840,180 +1803,6 @@ export class GameEngine {
     const { locked, ...rest } = p;
     Object.assign(this.player, rest);
     if (locked !== undefined) this.locked = locked;
-  }
-
-  /* ---------------- sticky notes ---------------- */
-
-  /** Whether the pencil is in hand (see setPencil). */
-  get pencilOn(): boolean {
-    return this.pencil;
-  }
-
-  /**
-   * Pick the pencil up or put it down. While it's in hand, the mouse moves a pointer instead of the view (turning the
-   * view only when pushed past its edge), and the left button marks out a new sticky note on bare back wall, draws on
-   * a note, moves one by its top strip, resizes one by its bottom right corner, or throws one away by the × at its top
-   * right; a click on a note types a line of text there (or edits the line clicked); and the right button erases.
-   */
-  setPencil(on: boolean): void {
-    if (on === this.pencil || (on && inPod(this.wake))) return;
-    this.pencil = on;
-    this.paperDrag = null;
-    this.endTurn();
-    this.cursor = { x: this.viewW / 2, y: this.viewH / 2 };
-    if (!on) this.cb.onPaperText(null);
-    this.cb.onPencil(on);
-  }
-
-  /**
-   * Where the pencil points on the back wall, where sticky notes go, as a point on the old flat bench (x across, y down
-   * in world units, as paper.ts works in); null if it isn't pointing at the wall.
-   */
-  private wallAt(): Point | null {
-    if (!this.viewW) return null;
-    const { o, d } = this.view.ray((this.cursor.x / this.viewW) * 2 - 1, 1 - (this.cursor.y / this.viewH) * 2);
-    if (d.z >= -1e-6) return null;
-    const s = (PAPER_Z - o.z) / d.z;
-    const x = o.x + d.x * s;
-    const y = o.y + d.y * s;
-    if (x < ROOM.x0 || x > ROOM.x1 || y < 0 || y > ROOM.y1) return null;
-    return { x, y: -y };
-  }
-
-  /** A sticky note's top left corner, on the old flat bench (see wallAt). */
-  private paperXY(pa: Paper): Point {
-    const p = fromFrac({ x: pa.fx, y: pa.fy });
-    return { x: p.x, y: -p.y };
-  }
-
-  /** A point on the old flat bench (see wallAt), as fractions of its home area. */
-  private flatToFrac(p: Point): Point {
-    return toFrac({ x: p.x, y: -p.y, z: 0 });
-  }
-
-  /** A point on the old flat bench, on a sticky note, from its top left corner. */
-  private onPaper(pa: Paper, p: Point): Point {
-    const o = this.paperXY(pa);
-    return { x: p.x - o.x, y: p.y - o.y };
-  }
-
-  /** The sticky note under p, the one on top first. */
-  private paperAt(p: Point): Paper | null {
-    for (let i = this.papers.length - 1; i >= 0; i--) {
-      const q = this.onPaper(this.papers[i], p);
-      if (q.x >= 0 && q.y >= 0 && q.x <= this.papers[i].w && q.y <= this.papers[i].h) return this.papers[i];
-    }
-    return null;
-  }
-
-  private raisePaper(pa: Paper): void {
-    this.papers.splice(this.papers.indexOf(pa), 1);
-    this.papers.push(pa);
-  }
-
-  private pencilDown(p: Point, button: number): void {
-    if (button === 2) {
-      this.paperDrag = { kind: 'erase' };
-      this.pencilMove(p);
-      return;
-    }
-    if (button !== 0) return;
-    const pa = this.paperAt(p);
-    if (!pa) {
-      this.paperDrag = { kind: 'new', from: p };
-      return;
-    }
-    this.raisePaper(pa);
-    const q = this.onPaper(pa, p);
-    const right = q.x >= pa.w - PAPER_HANDLE;
-    if (right && q.y <= PAPER_HANDLE) {
-      this.papers.splice(this.papers.indexOf(pa), 1);
-      this.cb.onPaperText(null);
-    } else if (right && q.y >= pa.h - PAPER_HANDLE) this.paperDrag = { kind: 'resize', paper: pa };
-    else if (q.y <= PAPER_HEADER) this.paperDrag = { kind: 'move', paper: pa, off: q };
-    else {
-      const stroke: number[] = [];
-      extend(pa, stroke, q);
-      pa.strokes.push(stroke);
-      this.paperDrag = { kind: 'draw', paper: pa, stroke, from: p, moved: false };
-    }
-  }
-
-  private pencilMove(p: Point): void {
-    const d = this.paperDrag;
-    if (!d) return;
-    if (d.kind === 'draw') {
-      extend(d.paper, d.stroke, this.onPaper(d.paper, p));
-      if (Math.hypot(p.x - d.from.x, p.y - d.from.y) > 3) d.moved = true;
-    } else if (d.kind === 'move') {
-      const at = this.flatToFrac({ x: p.x - d.off.x, y: p.y - d.off.y });
-      d.paper.fx = at.x;
-      d.paper.fy = at.y;
-    } else if (d.kind === 'resize') {
-      const q = this.onPaper(d.paper, p);
-      d.paper.w = Math.max(PAPER_MIN.w, q.x);
-      d.paper.h = Math.max(PAPER_MIN.h, q.y);
-    } else if (d.kind === 'erase') {
-      const pa = this.paperAt(p);
-      if (pa) eraseAt(pa, this.onPaper(pa, p));
-    }
-  }
-
-  private pencilUp(p: Point | null): void {
-    const d = this.paperDrag;
-    this.paperDrag = null;
-    if (d?.kind === 'draw' && !d.moved) {
-      // a click, not a stroke: type there, or edit the line clicked
-      d.paper.strokes.splice(d.paper.strokes.indexOf(d.stroke), 1);
-      const q = this.onPaper(d.paper, d.from);
-      const i = textAt(d.paper, q);
-      const t = d.paper.texts[i];
-      document.exitPointerLock();
-      this.cb.onPaperText(t ? { paper: d.paper, index: i, x: t.x, y: t.y } : { paper: d.paper, index: -1, x: q.x, y: q.y + PAPER_TEXT / 2 });
-    } else if (d?.kind === 'new' && p) {
-      const x0 = Math.min(d.from.x, p.x);
-      const y0 = Math.min(d.from.y, p.y);
-      const w = Math.abs(p.x - d.from.x);
-      const h = Math.abs(p.y - d.from.y);
-      if (w >= PAPER_MIN.w && h >= PAPER_MIN.h) {
-        const at = this.flatToFrac({ x: x0, y: y0 });
-        this.papers.push(new Paper(at.x, at.y, w, h));
-      }
-    }
-  }
-
-  /** The text a line on a sticky note being typed starts with: what's there already, if it's an old one. */
-  paperText(edit: PaperEdit): string {
-    return edit.index >= 0 ? (edit.paper.texts[edit.index]?.text ?? '') : '';
-  }
-
-  /** Where a line on a sticky note being typed starts (the left end of its baseline), on the canvas in CSS pixels. */
-  paperTextSpot(edit: PaperEdit): { x: number; y: number } | null {
-    if (!this.papers.includes(edit.paper)) return null;
-    const o = this.paperXY(edit.paper);
-    return this.view.project({ x: o.x + edit.x, y: -(o.y + edit.y), z: PAPER_Z }, this.viewW, this.viewH);
-  }
-
-  /** Keep a line typed on a sticky note: a new one is added, an old one changed, and an empty one rubbed out. */
-  writePaperText(edit: PaperEdit, text: string): void {
-    const { paper, index } = edit;
-    if (!this.papers.includes(paper)) return;
-    text = text.trim().slice(0, PAPER_TEXT_MAX);
-    if (index >= 0 && paper.texts[index]) {
-      if (text) paper.texts[index].text = text;
-      else paper.texts.splice(index, 1);
-    } else if (text) paper.texts.push({ x: edit.x, y: edit.y, text });
-  }
-
-  /** The sticky notes as the view draws them: each sheet's top left corner on the back wall, and a sheet being marked out. */
-  private paperFrame(): Frame['papers'] {
-    const d = this.paperDrag;
-    const p = d?.kind === 'new' ? this.wallAt() : null;
-    return {
-      sheets: this.papers.map((paper) => ({ paper, at: this.paperXY(paper) })),
-      pencil: this.pencil,
-      draft: d?.kind === 'new' && p ? { x0: Math.min(d.from.x, p.x), y0: Math.min(d.from.y, p.y), x1: Math.max(d.from.x, p.x), y1: Math.max(d.from.y, p.y) } : null,
-    };
   }
 
   /* ---------------- layout ---------------- */
@@ -2060,7 +1849,7 @@ export class GameEngine {
    * Every vessel holding fluid, with how exposed that fluid is to the room (see exposure): how deep it stands, and
    * how wide on average, as it's shown, taking the flat outline its shape is built from. A flask fills its wide base
    * first; a tank fills straight up, a funnel from its narrow stem; a pipette fills its tube, then its cup; a sump
-   * fills first; a heater's tube holds a shallow stream along its floor.
+   * fills first; a swell bulb fills its bulb, then its neck; a heater's tube holds a shallow stream along its floor.
    */
   private exposures(): [Vessel, number][] {
     const out: [Vessel, number][] = [];
@@ -2076,7 +1865,12 @@ export class GameEngine {
       t.tanks.forEach((v, k) => {
         if (v.N <= 0) return;
         const W = sh.tanks[k].x1 - sh.tanks[k].x0;
-        if (sh.cup) {
+        if (sh.neck) {
+          // as it's drawn: its depth, and the side of a square as big across as it is on average
+          const ps = tankPieces(sh, k, W);
+          const h = levelIn(ps, share(v));
+          out.push([v, exposure(h, Math.sqrt((share(v) * spaceOf(ps)) / h))]);
+        } else if (sh.cup) {
           const cupW = 2 * sh.cup.w;
           const h = cupFillHeight(share(v), W, H, cupW, sh.cup.h);
           const area = share(v) * (W * H + ((W + cupW) / 2) * sh.cup.h);
@@ -2209,9 +2003,17 @@ export class GameEngine {
       }
     }
     if (h?.kind !== 'flask' || !this.rightHeld) this.pinned = null;
+    // a nozzle held with the crosshair on an open top goes straight over it, where it would be set down to pour in;
+    // and a strip or a thermometer hovers over it, and lowers into it while the right button's held, or, a strip, until
+    // it's all the way in from a tap
+    const aim = h?.kind === 'tool' && isDipper(h.t.kind) ? this.dipAim(h) : null;
+    if (!aim) this.tapping = false;
+    this.dip = aim ? Math.max(0, Math.min(1, this.dip + ((this.rightHeld || this.tapping ? 1 : -1) * dt) / DIP_S)) : 0;
     if (!h) return;
-    // a nozzle held with the crosshair on an open top goes straight over it, where it would be set down to pour in
-    const over = h.kind === 'hose' ? this.nozzleOver(h) : null;
+    const lower = ease(this.dip);
+    const over = h.kind === 'hose' ? this.nozzleOver(h)
+      : aim ? { ...aim.hover, y: aim.hover.y + (aim.dipped.y - aim.hover.y) * lower, x: aim.dipped.x, z: aim.dipped.z }
+      : null;
     if (over) {
       this.placeHeld(h, over);
       return;
@@ -2300,6 +2102,9 @@ export class GameEngine {
     const vessels = this.vessels();
     // how exposed each one's fluid is to the room, from how it stands now; it hardly changes in a frame
     const exposures = simDt > 0 ? this.exposures() : [];
+    // what each thermometer's bulb and each strip's foot is in (see dipping)
+    const whole = this.tools.map((t) => !t.broken);
+    this.dipping(quiet ? 0 : dt);
     if (simDt > 0) {
       const sub = Math.ceil(simDt / 0.02);
       const step = simDt / sub;
@@ -2416,6 +2221,10 @@ export class GameEngine {
         d.stop(); // quiet a while, or the lab was replaced
         this.diverters.delete(t);
       }
+    // a thermometer whose bulb got too hot shatters, with a crack of glass, on sim time like what broke it
+    this.tools.forEach((t, j) => {
+      if (t.broken && whole[j]) shatter(this.hear(footAt(t)));
+    });
     // and it chimes as it's been delivering steadily for long enough to open the airlock
     const st = this.station();
     if (steadyFrom < DELIVERY.streak && st.steady >= DELIVERY.streak) chime(this.hear(this.machineAt(st)));
@@ -2494,9 +2303,11 @@ export class GameEngine {
    * player too. If it can't rest anywhere near, why not where it's held.
    */
   private placement(h: Held): { rest: Rest } | { why: string } {
+    // a strip or a thermometer aimed at an open top is set down standing in it
+    const aim = h.kind === 'tool' && isDipper(h.t.kind) ? this.dipAim(h) : null;
+    if (aim) return aim.rest;
     const p = this.heldPose(h);
-    const { x, z } = this.player;
-    const me: Box = { x, y: (EYE + 20) / 2, z, yaw: 0, hx: PLAYER_R, hy: (EYE + 20) / 2, hz: PLAYER_R, round: true };
+    const me = this.me();
     const obstacles = [...this.obstacles(h), me];
     const solid = [...this.obstacles(h, false), me];
     // each cell's spot, nearest where it's held first; that's the cell it's held over
@@ -2535,9 +2346,11 @@ export class GameEngine {
       const tops = stands.map((st) => counterUnder(standBase(st, 0)));
       if (tops.some((t) => t === null)) return 'Its stand needs a counter under it';
       let dy = -Math.max(0, ...stands.map((st, i) => st.clampY - tops[i]! - STAND_MAX));
-      // held sunk into a counter, it comes up to stand on it
+      // held sunk into a counter, it comes up to stand on it: all of a strip or a thermometer, though its lower part
+      // bumps into nothing else
       const sunk = LIFT - (box.y + dy - box.hy);
-      if (sunk > 0 && COUNTER_BOXES.some((c) => boxesOverlap({ ...box, y: box.y + dy }, c))) dy += sunk;
+      const solidBox = h.kind === 'tool' && isDipper(h.t.kind) ? { ...box, parts: undefined } : box;
+      if (sunk > 0 && COUNTER_BOXES.some((c) => boxesOverlap({ ...solidBox, y: box.y + dy }, c))) dy += sunk;
       const to = { ...box, y: box.y + dy };
       if (blocked(to)) return 'No room';
       if (stands.some((st, i) => solid.some((o) => boxesOverlap(standBase(st, tops[i]!), o)))) return 'No room for its stand';
@@ -2593,11 +2406,15 @@ export class GameEngine {
     return { turn: toCardinal(this.player.yaw + h.relYaw), reach: snapReach(h.reach) };
   }
 
-  /** Every stand in the lab, with what it holds up. */
+  /** Every stand in the lab, with what it holds up; but none for a dipper (see DIPPERS) while it's in hand. */
   private stands(): { s: Stand; of: Pick }[] {
     const out: { s: Stand; of: Pick }[] = [];
-    for (const t of this.tools) for (const s of toolStands(t)) out.push({ s, of: { kind: 'tool', t, part: 'body', k: 0 } });
     const held = this.held;
+    for (const t of this.tools) {
+      // a strip or a thermometer in hand is just itself: its stand is there once it's set down
+      if (held?.kind === 'tool' && held.t === t && isDipper(t.kind)) continue;
+      for (const s of toolStands(t)) out.push({ s, of: { kind: 'tool', t, part: 'body', k: 0 } });
+    }
     const pl = this.placed;
     const follow = held?.follow ?? [];
     for (const h of this.hoses) {
@@ -2696,7 +2513,6 @@ export class GameEngine {
       tarePress: this.tarePress, hot: this.target, dt, clock: this.clock,
       energies: BOND_KEYS.map((k) => this.chem.params.bonds[k].E), alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
       airlock: this.airlockLook(),
-      papers: this.paperFrame(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(),
     });
   }
@@ -2756,20 +2572,21 @@ export class GameEngine {
       add(['/'], 'hide this list');
       return out;
     }
-    if (this.pencil) {
-      add(['LMB'], 'drag to draw, or on bare wall to mark out a sheet');
-      add(['LMB'], 'click a sheet to type on it');
-      add(['RMB'], 'drag to erase');
-      add(['P'], 'put the pencil down');
-      add(['Q'], 'put the pencil down');
-    }
     if (h) {
       const ok = !!this.placed && 'rest' in this.placed;
-      const how = h.kind === 'hose' ? 'set the hose’s end down' : 'set it down';
-      // the pencil has the mouse, so E sets down; and a button looked at takes the click
-      if (this.pencil || !this.onButton()) add([this.pencil ? 'E' : 'LMB'], ok ? how : `${how}: not here`, !ok);
-      if (!this.pencil && this.rightWouldDo())
-        add(['RMB'], h.kind !== 'flask' ? 'hold to let it flow' : this.mouthAimed() ? 'hold to pour into it' : 'hold to pour');
+      const how = h.kind === 'hose' ? 'set the hose’s end down'
+        : h.kind === 'tool' && isDipper(h.t.kind) && this.mouthAimed() ? 'stand it in it'
+        : 'set it down';
+      // a button looked at takes the click
+      if (!this.onButton()) add(['LMB'], ok ? how : `${how}: not here`, !ok);
+      if (this.rightWouldDo())
+        add(
+          ['RMB'],
+          h.kind === 'tool' ? (h.t.kind === 'strip' ? 'tap to dip it, hold to soak it' : 'hold to dip it in')
+          : h.kind !== 'flask' ? 'hold to let it flow'
+          : this.mouthAimed() ? 'hold to pour into it'
+          : 'hold to pour',
+        );
       if (h.kind === 'hose') {
         add(['Shift', '←→'], 'swing its stand round');
         add(['Shift', '↑↓'], 'slide its stand out or in');
@@ -2777,30 +2594,23 @@ export class GameEngine {
       add(['Wheel'], 'hold it nearer or further');
       if (h.kind === 'hose') add(['Backspace'], 'roll the hose back up');
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it away');
-      if (!this.pencil) add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it away') : 'put it back');
+      add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it away') : 'put it back');
     } else {
-      if (this.pencil && p && this.grabbable(p)) {
-        add(['E'], 'pick it up');
-        if (this.hooked(p)) add(['Shift', 'E'], 'pick it up still hooked up');
-      }
-      if (!this.pencil && this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
-      add(['1–0, -, ='], 'make equipment in your hands');
+      if (this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
+      add(['1–0, -, =, Z–B, M, ,'], 'make equipment in your hands');
     }
-    if (!this.pencil) {
-      if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
-      else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
-      else if (this.pressable()) add(['LMB'], 'press it');
-      const m = h ? null : this.mountAimed();
-      if (m) add(['LMB'], this.hoseOn(m) ? 'take hold of its hose' : 'pull out its hose');
-      else if (!h && p?.kind === 'hose') add(['LMB'], 'take hold of it');
-      else if (!h && p && this.grabbable(p) && !this.onButton()) {
-        add(['LMB'], 'pick it up');
-        if (this.hooked(p)) add(['Shift', 'LMB'], 'pick it up still hooked up');
-      }
-      const id = this.targetNote();
-      if (id) add(['N'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
-      add(['P'], 'pick up the pencil');
+    if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
+    else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
+    else if (this.pressable()) add(['LMB'], 'press it');
+    const m = h ? null : this.mountAimed();
+    if (m) add(['LMB'], this.hoseOn(m) ? 'take hold of its hose' : 'pull out its hose');
+    else if (!h && p?.kind === 'hose') add(['LMB'], 'take hold of it');
+    else if (!h && p && this.grabbable(p) && !this.onButton()) {
+      add(['LMB'], 'pick it up');
+      if (this.hooked(p)) add(['Shift', 'LMB'], 'pick it up still hooked up');
     }
+    const id = this.targetNote();
+    if (id) add(['N'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
     if (!h && this.history.canUndo) add([MOD, 'Z'], 'undo');
     if (!h && this.history.canRedo) add([MOD, 'Shift', 'Z'], 'redo');
     add(['Esc'], 'let go of the mouse');
@@ -2882,7 +2692,6 @@ export class GameEngine {
     if (this.held) this.release();
     if (this.held && !(this.held.kind === 'tool' && UNIQUE_TOOLS.includes(this.held.t.kind))) this.putAway();
     this.held = null;
-    this.setPencil(false);
     this.endTurn();
     this.rightHeld = false;
   }
@@ -2963,6 +2772,7 @@ export class GameEngine {
         ...this.tools.flatMap((t) => [
           ...t.tanks.map((v, k) => ({ v, terminal: !drains(t, k) })),
           ...t.tube.map((v) => ({ v, terminal: false })),
+          ...t.bed.map((v) => ({ v, terminal: false })),
         ]),
       ],
       station: this.station(),
@@ -3090,17 +2900,48 @@ export class GameEngine {
     if (this.rightHeld) return false;
     const h = this.held;
     if (h?.kind === 'flask') return h.f.N > TRACE;
+    // a strip or a thermometer dips into the open top looked at
+    if (h?.kind === 'tool' && isDipper(h.t.kind)) return !!this.mouthAimed();
     // a held tool runs anyway
     if (h?.kind === 'tool') return false;
     // a faucet always runs
     if (h?.kind === 'hose') return 'tool' in h.h.on ? this.wouldFlow(h.h.on.tool) : true;
-    return !this.pencil && !!this.valveAimed();
+    return !!this.valveAimed();
+  }
+
+  /**
+   * What each dipper's foot is in (see footAt and dippedIn), from where it is now, held or set down; it doesn't change
+   * much in a frame. A thermometer's bulb reads whatever it's in. A wicking strip counts as in a fluid only while it's
+   * set down, or held dipped with the right button (or on its way in from a tap of it, see tapping), so carrying one
+   * past fluid does nothing; it drinks it while it's set down, or once it's been held dipped DIP_SOAK real seconds
+   * (`dt`, as the player's own movements go), so a tap only spots it (see Tool.dipIn).
+   */
+  private dipping(dt: number): void {
+    const h = this.held;
+    let dipped = false;
+    for (const t of this.tools) {
+      if (isThermometer(t.kind)) t.bath = bathAt(footAt(t), this.flasks, this.tools);
+      if (t.kind !== 'strip') continue;
+      const held = h?.kind === 'tool' && h.t === t;
+      // one in hand is in the fluid once it's all the way down, so its spot is as deep as it's dipped
+      const d = !held || ((this.rightHeld || this.tapping) && this.dip >= 1) ? dippedIn(footAt(t), this.flasks, this.tools) : null;
+      if (held && d) {
+        dipped = true;
+        this.dipFor += dt;
+      }
+      t.dipIn(d?.v ?? null, !held || this.dipFor > DIP_SOAK, d?.depth);
+    }
+    if (!dipped) this.dipFor = 0;
+    // all the way in, its foot has touched: a tap is over, and it rises unless the button's still held
+    if (this.dip >= 1) this.tapping = false;
   }
 
   /** Whether fluid would leave a tool's spouts if it ran. */
   private wouldFlow(t: Tool): boolean {
     // the station's reservoir through its faucet, or its funnel through the diverter
     if (t.kind === 'receptacle') return t.tanks.some((v, k) => v.N > TRACE && drains(t, k));
+    // a column's dry bed drinks what's in its funnel, and lets nothing out
+    if (t.kind === 'column') return t.soaked >= 1 && t.valves[0] > 0 && t.tanks[0].N > TRACE;
     // a heater's tube runs whatever its valves say
     return (t.shape.spouts.length > 0 && t.tanks.some((v, k) => v.N > TRACE && drains(t, k))) || t.tube.some((v) => v.N > TRACE);
   }
@@ -3117,10 +2958,9 @@ export class GameEngine {
       drop: !!this.placed && 'rest' in this.placed,
       press: this.leftWouldDo(),
       right: this.rightWouldDo(),
-      aim: this.pencil ? { ...this.cursor } : this.turning ? { ...this.turning.aim } : null,
-      pencil: this.pencil,
+      aim: this.turning ? { ...this.turning.aim } : null,
       label: !inPod(this.wake) && !!this.targetNote(),
-      hand: this.pencil ? 'Erase' : h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : 'Turn',
+      hand: h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : h?.kind === 'tool' && isDipper(h.t.kind) ? 'Dip' : 'Turn',
       note: this.flash?.text ?? null,
       actions: this.actions(),
       black: this.black(),
@@ -3149,6 +2989,8 @@ export class GameEngine {
 function drains(t: Tool, k: number): boolean {
   if (t.kind === 'receptacle') return k === 0 || t.valves[0] > 0;
   if (t.kind === 'multiplexer') return k ? t.valves[0] > 0 : t.valves[0] < 1;
+  // a dry column's bed drinks from its funnel, its tap open or not
+  if (t.kind === 'column') return t.soaked < 1 || t.valves[0] > 0;
   return t.kind === 'splitter' || t.kind === 'sorter' || t.kind === 'heater' || INLINE_TOOLS.includes(t.kind) || t.valves[k] > 0;
 }
 

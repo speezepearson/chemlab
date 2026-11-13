@@ -1,6 +1,20 @@
 import type { ReactNode } from 'react';
 import { HOTKEYS, ITEMS, type GameEngine } from '../game/engine';
 
+/** A thermometer's icon: ticks every `gap` up its backing, every fifth longer, and its column of spirit up to `top`. */
+function thermometerIcon(gap: number, top: number): ReactNode {
+  const ticks = Array.from({ length: Math.floor(20 / gap) + 1 }, (_, i) => `M19.6 ${27 - i * gap} H${i % 5 ? 21.4 : 22.6}`).join(' ');
+  return (
+    <>
+      <rect className="glass" x="15.5" y="2" width="9" height="36" rx="4.5" />
+      <rect x="17.5" y="5" width="5.5" height="24" style={{ fill: '#f1efe6', stroke: 'none' }} />
+      <path d={ticks} style={{ stroke: '#2a2925', strokeWidth: 0.6 }} />
+      <path d={`M18.6 32 V${top}`} style={{ stroke: '#d8443b', strokeWidth: 1.3 }} />
+      <rect x="17.2" y="30" width="5.6" height="6" rx="2.8" style={{ fill: '#d8443b', stroke: 'none' }} />
+    </>
+  );
+}
+
 /** Small drawings of each item, echoing how the bench draws it, in a 40 × 40 box. */
 const ICONS: Record<string, ReactNode> = {
   flask: <path className="glass" d="M16 6 H24 L23 15 L31 32 Q32 35 29 35 H11 Q8 35 9 32 L17 15 Z" />,
@@ -90,14 +104,60 @@ const ICONS: Record<string, ReactNode> = {
       <path className="digits" d="M14.5 24.5 H25.5" style={{ stroke: 'yellowgreen' }} />
     </>
   ),
+  dilatometer: (
+    <>
+      <path className="pipe" d="M11 30 V32 H5 V38 M29 30 V32 H35 V38" />
+      <path className="glass" d="M2 2 H10 L7 6 H5 Z M30 2 H38 L35 6 H33 Z" />
+      <path className="glass" d="M6 6 L18 12 M34 6 L22 12" />
+      <path className="glass" d="M19.2 11 V30 H5 V22 H16 V11 M20.8 11 V30 H35 V22 H24 V11" />
+      <path d="M5 24.5 H35 M5 27.5 H35" style={{ stroke: '#b87333', strokeWidth: 1.2 }} />
+      <circle className="valve" cx="20" cy="35" r="3" />
+    </>
+  ),
+  strip: (
+    <>
+      <path d="M15 5 H25 V32 L20 38 L15 32 Z" style={{ fill: '#e6dfc8', stroke: 'var(--pipe)', strokeWidth: 0.8 }} />
+      <path d="M16 13 H24 M16 21 H24 M16 24.5 H24" style={{ stroke: 'var(--pipe)', strokeWidth: 2.2, opacity: 0.75 }} />
+      <rect x="16.5" y="2" width="7" height="6" rx="0.8" style={{ fill: 'var(--pipe)', stroke: 'none' }} />
+    </>
+  ),
+  dish: (
+    <>
+      <rect x="15" y="25" width="10" height="9" rx="1" style={{ fill: 'var(--pipe)', stroke: 'none' }} />
+      <path className="glass" d="M4 16 V24 H36 V16" />
+    </>
+  ),
+  column: (
+    <>
+      <path className="pipe" d="M20 7.5 V9 M20 30 V38" />
+      <path className="glass" d="M14 1.5 H26 L21 7.5 H19 Z" />
+      <rect x="17" y="9" width="6" height="21" rx="1" style={{ fill: '#e6dfc8', stroke: 'var(--glass)', strokeWidth: 0.8 }} />
+      <path d="M17.6 15 H22.4 M17.6 22 H22.4" style={{ stroke: 'var(--pipe)', strokeWidth: 1.6, opacity: 0.6 }} />
+      <circle className="valve" cx="20" cy="33" r="2.5" />
+    </>
+  ),
+  culture: (
+    <>
+      <path className="pipe" d="M20 30 V38" />
+      <path className="glass" d="M15 2 H25 L31 7 V30 H9 V7 Z" />
+      <g style={{ fill: '#96d6ff', stroke: 'none' }}>
+        {[14.5, 20, 25.5].flatMap((x) => [12, 18.5, 25].map((y) => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.7" />))}
+      </g>
+      <circle cx="20" cy="18.5" r="1.7" style={{ fill: '#8a5a36', stroke: 'none' }} />
+      <circle className="valve" cx="20" cy="34" r="2.5" />
+    </>
+  ),
+  // the thermometers: a glass rod with a white backing, a scale on it, and a column of red spirit up from its bulb;
+  // the fine one's ticks close together, the wide one's further apart
+  thermometer: thermometerIcon(2, 21),
+  thermometerWide: thermometerIcon(5, 14),
 };
 
 /**
- * The equipment that can be made, along the bottom of the view: a key along the number row makes one in the player's
- * hands, if they're empty. Clicking one does the same, when the mouse isn't captured. Last is the pencil, for sticky
- * notes.
+ * The equipment that can be made, along the bottom of the view: a key (along the number row, and then from Z along
+ * the bottom row of letters) makes one in the player's hands, if they're empty. Clicking one does the same, when the mouse isn't captured.
  */
-export function Palette({ engine, pencil }: { engine: GameEngine; pencil: boolean }) {
+export function Palette({ engine }: { engine: GameEngine }) {
   return (
     <div className="palette" aria-label="equipment">
       {ITEMS.map((kind, i) => (
@@ -118,28 +178,6 @@ export function Palette({ engine, pencil }: { engine: GameEngine; pencil: boolea
           <kbd>{HOTKEYS[i]}</kbd>
         </button>
       ))}
-      <button
-        className={`pencil${pencil ? ' on' : ''}`}
-        aria-label="Pencil"
-        aria-pressed={pencil}
-        aria-keyshortcuts="P"
-        title={
-          'Pencil (P): the mouse moves a pointer instead of your view. Drag on bare back wall for a sticky note, drag ' +
-          'on one to draw, click one to type, right-drag to erase. Drag a note by its top strip, resize it by its ' +
-          'corner, × throws it away. P puts it down.'
-        }
-        onClick={() => {
-          engine.lock();
-          engine.setPencil(!engine.pencilOn);
-        }}
-      >
-        <svg viewBox="0 0 40 40" aria-hidden="true">
-          <rect x="5" y="20" width="18" height="15" rx="1" style={{ fill: '#fbf0a2', stroke: 'var(--glass)' }} />
-          <path className="pipe" d="M17 30 L33 9" style={{ strokeWidth: 4 }} />
-          <path d="M15.2 32.4 L17 30 L19 31.5 Z" style={{ fill: 'var(--ink)', stroke: 'var(--ink)', strokeWidth: 1 }} />
-        </svg>
-        <kbd>P</kbd>
-      </button>
     </div>
   );
 }

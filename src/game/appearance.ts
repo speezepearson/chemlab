@@ -7,8 +7,8 @@
  *   value         0     0.70   0.95   1.00   1.00   cold fluids fade to black
  *   whitening     0     0.01   0.02   0.27   1.00   hot fluids wash out to white
  *
- * And how composition looks (colorModel, cloudy): see fluidHue and fluidAlpha
- * in flask.ts.
+ * And how composition looks (colorModel, cloudy, and the solvent's thinning,
+ * solventAlpha): see fluidHue and fluidAlpha in flask.ts.
  *
  * LOOK is mutable so the Appearance debug panel can tune it live.
  */
@@ -93,6 +93,19 @@ export function glowFalloff(x: number, sharpness: number): number {
 }
 
 export type RGB = [number, number, number];
+
+/**
+ * How opaque a fluid is by the share of its atoms that are the solvent, S, which has no color and thins whatever it's
+ * in: 1 with none, falling to 0.12 for pure S, which still reads as a liquid with a surface. Concave, so strong
+ * dilutions still show their color: about 0.70 at half S, 0.34 at nine tenths.
+ */
+export function solventAlpha(share: number): number {
+  const x = Math.max(0, Math.min(1, share));
+  return 0.12 + 0.88 * (1 - x) ** 0.6;
+}
+
+/** The hue of a fluid that's all solvent: a faint, cool near-white, as clear liquid in glass looks. */
+export const SOLVENT_TINT: RGB = [222, 232, 240];
 
 /** Push a color toward white by fraction w. */
 export function whiten(c: readonly number[], w: number): RGB {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultChemParams } from '../chem/params';
-import { TARGET, singleOf } from '../chem/species';
+import { SOLVENT_SPECIES, TARGET, singleOf } from '../chem/species';
 import { Vessel } from './flask';
 import { decodeSave, encodeSave, loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 
@@ -15,6 +15,20 @@ describe('saves', () => {
     loadVessel(w, saveVessel(v));
     expect([...w.n]).toEqual([...v.n]);
     expect([w.N, w.Q, w.label]).toEqual([v.N, v.Q, v.label]);
+  });
+
+  it('round-trip a vessel holding the solvent, which they store by its name', () => {
+    const v = new Vessel(4e9);
+    v.n[SOLVENT_SPECIES] = 5000;
+    v.n[singleOf('R')] = 300;
+    v.N = 5300;
+    v.Q = 5300;
+    const saved = saveVessel(v);
+    expect(JSON.stringify(saved)).toContain('"S"');
+    const w = new Vessel(4e9);
+    loadVessel(w, JSON.parse(JSON.stringify(saved)));
+    expect([...w.n]).toEqual([...v.n]);
+    expect([w.N, w.Q]).toEqual([v.N, v.Q]);
   });
 
   it('drop what does not fit, unknown species, and fractions', () => {
