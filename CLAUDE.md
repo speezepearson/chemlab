@@ -81,7 +81,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     antinucleant (R–B), then the cryostabilizer.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
-    `volumes.ts`); `rumble.ts` is the composition analyzer, `diverter.ts` the supply station's diverter, `ambience.ts` the ship, `water.ts` drips and streams, `shatter.ts` a thermometer
+    `volumes.ts`); `rumble.ts` is the composition analyzer, `diverter.ts` the supply station's diverter, `changeover.ts` its changeover, `ambience.ts` the ship, `water.ts` drips and streams, `shatter.ts` a thermometer
     shattering.
     New sounds play into a channel's `bus()`, never straight to the destination, so the sliders reach them. A sound
     in the lab goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),

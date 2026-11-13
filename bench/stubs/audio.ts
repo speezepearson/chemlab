@@ -1,4 +1,4 @@
-// Headless stand-ins for the Web Audio modules the engine uses (water, rumble, diverter, chime, shatter, ambience).
+// Headless stand-ins for the Web Audio modules the engine uses (water, rumble, diverter, changeover, chime, shatter, ambience).
 export class WaterSounds {
   update(): void {}
   stop(): void {}
@@ -6,6 +6,7 @@ export class WaterSounds {
 const noop = () => {};
 export const rumble = () => ({ place: noop, level: noop, stop: noop });
 export const diverter = () => ({ place: noop, swing: noop, stop: noop });
+export const changeover = () => ({ place: noop, run: noop, clunk: noop, stop: noop });
 export const hushAlarms = noop;
 export const chime = noop;
 export const shatter = noop;

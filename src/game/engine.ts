@@ -8,6 +8,7 @@ import {
   flaskLip, flaskMouth, nozzleBox, tankFluid, docked, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
+import { changeover, type ChangeoverSound } from './changeover';
 import { chime } from './chime';
 import { diverter, type Diverter } from './diverter';
 import { CAP, DELIVERY, FILL_RATE, HOME_H, HOME_W, N_FLASKS, POUR_RATE, TRACE } from './config';
@@ -20,7 +21,7 @@ import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
 import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
-import { CRYOSTABILIZER, FIRST_SUPPLY, litresOf, nextSupply } from './supply';
+import { CRYOSTABILIZER, FIRST_SUPPLY, litresOf, nextSupply, type Supply } from './supply';
 import { shatter } from './shatter';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
@@ -30,7 +31,7 @@ import {
   type Pose, type Vec3,
 } from './space';
 import {
-  ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
+  changeoverAt, ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
   TANK_H, TOOL_NAMES, isDipper, isThermometer, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
   type Mouth, type ToolKind,
 } from './tools';
@@ -380,6 +381,11 @@ export class GameEngine {
   private pumper = new MessageChannel();
   /** The supply station's diverter's sounds, while it's swinging or letting into the reservoir. */
   private diverters = new Map<Tool, Diverter>();
+  /**
+   * The sounds of the station's changeover, while one's under way (see changeoverSounds), with the part of it and the
+   * supply the station was fitted for when last heard.
+   */
+  private changing: { sound: ChangeoverSound; part: string; supply: Supply } | null = null;
   /** Undo and redo, of the lab's arrangement (see history.ts). */
   private history = new History();
   private inspected: Vessel | null = null;
@@ -575,6 +581,8 @@ export class GameEngine {
     }
     for (const d of this.diverters.values()) d.stop();
     this.diverters.clear();
+    this.changing?.sound.stop();
+    this.changing = null;
     this.falling = [];
     this.held = this.turning = this.tarePress = null;
     this.history.clear();
@@ -2234,6 +2242,7 @@ export class GameEngine {
         d.stop(); // quiet a while, or the lab was replaced
         this.diverters.delete(t);
       }
+    this.changeoverSounds(simDt);
     // a thermometer whose bulb got too hot shatters, with a crack of glass, on sim time like what broke it
     this.tools.forEach((t, j) => {
       if (t.broken && whole[j]) shatter(this.hear(footAt(t)));
@@ -2263,6 +2272,32 @@ export class GameEngine {
       this.won = true;
       this.cb.onWin();
     }
+  }
+
+  /**
+   * The station's changeover is heard on sim time too (see changeover.ts): its alarm sounding on and off; a rumble
+   * while the block or the door slides, and a duller one while the door's shut, with the next block being brought
+   * behind it; and a clunk as the block unlatches, as the door shuts, as it lifts again, as the next block is set
+   * down behind it, and as that seats in the wall.
+   */
+  private changeoverSounds(simDt: number): void {
+    const st = this.station();
+    if (st.swap === null) {
+      this.changing?.sound.stop();
+      this.changing = null;
+      return;
+    }
+    const at = changeoverAt(st.swap);
+    const from = this.hear(this.machineAt(st));
+    const c = (this.changing ??= { sound: changeover(from), part: at.part, supply: st.supply });
+    c.sound.place(from);
+    const { part } = at;
+    const rumble = part === 'retract' || part === 'extend' ? 0.8 : part === 'shut' || part === 'open' ? 0.5 : part === 'away' ? 0.35 : 0;
+    c.sound.run(simDt > 0 && at.alarm, simDt > 0 ? rumble : 0, part === 'away');
+    if (part !== c.part && (part === 'retract' || part === 'away' || part === 'open' || part === 'clear')) c.sound.clunk(false);
+    if (st.supply !== c.supply) c.sound.clunk(true);
+    c.part = part;
+    c.supply = st.supply;
   }
 
   /**
@@ -2775,6 +2810,8 @@ export class GameEngine {
     this.rumbles.clear();
     for (const d of this.diverters.values()) d.stop();
     this.diverters.clear();
+    this.changing?.sound.stop();
+    this.changing = null;
     const stats = { plain: 0, jumped: 0, jumps: 0 };
     this.sleeping = { run: sleep(this.sleeper(), stats), stats, from: this.clock, woke: null };
     this.pumper.port1.onmessage = () => this.pump();
