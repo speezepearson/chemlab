@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FLASK_R, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_BASE, aimValve, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, onGrid, toolAnchor, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
+  FLASK_R, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_BASE, aimValve, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, onGrid, toolAnchor, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
   docked, nozzleBox, nozzleMounts, nozzleStand, onScale, scaleSpot, snapReach, spoutNear, spoutAt, standBase, tankMouth, toolBox, toolStands, valveLocal,
   valveNear,
 } from './bodies';
@@ -11,7 +11,7 @@ import { FLASK_H } from './flaskShape';
 import { boxesOverlap } from './physics';
 import { Scale } from './scale';
 import { CELL, COUNTERS, LIFT, counterUnder, fromFrac, toCell, toFrac } from './space';
-import { BULB_Y, Hose, INLINE_DOCK, SHAPES, STRIP, STRIP_FOOT, THERMOMETER_ROD, Tool, footY, mouthBelow, tankX, type ToolKind } from './tools';
+import { BULB_Y, Hose, INLINE_DOCK, SHAPES, STRIP, STRIP_FOOT, THERMOMETER_ROD, Tool, dipUnder, footY, mouthBelow, tankX, type ToolKind } from './tools';
 
 const at = (x: number, y: number, z: number, yaw = 0) => ({ x, y, z, yaw });
 
@@ -426,16 +426,17 @@ describe('dippers', () => {
     expect(t.pose.y - st.clampY).toBeLessThan(STRIP.clip.h);
   });
 
-  it('hover over the middle of a mouth they are aimed at, and dip to the middle of its fluid, or near its floor if empty', () => {
+  it('hover over the middle of a mouth they are aimed at, dip just under its fluid, and stand deeper in it', () => {
     for (const kind of ['strip', 'thermometer', 'thermometerWide'] as const) {
       const t = new Tool(kind, 9);
-      // a flask on the grid, half full
+      const strip = kind === 'strip';
+      // a flask on the grid, nearly full
       const f = new Flask(CAP);
       f.pose = at(150, LIFT + FLASK_H, 250);
-      f.setMolecules(R, CAP / 2);
+      f.setMolecules(R, 0.9 * CAP);
       const m = flaskMouth(f);
-      const { hover, dipped } = dipPoses(t, m, flaskFluid(f), 0.2);
-      for (const p of [hover, dipped]) {
+      const { hover, dipped, stood } = dipPoses(t, m, flaskFluid(f), 0.2);
+      for (const p of [hover, dipped, stood]) {
         t.pose = p;
         const foot = footAt(t);
         expect(foot.x, kind).toBeCloseTo(m.x, 6);
@@ -444,21 +445,48 @@ describe('dippers', () => {
       }
       t.pose = hover;
       expect(footAt(t).y).toBeCloseTo(m.y + DIP_HOVER, 6);
-      t.pose = dipped;
+      // dipped by hand, no further in than it takes to touch the fluid
       const { floor, surface } = flaskFluid(f);
-      expect(footAt(t).y).toBeCloseTo((floor + surface) / 2, 6);
+      expect(surface - floor).toBeGreaterThan(2 * (STRIP_STOOD + DIP_FLOOR));
+      t.pose = dipped;
+      expect(footAt(t).y).toBeCloseTo(surface - dipUnder(kind), 6);
       expect(bathAt(footAt(t), [f], [])).toBe(f);
-      // empty, just above its floor
+      // a strip's point half in, a thermometer's bulb just covered
+      if (strip) expect(surface - (footAt(t).y - 0.5)).toBeCloseTo(STRIP.paper.point / 2, 6);
+      else expect(surface - (footAt(t).y + (THERMOMETER_ROD.bulb.y1 - THERMOMETER_ROD.bulb.y0) / 2)).toBeCloseTo(1, 6);
+      // stood in it, deeper: a strip's whole point under, a thermometer's bulb near the floor
+      t.pose = stood;
+      expect(footAt(t).y).toBeCloseTo(strip ? surface - STRIP_STOOD : floor + DIP_FLOOR, 6);
+      expect(footAt(t).y).toBeLessThan(surface - dipUnder(kind));
+      expect(bathAt(footAt(t), [f], [])).toBe(f);
+      // empty, down where it would stand on its floor, dipped or stood
       f.setMolecules(R, 0);
-      t.pose = dipPoses(t, m, flaskFluid(f), 0).dipped;
-      expect(footAt(t).y).toBeCloseTo(floor + DIP_FLOOR, 6);
-      // and into a dish's shallow fluid, the same
+      const empty = dipPoses(t, m, flaskFluid(f), 0);
+      for (const p of [empty.dipped, empty.stood]) {
+        t.pose = p;
+        expect(footAt(t).y).toBeCloseTo(floor + (strip ? STRIP_FLOOR : DIP_FLOOR), 6);
+      }
+      // in a dish's shallow fluid, dipped to the middle of its depth, and stood no higher: a strip's tip on its floor
       const d = new Tool('dish', 3, onGrid(at(420, LIFT + 100, 250), toolAnchor(new Tool('dish', 3))));
       d.tanks[0].setMolecules(SOLVENT_SPECIES, d.tanks[0].cap / 2);
       const fl = tankFluid(d, 0);
-      t.pose = dipPoses(t, tankMouth(d, 0), fl, Math.PI / 2).dipped;
-      expect(footAt(t).y).toBeCloseTo((fl.floor + fl.surface) / 2, 6);
+      const mid = (fl.floor + fl.surface) / 2;
+      expect(fl.surface - fl.floor).toBeLessThan(2 * dipUnder(kind));
+      const shallow = dipPoses(t, tankMouth(d, 0), fl, Math.PI / 2);
+      t.pose = shallow.dipped;
+      expect(footAt(t).y).toBeCloseTo(mid, 6);
       expect(bathAt(footAt(t), [], [d])).toBe(d.tanks[0]);
+      t.pose = shallow.stood;
+      expect(footAt(t).y).toBeCloseTo(strip ? fl.floor + STRIP_FLOOR : mid, 6);
+      expect(bathAt(footAt(t), [], [d])).toBe(d.tanks[0]);
+      // and in next to nothing, either way at the middle of what there is, so it's in it
+      d.tanks[0].setMolecules(SOLVENT_SPECIES, d.tanks[0].cap / 50);
+      const film = tankFluid(d, 0);
+      const least = dipPoses(t, tankMouth(d, 0), film, 0);
+      for (const p of [least.dipped, least.stood]) {
+        t.pose = p;
+        expect(footAt(t).y).toBeCloseTo((film.floor + film.surface) / 2, 6);
+      }
     }
   });
 });

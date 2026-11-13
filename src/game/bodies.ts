@@ -4,7 +4,7 @@ import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { CELL, groundAt, toCardinal, toCell, toLocal, toWorld, type Pose, type Vec3 } from './space';
 import {
-  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, STRIP, TANK_H, THERMOMETER_ROD, footY, isThermometer, levelIn,
+  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, STRIP, TANK_H, THERMOMETER_ROD, dipUnder, footY, isThermometer, levelIn,
   tankDepth, tankPieces, tankX, overMouth, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
 } from './tools';
 
@@ -268,20 +268,36 @@ function inTank(t: Tool, k: number, p: Vec3): boolean {
 /** Where a dipper's foot is, in the room (see footY): a thermometer's bulb, or a wicking strip's paper's tip. */
 export const footAt = (t: Tool): Vec3 => onTool(t, 0, footY(t.kind));
 
-/** How far above a mouth a dipper aimed at it hovers, its foot (see dipPose). */
+/** How far above a mouth a dipper aimed at it hovers, its foot (see dipPoses). */
 export const DIP_HOVER = 15;
-/** How far above an empty vessel's floor a dipper dipped into it has its foot (see dipPose). */
+/** How far above a vessel's floor a thermometer stood in it has its bulb's middle (see dipPoses). */
 export const DIP_FLOOR = 4;
+/** How far above a vessel's floor a wicking strip stood in it has its foot (see dipPoses): its tip is on the floor. */
+export const STRIP_FLOOR = 0.5;
+/** How far under a fluid's surface, at most, a wicking strip stood in it has its foot (see dipPoses): all its point is in. */
+export const STRIP_STOOD = STRIP.paper.point - 0.5;
 
 /**
- * Where a dipper (see DIPPERS) aimed at mouth m goes, facing `yaw`, upright, over the middle of the mouth, on the grid:
- * hovering, its foot DIP_HOVER above the mouth; and dipped, its foot at the middle of the depth of the fluid in it
- * (between its floor and its surface, see flaskFluid and tankFluid), or DIP_FLOOR above its floor if it's empty.
+ * Where a dipper (see DIPPERS) aimed at mouth m goes, facing `yaw`, upright, over the middle of the mouth, on the grid,
+ * given how high the vessel's floor and its fluid's surface are (see flaskFluid and tankFluid):
+ * - hovering, its foot DIP_HOVER above the mouth;
+ * - dipped in by hand, its foot just under the surface (see dipUnder), so no more of it goes in than touches the
+ *   fluid, or at the middle of the fluid's depth if that's less far down;
+ * - stood in it, deeper, so that it stays in as the level falls: a thermometer's bulb DIP_FLOOR above the floor, and
+ *   a strip's foot STRIP_STOOD under the surface, or its tip on the floor if that's less far down; either at the
+ *   middle of the fluid's depth if the fluid is shallower than that, so it's in it.
+ * In an empty vessel, dipped or stood, it goes down to where it would stand on the floor.
  */
-export function dipPoses(t: Tool, m: Vec3, fluid: { floor: number; surface: number }, yaw: number): { hover: Pose; dipped: Pose } {
+export function dipPoses(t: Tool, m: Vec3, fluid: { floor: number; surface: number }, yaw: number): { hover: Pose; dipped: Pose; stood: Pose } {
   const at = (foot: number) => onGrid({ x: m.x, y: foot + footY(t.kind), z: m.z, yaw }, toolAnchor(t));
   const { floor, surface } = fluid;
-  return { hover: at(m.y + DIP_HOVER), dipped: at(surface > floor ? (floor + surface) / 2 : floor + DIP_FLOOR) };
+  const strip = t.kind === 'strip';
+  const rest = floor + (strip ? STRIP_FLOOR : DIP_FLOOR);
+  const hover = at(m.y + DIP_HOVER);
+  if (surface <= floor) return { hover, dipped: at(rest), stood: at(rest) };
+  const mid = (floor + surface) / 2;
+  const low = Math.min(mid, rest);
+  return { hover, dipped: at(Math.max(surface - dipUnder(t.kind), mid)), stood: at(strip ? Math.max(surface - STRIP_STOOD, low) : low) };
 }
 
 /**

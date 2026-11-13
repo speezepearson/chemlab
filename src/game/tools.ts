@@ -595,6 +595,14 @@ export const STRIP_FOOT = STRIP.paper.top + STRIP.paper.len;
 export const footY = (kind: ToolKind): number => (kind === 'strip' ? STRIP_FOOT - 0.5 : BULB_Y);
 
 /**
+ * How far under a fluid's surface a dipper's foot (see footY) goes when it's dipped in by hand (see dipPoses), which is
+ * no further than it takes to touch it: a wicking strip's, so that the lower half of its point is in; a thermometer's,
+ * so that its bulb is just covered.
+ */
+export const dipUnder = (kind: ToolKind): number =>
+  kind === 'strip' ? STRIP.paper.point / 2 - 0.5 : (THERMOMETER_ROD.bulb.y1 - THERMOMETER_ROD.bulb.y0) / 2 + 1;
+
+/**
  * The dish (see SHAPES.dish): a shallow open glass tray, reaching w either side of its middle, h deep and d front to
  * back inside, on a little base `base` tall, for its stand to clamp.
  */

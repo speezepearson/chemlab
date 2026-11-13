@@ -1765,18 +1765,18 @@ export class GameEngine {
 
   /**
    * Where a held dipper (see DIPPERS) goes with the crosshair on an open top (see mouthAimed): upright, facing as it's
-   * held, over the middle of the mouth, on the grid, hovering a little above it, or dipped into it, its foot at the
-   * middle of the fluid's depth or just above the floor if it's empty (see dipPoses); and whether it can be set down
-   * there dipped, standing in it (see rest), or why not. Null if the crosshair is on no open top.
+   * held, over the middle of the mouth, on the grid, hovering a little above it, or dipped into it, its foot just
+   * under the fluid's surface (see dipPoses); and where it would be set down standing in it, deeper (see dipPoses and
+   * rest), or why it can't be. Null if the crosshair is on no open top.
    */
   private dipAim(h: Held & { kind: 'tool' }): { hover: Pose; dipped: Pose; rest: { rest: Rest } | { why: string } } | null {
     const p = this.target;
     const m = this.mouthAimed();
     if (!m || (p?.kind !== 'flask' && p?.kind !== 'tool')) return null;
     const fluid = p.kind === 'flask' ? flaskFluid(p.f) : tankFluid(p.t, p.k);
-    const { hover, dipped } = dipPoses(h.t, m, fluid, toCardinal(this.player.yaw + h.relYaw));
-    const r = this.rest(h, dipped, [...this.obstacles(h), this.me()], [...this.obstacles(h, false), this.me()]);
-    return typeof r === 'string' ? { hover, dipped, rest: { why: r } } : { hover, dipped: r.pose, rest: { rest: r } };
+    const { hover, dipped, stood } = dipPoses(h.t, m, fluid, toCardinal(this.player.yaw + h.relYaw));
+    const r = this.rest(h, stood, [...this.obstacles(h), this.me()], [...this.obstacles(h, false), this.me()]);
+    return { hover, dipped, rest: typeof r === 'string' ? { why: r } : { rest: r } };
   }
 
   /** The player's body, as a box, which what's set down mustn't overlap. */
