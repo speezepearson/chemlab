@@ -87,6 +87,8 @@ export interface SavedTool extends SavedDepth {
   memory?: number[];
   /** What's on a wicking strip's paper, stretch by stretch from its foot (see Tool.paper). */
   paper?: SavedVessel[];
+  /** What's fixed to a dyed wicking strip's paper, stretch by stretch from its foot (see Tool.fixed). */
+  fixed?: SavedVessel[];
   /** What's on a column's bed, stretch by stretch from its top (see Tool.bed). */
   bed?: SavedVessel[];
   /** From when a wicking strip's paper took up a sample from a pad on top of it, as one vessel; ignored now. */

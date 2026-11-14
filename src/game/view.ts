@@ -11,7 +11,7 @@ import { glowFalloff } from './appearance';
 import {
   NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
 } from './bodies';
-import { SPECIES } from '../chem/species';
+import { NS, SPECIES } from '../chem/species';
 import { CAP, DELIVERY, GOAL_PURITY, TRACE } from './config';
 import { Flask, Vessel, fluidAlpha, fluidRGB, volume } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
@@ -771,17 +771,24 @@ function paperOutline(ctx: CanvasRenderingContext2D, W: number, L: number): void
 /**
  * A wicking strip's paper, foot at the bottom, cut to a point there: cream, darker as far as each stretch of it is wet
  * (see wetness), by what's on it; each species on each stretch of it (see Tool.paper) as ink of its own
- * color, as opaque as stripInk says, single atoms first, so what's left in bands lies over the carrier's tint; both
+ * color, as opaque as stripInk says, single atoms first, so what's left in bands lies over the carrier's tint, and
+ * what's fixed to dyed paper (see Tool.fixed) the same way, under what's loose, so the dye tints it and what it holds
+ * is a band; both
  * blended smoothly from one stretch's middle to the next, except for a spot that has yet to move, which is drawn
  * stretch by stretch, so its top is a line, where the fluid's surface was; lines marked across its edges, over all
  * that (see drawMarks); and each stretch browned over by how scorched it is (see Tool.scorch), stretch by stretch too,
  * so that ends at a line as well. Nothing's drawn outside its outline.
  */
 function drawStrip(sc: Screen, t: Tool): void {
-  const { paper } = t;
+  const { paper, fixed } = t;
   const C = paper.length;
+  // a sum that changes whenever anything on it moves along it, or turns into something else where it is
   let sum = 0;
-  paper.forEach((v, c) => (sum += v.N * (c + 1)));
+  for (const on of [paper, fixed])
+    on.forEach((v, c) => {
+      if (v.N > 0) for (let s = 0; s < NS; s++) sum += v.n[s] * (s + 1) * (c + 1);
+      sum *= 1.000001;
+    });
   let char = 0;
   t.scorch.forEach((x, c) => (char += x * (c + 1)));
   const key = `${sum} ${t.soaked > 0} ${char.toFixed(2)}`;
@@ -816,9 +823,12 @@ function drawStrip(sc: Screen, t: Tool): void {
     ctx.fillRect(0, 0, W, L);
   };
   if (wet.some((w) => w > 0)) lay((c) => 0.28 * wet[c], '96, 92, 78');
-  const here = SPECIES.map((_, s) => s).filter((s) => paper.some((v) => v.n[s] > 0));
-  here.sort((a, b) => SPECIES[a].size - SPECIES[b].size);
-  for (const s of here) lay((c) => stripInk(s, paper[c].n[s]), SPECIES[s].color.slice(4, -1));
+  // what's fixed to it first, the dye under what it holds, and what's loose over that
+  for (const on of [fixed, paper]) {
+    const here = SPECIES.map((_, s) => s).filter((s) => on.some((v) => v.n[s] > 0));
+    here.sort((a, b) => SPECIES[a].size - SPECIES[b].size);
+    for (const s of here) lay((c) => stripInk(s, on[c].n[s]), SPECIES[s].color.slice(4, -1));
+  }
   // printed on the paper, so over what's run up it, and under where it's scorched
   drawMarks(ctx, W, L, STRIP.marks);
   cells((c) => 0.92 * t.scorch[c], '46, 28, 14');

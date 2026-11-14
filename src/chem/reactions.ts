@@ -48,7 +48,12 @@ export interface NetReaction {
 /** Black's index in ATOMS: every displacement has it on one side or the other. */
 const BLACK = ATOMS.indexOf('K');
 
-interface Reaction {
+/** The kinds of reaction there are (see README), in the order a reaction's `kind` numbers them. */
+export const REACTION_KINDS = ['formation', 'closure', 'breaking', 'displacement'] as const;
+export type ReactionKind = (typeof REACTION_KINDS)[number];
+
+/** One reaction of the network, one way (its reverse is another). */
+export interface Reaction {
   ra: number;
   rb: number; // -1 if unimolecular
   p1: number;
@@ -57,6 +62,8 @@ interface Reaction {
   /** Barrier actually climbed in this direction: Ea + max(0, dU). */
   bar: number;
   dU: number;
+  /** Which kind it is, as an index into REACTION_KINDS. */
+  kind: number;
 }
 
 /**
@@ -75,6 +82,7 @@ export class ReactionNetwork {
   private k = new Float64Array(0);
   private bar = new Float64Array(0);
   private dU = new Float64Array(0);
+  private kind = new Uint8Array(0);
   private flux = new Float64Array(0);
   private cons = new Float64Array(NS);
   /** Reactions are stored by first reactant: those of species s are first[s] to first[s + 1] − 1. */
@@ -100,10 +108,12 @@ export class ReactionNetwork {
     const p = this.params;
     const U = speciesEnergies(p, this.U);
     const rx: Reaction[] = [];
+    let kind = 0;
     const add = (ra: number, rb: number, p1: number, p2: number, A: number, Ea: number, dU: number) =>
-      rx.push({ ra, rb, p1, p2, A, bar: Ea + Math.max(0, dU), dU });
+      rx.push({ ra, rb, p1, p2, A, bar: Ea + Math.max(0, dU), dU, kind });
 
     // bond formation (bimolecular): A + B -> AB with one new bond, between two molecules with no color in common
+    kind = REACTION_KINDS.indexOf('formation');
     // (the solvent bonds with nothing, so it's in none of these, nor in anything below)
     for (const A of SPECIES)
       for (const B of SPECIES) {
@@ -118,6 +128,7 @@ export class ReactionNetwork {
       }
 
     // ring closure (unimolecular): a bond forms between two atoms of the same molecule
+    kind = REACTION_KINDS.indexOf('closure');
     for (const sp of SPECIES)
       BONDS.forEach(([i, j], k) => {
         if (!((sp.has >> i) & 1 && (sp.has >> j) & 1) || sp.mask & (1 << k)) return;
@@ -126,6 +137,7 @@ export class ReactionNetwork {
       });
 
     // bond breaking (unimolecular), the reverse of both: the molecule stays whole, or splits in two
+    kind = REACTION_KINDS.indexOf('breaking');
     for (const sp of SPECIES)
       BONDS.forEach(([i], k) => {
         if (!(sp.mask & (1 << k))) return;
@@ -141,6 +153,7 @@ export class ReactionNetwork {
 
     // displacement (bimolecular, Ea = 0): a free atom trades places with a bound one, black on one side of the
     // trade, keeping the bond topology, e.g. R–K + G -> R–G + K, or the reverse; never two bound atoms
+    kind = REACTION_KINDS.indexOf('displacement');
     for (const M of SPECIES) {
       if (M.size < 2) continue;
       for (const c of M.atomIdx)
@@ -169,6 +182,7 @@ export class ReactionNetwork {
       this.k = new Float64Array(nr);
       this.bar = new Float64Array(nr);
       this.dU = new Float64Array(nr);
+      this.kind = new Uint8Array(nr);
       this.flux = new Float64Array(nr);
       this.barOf = new Int32Array(nr);
       this.active = new Int32Array(nr);
@@ -187,11 +201,18 @@ export class ReactionNetwork {
       this.k[i] = r.A;
       this.bar[i] = r.bar;
       this.dU[i] = r.dU;
+      this.kind[i] = r.kind;
     });
     this.boltz = new Float64Array(bars.size);
     this.seen = new Int32Array(bars.size);
     this.stamp = 0;
     this.barList = Float64Array.from(bars.keys());
+  }
+
+  /** Every reaction there is, one way at a time, in turn. */
+  forEach(fn: (r: Reaction) => void): void {
+    const { ra, rb, p1, p2, k, bar, dU, kind } = this;
+    for (let i = 0; i < this.count; i++) fn({ ra: ra[i], rb: rb[i], p1: p1[i], p2: p2[i], A: k[i], bar: bar[i], dU: dU[i], kind: kind[i] });
   }
 
   /**

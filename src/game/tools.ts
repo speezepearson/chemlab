@@ -1,8 +1,9 @@
-import { BOND_KEYS, BONDS, SOLVENT, type ColorAtom } from '../chem/atoms';
+import { ATOMS, BOND_KEYS, BONDS, SOLVENT, type ColorAtom } from '../chem/atoms';
+import type { Mordants } from '../chem/mordant';
 import { THERMO, T_ROOM } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
 import { END_WEIGHT, LOOSE_ENDS } from '../chem/shape';
-import { NS, SPECIES } from '../chem/species';
+import { NS, SINGLE, SOLVENT_SPECIES, SPECIES } from '../chem/species';
 import { CAP, DELIVERY, TRACE } from './config';
 import { COOLING } from './cooling';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
@@ -642,6 +643,8 @@ export function neckShare(vol: number): number {
  *   far up it something has run;
  * - scorch: the temperatures from which a fluid starts to brown the paper that's in it, and at which it chars it
  *   through;
+ * - dye: the share of what the paper holds once it's soaked through, the solvent aside and by atoms, that has to be
+ *   single atoms of one color for them to dye it (see Tool.dye);
  * - paper: the paper itself, in local units, y down from the top of its clip: reaching w either side of the middle,
  *   from `top` down `len` to its foot, the last `point` of it narrowing to a point there;
  * - clip: the clip it hangs from, at its top, reaching w either side of the middle, h down from its top, d front to
@@ -649,7 +652,7 @@ export function neckShare(vol: number): number {
  */
 export const STRIP = {
   cap: CAP / 100, spot: CAP / 1000, spots: 3, time: 20, drag: 34, cells: 108, spread: 0.05, ink: 33, tint: 0.4, marks: 20,
-  scorch: { from: 2, to: 6 },
+  scorch: { from: 2, to: 6 }, dye: 0.99,
   paper: { w: 6, top: 10, len: 108, point: 6 },
   clip: { w: 4.5, h: 15, d: 4 },
 };
@@ -1600,8 +1603,8 @@ export class Tool {
   rate = 0;
   /**
    * A wicking strip's paper, stretch by stretch from its foot to its top (see STRIP.cells), each holding what's on
-   * that stretch; it doesn't react or cool, having lost its heat as the paper took it up (see scorch). Empty for any
-   * other tool.
+   * that stretch and loose, for the liquid to carry; it doesn't cool, having lost its heat as the paper took it up
+   * (see scorch), nor react, but with the dye of dyed paper (see react). Empty for any other tool.
    */
   readonly paper: Vessel[];
   /**
@@ -1616,6 +1619,21 @@ export class Tool {
    * wetness).
    */
   soaked = 0;
+  /**
+   * The color a wicking strip's paper is dyed, as an index into ATOMS, or null if it isn't (as any other tool isn't).
+   * Paper that soaks through in what is, the solvent aside, single atoms of one color (see STRIP.dye) isn't used up:
+   * those atoms are fixed to it where they are (see fixed), the solvent dries off, and it's paper again, to be
+   * spotted and run once, on which whatever can react with the dye is held by it (see react). Soaked through in the
+   * same color again, it takes that much more of it; it never takes a second color.
+   */
+  dye: number | null = null;
+  /**
+   * What's fixed to each stretch of a dyed wicking strip's paper, from its foot: the dye's atoms, and whatever is
+   * bonded to them, which nothing carries along. Empty for any other tool.
+   */
+  readonly fixed: Vessel[];
+  /** Whether a wicking strip's foot has come into a fluid from none since its paper was dyed: it drinks nothing till then. */
+  private lifted = true;
   /** What a wicking strip's foot was in when it was last told (see dipIn), if anything: it touches what it comes into. */
   private wasIn: Vessel | null = null;
   /** How what's on a wicking strip's paper or a column's bed is carried along it (see Bed); null for any other tool. */
@@ -1690,6 +1708,7 @@ export class Tool {
     this.tanks = SHAPES[kind].tanks.map((tk) => new Vessel(tk.cap ?? SHAPES[kind].tankCap ?? TANK_CAP));
     this.tube = Array.from({ length: kind === 'heater' ? HEATER_CELLS : 0 }, () => new Vessel(Infinity));
     this.paper = Array.from({ length: kind === 'strip' ? STRIP.cells : 0 }, () => new Vessel(Infinity));
+    this.fixed = this.paper.map(() => new Vessel(Infinity));
     this.scorch = new Float32Array(this.paper.length);
     this.bed = Array.from({ length: kind === 'column' ? COLUMN.cells : 0 }, () => new Vessel(Infinity));
     this.packing = kind === 'strip' ? new Bed(this.paper) : kind === 'column' ? new Bed(this.bed) : null;
@@ -1813,7 +1832,10 @@ export class Tool {
   dipIn(v: Vessel | null, soak: boolean, depth = 0): void {
     this.under = Math.max(1, Math.min(this.paper.length, Math.ceil(depth)));
     if (v) this.char(v);
-    if (v && !this.wasIn) this.touch(v);
+    if (v && !this.wasIn) {
+      this.touch(v);
+      this.lifted = true;
+    }
     this.wasIn = v;
     this.bath = v && soak ? v : null;
   }
@@ -1852,12 +1874,13 @@ export class Tool {
    * share d, the liquid, at the pace of what it drew (see leadOf), carries what's on the paper d · STRIP.cells
    * stretches' worth up it (see Bed), never past that share of its length. Lifted out, it stops where it is, and put
    * back, it goes on. Once it's soaked through, it's done: it takes up nothing more, and stays as it is, wet, for
-   * good. Nothing leaves it.
+   * good. Nothing leaves it. But for paper that soaks through in dye, which is dyed instead (see set): that drinks
+   * nothing more until it's been lifted out and dipped again.
    */
   private wick(h: number): (Vessel | null)[] {
     const bath = this.bath;
     const { paper } = this;
-    if (this.soaked >= 1 || !bath || bath.N <= 0) return this.none();
+    if (this.soaked >= 1 || !this.lifted || !bath || bath.N <= 0) return this.none();
     const C = STRIP.cells;
     const d = Math.min(Math.min(1, Math.sqrt(this.soaked ** 2 + h / STRIP.time)) - this.soaked, volume(bath) / STRIP.cap);
     if (d <= 0) return this.none();
@@ -1877,8 +1900,60 @@ export class Tool {
       // from the stretch under the soaked one's at most into it
       this.packing!.carry((d / passes) * C, Math.min(C, Math.ceil(this.soaked * C)) - 2, lead);
     }
-    if (this.soaked > 1 - 1e-9) this.soaked = 1;
+    if (this.soaked > 1 - 1e-9) {
+      this.soaked = 1;
+      this.set();
+    }
     return this.none();
+  }
+
+  /**
+   * A wicking strip's paper, as it soaks through, is dyed if what's loose on it, the solvent aside, is single atoms
+   * of one color, or at least STRIP.dye of it by atoms (see dye), and it isn't dyed another color already: those atoms
+   * are fixed where they are, the solvent dries off, and whatever else is on it stays where it is, to run with the
+   * next liquid. It has drunk nothing, as when it was new, but won't until it's been out of the fluid.
+   */
+  private set(): void {
+    const single = ATOMS.map(() => 0);
+    let all = 0;
+    for (const v of this.paper)
+      for (let s = 0; s < NS; s++) {
+        if (!v.n[s] || s === SOLVENT_SPECIES) continue;
+        all += v.n[s] * SPECIES[s].size;
+        if (SPECIES[s].size === 1) single[SPECIES[s].atomIdx[0]] += v.n[s];
+      }
+    const dye = single.indexOf(Math.max(...single));
+    if (all <= 0 || single[dye] < STRIP.dye * all || (this.dye !== null && this.dye !== dye)) return;
+    this.dye = dye;
+    this.paper.forEach((v, c) => {
+      for (const [s, to] of [[SINGLE[dye], this.fixed[c]], [SOLVENT_SPECIES, null]] as const) {
+        const m = v.n[s];
+        v.n[s] = 0;
+        v.N -= m;
+        if (to) {
+          to.n[s] += m;
+          to.N += m;
+        }
+      }
+      v.Q = 0;
+    });
+    this.soaked = 0;
+    this.lifted = false;
+  }
+
+  /**
+   * What's on a dyed wicking strip's paper reacting with its dye for h sim seconds, at the room's temperature (paper
+   * keeps no heat): on each stretch, what the liquid carries (see paper) meets what's fixed there (see fixed) and
+   * nothing else, by `mordants`' kinetics (see Mordant). What bonds to the dye is fixed with it, and what the dye
+   * displaces, or what's displaced from it, runs on. Only until the paper has soaked through: then it's done, and
+   * stays as it is.
+   */
+  react(mordants: Mordants, h: number): void {
+    if (this.dye === null || this.soaked >= 1) return;
+    const mordant = mordants.of(this.dye, COOLING.ambient);
+    this.paper.forEach((v, c) => {
+      if (v.N > 0) mordant.react(v, this.fixed[c], h);
+    });
   }
 
   /**
@@ -1941,12 +2016,12 @@ export class Tool {
   /**
    * What a save keeps of an instrument's own state, as numbers, or undefined if it has none: a thermometer's bulb's
    * temperature, and 1 if it's broken or 0 if not; how much a wicking strip's paper has drunk, a 0 where how dry it
-   * was used to be, when strips dried, and how scorched each stretch is (what's on its paper is saved as vessels, see paper); how much a column's bed has drunk (what's on it is
+   * was used to be, when strips dried, how scorched each stretch is, and the color it's dyed (see dye), or −1 if it isn't (what's on its paper, and fixed to it, is saved as vessels, see paper and fixed); how much a column's bed has drunk (what's on it is
    * saved as vessels, see bed); which of a sleeper culture's cells are dead (see dead); which supply a receptacle is
    * fitted for (its place in SUPPLIES), and how far into its changeover it is, or −1 if none is under way.
    */
   get memory(): number[] | undefined {
-    if (this.kind === 'strip') return [this.soaked, 0, ...this.scorch];
+    if (this.kind === 'strip') return [this.soaked, 0, ...this.scorch, this.dye ?? -1];
     if (this.kind === 'column') return [this.soaked];
     if (this.kind === 'culture') return Array.from(this.dead!);
     if (this.kind === 'receptacle') return [SUPPLIES.indexOf(this.supply), this.swap ?? -1];
@@ -1955,19 +2030,24 @@ export class Tool {
 
   /**
    * Put back what a save kept (see memory), wherever it's the right length and all finite numbers. An older save's
-   * strip kept one number for how scorched it was, all over: that goes for as much of it as it had soaked.
+   * strip kept one number for how scorched it was, all over: that goes for as much of it as it had soaked; and one
+   * from before paper could be dyed has no dye.
    */
   remember(m: unknown): void {
     const want = this.memory?.length;
-    const old = this.kind === 'strip' && Array.isArray(m) && m.length === 3;
-    if (!Array.isArray(m) || (m.length !== want && !old) || !m.every((x) => typeof x === 'number' && Number.isFinite(x))) return;
+    const strip = this.kind === 'strip' && Array.isArray(m);
+    const old = strip && m.length === 3;
+    const undyed = strip && m.length === want! - 1;
+    if (!Array.isArray(m) || (m.length !== want && !old && !undyed) || !m.every((x) => typeof x === 'number' && Number.isFinite(x))) return;
     if (isThermometer(this.kind)) [this.temp, this.broken] = [m[0] as number, (m[1] as number) > 0];
     if (this.kind === 'strip') {
       // the second was how dry it was, when strips dried
-      const [soaked, , ...scorch] = (m as number[]).map((x) => Math.max(0, Math.min(1, x)));
+      const dye = old || undyed ? -1 : (m as number[])[m.length - 1];
+      const [soaked, , ...scorch] = (m as number[]).slice(0, old ? 3 : STRIP.cells + 2).map((x) => Math.max(0, Math.min(1, x)));
       this.soaked = soaked;
       if (old) this.scorch.fill(scorch[0], 0, Math.ceil(soaked * STRIP.cells));
       else this.scorch.set(scorch);
+      this.dye = Number.isInteger(dye) && dye >= 0 && dye < ATOMS.length && dye !== ATOMS.indexOf(SOLVENT) ? dye : null;
     }
     if (this.kind === 'column') this.soaked = Math.max(0, Math.min(1, (m as number[])[0]));
     if (this.kind === 'culture') this.dead!.set((m as number[]).map((x) => +(x > 0)));

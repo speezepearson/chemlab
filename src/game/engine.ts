@@ -1,4 +1,5 @@
 import { equilibrate } from '../chem/equilibrium';
+import { Mordants } from '../chem/mordant';
 import { Lag, temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
@@ -447,6 +448,8 @@ export class GameEngine {
   private landed: Vec3[] = [];
   /** Each vessel's chemistry, put off while it's quiet (see ReactionNetwork.tick). */
   private lags = new WeakMap<Vessel, Lag>();
+  /** How what's on a dyed wicking strip's paper reacts with its dye (see Tool.react). */
+  private mordants: Mordants;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -455,6 +458,7 @@ export class GameEngine {
     private cb: EngineCallbacks,
     private preset: Preset = DEFAULT_PRESET,
   ) {
+    this.mordants = new Mordants(chem);
     // the colors' along the right wall, left to right as the player faces it; then the solvent's, one on each island
     const islands = COUNTERS.filter((c) => c.island);
     this.faucets = FAUCETS.map((start, i) => {
@@ -752,6 +756,7 @@ export class GameEngine {
         ...(t.note ? { note: t.note } : {}),
         ...(t.memory ? { memory: t.memory } : {}),
         ...(t.paper.length ? { paper: t.paper.map(saveVessel) } : {}),
+        ...(t.dye !== null ? { fixed: t.fixed.map(saveVessel) } : {}),
         ...(t.bed.length ? { bed: t.bed.map(saveVessel) } : {}),
       })),
       scales: this.scales.map((sc) => ({
@@ -805,6 +810,7 @@ export class GameEngine {
         if (typeof st.note === 'string') t.note = st.note;
         t.remember(st.memory);
         t.paper.forEach((v, k) => st.paper?.[k] && loadVessel(v, st.paper[k]));
+        if (t.dye !== null) t.fixed.forEach((v, k) => st.fixed?.[k] && loadVessel(v, st.fixed[k]));
         t.bed.forEach((v, k) => st.bed?.[k] && loadVessel(v, st.bed[k]));
         // an older save's strip stood in a tray, posed at the tray's top, 4 above its paper's foot: it's bare paper now,
         // so it goes up to keep its paper where it was (its tray, and what was in it, are gone), and the tray's label
@@ -2411,6 +2417,7 @@ export class GameEngine {
         for (const { fa, m } of this.faucetFlows) this.stream(m.v, fa.output, FILL_RATE * step);
         this.tools.forEach((t, j) => {
           if (t === stillTool) return;
+          if (t.dye !== null) t.react(this.mordants, step);
           t.step(step).forEach((out, k) => {
             if (quiet) {
               pour(t.drops[k], out, spouts[j][k], targets[j][k], this.loose(t, k));

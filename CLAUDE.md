@@ -49,6 +49,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `params.ts` holds the bond parameters.
   - `shape.ts` is what follows from a molecule's shape alone: each atom's bonds, and its loose ends.
   - `reactions.ts` is Arrhenius kinetics on whole molecules. The engine steps vessels through `tick`, never `step`.
+  - `mordant.ts` is the same kinetics against atoms fixed in place (a dyed wicking strip's paper): what's loose reacts
+    only with what's fixed, and the product with the fixed atom in it stays fixed.
   - `equilibrium.ts` is the exact full-equilibrium solver, for the editor's Equilibrate button and the bench's settled mixes. Faucets
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
 - `src/game/`: everything else in the game.
