@@ -49,6 +49,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `params.ts` holds the bond parameters.
   - `shape.ts` is what follows from a molecule's shape alone: each atom's bonds, and its loose ends.
   - `reactions.ts` is Arrhenius kinetics on whole molecules. The engine steps vessels through `tick`, never `step`.
+  - `mordant.ts` is the same kinetics against atoms fixed in place (a dyed wicking strip's paper): what's loose reacts
+    only with what's fixed, and the product with the fixed atom in it stays fixed.
   - `equilibrium.ts` is the exact full-equilibrium solver, for the editor's Equilibrate button and the bench's settled mixes. Faucets
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
 - `src/game/`: everything else in the game.
@@ -91,6 +93,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
     `volumes.ts`); `rumble.ts` is the composition analyzer, `diverter.ts` the supply station's diverter, `changeover.ts` its changeover, `ambience.ts` the ship, `water.ts` drips and streams, `shatter.ts` a thermometer
     shattering.
+    `crackle.ts` is the ear trumpet's clicks, one kind for each kind of reaction.
     New sounds play into a channel's `bus()`, never straight to the destination, so the sliders reach them. A sound
     in the lab goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),
     so it fades and pans with where it is relative to the player's head.
@@ -105,7 +108,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Volume isn't atoms.** Capacities and flows are in `volume()` units: molecules by default, or atoms when the
   "volume counts molecules" toggle is off. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
 - **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
-  chemistry, cooling, the composition analyzer's reading and hum, the supply station's diverter, display and needle, and its changeover (block, door, lamp and alarm), a thermometer's bulb and its crack as it shatters, and the drip and stream sounds. All of it
+  chemistry, cooling, the composition analyzer's reading and hum, the supply station's diverter, display and needle, and its changeover (block, door, lamp and alarm), a thermometer's bulb and its crack as it shatters, an ear trumpet's crackle, and the drip and stream sounds. All of it
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The one exception to the
   substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
@@ -161,9 +164,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     used up. `cabinet.test.ts` checks it fits.
   - If it has state of its own that a save should keep, `Tool.memory` and `Tool.remember`.
   - Tests and the README.
-  - A tool needn't have tanks at all: the thermometers and the wicking strip (the `DIPPERS`) have none, nor spouts nor
+  - A tool needn't have tanks at all: the thermometers, the ear trumpet and the wicking strip (the `DIPPERS`) have none, nor spouts nor
     valves. Then its grid anchor is its middle (`toolAnchor`), Enter writes its own `note`, and its collision is whatever
-    `toolParts` gives it (a thermometer's, only the top of its rod; a strip's, its clip), so code that reaches for
+    `toolParts` gives it (a thermometer's, only the top of its rod; an ear trumpet's, its horn and the top of its stem; a strip's, its clip), so code that reaches for
     `tanks[0]` must allow for there being none. Nor need a tool with tanks have spouts (the dish): nothing drains from it.
   - A tank needn't be under its opening: one with a `neck` (the swell bulbs') has its bulb and neck where the flag
     says, and its own `x0` and `x1` are its inlet's, since it's the openings and spouts that go on the grid.

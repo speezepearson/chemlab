@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FLASK_R, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_BASE, aimValve, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, onGrid, toolAnchor, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
+  FLASK_R, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_BASE, aimValve, bathAt, footAt, hornAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, onGrid, toolAnchor, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
   docked, nozzleBox, nozzleMounts, nozzleStand, onScale, scaleSpot, snapReach, spoutNear, spoutAt, standBase, tankMouth, toolBox, toolStands, valveLocal,
   valveNear,
 } from './bodies';
 import { SOLVENT_SPECIES, singleOf } from '../chem/species';
 import { CAP } from './config';
 import { Flask } from './flask';
-import { FLASK_H } from './flaskShape';
+import { FLASK_H, flaskRadius } from './flaskShape';
 import { boxesOverlap } from './physics';
 import { Scale } from './scale';
 import { CELL, COUNTERS, LIFT, counterUnder, fromFrac, toCell, toFrac } from './space';
-import { BULB_Y, Hose, INLINE_DOCK, SHAPES, STRIP, STRIP_FOOT, THERMOMETER_ROD, Tool, dipUnder, footY, mouthBelow, tankX, type ToolKind } from './tools';
+import { BULB_Y, Hose, INLINE_DOCK, SHAPES, STRIP, STRIP_FOOT, THERMOMETER_ROD, TRUMPET, Tool, dipUnder, footY, mouthBelow, tankX, type ToolKind } from './tools';
 
 const at = (x: number, y: number, z: number, yaw = 0) => ({ x, y, z, yaw });
 
@@ -426,8 +426,29 @@ describe('dippers', () => {
     expect(t.pose.y - st.clampY).toBeLessThan(STRIP.clip.h);
   });
 
+  it("an ear trumpet's horn bumps into things, over the stem its stand holds, and nothing below does", () => {
+    const f = new Flask(CAP);
+    f.pose = at(150, LIFT + FLASK_H, 150);
+    // standing in the flask, its knob near the floor: its stem goes down the neck, and its horn is well above the mouth
+    const t = new Tool('trumpet', 9, at(150, LIFT + 4 + footY('trumpet'), 150));
+    expect(boxesOverlap(toolBox(t), flaskBox(f))).toBe(false);
+    expect(2 * TRUMPET.tip).toBeLessThan(2 * flaskRadius(22) - 4);
+    const [st] = toolStands(t);
+    expect(t.pose.y - st.clampY).toBeGreaterThan(0);
+    expect(t.pose.y - st.clampY).toBeLessThan(24);
+    // another's horn beside it, a horn's width off, hits it; a thermometer's rod at the level of its stem doesn't
+    expect(boxesOverlap(toolBox(t), toolBox(new Tool('trumpet', 8, at(150 + TRUMPET.bell.r, t.pose.y, 150))))).toBe(true);
+    expect(boxesOverlap(toolBox(t), toolBox(new Tool('thermometer', 7, at(150 + TRUMPET.bell.r, t.pose.y - 30, 150))))).toBe(false);
+    // what it hears sounds from the middle of its horn's mouth, straight above its foot
+    expect(hornAt(t)).toEqual({ x: 150, y: t.pose.y + TRUMPET.bell.h, z: 150 });
+    expect(footAt(t).y).toBeCloseTo(LIFT + 4, 9);
+    expect(bathAt(footAt(t), [f], [])).toBeNull();
+    f.setMolecules(R, 0.5 * CAP);
+    expect(bathAt(footAt(t), [f], [])).toBe(f);
+  });
+
   it('hover over the middle of a mouth they are aimed at, dip just under its fluid, and stand deeper in it', () => {
-    for (const kind of ['strip', 'thermometer', 'thermometerWide'] as const) {
+    for (const kind of ['strip', 'thermometer', 'thermometerWide', 'trumpet'] as const) {
       const t = new Tool(kind, 9);
       const strip = kind === 'strip';
       // a flask on the grid, nearly full
@@ -451,8 +472,9 @@ describe('dippers', () => {
       t.pose = dipped;
       expect(footAt(t).y).toBeCloseTo(surface - dipUnder(kind), 6);
       expect(bathAt(footAt(t), [f], [])).toBe(f);
-      // a strip's point half in, a thermometer's bulb just covered
+      // a strip's point half in, a thermometer's bulb just covered, and an ear trumpet's knob
       if (strip) expect(surface - (footAt(t).y - 0.5)).toBeCloseTo(STRIP.paper.point / 2, 6);
+      else if (kind === 'trumpet') expect(surface - (footAt(t).y + TRUMPET.tip)).toBeCloseTo(1, 6);
       else expect(surface - (footAt(t).y + (THERMOMETER_ROD.bulb.y1 - THERMOMETER_ROD.bulb.y0) / 2)).toBeCloseTo(1, 6);
       // stood in it, deeper: a strip's whole point under, a thermometer's bulb near the floor
       t.pose = stood;

@@ -3,6 +3,7 @@ import { SOLVENT_SPECIES, SPECIES, TARGET, bondMask, pairOf, singleOf, speciesIn
 import { CAP, DELIVERY, GOAL_PURITY, GOAL_TARGET, TRACE } from './config';
 import { ReactionNetwork, heatAt, temperature } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
+import { Mordants } from '../chem/mordant';
 import { COOLING } from './cooling';
 import { Vessel, roomFor, transfer, volume } from './flask';
 import { FLASK_VOLUME, flaskRadius } from './flaskShape';
@@ -14,7 +15,7 @@ import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, TRUMPET, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -889,7 +890,8 @@ describe('wicking strip', () => {
 
   it('drinks from what its foot is in as the square root of the time, stops when out of it, and goes on when back', () => {
     const t = new Tool('strip', 0);
-    const bath = carrierOf(G);
+    // (the solvent: paper that soaks through in one color alone is dyed, see below)
+    const bath = carrierOf(SOLVENT_SPECIES);
     t.dipIn(bath, true);
     const atoms = bath.N + onPaper(t);
     run(t, STRIP.time / 4);
@@ -916,7 +918,7 @@ describe('wicking strip', () => {
 
   it('stops where it is when what it stands in runs dry, and goes on when there is more', () => {
     const t = new Tool('strip', 0);
-    const bath = carrierOf(G, 0.3 * STRIP.cap);
+    const bath = carrierOf(SOLVENT_SPECIES, 0.3 * STRIP.cap);
     t.dipIn(bath, true);
     run(t, 5);
     expect(bath.N).toBe(0);
@@ -924,7 +926,7 @@ describe('wicking strip', () => {
     expect(t.soaked).toBeCloseTo(0.3 - STRIP.spot / STRIP.cap, 3);
     run(t, 5);
     expect(t.soaked).toBeCloseTo(0.3 - STRIP.spot / STRIP.cap, 3);
-    filled(bath, G, STRIP.cap, 1);
+    filled(bath, SOLVENT_SPECIES, STRIP.cap, 1);
     run(t, STRIP.time);
     expect(t.soaked).toBe(1);
   });
@@ -1118,17 +1120,18 @@ describe('wicking strip', () => {
     const t = new Tool('strip', 0);
     const upTo = (n: number, by: number) => Array.from({ length: C }, (_, c) => (c < n ? by : 0));
     // the second number was how dry it was, when strips dried: it's kept as 0, so saves are the shape they were
+    // (the last is the color it's dyed, −1 for none; a save from before paper could be dyed has none)
     t.remember([0.4, 0.2, ...upTo(3, 0.25)]);
-    expect(t.memory).toEqual([0.4, 0, ...upTo(3, 0.25)]);
-    t.remember([7, -3, ...upTo(C, 0.5)]);
-    expect(t.memory).toEqual([1, 0, ...upTo(C, 0.5)]);
+    expect(t.memory).toEqual([0.4, 0, ...upTo(3, 0.25), -1]);
+    t.remember([7, -3, ...upTo(C, 0.5), -1]);
+    expect(t.memory).toEqual([1, 0, ...upTo(C, 0.5), -1]);
     // what was saved before, of the pad's paper, isn't
     t.remember([0.3, 0.1]);
-    expect(t.memory).toEqual([1, 0, ...upTo(C, 0.5)]);
+    expect(t.memory).toEqual([1, 0, ...upTo(C, 0.5), -1]);
     // an older save's strip, scorched alike all over what was wet: as far as it had soaked
     const o = new Tool('strip', 2);
     o.remember([0.5, 0, 0.25]);
-    expect(o.memory).toEqual([0.5, 0, ...upTo(C / 2, 0.25)]);
+    expect(o.memory).toEqual([0.5, 0, ...upTo(C / 2, 0.25), -1]);
     // and its paper, stretch by stretch
     const { t: u } = spotted([[TARGET, 1]], R);
     run(u, STRIP.time / 2);
@@ -1137,6 +1140,201 @@ describe('wicking strip', () => {
     u.paper.forEach((p, c) => loadVessel(v.paper[c], saveVessel(p)));
     expect(v.memory).toEqual(u.memory);
     expect(v.paper.map((p) => [...p.n])).toEqual(u.paper.map((p) => [...p.n]));
+  });
+
+  describe('dyed', () => {
+    const K = singleOf('K');
+    const B = singleOf('B');
+    const net = new ReactionNetwork(testChemParams());
+    const mordants = new Mordants(net);
+    const colorOf = (s: number) => SPECIES[s].atomIdx[0];
+    const onFixed = (t: Tool, s: number) => t.fixed.reduce((a, v) => a + v.n[s], 0);
+    const onLoose = (t: Tool, s: number) => t.paper.reduce((a, v) => a + v.n[s], 0);
+    /** A strip stood in `dye`, a share `thin` of it solvent, until it has soaked through, and lifted out. */
+    const dyedIn = (dye: number, thin = 0) => {
+      const t = new Tool('strip', 0);
+      const bath = mix(thin > 0 ? [[dye, 1 - thin], [SOLVENT_SPECIES, thin]] : [[dye, 1]], 3 * STRIP.cap);
+      t.dipIn(bath, true);
+      run(t, STRIP.time + 1);
+      t.dipIn(null, false);
+      return t;
+    };
+    /**
+     * A dyed strip touched to a spot of `parts`, left `sit` sim seconds, then stood in the solvent and run for
+     * `seconds`, reacting all the while by `by`.
+     */
+    const develop = (t: Tool, parts: [number, number][], seconds = STRIP.time + 1, sit = 0, by = mordants) => {
+      const go = (time: number) => {
+        for (let i = 0; i < Math.round(time / 0.02); i++) {
+          t.react(by, 0.02);
+          t.step(0.02);
+        }
+      };
+      // dipped by hand, the lower half of its point is in
+      t.dipIn(mix(parts), false, STRIP.paper.point / 2);
+      t.dipIn(null, false);
+      go(sit);
+      t.dipIn(carrierOf(SOLVENT_SPECIES), true);
+      go(seconds);
+      return t;
+    };
+
+    it('is dyed by soaking through in single atoms of one color: they are fixed to it, and it is paper again', () => {
+      const t = dyedIn(R);
+      expect(t.dye).toBe(colorOf(R));
+      expect(t.soaked).toBe(0);
+      // the dye is all fixed, all along it, a paperful of it but for what the top has yet to get; nothing is loose
+      expect(onPaper(t)).toBe(0);
+      expect(onFixed(t, R)).toBeGreaterThan(0.95 * STRIP.cap);
+      expect(t.fixed.filter((v) => v.n[R] > 0.5 * (STRIP.cap / C)).length).toBeGreaterThan(0.9 * C);
+      for (const v of t.fixed) expect(v.N).toBe(v.n[R]);
+      // an undyed strip, and any other tool, has nothing fixed
+      expect(new Tool('strip', 0).dye).toBeNull();
+      expect(new Tool('strip', 0).fixed.every((v) => v.N === 0)).toBe(true);
+      expect(new Tool('dish', 0).fixed).toEqual([]);
+    });
+
+    it('drinks no more of the dye it stands in, until it has been lifted out and dipped again', () => {
+      const t = new Tool('strip', 0);
+      const bath = carrierOf(G);
+      t.dipIn(bath, true);
+      run(t, STRIP.time + 1);
+      expect(t.dye).toBe(colorOf(G));
+      const n = bath.N;
+      run(t, 5);
+      expect(t.soaked).toBe(0);
+      expect(bath.N).toBe(n);
+      // lifted out and touched to something, it takes a spot of it, as new paper does, and then drinks
+      t.dipIn(null, false);
+      t.dipIn(bath, true);
+      expect(bath.N).toBeLessThan(n);
+      expect(onLoose(t, G)).toBeGreaterThan(0);
+      run(t, 1);
+      expect(t.soaked).toBeGreaterThan(0);
+    });
+
+    it('takes dye thinned with solvent, less of it, and the solvent dries off', () => {
+      const t = dyedIn(K, 0.7);
+      expect(t.dye).toBe(colorOf(K));
+      expect(onPaper(t)).toBe(0);
+      expect(onFixed(t, K) / STRIP.cap).toBeGreaterThan(0.25);
+      expect(onFixed(t, K) / STRIP.cap).toBeLessThan(0.35);
+      expect(onFixed(t, SOLVENT_SPECIES)).toBe(0);
+    });
+
+    it('is not dyed by solvent alone, by a mix of colors, or by a sample run up it in a colored carrier', () => {
+      const plain = dyedIn(SOLVENT_SPECIES);
+      expect(plain.dye).toBeNull();
+      expect(plain.soaked).toBe(1);
+      const mixed = new Tool('strip', 0);
+      mixed.dipIn(mix([[R, 0.5], [B, 0.5]], 3 * STRIP.cap), true);
+      run(mixed, STRIP.time + 1);
+      expect(mixed.dye).toBeNull();
+      expect(mixed.soaked).toBe(1);
+      const { t } = spotted([[TARGET, 1]], R);
+      run(t, STRIP.time + 1);
+      expect(t.dye).toBeNull();
+      expect(t.soaked).toBe(1);
+      expect(onLoose(t, R)).toBeGreaterThan(0);
+    });
+
+    it('takes more of the same dye, soaked through in it again, but never a second color', () => {
+      const t = dyedIn(B);
+      const once = onFixed(t, B);
+      t.dipIn(carrierOf(B), true);
+      run(t, STRIP.time + 1);
+      expect(t.dye).toBe(colorOf(B));
+      expect(t.soaked).toBe(0);
+      expect(onPaper(t)).toBe(0);
+      expect(onFixed(t, B) / once).toBeCloseTo(2, 1);
+      // stood in another color, that's just its run, and its last
+      t.dipIn(null, false);
+      t.dipIn(carrierOf(G), true);
+      run(t, STRIP.time + 1);
+      expect(t.dye).toBe(colorOf(B));
+      expect(t.soaked).toBe(1);
+      expect(onLoose(t, G)).toBeGreaterThan(0);
+      expect(onFixed(t, G)).toBe(0);
+    });
+
+    it('holds what bonds to its dye, and lets by what already has an atom of its color', () => {
+      const pairRG = pairOf('R', 'G');
+      // green bonds to red, but not at once: red paper holds some of it as R–G, all the way up, and none of that runs
+      const t = develop(dyedIn(R), [[G, 1]]);
+      expect(onFixed(t, pairRG)).toBeGreaterThan(0.25 * STRIP.spot);
+      expect(Math.abs(onFixed(t, pairRG) + onLoose(t, G) - STRIP.spot)).toBeLessThanOrEqual(3);
+      expect(onLoose(t, pairRG)).toBe(0);
+      expect(t.fixed.filter((v) => v.n[pairRG] > 0).length).toBeGreaterThan(0.5 * C);
+      // R–G has its red already: it runs up red paper just as it does up bare paper
+      const u = develop(dyedIn(R), [[pairRG, 1]]);
+      const bare = develop(new Tool('strip', 1), [[pairRG, 1]]);
+      expect(Math.abs(onLoose(u, pairRG) - onLoose(bare, pairRG))).toBeLessThanOrEqual(6);
+      expect(centre(u, pairRG)).toBeCloseTo(centre(bare, pairRG), 0);
+      expect(u.fixed.every((v) => v.N === v.n[R])).toBe(true);
+      // and blue bonds with nothing, so it runs up it too
+      const w = develop(dyedIn(R), [[B, 1]]);
+      expect(Math.abs(onLoose(w, B) - STRIP.spot)).toBeLessThanOrEqual(3);
+      expect(centre(w, B)).toBeGreaterThan(0.8 * C);
+    });
+
+    it('swaps its dye in for what it displaces, at the foot, and what it displaced runs on', () => {
+      // (a chemistry in which black bonds to nothing outright, so displacement is all there is for it)
+      const params = testChemParams();
+      params.bonds.RK.A = params.bonds.GK.A = 0;
+      const frozen = new Mordants(new ReactionNetwork(params));
+      // black takes blue's place in the triangle, which is held where it was spotted, if it's left there a while
+      // first, and the blue goes free, up the paper
+      const ringK = speciesIndex(['R', 'G', 'K'], bondMask(['R', 'G'], ['R', 'K'], ['G', 'K']));
+      const dye = dyedIn(K);
+      const before = onFixed(dye, K);
+      // (a thin sample: there's only so much dye at the foot to hold it)
+      const thin: [number, number][] = [[TARGET, 0.1], [SOLVENT_SPECIES, 0.9]];
+      const there = 0.1 * STRIP.spot;
+      const t = develop(dye, thin, STRIP.time + 1, 10, frozen);
+      expect(onLoose(t, TARGET)).toBeLessThan(0.01 * there);
+      expect(onFixed(t, ringK)).toBeGreaterThan(0.99 * there);
+      expect(Math.abs(onLoose(t, B) - onFixed(t, ringK))).toBeLessThan(0.01 * there);
+      const heldAt = (u: Tool) => u.fixed.reduce((a, v, c) => a + v.n[ringK] * (c + 0.5), 0) / onFixed(u, ringK);
+      expect(heldAt(t)).toBeLessThan(0.1 * C);
+      expect(centre(t, B)).toBeGreaterThan(0.8 * C);
+      // run at once instead, it's caught on its way up, further along
+      const quick = develop(dyedIn(K), thin, STRIP.time + 1, 0, frozen);
+      expect(onFixed(quick, ringK)).toBeGreaterThan(0.9 * there);
+      expect(heldAt(quick)).toBeGreaterThan(2 * heldAt(t));
+      // and more of it than the dye at the foot can hold: the rest is caught further up
+      const much = develop(dyedIn(K), [[TARGET, 1]], STRIP.time + 1, 10, frozen);
+      const past = (u: Tool) => u.fixed.reduce((a, v, c) => a + (c >= 6 ? v.n[ringK] : 0), 0) / onFixed(u, ringK);
+      expect(past(t)).toBeLessThan(0.3);
+      expect(past(much)).toBeGreaterThan(0.5);
+      // the dye's atoms are all still fixed, whatever they're in now
+      const black = (v: Vessel) => SPECIES.reduce((b, sp) => b + (sp.atoms.includes('K') ? v.n[sp.i] : 0), 0);
+      expect(t.fixed.reduce((a, v) => a + black(v), 0)).toBe(before);
+      expect(t.paper.reduce((a, v) => a + black(v), 0)).toBe(0);
+    });
+
+    it('reacts only until it has soaked through: then it stays as it is', () => {
+      const t = develop(dyedIn(R), [[B, 1]]);
+      expect(t.soaked).toBe(1);
+      t.paper[5].setMolecules(G, 1000);
+      for (let i = 0; i < 500; i++) t.react(mordants, 0.02);
+      expect(t.paper[5].n[G]).toBe(1000);
+    });
+
+    it('keeps its dye, and what is fixed to it, in a save', () => {
+      const t = develop(dyedIn(K), [[TARGET, 1]], STRIP.time / 2);
+      const u = new Tool('strip', 1);
+      u.remember(t.memory);
+      t.fixed.forEach((p, c) => loadVessel(u.fixed[c], saveVessel(p)));
+      expect(u.dye).toBe(t.dye);
+      expect(u.memory).toEqual(t.memory);
+      expect(u.fixed.map((p) => [...p.n])).toEqual(t.fixed.map((p) => [...p.n]));
+      // a color there isn't, or the solvent, is no dye
+      const w = new Tool('strip', 2);
+      w.remember([0, 0, ...new Array<number>(C).fill(0), 4]);
+      expect(w.dye).toBeNull();
+      w.remember([0, 0, ...new Array<number>(C).fill(0), 9]);
+      expect(w.dye).toBeNull();
+    });
   });
 });
 
@@ -1552,6 +1750,23 @@ describe('sleeper culture', () => {
     // a list of another length isn't its cells
     t.remember([1, 1]);
     expect(t.memory).toEqual(m);
+  });
+});
+
+describe('ear trumpet', () => {
+  it('is a stem under a horn, with no tanks, spouts or valves: a dipper, which does nothing of itself', () => {
+    const t = new Tool('trumpet', 0);
+    expect([t.tanks.length, t.shape.spouts.length, t.valves.length]).toEqual([0, 0, 0]);
+    expect(isDipper('trumpet')).toBe(true);
+    expect(INLINE_TOOLS).not.toContain('trumpet');
+    expect(UNIQUE_TOOLS).not.toContain('trumpet');
+    // its foot is the knob at the end of its stem, and its horn is above its top, where its stand holds it
+    expect(footY('trumpet')).toBe(TRUMPET.h - TRUMPET.tip);
+    expect(t.shape.box.y0).toBeLessThan(-TRUMPET.bell.h);
+    expect(t.shape.box.y1).toBeGreaterThan(TRUMPET.h);
+    t.bath = filled(new Vessel(CAP), R, CAP / 2, 1);
+    expect(t.step(0.02)).toEqual([]);
+    expect(t.memory).toBeUndefined();
   });
 });
 
