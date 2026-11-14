@@ -26,7 +26,7 @@ import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
   clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
-  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
+  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, TRUMPET, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, Tool,
 } from './tools';
 import { CABINET, CABINET_BUILD, STOCK, type Stock, type Stocked } from './cabinet';
@@ -228,6 +228,8 @@ const keyMats = {
 const paperMat = new THREE.MeshStandardMaterial({ color: 0xe6dfc8, roughness: 0.95, metalness: 0 });
 const hidden = new THREE.MeshBasicMaterial({ visible: false });
 const faintMat = new THREE.MeshBasicMaterial({ color: 0xd6ecf2, transparent: true, opacity: 0.3, depthWrite: false });
+/** An ear trumpet's brass, seen from inside its horn as well as out. */
+const brassMat = new THREE.MeshStandardMaterial({ color: 0xc09a45, metalness: 1, roughness: 0.3, side: THREE.DoubleSide });
 const rodMat = new THREE.MeshStandardMaterial({ color: 0xc8cfcd, metalness: 1, roughness: 0.18 });
 /** How see-through a faucet's knob is at the most, for a clear fluid's (the solvent's). */
 const KNOB_ALPHA = 0.6;
@@ -1500,6 +1502,7 @@ class ToolView {
       block(art, darkMat, -12, 12, TH + 0.6, sh.box.y1, -D.body / 2, D.body / 2, 1);
     }
     else if (isThermometer(t.kind)) this.buildThermometer(t.kind);
+    else if (t.kind === 'trumpet') this.buildTrumpet();
     else if (t.kind === 'column') {
       this.buildColumn();
       // the funnel's stem down into the tube, and from the tube's foot down through the tap to the spout
@@ -2095,6 +2098,31 @@ class ToolView {
     }
     stump.visible = false;
     this.spirit = { column, whole, stump };
+  }
+
+  /**
+   * An ear trumpet (see TRUMPET): a brass stem with a little knob at its foot, and on top of it a horn opening upward,
+   * flaring ever faster out to its mouth, with a rolled rim.
+   */
+  private buildTrumpet(): void {
+    const { h, r, tip, bell } = TRUMPET;
+    const art = this.art;
+    rod(art, brassMat, v3(0, 0, 0), v3(0, h - tip, 0), r);
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(tip, 20, 12), brassMat);
+    knob.position.copy(v3(0, h - tip, 0));
+    knob.castShadow = true;
+    art.add(knob);
+    // the horn's wall, from the stem up to its mouth: its radius grows like a horn's, slowly and then fast
+    const flare = Array.from({ length: 25 }, (_, i) => {
+      const u = i / 24;
+      return new THREE.Vector2(r * (bell.r / r) ** (u ** 1.6), bell.h * u);
+    });
+    const horn = new THREE.Mesh(new THREE.LatheGeometry(flare, 40), brassMat);
+    horn.castShadow = true;
+    art.add(horn);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(bell.r, 0.7, 8, 40).rotateX(Math.PI / 2), brassMat);
+    rim.position.y = bell.h;
+    art.add(rim);
   }
 
   /**
@@ -3819,11 +3847,13 @@ const ICON_VIEW = {
  * The kinds that aren't seen whole and upright. A thermometer is so long and thin that its scale's numbers, all that
  * tells the fine one from the wide one, would be lost: so it lies aslant (`roll`, in radians, anticlockwise), and only
  * its lower end is in the picture (`only`, heights in its flat frame, y down from its top): its bulb and the first two
- * numbers of its scale, the rest running off the corner.
+ * numbers of its scale, the rest running off the corner. An ear trumpet is as long and thin, and its horn is all there
+ * is to know it by: so it lies aslant the other way, with its horn and a little of its stem in the picture.
  */
 const ICON_POSES: Partial<Record<Stocked, { roll: number; only: { y0: number; y1: number } }>> = {
   thermometer: { roll: -Math.PI / 4, only: { y0: THERMOMETER_ROD.foot - 22, y1: THERMOMETER_ROD.h } },
   thermometerWide: { roll: -Math.PI / 4, only: { y0: THERMOMETER_ROD.foot - 22, y1: THERMOMETER_ROD.h } },
+  trumpet: { roll: Math.PI / 4, only: { y0: -TRUMPET.bell.h, y1: 2 * TRUMPET.bell.h } },
 };
 
 /** A little picture of each kind of thing the equipment wheels make, each on a canvas of its own (see IconStudio). */

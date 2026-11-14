@@ -594,10 +594,21 @@ export const THERMOMETER_ROD = {
 export const BULB_Y = (THERMOMETER_ROD.bulb.y0 + THERMOMETER_ROD.bulb.y1) / 2;
 
 /**
- * The tools that are dipped (see Tool.bath): a wicking strip and the thermometers. They have no tanks; held with the
- * crosshair on an open top, one hovers upright over it, the right button lowers it in, and the left stands it in it.
+ * An ear trumpet, in its own frame (x right, y down, the top of its stem at the origin, where its stand's clamp holds
+ * it): a brass stem `h` long and `r` in radius, upright, ending in a little knob `tip` in radius, which is what's
+ * dipped; and on top of it a horn opening upward, `bell.h` tall, flaring from the stem out to `bell.r` in radius at
+ * its mouth, which is where what it hears is heard from.
  */
-export const DIPPERS: readonly ToolKind[] = ['strip', 'thermometer', 'thermometerWide'];
+export const TRUMPET = { h: 150, r: 2, tip: 2.8, bell: { h: 34, r: 15 } };
+/** Where an ear trumpet's foot is, in its own frame: the middle of the knob at the end of its stem, which is what's dipped. */
+export const TRUMPET_FOOT = TRUMPET.h - TRUMPET.tip;
+
+/**
+ * The tools that are dipped (see Tool.bath): a wicking strip, the thermometers and the ear trumpet. They have no
+ * tanks; held with the crosshair on an open top, one hovers upright over it, the right button lowers it in, and the
+ * left stands it in it.
+ */
+export const DIPPERS: readonly ToolKind[] = ['strip', 'thermometer', 'thermometerWide', 'trumpet'];
 export const isDipper = (kind: ToolKind): boolean => DIPPERS.includes(kind);
 
 /**
@@ -662,17 +673,20 @@ export const STRIP_FOOT = STRIP.paper.top + STRIP.paper.len;
 
 /**
  * Where a dipper's foot is, in its own frame (y down from its top): what's dipped, and what's in a fluid or not (see
- * bathAt): a thermometer's bulb's middle, or the middle of a wicking strip's first stretch, at the tip of its paper.
+ * bathAt): a thermometer's bulb's middle, the knob at the end of an ear trumpet's stem, or the middle of a wicking
+ * strip's first stretch, at the tip of its paper.
  */
-export const footY = (kind: ToolKind): number => (kind === 'strip' ? STRIP_FOOT - 0.5 : BULB_Y);
+export const footY = (kind: ToolKind): number => (kind === 'strip' ? STRIP_FOOT - 0.5 : kind === 'trumpet' ? TRUMPET_FOOT : BULB_Y);
 
 /**
  * How far under a fluid's surface a dipper's foot (see footY) goes when it's dipped in by hand (see dipPoses), which is
  * no further than it takes to touch it: a wicking strip's, so that the lower half of its point is in; a thermometer's,
- * so that its bulb is just covered.
+ * so that its bulb is just covered; an ear trumpet's, its knob.
  */
 export const dipUnder = (kind: ToolKind): number =>
-  kind === 'strip' ? STRIP.paper.point / 2 - 0.5 : (THERMOMETER_ROD.bulb.y1 - THERMOMETER_ROD.bulb.y0) / 2 + 1;
+  kind === 'strip' ? STRIP.paper.point / 2 - 0.5
+  : kind === 'trumpet' ? TRUMPET.tip + 1
+  : (THERMOMETER_ROD.bulb.y1 - THERMOMETER_ROD.bulb.y0) / 2 + 1;
 
 /**
  * The dish (see SHAPES.dish): a shallow open glass tray, reaching w either side of its middle, h deep and d front to
@@ -939,7 +953,7 @@ export function analyzerSector(atom: ColorAtom): (readonly [number, number])[] {
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater' | 'analyzer'
   | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'dish' | 'column' | 'culture' | 'tank'
-  | 'receptacle';
+  | 'trumpet' | 'receptacle';
 
 /**
  * Tools there's only ever one of: not on an equipment wheel, and never put away. The receptacle is the whole cryostabilizer
@@ -1242,6 +1256,16 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   // the thermometers: a glass rod each (see THERMOMETER_ROD), with no tanks, spouts or valves
   thermometer: THERMOMETER_SHAPE,
   thermometerWide: THERMOMETER_SHAPE,
+  // the ear trumpet: a brass stem under a horn (see TRUMPET), with no tanks, spouts or valves; its horn is above its
+  // top, where its stand's clamp holds its stem
+  trumpet: {
+    tanks: [],
+    noValve: true,
+    spouts: [],
+    valveY: 0,
+    spoutY: TRUMPET.h,
+    box: { x0: -TRUMPET.bell.r - 0.5, x1: TRUMPET.bell.r + 0.5, y0: -TRUMPET.bell.h - 0.5, y1: TRUMPET.h + 0.5 },
+  },
   analyzer: {
     // a glass tube straight down to a spout, and a cabinet beside it with a screen (see ANALYZER), which takes its
     // sample from the tube's foot and lets it out a waste spout on its far side, two grid cells along
@@ -1443,6 +1467,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   meter: 'Flow meter',
   thermometer: 'Fine thermometer',
   thermometerWide: 'Wide thermometer',
+  trumpet: 'Ear trumpet',
   dilatometer: 'Swell bulbs',
   strip: 'Wicking strip',
   dish: 'Dish',
@@ -1550,6 +1575,8 @@ export function separatorShares(): number[][] {
  * - A **thermometer** (fine or wide, see THERMOMETERS) has no tanks at all: it's a glass rod whose bulb takes the
  *   temperature of whatever fluid it's dipped in, or the room's (see warm and bath), and which shatters, for good, if
  *   that's too hot for it.
+ * - An **ear trumpet** has no tanks either: it's a brass stem under a horn, and does nothing itself. Whoever runs it
+ *   says what its foot is in (see bath), and makes the sound of what's reacting there come out of its horn.
  * - A **composition analyzer** is an inline instrument too, and it draws off ANALYZER_SAMPLE of what passes, out its waste spout, reading that (see
  *   composition) onto a screen, averaged over the recent past (see INSTRUMENT_TAU).
  * - A **spectroscope** is an inline instrument too, which lets everything through, counting the bonds that pass over
@@ -1652,7 +1679,8 @@ export class Tool {
   temp = COOLING.ambient;
   /**
    * The vessel a dipper's foot is in (see footY), if any, which whoever runs it sets before each step: the fluid a
-   * thermometer's bulb is in (see warm), or what a wicking strip drinks from, only while it may (see wick).
+   * thermometer's bulb is in (see warm), what an ear trumpet listens to, or what a wicking strip drinks from, only
+   * while it may (see wick).
    */
   bath: Vessel | null = null;
   /** Whether a thermometer has shattered (see warm): for good, reading nothing. */
@@ -1737,6 +1765,7 @@ export class Tool {
       this.warm(h);
       return this.none();
     }
+    if (this.kind === 'trumpet') return this.none();
     if (this.kind === 'column') return this.elute(h);
     // a culture's cells sicken in what's in the plate, which then drains like any tank
     if (this.kind === 'culture') this.sicken(h);

@@ -23,7 +23,7 @@ export const endless = (k: Stocked) => ENDLESS.includes(k);
 /** How many of each kind the cabinet holds, full: thirty flasks, and eight of everything else (see ENDLESS). */
 export const STOCK: Record<Stocked, number> = {
   flask: 30, scale: 8, dispenser: 8, pipette: 8, exchanger: 8, separator: 8, splitter: 8, multiplexer: 8, sorter: 8,
-  heater: 8, tank: 8, meter: 8, dilatometer: 8, column: 8, dish: 8,
+  heater: 8, tank: 8, meter: 8, dilatometer: 8, column: 8, dish: 8, trumpet: 8,
   // drawn as this many, but endless
   thermometer: 16, thermometerWide: 16, strip: 16, culture: 8,
 };
@@ -63,7 +63,7 @@ const BAYS: readonly (readonly (readonly Compartment[])[])[] = [
   ],
   [
     [{ kind: 'dispenser', cols: 2, high: 1, deep: 4 }, { kind: 'culture', cols: 2, high: 1, deep: 4 }],
-    [{ kind: 'strip', cols: 8, high: 1, deep: 2 }],
+    [{ kind: 'strip', cols: 8, high: 1, deep: 2 }, { kind: 'trumpet', cols: 4, high: 1, deep: 2 }],
     [{ kind: 'thermometer', cols: 8, high: 1, deep: 2 }, { kind: 'thermometerWide', cols: 8, high: 1, deep: 2 }],
   ],
 ];

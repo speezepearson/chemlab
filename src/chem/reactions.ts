@@ -216,6 +216,33 @@ export class ReactionNetwork {
   }
 
   /**
+   * How busy f is right now: the events a sim second of each kind of reaction (in REACTION_KINDS order), per molecule
+   * in it, at its current rates. They're gross: a reaction and its reverse both count, so a fluid at equilibrium,
+   * where nothing changes on the whole, is as busy as its exchange is. All zero for an empty fluid.
+   */
+  activity(f: Fluid, out: number[] = []): number[] {
+    for (let j = 0; j < REACTION_KINDS.length; j++) out[j] = 0;
+    const N = f.N;
+    if (N <= 0) return out;
+    const { n } = f;
+    const { rb, k, bar, kind, first } = this;
+    const invT = 1 / Math.max(temperature(f), 0.05);
+    let molecules = 0;
+    for (let s = 0; s < NS; s++) {
+      const a = n[s];
+      if (a <= 0) continue;
+      molecules += a;
+      for (let i = first[s]; i < first[s + 1]; i++) {
+        const b = rb[i];
+        if (!k[i] || (b >= 0 && n[b] <= 0)) continue;
+        out[kind[i]] += (b >= 0 ? (a * n[b]) / N : a) * k[i] * Math.exp(-bar[i] * invT);
+      }
+    }
+    for (let j = 0; j < REACTION_KINDS.length; j++) out[j] /= molecules;
+    return out;
+  }
+
+  /**
    * What's reacting in f right now: each reaction netted against its reverse, at its expected events per sim second
    * in whichever direction is ahead, busiest first. Reactions that cancel exactly, or can't happen, are left out.
    */

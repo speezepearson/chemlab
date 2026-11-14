@@ -4,7 +4,7 @@ import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { CELL, groundAt, toCardinal, toCell, toLocal, toWorld, type Pose, type Vec3 } from './space';
 import {
-  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, STRIP, TANK_H, THERMOMETER_ROD, dipUnder, footY, isThermometer, levelIn,
+  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, STRIP, TANK_H, THERMOMETER_ROD, TRUMPET, dipUnder, footY, isThermometer, levelIn,
   tankDepth, tankPieces, tankX, overMouth, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
 } from './tools';
 
@@ -126,8 +126,9 @@ export function tankNoteY(t: Tool, k: number): number {
  * its funnel, the plate in the wall, and its spouts' pipes out from it. An inline instrument's are its
  * tube and the pipe down from it, and the cabinet beside them, and any pipe on to a spout past the cabinet, or the
  * flow meter's readout round the pipe; the tube's top is flush with its opening, for a nozzle to snap onto (see
- * INLINE_DOCK). A dipper's (see DIPPERS) is only its top, where its stand's clamp holds it: a thermometer's rod's, or
- * a wicking strip's clip; the rest of it bumps into nothing, so it can stand down in a flask or a tank.
+ * INLINE_DOCK). A dipper's (see DIPPERS) is only its top, where its stand's clamp holds it: a thermometer's rod's, a
+ * wicking strip's clip, or an ear trumpet's stem's with the horn on it; the rest of it bumps into nothing, so it can
+ * stand down in a flask or a tank.
  */
 export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean }[] {
   const sh = t.shape;
@@ -147,6 +148,14 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
   if (isThermometer(t.kind)) {
     const r = THERMOMETER_ROD.r;
     return [{ x0: -r, x1: r, y0: b.y0, y1: 24, hz: r, round: true }];
+  }
+  if (t.kind === 'trumpet') {
+    // its horn, and the top of its stem under it
+    const { r, bell } = TRUMPET;
+    return [
+      { x0: -bell.r, x1: bell.r, y0: -bell.h, y1: 0, hz: bell.r, round: true },
+      { x0: -r, x1: r, y0: 0, y1: 24, hz: r, round: true },
+    ];
   }
   if (t.kind === 'strip') {
     // its clip, and the top of the paper it holds
@@ -269,8 +278,11 @@ function inTank(t: Tool, k: number, p: Vec3): number | null {
   return null;
 }
 
-/** Where a dipper's foot is, in the room (see footY): a thermometer's bulb, or a wicking strip's paper's tip. */
+/** Where a dipper's foot is, in the room (see footY): a thermometer's bulb, an ear trumpet's knob, or a wicking strip's paper's tip. */
 export const footAt = (t: Tool): Vec3 => onTool(t, 0, footY(t.kind));
+
+/** The middle of an ear trumpet's horn's mouth, in the room: where what it hears sounds from. */
+export const hornAt = (t: Tool): Vec3 => onTool(t, 0, -TRUMPET.bell.h);
 
 /** How far above a mouth a dipper aimed at it hovers, its foot (see dipPoses). */
 export const DIP_HOVER = 15;

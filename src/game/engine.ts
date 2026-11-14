@@ -5,7 +5,7 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
-  FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
+  FLASK_CENTER, FLASK_LIP, NOZZLE_H, hornAt, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
   flaskLip, flaskMouth, nozzleBox, tankFluid, docked, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
@@ -23,6 +23,7 @@ import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
 import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
+import { crackle, type Crackle } from './crackle';
 import { CRYOSTABILIZER, FIRST_SUPPLY, litresOf, type Supply } from './supply';
 import { shatter } from './shatter';
 import { WHEELS, wheelMove, wheelPick, type WheelAim } from './wheel';
@@ -232,6 +233,8 @@ const DIP_S = 0.2;
  * drinks it: a shorter tap only takes a spot (see Tool.touch).
  */
 const DIP_SOAK = 0.35;
+/** How loud an ear trumpet set down is, next to one in hand, at her ear. */
+const TRUMPET_STOOD = 0.6;
 /** How fast a falling drop speeds up, in world units per sim second squared: a 500-unit fall takes 0.7 s. */
 const GRAVITY = 2000;
 /** The player's eyes, and their body's radius. */
@@ -441,6 +444,10 @@ export class GameEngine {
   private viewW = 0;
   private viewH = 0;
   private rumbles = new Map<Tool, Rumble>();
+  /** Each ear trumpet's sound, once it's had anything to hear (see listen). */
+  private crackles = new Map<Tool, Crackle>();
+  /** How busy the fluid an ear trumpet is in is, per kind of reaction; worked out afresh for each. */
+  private busy: number[] = [];
   private water = new WaterSounds();
   /** This frame's streams, for their sound: how much ran into each vessel, by volume. */
   private inflow = new Map<Vessel, number>();
@@ -497,6 +504,7 @@ export class GameEngine {
     this.resizeObserver.disconnect();
     for (const c of this.cleanups) c();
     for (const r of this.rumbles.values()) r.stop();
+    for (const c of this.crackles.values()) c.stop();
     this.water.stop();
     this.view.dispose();
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
@@ -2483,6 +2491,8 @@ export class GameEngine {
       r.level(simDt > 0 ? ANALYZER_HUM : 0);
     }
 
+    this.listen(dt, simDt);
+
     // the station's diverter goes by sim time too: a clunk as it swings
     this.tools.forEach((t, j) => {
       if (t.kind !== 'receptacle') return;
@@ -2516,6 +2526,28 @@ export class GameEngine {
     this.water.update(dt, this.landed.map((p) => this.hear(p)), streams);
 
     this.napHint();
+  }
+
+  /**
+   * What each ear trumpet hears, for a frame of dt real seconds in which simDt sim seconds pass: the crackle of what's
+   * reacting in the fluid its foot is in (see Tool.bath and ReactionNetwork.activity), on sim time, so silent while
+   * paused and faster at 4× and 16×. One in hand is at her ear; one set down sounds from its horn, fainter.
+   */
+  private listen(dt: number, simDt: number): void {
+    const h = this.held;
+    for (const t of this.tools) {
+      if (t.kind !== 'trumpet' || !t.bath || t.bath.N <= 0 || simDt <= 0) continue;
+      const inHand = h?.kind === 'tool' && h.t === t;
+      const at = inHand ? CENTER : this.hear(hornAt(t));
+      let c = this.crackles.get(t);
+      if (!c) this.crackles.set(t, (c = crackle(at)));
+      c.play(this.chem.activity(t.bath, this.busy), simDt, dt, at, inHand ? 1 : TRUMPET_STOOD);
+    }
+    for (const [t, c] of this.crackles)
+      if (!this.tools.includes(t)) {
+        c.stop(); // put away, or the lab was replaced
+        this.crackles.delete(t);
+      }
   }
 
   /**
@@ -3087,6 +3119,8 @@ export class GameEngine {
     this.water.update(0.1, [], new Map());
     for (const r of this.rumbles.values()) r.stop();
     this.rumbles.clear();
+    for (const c of this.crackles.values()) c.stop();
+    this.crackles.clear();
     for (const d of this.diverters.values()) d.stop();
     this.diverters.clear();
     this.changing?.sound.stop();
@@ -3314,7 +3348,7 @@ export class GameEngine {
 
   /**
    * What each dipper's foot is in (see footAt and dippedIn), from where it is now, held or set down; it doesn't change
-   * much in a frame. A thermometer's bulb reads whatever it's in. A wicking strip counts as in a fluid only while it's
+   * much in a frame. A thermometer's bulb reads whatever it's in, and an ear trumpet hears it. A wicking strip counts as in a fluid only while it's
    * set down, or held dipped with the right button (or on its way in from a tap of it, see tapping), so carrying one
    * past fluid does nothing; it drinks it while it's set down, or once it's been held dipped DIP_SOAK real seconds
    * (`dt`, as the player's own movements go), so a tap only spots it (see Tool.dipIn).
@@ -3323,7 +3357,7 @@ export class GameEngine {
     const h = this.held;
     let dipped = false;
     for (const t of this.tools) {
-      if (isThermometer(t.kind)) t.bath = bathAt(footAt(t), this.flasks, this.tools);
+      if (isThermometer(t.kind) || t.kind === 'trumpet') t.bath = bathAt(footAt(t), this.flasks, this.tools);
       if (t.kind !== 'strip') continue;
       const held = h?.kind === 'tool' && h.t === t;
       // one in hand is in the fluid once it's all the way down, so its spot is as deep as it's dipped

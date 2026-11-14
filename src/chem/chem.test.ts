@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { testChemParams } from './testChem';
-import { Lag, QUIET, ReactionNetwork, atomCounts, heatAt, temperature, type Fluid } from './reactions';
+import { Lag, QUIET, REACTION_KINDS, ReactionNetwork, atomCounts, heatAt, temperature, type Fluid } from './reactions';
 import { NS, SOLVENT_SPECIES, SPECIES, TARGET, bondMask, pairOf, singleOf, speciesIndex } from './species';
 import { ATOMS, ATOM_WEIGHT, BONDS, SOLVENT_INDEX, type Atom } from './atoms';
 import { equilibrate, equilibrium } from './equilibrium';
@@ -319,6 +319,70 @@ describe('net rates', () => {
     const n = equilibrium(atoms.map((v) => (v / 7) * N), net.U, 1.5);
     const f: Fluid = { n, N, Q: heatAt(1.5, N) };
     for (const r of net.netRates(f)) expect(r.rate).toBeLessThan(N * 1e-6);
+  });
+});
+
+describe('activity', () => {
+  const net = new ReactionNetwork(testChemParams());
+  const [FORMATION, CLOSURE, BREAKING, DISPLACEMENT] = REACTION_KINDS.map((_, k) => k);
+
+  it('knows each reaction by its kind', () => {
+    const kinds = REACTION_KINDS.map(() => 0);
+    let n = 0;
+    net.forEach((r) => {
+      n++;
+      kinds[r.kind]++;
+      // two molecules join into one, one changes or splits on its own, or a free atom and a molecule trade
+      if (r.kind === FORMATION) expect([r.rb >= 0, r.p2 < 0]).toEqual([true, true]);
+      if (r.kind === CLOSURE) expect([r.rb < 0, r.p2 < 0, SPECIES[r.p1].has === SPECIES[r.ra].has]).toEqual([true, true, true]);
+      if (r.kind === BREAKING) expect(r.rb).toBe(-1);
+      if (r.kind === DISPLACEMENT) expect([r.rb >= 0, r.p2 >= 0, SPECIES[r.rb].size, SPECIES[r.p2].size]).toEqual([true, true, 1, 1]);
+    });
+    expect(n).toBe(net.count);
+    for (const k of kinds) expect(k).toBeGreaterThan(0);
+    // every bond that can form can break again, between molecules or within one
+    expect(kinds[FORMATION] + kinds[CLOSURE]).toBe(kinds[BREAKING]);
+  });
+
+  it('is nothing in an empty fluid, or one that cannot react', () => {
+    expect(net.activity(fluid([]))).toEqual([0, 0, 0, 0]);
+    expect(net.activity(fluid([single('R', 3)]))).toEqual([0, 0, 0, 0]);
+    expect(net.activity(fluid([single('G', 1), single('B', 1), [SOLVENT_SPECIES, 5]]))).toEqual([0, 0, 0, 0]);
+  });
+
+  it('counts the events of each kind a sim second, per molecule, at the rates as they are', () => {
+    // red and green only bond: half a million pairs' worth of meetings, over two million molecules
+    const a = net.activity(fluid([single('R', 1), single('G', 1)]));
+    expect(a[FORMATION]).toBeCloseTo(0.25 * Math.exp(-2), 12);
+    expect([a[CLOSURE], a[BREAKING], a[DISPLACEMENT]]).toEqual([0, 0, 0]);
+    // hotter, more; and the same whatever the amount
+    const hot = net.activity(fluid([single('R', 1), single('G', 1)], 2));
+    expect(hot[FORMATION]).toBeCloseTo(0.25 * Math.exp(-1), 12);
+    expect(net.activity(fluid([single('R', 7), single('G', 7)]))[FORMATION]).toBeCloseTo(a[FORMATION], 12);
+    // R–K with free blue: blue displaces black (uphill by 5), and R–K breaks on its own (a barrier of 1 over its 4)
+    const b = net.activity(fluid([[pairOf('R', 'K'), 1], single('B', 1)]));
+    expect(b[DISPLACEMENT]).toBeCloseTo(Math.exp(-5) / 3 / 2, 12);
+    expect(b[BREAKING]).toBeCloseTo(Math.exp(-5) / 2, 12);
+    expect([b[FORMATION], b[CLOSURE]]).toEqual([0, 0]);
+    // a chain that can close its ring: R–K–G, closing R–G
+    const chain = sp(['R', 'K'], ['K', 'G']);
+    expect(net.activity(fluid([[chain, 1]]))[CLOSURE]).toBeCloseTo(Math.exp(-2), 12);
+  });
+
+  it('is gross: a fluid at equilibrium is as busy as its exchange, though nothing changes on the whole', () => {
+    const f = fluid([[pairOf('R', 'K'), 2], single('G', 1), single('B', 2)]);
+    equilibrate(f, net.U, 1);
+    const net0 = net.netRates(f).reduce((s, r) => s + r.rate, 0);
+    const busy = net.activity(f).reduce((s, x) => s + x, 0) * f.n.reduce((s, x) => s + x, 0);
+    expect(busy).toBeGreaterThan(0);
+    expect(net0).toBeLessThan(1e-3 * busy);
+  });
+
+  it('fills the array it is given', () => {
+    const out = [9, 9, 9, 9];
+    expect(net.activity(fluid([single('R', 1), single('G', 1)]), out)).toBe(out);
+    expect(out[BREAKING]).toBe(0);
+    expect(out[FORMATION]).toBeGreaterThan(0);
   });
 });
 
