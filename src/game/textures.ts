@@ -13,7 +13,6 @@ const PLAIN: Record<SurfaceName, number> = {
   ceiling: 0x6f7675,
   brushedSteel: 0x9aa3a4,
   grate: 0x2c3132,
-  epoxy: 0x1c1f1f,
   cabinet: 0x949d99,
 };
 

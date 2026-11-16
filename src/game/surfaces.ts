@@ -8,7 +8,7 @@
  */
 
 /** The surfaces there are. */
-export type SurfaceName = 'deck' | 'walls' | 'ceiling' | 'brushedSteel' | 'grate' | 'epoxy' | 'cabinet';
+export type SurfaceName = 'deck' | 'walls' | 'ceiling' | 'brushedSteel' | 'grate' | 'cabinet';
 
 /** How much world one copy of each surface's texture covers, across (u) and up (v). */
 export const TILES: Record<SurfaceName, { u: number; v: number }> = {
@@ -19,7 +19,6 @@ export const TILES: Record<SurfaceName, { u: number; v: number }> = {
   ceiling: { u: 500, v: 500 },
   brushedSteel: { u: 160, v: 160 },
   grate: { u: 160, v: 160 },
-  epoxy: { u: 300, v: 300 },
   // one door; callers size it so a whole number fit
   cabinet: { u: 250, v: 396 },
 };
@@ -353,23 +352,6 @@ function grate(): Baked {
   });
 }
 
-/** Black epoxy resin, as on lab benches: faintly speckled, with a soft, uneven sheen. 300 across. */
-function epoxy(): Baked {
-  const N = 512;
-  const speck = noise(61, 512);
-  const speck2 = noise(62, 256);
-  const sheen = fbm(63, 3, 4);
-  return bake(N, N, 0.3, (_x, _y, u, v, p) => {
-    const s = speck(u, v);
-    const s2 = speck2(u, v);
-    const dot = smooth(0.82, 0.9, s) * 30 + smooth(0.85, 0.95, s2) * 18;
-    const b = 26 + dot;
-    p.rgb = [b - 2, b + 1, b + 1];
-    p.rough = 0.28 + sheen(u, v) * 0.18;
-    p.height = s2 * 0.4;
-  });
-}
-
 /**
  * Cabinet fronts: one door per copy, its edges a narrow gap, painted steel with a fine orange-peel texture; the door
  * spans its tile, which callers size so a whole number fit (see boxUV).
@@ -398,5 +380,5 @@ function cabinet(): Baked {
 
 /** Make a surface's maps. */
 export function paintSurface(name: SurfaceName): Baked {
-  return { deck, walls, ceiling, brushedSteel, grate, epoxy, cabinet }[name]();
+  return { deck, walls, ceiling, brushedSteel, grate, cabinet }[name]();
 }
