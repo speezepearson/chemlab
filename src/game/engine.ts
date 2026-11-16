@@ -1929,6 +1929,8 @@ export class GameEngine {
    */
   private writeNote(): void {
     if (this.dozing()) return;
+    // what the pointer's on now, not as of the last frame
+    this.retarget();
     const id = this.targetNote();
     if (!id || inPod(this.wake)) return;
     if (this.god && /^(f\d+|t\d+\.\d+)$/.test(id)) this.cb.onEdit(id);
