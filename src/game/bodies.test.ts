@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FLASK_R, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_BASE, aimValve, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, onGrid, toolAnchor, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
+  FLASK_R, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_BASE, aimValve, newGrip, type Grip, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, onGrid, toolAnchor, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
   docked, nozzleBox, nozzleMounts, nozzleStand, onScale, scaleSpot, snapReach, spoutNear, spoutAt, standBase, tankMouth, toolBox, toolStands, valveLocal,
   valveNear,
 } from './bodies';
@@ -161,6 +161,76 @@ describe('aimValve', () => {
     expect(t.valves[0]).toBeCloseTo(0.5);
     aimValve(t, 0, v.x + 2, v.y - 2);
     expect(t.valves[0]).toBeCloseTo(0.5);
+  });
+
+  /** Swing the aim round valve k of t at radius 30, from `from` to `to` radians clockwise from straight up, in small steps. */
+  const swing = (t: Tool, k: number, grip: Grip, from: number, to: number) => {
+    const v = valveLocal(t, k);
+    const n = Math.ceil(Math.abs(to - from) / 0.05);
+    for (let i = 0; i <= n; i++) {
+      const a = from + ((to - from) * i) / n;
+      aimValve(t, k, v.x + 30 * Math.sin(a), v.y - 30 * Math.cos(a), grip);
+    }
+  };
+
+  it('keeps a dial at full when the aim circles on round past it, until the aim comes back across', () => {
+    const ht = new Tool('heater', 0);
+    const k = ht.shape.dial!;
+    const grip = newGrip();
+    swing(ht, k, grip, 0, 1.9 * Math.PI); // up, round past full at down-right, under past off, and up the left side
+    expect(ht.valves[k]).toBeCloseTo(1);
+    swing(ht, k, grip, 1.9 * Math.PI, 2.9 * Math.PI); // a second lap, past full again
+    expect(ht.valves[k]).toBeCloseTo(1);
+    swing(ht, k, grip, 2.9 * Math.PI, 2.5 * Math.PI); // back across full: it follows, to straight right
+    expect(ht.valves[k]).toBeCloseTo(1.25 / 1.5);
+  });
+
+  it('keeps a dial off when the aim circles back round past off, and takes it up where the aim crosses it', () => {
+    const ht = new Tool('heater', 0);
+    const k = ht.shape.dial!;
+    const grip = newGrip();
+    swing(ht, k, grip, 0, -1.5 * Math.PI); // up, back round past off at down-left, under and up the right
+    expect(ht.valves[k]).toBeCloseTo(0);
+    swing(ht, k, grip, -1.5 * Math.PI, -2.9 * Math.PI); // over the top and down the left, past off again
+    expect(ht.valves[k]).toBeCloseTo(0);
+    swing(ht, k, grip, -2.9 * Math.PI, -2 * Math.PI); // back across off and up to the top
+    expect(ht.valves[k]).toBeCloseTo(0.5);
+  });
+
+  it('keeps a valve shut when the aim swings on round below it, and open when it swings on round the left', () => {
+    const t = new Tool('dispenser', 0);
+    const grip = newGrip();
+    swing(t, 0, grip, 0, 0.5 * Math.PI); // up to right: shut
+    expect(t.valves[0]).toBeCloseTo(0);
+    swing(t, 0, grip, 0.5 * Math.PI, 1.3 * Math.PI); // on under and round to the left, past where a fresh aim opens it
+    expect(t.valves[0]).toBeCloseTo(0);
+    swing(t, 0, grip, 1.3 * Math.PI, 0.25 * Math.PI); // back: taken up as the aim crosses straight right
+    expect(t.valves[0]).toBeCloseTo(0.5);
+    swing(t, 0, grip, 0.25 * Math.PI, -0.9 * Math.PI); // up, over to the left and down past where a fresh aim shuts it
+    expect(t.valves[0]).toBeCloseTo(1);
+  });
+
+  it("keeps a splitter's lever at its side when the aim swings on round below", () => {
+    const t = new Tool('splitter', 0);
+    const grip = newGrip();
+    swing(t, 0, grip, 0, 1.1 * Math.PI); // up, right, and on down past straight down
+    expect(t.valves[0]).toBeCloseTo(1);
+    swing(t, 0, grip, 1.1 * Math.PI, -0.4 * Math.PI); // back round to left of straight up
+    expect(t.valves[0]).toBeCloseTo(0.1);
+  });
+
+  it('aims afresh after the aim passes through the core', () => {
+    const t = new Tool('dispenser', 0);
+    const v = valveLocal(t, 0);
+    const lowerLeft = { x: v.x + 30 * Math.sin(1.3 * Math.PI), y: v.y - 30 * Math.cos(1.3 * Math.PI) };
+    const grip = newGrip();
+    swing(t, 0, grip, 0, 0.5 * Math.PI);
+    aimValve(t, 0, lowerLeft.x, lowerLeft.y, grip); // a jump straight there keeps it shut...
+    expect(t.valves[0]).toBeCloseTo(0);
+    swing(t, 0, grip, 0, 0.5 * Math.PI);
+    aimValve(t, 0, v.x + 2, v.y, grip); // ...but by way of the core it's a fresh aim, at the nearer stop
+    aimValve(t, 0, lowerLeft.x, lowerLeft.y, grip);
+    expect(t.valves[0]).toBeCloseTo(1);
   });
 
   it("sweeps a splitter's from all left to all right", () => {

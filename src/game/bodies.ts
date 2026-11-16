@@ -2,7 +2,7 @@ import { volume, type Flask, type Vessel } from './flask';
 import { FLASK_H, fillLevel, flaskRadius } from './flaskShape';
 import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
-import { CELL, groundAt, toCardinal, toCell, toLocal, toWorld, type Pose, type Vec3 } from './space';
+import { CELL, groundAt, toCardinal, toCell, toLocal, toWorld, wrapAngle, type Pose, type Vec3 } from './space';
 import {
   ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, STRIP, TANK_H, THERMOMETER_ROD, dipUnder, footY, isThermometer, levelIn,
   tankDepth, tankPieces, tankX, overMouth, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
@@ -584,27 +584,71 @@ export function valveNear(t: Tool, x: number, y: number): number | null {
 }
 
 /**
- * Point valve k's lever at (x, y) in the tool's flat frame as it stands (y down): straight up from the valve is fully
- * open, straight right is closed, and in between is partly open. Below the valve it closes, and left
- * of it (past the down-left diagonal) it opens, so a wild swing lands at the nearer end. A splitter's lever instead
- * sweeps the upper half: straight left sends everything left, straight right everything right, and below the valve
- * it goes to the nearer side; a multiplexer's the same, taking everything from the left or the right. A dial points at (x, y), turning clockwise from down-left (0) to down-right (1), and
- * straight below it goes to the nearer end. Within VALVE_DEADZONE of the valve the angle is too jumpy to mean
- * anything, so the lever stays put.
+ * How valve k's lever sweeps: the angle of (dx, dy) from the valve (y down) as it's measured for this lever, the range
+ * of angles the lever points through (lo < hi), and the setting at each end. A dial turns clockwise from down-left (0)
+ * to down-right (1); a splitter's or multiplexer's lever sweeps the upper half from straight right (1) to straight
+ * left (0); any other valve's from straight right (closed) to straight up (open).
  */
-export function aimValve(t: Tool, k: number, x: number, y: number): void {
+function leverSweep(t: Tool, k: number) {
+  if (k === t.shape.dial)
+    return { angle: (dx: number, dy: number) => Math.atan2(dx, -dy), lo: -0.75 * Math.PI, hi: 0.75 * Math.PI, vLo: 0, vHi: 1 };
+  const ccw = (dx: number, dy: number) => Math.atan2(-dy, dx);
+  if (t.kind === 'splitter' || t.kind === 'multiplexer') return { angle: ccw, lo: 0, hi: Math.PI, vLo: 1, vHi: 0 };
+  return { angle: ccw, lo: 0, hi: Math.PI / 2, vLo: 0, vHi: 1 };
+}
+
+/**
+ * What a hand turning a lever remembers from one move of the aim to the next: the aim's last angle (null when it's
+ * fresh, or was last in the core), and whether the lever has been left behind at one of its stops.
+ */
+export interface Grip {
+  prev: number | null;
+  free: boolean;
+}
+
+/** A hand just taking hold of a lever. */
+export const newGrip = (): Grip => ({ prev: null, free: false });
+
+/**
+ * Point valve k's lever at (x, y) in the tool's flat frame as it stands (y down): straight up from the valve is fully
+ * open, straight right is closed, and in between is partly open. A splitter's lever instead sweeps the upper half:
+ * straight left sends everything left, straight right everything right; a multiplexer's the same, taking everything
+ * from the left or the right. A dial points at (x, y), turning clockwise from down-left (0) to down-right (1).
+ *
+ * Aimed afresh (no `grip`, or the grip's first aim, or the first after the core), an aim the lever can't point at
+ * sends it to the nearer stop. After that, with a `grip`, it follows the aim as it moves: carried past a stop, the
+ * lever stays at that stop, however far round the aim goes, and takes up the aim again only where the aim comes back
+ * across it, so circling a dial past full leaves it at full rather than flicking it to off. Within VALVE_DEADZONE of
+ * the valve the angle is too jumpy to mean anything, so the lever stays put.
+ */
+export function aimValve(t: Tool, k: number, x: number, y: number, grip?: Grip): void {
   const vc = valveLocal(t, k);
-  if (Math.hypot(x - vc.x, y - vc.y) < VALVE_DEADZONE) return;
-  if (k === t.shape.dial) {
-    const cw = Math.atan2(x - vc.x, vc.y - y); // clockwise from straight up
-    t.valves[k] = Math.max(0, Math.min(1, (cw + 0.75 * Math.PI) / (1.5 * Math.PI)));
+  if (Math.hypot(x - vc.x, y - vc.y) < VALVE_DEADZONE) {
+    if (grip) grip.prev = null;
     return;
   }
-  const a = Math.atan2(vc.y - y, x - vc.x); // counterclockwise from right
-  if (t.kind === 'splitter' || t.kind === 'multiplexer') {
-    t.valves[k] = a >= 0 ? 1 - a / Math.PI : a > -Math.PI / 2 ? 1 : 0;
-    return;
+  const { angle, lo, hi, vLo, vHi } = leverSweep(t, k);
+  const phi = angle(x - vc.x, y - vc.y);
+  const clamp = (a: number) => Math.max(lo, Math.min(hi, a));
+  // the lever's angle now, from its setting
+  const at = lo + ((t.valves[k] - vLo) / (vHi - vLo)) * (hi - lo);
+  let to: number;
+  if (!grip || grip.prev === null) {
+    // afresh: the aim itself, if the lever can point there, or else the nearer stop
+    const mid = (lo + hi) / 2;
+    const a = mid + wrapAngle(phi - mid);
+    to = a >= lo && a <= hi ? a : Math.abs(wrapAngle(phi - lo)) < Math.abs(wrapAngle(phi - hi)) ? lo : hi;
+    if (grip) grip.free = false;
+  } else {
+    const d = wrapAngle(phi - grip.prev);
+    // left at a stop, it's taken up again only once the aim comes back across it
+    const s = wrapAngle(at - grip.prev);
+    const crossed = d > 0 ? s > 0 && s <= d : d < 0 && s < 0 && s >= d;
+    if (!grip.free) to = at + d;
+    else if (crossed) to = at + d - s;
+    else to = at;
+    grip.free = to < lo || to > hi || (grip.free && !crossed);
   }
-  const open = a < -0.75 * Math.PI ? 1 : a / (Math.PI / 2);
-  t.valves[k] = Math.max(0, Math.min(1, open));
+  if (grip) grip.prev = phi;
+  t.valves[k] = vLo + ((clamp(to) - lo) / (hi - lo)) * (vHi - vLo);
 }

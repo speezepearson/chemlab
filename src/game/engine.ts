@@ -4,7 +4,7 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
-  FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
+  FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, newGrip, type Grip, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
   flaskLip, flaskMouth, nozzleBox, tankFluid, docked, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
@@ -337,7 +337,7 @@ export class GameEngine {
   /** Whether the right button is held: a held flask tips and pours, and a held tool or hose lets fluid out, only while it is. */
   private rightHeld = false;
   /** A valve being turned with the right button, and where on screen the pointer aiming its lever is. */
-  private turning: { t: Tool; k: number; aim: { x: number; y: number } } | null = null;
+  private turning: { t: Tool; k: number; aim: { x: number; y: number }; grip: Grip } | null = null;
   /** How far the view is zoomed in (see ZOOM), from 0, not at all, to 1. */
   private zoom = 0;
   /**
@@ -1485,7 +1485,7 @@ export class GameEngine {
   private aimTurning(): void {
     const tr = this.turning;
     if (!tr || !this.viewW) return;
-    const { t, k, aim } = tr;
+    const { t, k, aim, grip } = tr;
     const { o, d } = this.view.ray((aim.x / this.viewW) * 2 - 1, 1 - (aim.y / this.viewH) * 2);
     const n = { x: Math.sin(t.pose.yaw), y: 0, z: Math.cos(t.pose.yaw) };
     const p0 = onTool(t, 0, 0, valveZ(t));
@@ -1494,7 +1494,7 @@ export class GameEngine {
     const s = ((p0.x - o.x) * n.x + (p0.z - o.z) * n.z) / dn;
     if (s <= 0) return;
     const l = toLocal(t.pose, { x: o.x + d.x * s, y: o.y + d.y * s, z: o.z + d.z * s });
-    aimValve(t, k, l.x, -l.y);
+    aimValve(t, k, l.x, -l.y, grip);
   }
 
   /**
@@ -1963,7 +1963,7 @@ export class GameEngine {
     const k = this.valveAimed();
     if (!k) return;
     this.mark();
-    this.turning = { ...k, aim: { x: this.viewW / 2, y: this.viewH / 2 } };
+    this.turning = { ...k, aim: { x: this.viewW / 2, y: this.viewH / 2 }, grip: newGrip() };
     this.aimTurning();
   }
 
