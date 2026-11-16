@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { flaskBox, scaleBox, toolBox } from './bodies';
 import { CABINET, CABINET_BUILD, ENDLESS, STOCK, endless, putIn, stockWith, takeFrom, takeSlot, type Stocked } from './cabinet';
 import { Flask } from './flask';
-import { boxesOverlap, solids, type Box } from './physics';
+import { boxesOverlap, type Box } from './physics';
 import { Scale } from './scale';
 import { CABINET_AREA, COUNTERS, ROOM, type Pose } from './space';
 import { Tool } from './tools';
@@ -50,21 +50,6 @@ describe('the equipment cabinet', () => {
     const shrink = (b: Box): Box => ({ ...b, hx: b.hx - 0.01, hy: b.hy - 0.01, hz: b.hz - 0.01, parts: undefined });
     for (let i = 0; i < all.length; i++)
       for (let j = i + 1; j < all.length; j++) expect(boxesOverlap(shrink(all[i].b), shrink(all[j].b))).toBe(false);
-  });
-
-  it("puts the front one of each kind in reach of someone standing at it", () => {
-    // the player's eyes, 620 up, as close as they can stand (45 round) to the front one
-    for (const k of KINDS) {
-      const p = CABINET.slots[k][STOCK[k] - 1];
-      const near = Math.min(
-        ...solids(boxAt(k, p)).map((b) => {
-          const eye = { x: b.x, y: 620, z: CABINET.z1 + 45 };
-          const dy = Math.max(0, Math.abs(eye.y - b.y) - b.hy);
-          return Math.hypot(dy, eye.z - (b.z + b.hz));
-        }),
-      );
-      expect(near, k).toBeLessThan(460);
-    }
   });
 });
 

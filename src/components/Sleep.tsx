@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import type { Hud } from '../game/engine';
 import { sleptFor } from '../game/sleep';
 
@@ -56,10 +55,6 @@ function Eyelids({ shut }: { shut: number }) {
  * of starting again or carrying on in the lab.
  */
 export function Ending({ hud, onReset, onContinue }: { hud: Hud; onReset: () => void; onContinue: () => void }) {
-  // the mouse is let go of, to press the buttons
-  useEffect(() => {
-    if (hud.ended && document.pointerLockElement) document.exitPointerLock();
-  }, [hud.ended]);
   if (hud.white <= 0) return null;
   return (
     <div className="ending" style={{ opacity: hud.white }}>

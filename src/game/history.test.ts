@@ -12,7 +12,7 @@ function lab(): Things {
   f.pose = { x: 50, y: 490, z: 150, yaw: 0 };
   const t = new Tool('dispenser', 0, { x: 250, y: 800, z: 150, yaw: 0 });
   const sc = new Scale({ x: 450, y: 420, z: 150, yaw: 0 });
-  const h = new Hose({ tool: t, spout: 0 }, { x: 250, y: 600, z: 150 }, 50);
+  const h = new Hose({ tool: t, spout: 0 }, { x: 250, y: 600, z: 150 });
   return { flasks: [f], tools: [t], scales: [sc], hoses: [h], faucets: [{ note: '' }], stock: stockWith({}) };
 }
 
@@ -66,11 +66,11 @@ describe('arrangement', () => {
     const a = arrangement(l, sw);
     sc.remove(f);
     h.outlet = { x: 0, y: 0, z: 0 };
-    h.turn = 2;
     arrange(l, a);
     expect(sc.load).toEqual([{ f, dx: 50 }]);
     expect(h.outlet).toEqual({ x: 250, y: 600, z: 150 });
-    expect(h.turn).toBe(0);
+    // the very same hose
+    expect(l.hoses[0]).toBe(h);
   });
 
   it('tells a changed arrangement from the same one', () => {

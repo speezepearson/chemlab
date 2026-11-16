@@ -1,5 +1,5 @@
 /**
- * The player's settings for the outline drawn round whatever the crosshair is on: its color, and how thick it is in
+ * The player's settings for the outline drawn round whatever the pointer is on, or what's held: its color, and how thick it is in
  * CSS pixels (0 for none). Kept in local storage, not in saves: it's a preference, like the volumes.
  */
 export interface Outline {

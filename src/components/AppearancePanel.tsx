@@ -29,7 +29,7 @@ const GROUPS: Group[] = [
 
 /**
  * Debug panel: live-tune the temperature appearance curves and how composition looks (see game/appearance.ts), and
- * the outline round what the crosshair is on (see game/outline.ts).
+ * the outline round what the pointer is on (see game/outline.ts).
  */
 export function AppearancePanel() {
   const [, rerender] = useReducer((x: number) => x + 1, 0);
@@ -121,7 +121,7 @@ export function AppearancePanel() {
             )}
             <tr className="group">
               <td colSpan={2}>
-                <b>Outline</b> <span>round what the crosshair is on; thickness in pixels, 0 for none</span>
+                <b>Outline</b> <span>round what the pointer is on; thickness in pixels, 0 for none</span>
               </td>
             </tr>
             <tr>

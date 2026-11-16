@@ -2,17 +2,18 @@ import { volume, type Flask, type Vessel } from './flask';
 import { FLASK_H, fillLevel, flaskRadius } from './flaskShape';
 import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
-import { CELL, groundAt, toCardinal, toCell, toLocal, toWorld, type Pose, type Vec3 } from './space';
+import { FAUCET_X } from './faucets';
+import { CELL, LIFT, PLANE_Z, toLocal, toWorld, type Pose, type Vec3 } from './space';
 import {
-  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, STRIP, TANK_H, THERMOMETER_ROD, dipUnder, footY, isThermometer, levelIn,
+  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, STRIP, TANK_H, THERMOMETER_ROD, footY, isThermometer, levelIn,
   tankDepth, tankPieces, tankX, overMouth, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
 } from './tools';
 
 /**
  * Where the parts of everything in the lab are, in the room. Tools, flasks and scales are drawn in their own
- * frames as they were on the old flat bench, x right and y down from their origin (the top center of a tool's
- * bounding box, a flask's mouth, a scale's platform), and given depth front to back; these put those points in the
- * room (see space.ts).
+ * frames, flat, x right and y down from their origin (the top center of a tool's bounding box, a flask's mouth, a
+ * scale's platform), and given depth front to back; these put those points in the room (see space.ts), where they're
+ * all in one upright plane (see PLANE_Z).
  */
 
 /** How deep a tool's cabinet is front to back, for the tools that have one deeper than their tanks. */
@@ -32,24 +33,6 @@ export const TOOL_DEPTH = Object.fromEntries(
     return [kind, { tank, body: Math.max(CABINET_DEPTH[kind] ?? 0, tank + 4, cup ? 2 * cup.w + 2 : 0) }];
   }),
 ) as Record<ToolKind, { body: number; tank: number }>;
-
-/**
- * A pose on the grid (see CELL): turned to the nearest of the four ways along it, and slid the least way that brings
- * `anchor`, a point in its own frame, over the middle of a cell.
- */
-export function onGrid(p: Pose, anchor: Vec3 = { x: 0, y: 0, z: 0 }): Pose {
-  const q = { ...p, yaw: toCardinal(p.yaw) };
-  const a = toWorld(q, anchor);
-  return { ...q, x: q.x + toCell(a.x) - a.x, z: q.z + toCell(a.z) - a.z };
-}
-
-/**
- * The point of a tool that goes over the middle of a grid cell: the middle of its first tank's mouth, or for a tool
- * with no tanks (a thermometer), its middle. Its other mouths and its spouts are a whole number of cells from it along
- * the tool, so once it's on the grid, they are too.
- */
-export const toolAnchor = (t: Tool): Vec3 => ({ x: t.shape.tanks.length ? tankX(t.shape.tanks[0]) : 0, y: 0, z: 0 });
-
 
 /** A point in a tool's flat frame (x right, y down from its top center), `z` toward its front, in the room. */
 export function onTool(t: Tool, x: number, y: number, z = 0): Vec3 {
@@ -126,7 +109,7 @@ export function tankNoteY(t: Tool, k: number): number {
  * its funnel, the plate in the wall, and its spouts' pipes out from it. An inline instrument's are its
  * tube and the pipe down from it, and the cabinet beside them, and any pipe on to a spout past the cabinet, or the
  * flow meter's readout round the pipe; the tube's top is flush with its opening, for a nozzle to snap onto (see
- * INLINE_DOCK). A dipper's (see DIPPERS) is only its top, where its stand's clamp holds it: a thermometer's rod's, or
+ * INLINE_DOCK). A dipper's (see DIPPERS) is only its top, where the arm holding it up grips it: a thermometer's rod's, or
  * a wicking strip's clip; the rest of it bumps into nothing, so it can stand down in a flask or a tank.
  */
 export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean }[] {
@@ -242,18 +225,12 @@ export function tankFluid(t: Tool, k: number): { floor: number; surface: number 
   return { floor: onTool(t, 0, bottom).y, surface: onTool(t, 0, bottom - up).y };
 }
 
-/**
- * How far under the surface of the fluid in tank k p is, if it's in it: within its walls as drawn, and below its
- * fluid's surface; null if it isn't.
- */
-function inTank(t: Tool, k: number, p: Vec3): number | null {
-  const v = t.tanks[k];
-  if (v.N <= 0) return null;
+/** How far above tank k's bottom p is, if it's within the tank's walls as drawn; null if it isn't. */
+function upInTank(t: Tool, k: number, p: Vec3): number | null {
   const { pieces, bottom, xs } = tankInside(t, k);
   const l = toLocal(t.pose, p);
   const up = bottom + l.y;
-  const level = levelIn(pieces, fullness(v));
-  if (up < 0 || up > level) return null;
+  if (up < 0) return null;
   let base = 0;
   for (let i = 0; i < pieces.length; i++) {
     const pc = pieces[i];
@@ -262,47 +239,28 @@ function inTank(t: Tool, k: number, p: Vec3): number | null {
       const w = pc.w0 + (pc.w1 - pc.w0) * f;
       const d = pc.d0 + (pc.d1 - pc.d0) * f;
       const dx = l.x - xs[i];
-      return (pc.round ? Math.hypot(dx, l.z) <= w / 2 : Math.abs(dx) <= w / 2 && Math.abs(l.z) <= d / 2) ? level - up : null;
+      return (pc.round ? Math.hypot(dx, l.z) <= w / 2 : Math.abs(dx) <= w / 2 && Math.abs(l.z) <= d / 2) ? up : null;
     }
     base += pc.h;
   }
   return null;
 }
 
+/**
+ * How far under the surface of the fluid in tank k p is, if it's in it: within its walls as drawn, and below its
+ * fluid's surface; null if it isn't.
+ */
+function inTank(t: Tool, k: number, p: Vec3): number | null {
+  const v = t.tanks[k];
+  if (v.N <= 0) return null;
+  const up = upInTank(t, k, p);
+  if (up === null) return null;
+  const level = levelIn(tankInside(t, k).pieces, fullness(v));
+  return up <= level ? level - up : null;
+}
+
 /** Where a dipper's foot is, in the room (see footY): a thermometer's bulb, or a wicking strip's paper's tip. */
 export const footAt = (t: Tool): Vec3 => onTool(t, 0, footY(t.kind));
-
-/** How far above a mouth a dipper aimed at it hovers, its foot (see dipPoses). */
-export const DIP_HOVER = 15;
-/** How far above a vessel's floor a thermometer stood in it has its bulb's middle (see dipPoses). */
-export const DIP_FLOOR = 4;
-/** How far above a vessel's floor a wicking strip stood in it has its foot (see dipPoses): its tip is on the floor. */
-export const STRIP_FLOOR = 0.5;
-/** How far under a fluid's surface, at most, a wicking strip stood in it has its foot (see dipPoses): all its point is in. */
-export const STRIP_STOOD = STRIP.paper.point - 0.5;
-
-/**
- * Where a dipper (see DIPPERS) aimed at mouth m goes, facing `yaw`, upright, over the middle of the mouth, on the grid,
- * given how high the vessel's floor and its fluid's surface are (see flaskFluid and tankFluid):
- * - hovering, its foot DIP_HOVER above the mouth;
- * - dipped in by hand, its foot just under the surface (see dipUnder), so no more of it goes in than touches the
- *   fluid, or at the middle of the fluid's depth if that's less far down;
- * - stood in it, deeper, so that it stays in as the level falls: a thermometer's bulb DIP_FLOOR above the floor, and
- *   a strip's foot STRIP_STOOD under the surface, or its tip on the floor if that's less far down; either at the
- *   middle of the fluid's depth if the fluid is shallower than that, so it's in it.
- * In an empty vessel, dipped or stood, it goes down to where it would stand on the floor.
- */
-export function dipPoses(t: Tool, m: Vec3, fluid: { floor: number; surface: number }, yaw: number): { hover: Pose; dipped: Pose; stood: Pose } {
-  const at = (foot: number) => onGrid({ x: m.x, y: foot + footY(t.kind), z: m.z, yaw }, toolAnchor(t));
-  const { floor, surface } = fluid;
-  const strip = t.kind === 'strip';
-  const rest = floor + (strip ? STRIP_FLOOR : DIP_FLOOR);
-  const hover = at(m.y + DIP_HOVER);
-  if (surface <= floor) return { hover, dipped: at(rest), stood: at(rest) };
-  const mid = (floor + surface) / 2;
-  const low = Math.min(mid, rest);
-  return { hover, dipped: at(Math.max(surface - dipUnder(t.kind), mid)), stood: at(strip ? Math.max(surface - STRIP_STOOD, low) : low) };
-}
 
 /**
  * The vessel whose fluid p is in, if any, for a dipper's foot, and how far under its surface p is: an upright flask
@@ -324,6 +282,23 @@ export function dippedIn(p: Vec3, flasks: readonly Flask[], tools: readonly Tool
       const depth = inTank(t, k, p);
       if (depth !== null) return { v: t.tanks[k], depth };
     }
+  }
+  return null;
+}
+
+/**
+ * The vessel p is inside, whether or not it's in its fluid: within an upright flask's outline, or a tool's tank's
+ * walls as drawn (but not the supply station's, which are in the wall). Null if it's in none.
+ */
+export function insideVessel(p: Vec3, flasks: readonly Flask[], tools: readonly Tool[]): Vessel | null {
+  for (const f of flasks) {
+    if (f.tilt !== 0) continue;
+    const l = toLocal(f.pose, p);
+    if (-l.y >= 0 && -l.y <= FLASK_H && Math.hypot(l.x, l.z) <= flaskRadius(-l.y)) return f;
+  }
+  for (const t of tools) {
+    if (t.shape.wall) continue;
+    for (let k = 0; k < t.tanks.length; k++) if (upInTank(t, k, p) !== null) return t.tanks[k];
   }
   return null;
 }
@@ -386,10 +361,8 @@ export function onScale(sc: Scale, dx: number): Pose {
   return { ...toWorld(sc.pose, { x: dx, y: FLASK_H, z: 0 }), yaw: sc.pose.yaw };
 }
 
-/** Where along its platform a scale stands flasks: half a grid cell either side of its middle, a cell apart. */
+/** Where along its platform a scale stands flasks: half of CELL either side of its middle, so a spout apart. */
 export const SCALE_SLOTS = [-CELL / 2, CELL / 2];
-/** The point of a scale that goes over the middle of a grid cell: one of its places for a flask, so both are. */
-export const SCALE_ANCHOR: Vec3 = { x: SCALE_SLOTS[1], y: 0, z: 0 };
 
 /**
  * A scale's body and platform in the room; with `load`, reaching up over whatever's standing on it too (as it's
@@ -428,19 +401,48 @@ export function scaleSpot(sc: Scale, p: Vec3, reach = 60): number | null {
   return lx < 0 ? SCALE_SLOTS[0] : SCALE_SLOTS[1];
 }
 
+/* ---------------- faucets ---------------- */
+
+/**
+ * How high the faucets' spouts are: high enough over the counter for a flask on a scale (whose mouth is 112 up) to go
+ * under one. Each is at the foot of a neck FAUCET_NECK long, down from a pipe out of the manifold on the wall.
+ */
+export const FAUCET_Y = LIFT + 160;
+export const FAUCET_NECK = 30;
+
+/**
+ * Where each faucet is (see FAUCET_X): its spout, out in the plane everything is in (see PLANE_Z), and where its pipe
+ * leaves the manifold on the wall, above and behind it.
+ */
+export function faucetPipes(): { spout: Vec3; wall: Vec3 }[] {
+  return FAUCET_X.map((x) => ({ spout: { x, y: FAUCET_Y, z: PLANE_Z }, wall: { x, y: FAUCET_Y + FAUCET_NECK, z: 14 } }));
+}
+
+/** A faucet's box, for whatever's left near it to keep clear of: its spout, its knob over that, and its pipe back to the wall. */
+export function faucetBox(spout: Vec3): Box {
+  const [y0, y1] = [spout.y, spout.y + FAUCET_NECK + 12];
+  const hz = (spout.z + 12) / 2;
+  return { x: spout.x, y: (y0 + y1) / 2, z: hz, yaw: 0, hx: 12, hy: (y1 - y0) / 2, hz };
+}
+
 /* ---------------- hoses ---------------- */
 
 /**
- * A hose's nozzle at p, snapped down onto the top of the tube of the inline instrument among `tools` it's over (see
- * INLINE_TOOLS), if it's over one, no more than INLINE_DOCK above it; otherwise just p.
+ * A hose's nozzle at p, snapped onto the top of the tube of the inline instrument among `tools` it's over (see
+ * INLINE_TOOLS), over the tube's middle, if it's over one, no more than INLINE_DOCK above it; otherwise just p.
  */
 export function docked(p: Pose, tools: readonly Tool[]): Pose {
   for (const t of tools) {
     if (!INLINE_TOOLS.includes(t.kind)) continue;
     const m = tankMouth(t, 0);
-    if (overMouth(m, p.x, p.z) && p.y >= m.y && p.y - m.y <= INLINE_DOCK) return { ...p, y: m.y + 1 };
+    if (overMouth(m, p.x, p.z) && p.y >= m.y && p.y - m.y <= INLINE_DOCK) return { ...p, x: m.x, y: m.y + 1 };
   }
   return p;
+}
+
+/** Whether a hose's nozzle is snapped onto the top of an inline instrument's tube (see docked), which holds it up. */
+export function isDocked(h: Hose, tools: readonly Tool[]): boolean {
+  return tools.some((t) => INLINE_TOOLS.includes(t.kind) && Math.abs(h.outlet.x - tankMouth(t, 0).x) < 0.5 && Math.abs(h.outlet.y - tankMouth(t, 0).y - 1) < 0.5);
 }
 
 /** How tall a hose's nozzle is, up from its tip, and how far it reaches either side of its middle. */
@@ -454,7 +456,7 @@ export function nozzleBox(h: Hose): Box {
 }
 
 /**
- * How near a spout's tip, across and up, in a tool's flat frame, the crosshair can be on the tool and still be on
+ * How near a spout's tip, across and up, in a tool's flat frame, the pointer can be on the tool and still be on
  * the spout: its tip, and the pipe just above it.
  */
 export const SPOUT_REACH = { x: 12, up: 30, down: 4 };
@@ -471,97 +473,44 @@ export function spoutNear(t: Tool, x: number, y: number): number | null {
   return best;
 }
 
-/* ---------------- stands ---------------- */
+/* ---------------- arms ---------------- */
 
 /**
- * A clamp stand, holding up a tool or a hose's nozzle: a base plate on whatever's below, a rod straight up from it, and a
- * clamp at the rod's top reaching out to what it holds. Its rod stands at (x, z), behind what it holds as that faces,
- * the clamp is `clampY` high, and its arm reaches what it holds at `to`.
+ * Whatever's left in the air is held there by an arm out of the back wall, straight behind it: a rod from the wall to
+ * a clamp on the back of what it holds. These say where each thing is gripped, in the room; the arm runs from there
+ * straight back to the wall. What stands on the counter, or on a scale, needs none.
  */
-export interface Stand {
-  x: number;
-  z: number;
-  clampY: number;
-  to: Vec3;
-  yaw: number;
-}
 
-/** A stand's base plate: how far it reaches either side of its rod, across and front to back, and how thick it is. */
-export const STAND_BASE = { hx: 30, hz: 16, h: 6 };
-/** How high a stand's rod reaches above the counter, whatever it holds: its clamp slides up and down it. */
-export const STAND_ROD = 570;
-/** How high a stand's clamp can be above the counter: just short of the top of its rod. */
-export const STAND_MAX = STAND_ROD - 10;
-/** A tool wider than this is held by two stands, one near each end, rather than one in the middle. */
-const TWO_STANDS = 300;
+/** A tool wider than this is held by two arms, one near each end, rather than one in the middle. */
+const TWO_ARMS = 300;
+
 /**
- * How far behind the middle of what it holds a stand's rod is: far enough that its base clears a flask standing
- * under what it holds (or under the tool's spouts, which are along its middle), by this much.
+ * Where the arms holding up a tool grip it, unless it's built into the wall: at the back of one of its solid parts
+ * (see toolParts), near that part's top. A narrow tool is gripped in the middle, by whichever of its parts is highest
+ * there; a wide one near each end, by whichever is highest there.
  */
-const STAND_CLEAR = 6;
-const rodBack = (body: number) => Math.max(body / 2, FLASK_R) + STAND_CLEAR + STAND_BASE.hz;
-
-/** The stands holding up a tool, unless it's built into a wall: clamped near its top, behind it. */
-export function toolStands(t: Tool, pose = t.pose): Stand[] {
+export function toolArms(t: Tool): Vec3[] {
   if (t.shape.wall) return [];
-  const at = (x: number, y: number, z: number) => toWorld(pose, { x, y: -y, z });
   const b = t.shape.box;
-  const body = TOOL_DEPTH[t.kind].body;
-  const xs = b.x1 - b.x0 > TWO_STANDS ? [b.x0 + 60, b.x1 - 60] : [(b.x0 + b.x1) / 2];
-  const y = Math.max(b.y0, 0) + 12;
+  const parts = toolParts(t);
+  const xs = b.x1 - b.x0 > TWO_ARMS ? [b.x0 + 60, b.x1 - 60] : [(b.x0 + b.x1) / 2];
   return xs.map((x) => {
-    const rod = at(x, y, -rodBack(body));
-    return { x: rod.x, z: rod.z, clampY: rod.y, to: at(x, y, -body / 2), yaw: pose.yaw };
+    // the highest part at x, or failing that the part nearest it across
+    const gap = (p: (typeof parts)[number]) => Math.max(0, p.x0 - x, x - p.x1);
+    const p = [...parts].sort((p1, p2) => gap(p1) - gap(p2) || p1.y0 - p2.y0)[0];
+    const at = Math.max(p.x0 + 4, Math.min(p.x1 - 4, x));
+    return onTool(t, at, Math.min(p.y0 + 12, (p.y0 + p.y1) / 2), (p.z ?? 0) - p.hz);
   });
 }
 
-/**
- * How far behind a hose's nozzle its stand's rod can be, its clamp's arm slid in or out: from just far enough for its
- * base to clear a flask under the nozzle, out to three cells, in steps of `step`.
- */
-export const NOZZLE_REACH = { min: rodBack(2 * NOZZLE_R), max: 3 * CELL, step: CELL / 4 };
+/** Where the arm holding up a flask left in the air grips it: round the back of its neck. */
+export const flaskArm = (f: Flask): Vec3 => toWorld({ ...f.pose, yaw: 0 }, { x: 0, y: -11, z: -12 });
 
-/** A reach for a nozzle's stand (see NOZZLE_REACH): the nearest step to `r`, within its range. */
-export function snapReach(r: number): number {
-  const { min, max, step } = NOZZLE_REACH;
-  const k = Math.round((Math.min(max, Math.max(min, r)) - min) / step);
-  return Math.min(max, min + k * step);
-}
+/** Where the arm holding up a scale left in the air grips it: the back of its body. */
+export const scaleArm = (sc: Scale): Vec3 => toWorld(sc.pose, { x: 0, y: -SCALE_SHAPE.body.y1 / 2, z: -SCALE_SHAPE.depth });
 
-/** The stand holding up a hose's nozzle, with its tip at `e`, facing `yaw`: `reach` behind it, clamped round it. */
-export function nozzleStand(e: Vec3, yaw: number, reach: number = NOZZLE_REACH.min): Stand {
-  const y = e.y + NOZZLE_H / 2;
-  const pose = { ...e, yaw };
-  const rod = toWorld(pose, { x: 0, y: 0, z: -reach });
-  return { x: rod.x, z: rod.z, clampY: y, to: { ...toWorld(pose, { x: 0, y: 0, z: -NOZZLE_R }), y }, yaw };
-}
-
-/** Where a nozzle's stand can be: which way the nozzle faces, with the stand behind it, and how far behind. */
-export interface NozzleMount {
-  turn: number;
-  reach: number;
-}
-
-/**
- * Where else a nozzle's stand could go than `want`, best first, for when that's blocked: the same way at every
- * other reach, nearest first (the longer of two as near), then each quarter turn either side the same way, and last
- * the way opposite. `want` itself comes first.
- */
-export function nozzleMounts(want: NozzleMount): NozzleMount[] {
-  const { min, max, step } = NOZZLE_REACH;
-  const reach = snapReach(want.reach);
-  const reaches: number[] = [];
-  for (let r = min; r <= max + 1e-9; r += step) reaches.push(r);
-  reaches.sort((a, b) => Math.abs(a - reach) - Math.abs(b - reach) || b - a);
-  const turns = [0, -1, 1, 2].map((k) => toCardinal(want.turn + (k * Math.PI) / 2));
-  return turns.flatMap((turn) => reaches.map((r) => ({ turn, reach: r })));
-}
-
-/** A stand's base plate, standing at height `y` (the counter's top, or the floor's under it if left out). */
-export function standBase(s: Stand, y = groundAt(s.x, s.z)): Box {
-  const { hx, hz, h } = STAND_BASE;
-  return { x: s.x, y: y + h / 2, z: s.z, yaw: s.yaw, hx, hy: h / 2, hz };
-}
+/** Where the arm holding up a hose's nozzle grips it: the back of it, halfway up. */
+export const nozzleArm = (h: Hose): Vec3 => ({ x: h.outlet.x, y: h.outlet.y + NOZZLE_H / 2, z: h.outlet.z - NOZZLE_R });
 
 /* ---------------- valves ---------------- */
 

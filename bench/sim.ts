@@ -29,7 +29,7 @@ import { equilibrium } from '../src/chem/equilibrium';
 import { T_ROOM, defaultChemParams } from '../src/chem/params';
 import { Lag, ReactionNetwork, heatAt, type Fluid } from '../src/chem/reactions';
 import { NS, SPECIES, TARGET, singleOf, speciesEnergies } from '../src/chem/species';
-import { flaskMouth, tankMouth, NOZZLE_REACH } from '../src/game/bodies';
+import { flaskMouth, tankMouth } from '../src/game/bodies';
 import { CAP, GOAL_TARGET } from '../src/game/config';
 import { GameEngine } from '../src/game/engine';
 import { Vessel } from '../src/game/flask';
@@ -67,7 +67,7 @@ g.ResizeObserver = class {
 g.requestAnimationFrame = () => 0;
 g.cancelAnimationFrame = noop;
 
-const canvas = { addEventListener: noop, removeEventListener: noop, setPointerCapture: noop, requestPointerLock: noop };
+const canvas = { addEventListener: noop, removeEventListener: noop, setPointerCapture: noop, style: {} };
 const stage = { clientWidth: 1280, clientHeight: 720 };
 const callbacks = new Proxy({}, { get: () => noop });
 
@@ -101,8 +101,16 @@ interface Scene {
 
 const base = (flasks: (FlaskFill | null)[], id: string): Preset => ({ ...DEFAULT_PRESET, id, name: id, flasks, tools: [] });
 
+/**
+ * How far along the wall the scenes' tools are moved from where they're given (in thousands of world units, as
+ * presets place them): past the equipment cabinet, the faucets, the station and the row of flasks, so that nothing
+ * of a scene's is over or under anything but what its hoses hook up.
+ */
+const ALONG = 4.6;
+const along = (p: Preset): Preset => ({ ...p, tools: p.tools?.map((t) => ({ ...t, at: [t.at[0] + ALONG, t.at[1]] })) });
+
 function hose(e: Engine, on: Hose['on'], into: { x: number; y: number; z: number }, up = 24): void {
-  e.hoses.push(new Hose(on, { x: into.x, y: into.y + up, z: into.z }, NOZZLE_REACH.min));
+  e.hoses.push(new Hose(on, { x: into.x, y: into.y + up, z: into.z }));
 }
 
 const SCENES: Record<string, Scene> = {
@@ -319,7 +327,7 @@ if (args.includes('--faststep'))
 function makeEngine(scene: Scene, seed: number): { e: Engine; net: ReactionNetwork } {
   Math.random = mulberry32(seed);
   const net = new ReactionNetwork(params);
-  const e = new GameEngine(canvas as any, stage as any, net, callbacks as any, scene.preset) as unknown as Engine;
+  const e = new GameEngine(canvas as any, stage as any, net, callbacks as any, along(scene.preset)) as unknown as Engine;
   e.wake = 'closed';
   // the scenes are of the cryostabilizer's making: a new lab's station is fitted for the antinucleant first
   e.station().stock(CRYOSTABILIZER);

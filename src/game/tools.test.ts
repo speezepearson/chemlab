@@ -8,7 +8,7 @@ import { Vessel, roomFor, transfer, volume } from './flask';
 import { FLASK_VOLUME, flaskRadius } from './flaskShape';
 import { STATION_POSE } from './presets';
 import { CRYOSTABILIZER, FIRST_SUPPLY, SUPPLIES, nextSupply } from './supply';
-import { CELL, WALL_PANEL } from './space';
+import { CELL, PLANE_Z, ROOM, WALL_PANEL } from './space';
 import { tankMouth } from './bodies';
 import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
@@ -449,8 +449,15 @@ describe('supply station', () => {
   it("is a block of the wall lined up with the wall's panels", () => {
     const { block, top } = STATION;
     const pose = STATION_POSE;
-    // the right wall's panels run along it from z = 0, and up from the floor
-    for (const z of [pose.z + block.x0, pose.z + block.x1]) expect(z / WALL_PANEL.w).toBeCloseTo(Math.round(z / WALL_PANEL.w), 9);
+    // the back wall's panels run along it from its left end, and up from the floor
+    for (const x of [pose.x + block.x0, pose.x + block.x1]) {
+      const n = (x - ROOM.x0) / WALL_PANEL.w;
+      expect(n).toBeCloseTo(Math.round(n), 9);
+    }
+    // on the back wall, facing out, its funnel and spouts out in the plane everything else is in
+    expect(pose.yaw).toBe(0);
+    expect(pose.z).toBe(PLANE_Z);
+    expect(STATION.out).toBe(pose.z - ROOM.z0);
     for (const y of [top - block.y0, top - block.y1]) expect(y / WALL_PANEL.h).toBeCloseTo(Math.round(y / WALL_PANEL.h), 9);
     expect(TILES.walls.u / 2).toBe(WALL_PANEL.w);
     expect(TILES.walls.v / 3).toBeCloseTo(WALL_PANEL.h, 9);
@@ -2400,7 +2407,7 @@ describe('hose', () => {
     expect(sameMount({ tool: t, spout: 2 }, { tool: u, spout: 2 })).toBe(false);
     expect(sameMount({ faucet: 3 }, { faucet: 3 })).toBe(true);
     expect(sameMount({ faucet: 0 }, { tool: t, spout: 0 })).toBe(false);
-    expect(new Hose({ faucet: 3 }, { x: 1, y: 2, z: 3 }, 50).outlet).toEqual({ x: 1, y: 2, z: 3 });
+    expect(new Hose({ faucet: 3 }, { x: 1, y: 2, z: 3 }).outlet).toEqual({ x: 1, y: 2, z: 3 });
   });
 });
 

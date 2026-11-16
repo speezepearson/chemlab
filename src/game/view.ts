@@ -8,15 +8,13 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import type { Fluid } from '../chem/reactions';
 import { OUTLINE } from './outline';
 import { glowFalloff } from './appearance';
-import {
-  NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
-} from './bodies';
+import { NOZZLE_H, TOOL_DEPTH, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ } from './bodies';
 import { SPECIES } from '../chem/species';
 import { CAP, DELIVERY, GOAL_PURITY, TRACE } from './config';
 import { Flask, Vessel, fluidAlpha, fluidRGB, volume } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, Scale } from './scale';
-import { COUNTERS, LIFT, ROOM, groundAt, toWorld, type Vec3 } from './space';
+import { COUNTERS, LIFT, ROOM, toWorld, type Vec3 } from './space';
 import { PORT_FRAC, PORT_WALL, porthole, type Porthole } from './porthole';
 import { AIRLOCK, POD } from './airlock';
 import { arrival, notice, type Block } from '../intro/notice';
@@ -31,7 +29,21 @@ import {
 } from './tools';
 import { CABINET, CABINET_BUILD, STOCK, type Stock, type Stocked } from './cabinet';
 
-/** What the crosshair is on. */
+/**
+ * Where the view is from, in the room: the camera's place, which way it looks (a yaw of 0 is square at the back wall,
+ * where the bench is, and π at the wall behind; pitch is up, in radians), and its field of view, top to bottom, in
+ * degrees.
+ */
+export interface Camera {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  pitch: number;
+  fov: number;
+}
+
+/** What the pointer is on. */
 export type Pick =
   | { kind: 'flask'; f: Flask }
   | { kind: 'tool'; t: Tool; part: 'body' | 'tank' | 'valve' | 'spout'; k: number }
@@ -46,6 +58,8 @@ export type Pick =
   | { kind: 'blinds' }
   /** The OK on the message inside the cryopod. */
   | { kind: 'wake' }
+  /** The airlock's doorway, in the wall behind: clicked while its doors stand open, it's the way into the cryopod. */
+  | { kind: 'airlock' }
   /**
    * The equipment cabinet itself: its shelves, uprights, back and top; or if `front`, its open front, which is only
    * hit while something's held, to put it in.
@@ -55,13 +69,12 @@ export type Pick =
   | { kind: 'stock'; item: Stocked; slot: number };
 
 /**
- * A faucet where it is: its spout, where its pipe meets the wall (or the top of its riser), and what it pours. One on
- * an island has a `base`, where its riser stands on the counter; one with none comes out of a manifold on the wall.
+ * A faucet where it is: its spout, where its pipe leaves the supply line along the back wall (see faucetPipes in
+ * bodies.ts), and what it pours.
  */
 export interface FaucetSpot {
   spout: Vec3;
   wall: Vec3;
-  base?: Vec3;
   output: Fluid;
   /** The player's note, written above its knob; empty for none. */
   note: string;
@@ -69,9 +82,7 @@ export interface FaucetSpot {
 
 /** Everything the view needs to draw one frame. */
 export interface Frame {
-  eye: Vec3;
-  yaw: number;
-  pitch: number;
+  cam: Camera;
   flasks: readonly Flask[];
   tools: readonly Tool[];
   scales: readonly Scale[];
@@ -82,8 +93,9 @@ export interface Frame {
   stock: Stock;
   streams: readonly { from: Vec3; toY: number; fluid: Fluid; flow: number }[];
   /**
-   * Streams for lining things up: gray where a held flask would pour, green for what will line up when what's held is
-   * let go; each with the mouth it lands in, whose rim is outlined to match, and whose vessel, `v`, flashes green.
+   * Streams for lining things up, while something's held: gray where a held flask would pour, green for what lines up
+   * with what's held where it is; each with the mouth it lands in, whose rim is outlined to match, and whose vessel,
+   * `v`, flashes green.
    */
   guides: readonly {
     from: Vec3;
@@ -93,17 +105,17 @@ export interface Frame {
     v: Vessel;
   }[];
   /**
-   * Where what's held would come to rest if let go, outlined where it'd stand (its footprint, or its stands' bases):
-   * pale if it can be set down there, red if it can't.
+   * Every arm out of the back wall holding something up where it was left (see the arms in bodies.ts): where it grips
+   * what it holds, from where it runs straight back to the wall, and what that is, to grab it by its arm.
    */
-  footprints: readonly (Vec3 & { hx: number; hz: number; yaw: number; ok: boolean })[];
-  /** Every clamp stand, each with what it holds up, to grab that by it. */
-  stands: readonly { s: Stand; of: Pick }[];
+  arms: readonly { at: Vec3; of: Pick }[];
   drops: readonly { at: Vec3; v: Vessel; hanging: boolean }[];
   /** The scale whose tare key is held down. */
   tarePress: Scale | null;
-  /** The key or button under the crosshair, to light it. */
+  /** What's outlined: what the pointer is on, or what's held. */
   hot: Pick | null;
+  /** Whether what's outlined is held where it can't be let go of: then it's outlined in red. */
+  bad: boolean;
   /** Real seconds since the last frame, for the guides' flash, which isn't part of the lab. */
   dt: number;
   /** Sim seconds the lab has run, for what blinks on sim time (the station's gauge, the beacon). */
@@ -115,23 +127,20 @@ export interface Frame {
   /** Whether the porthole's blinds are shut, leaving it solid black. */
   blindsShut: boolean;
   airlock: AirlockLook;
-  /** How far the ship has turned, in radians, which turns the stars about the axis straight out of the porthole. */
+  /** How far the ship has turned, in radians, which turns the stars about the axis straight out of the porthole (z). */
   spin: number;
 }
 
 export type GuideLook = 'solid' | 'snap';
-/**
- * How each look of guide is drawn: the color and opacity of its stream, and of its rim; and the same for the outline
- * of where what's held will stand, `place`, or can't, `bad` (see Frame.footprints), which have no stream.
- */
-const GUIDE_LOOKS: Record<GuideLook | 'place' | 'bad', { color: number; stream: number; edge: number; rim: number }> = {
+/** How each look of guide is drawn: the color and opacity of its stream, and of its rim. */
+const GUIDE_LOOKS: Record<GuideLook, { color: number; stream: number; edge: number; rim: number }> = {
   solid: { color: 0xb4bcb8, stream: 0.6, edge: 0xdfe6e2, rim: 0.85 },
   snap: { color: 0x7fd4ad, stream: 0.8, edge: 0x7fd4ad, rim: 0.95 },
-  place: { color: 0, stream: 0, edge: 0xe8eeea, rim: 0.75 },
-  bad: { color: 0, stream: 0, edge: 0xe0604c, rim: 0.85 },
 };
 /** Which look wins where guides of several looks end at the same mouth. */
-const LOOK_RANK: Record<GuideLook | 'place' | 'bad', number> = { solid: 1, snap: 2, place: 3, bad: 3 };
+const LOOK_RANK: Record<GuideLook, number> = { solid: 1, snap: 2 };
+/** The outline's color round something held where it can't be let go of (see Frame.bad): a clear red. */
+const BAD_OUTLINE = 0xff3b2f;
 
 /** Width of a stream flowing one flask per second; it goes as the square root of the flow. */
 const STREAM_WIDTH = 4.5;
@@ -541,7 +550,7 @@ const FLASH = { hz: 1.5, lo: 0.05, hi: 0.22 };
 
 /**
  * A copy of a glass mesh in flashMat, laid over it and hidden until its vessel is to flash; null for anything that
- * isn't glass. It's never hit by the crosshair.
+ * isn't glass. It's never hit by the pointer.
  */
 function flashOver(o: THREE.Object3D): THREE.Mesh | null {
   if (!(o instanceof THREE.Mesh)) return null;
@@ -1486,7 +1495,7 @@ class ToolView {
     }
     else if (t.kind === 'strip') this.buildStrip();
     else if (t.kind === 'dish') {
-      // a little base under the dish, for its stand to clamp
+      // a little base under the dish, for its arm to clamp
       block(art, darkMat, -12, 12, TH + 0.6, sh.box.y1, -D.body / 2, D.body / 2, 1);
     }
     else if (isThermometer(t.kind)) this.buildThermometer(t.kind);
@@ -1806,7 +1815,7 @@ class ToolView {
   }
 
   /**
-   * A wicking strip: its paper hanging from a little clip at its top (which its stand holds), its foot cut to a point,
+   * A wicking strip: its paper hanging from a little clip at its top (which its arm holds), its foot cut to a point,
    * with what's on it shown on its front (see drawStrip).
    */
   private buildStrip(): void {
@@ -2550,6 +2559,11 @@ class ScaleView {
 /* ---------------- hoses ---------------- */
 
 const nozzleGeom = new THREE.CylinderGeometry(4, 3, NOZZLE_H, 12).translate(0, NOZZLE_H / 2, 0);
+/**
+ * How far out from the back wall a hose's tube is drawn toward between its ends (its curve's middle control points):
+ * its ends are out in the plane everything is in, and its middle comes about halfway back to the wall from there.
+ */
+const HOSE_BACK = 30;
 
 /**
  * A hose pulled out of a spout or a faucet: a translucent tube drooping from the spout down to its nozzle, showing
@@ -2582,11 +2596,12 @@ class HoseView {
     const key = [from.x, from.y, from.z, h.outlet.x, h.outlet.y, h.outlet.z].map((x) => x.toFixed(1)).join();
     if (key !== this.key) {
       this.key = key;
-      // drooping below the spout, and coming down into the nozzle from above
+      // drooping below the spout, and coming down into the nozzle from above; and between them bowed back toward the
+      // wall, so that it hangs behind whatever's in the plane the two ends are in, not across its front
       const a = new THREE.Vector3(from.x, from.y + 2, from.z);
       const b = new THREE.Vector3(h.outlet.x, h.outlet.y + NOZZLE_H, h.outlet.z);
       const droop = 70;
-      const curve = new THREE.CubicBezierCurve3(a, a.clone().setY(a.y - droop), b.clone().setY(b.y + droop), b);
+      const curve = new THREE.CubicBezierCurve3(a, new THREE.Vector3(a.x, a.y - droop, HOSE_BACK), new THREE.Vector3(b.x, b.y + droop, HOSE_BACK), b);
       this.tube.geometry.dispose();
       this.core.geometry.dispose();
       this.tube.geometry = new THREE.TubeGeometry(curve, 40, 3.5, 8);
@@ -2607,46 +2622,44 @@ class HoseView {
   }
 }
 
-/* ---------------- stands ---------------- */
+/* ---------------- arms ---------------- */
 
-/** A clamp stand (see Stand): a base plate, a steel rod up from it, and a clamp out to what it holds. */
-class StandView {
+/** An arm's plate on the back wall: across, high, and how far it stands out from the wall. */
+const ARM_PLATE = { w: 22, h: 26, d: 5 };
+/** An arm's clamp: across, high, and front to back, its front at the point it grips. */
+const ARM_JAW = { w: 14, h: 10, d: 6 };
+
+/**
+ * An arm out of the back wall holding something up (see Frame.arms): a dark plate on the wall, a steel rod straight out
+ * from it, and a clamp at its end on the back of what it holds.
+ */
+class ArmView {
   readonly group = new THREE.Group();
   readonly parts: THREE.Mesh[];
-  private base: THREE.Mesh;
+  private plate: THREE.Mesh;
   private rod: THREE.Mesh;
-  private boss: THREE.Mesh;
-  private arm: THREE.Mesh;
   private jaw: THREE.Mesh;
 
   constructor(scene: THREE.Object3D) {
-    const { hx, hz, h } = STAND_BASE;
-    this.base = new THREE.Mesh(new RoundedBoxGeometry(2 * hx, h, 2 * hz, 3, Math.min(3, h / 2)), darkMat);
+    const { w, h, d } = ARM_PLATE;
+    this.plate = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, 1.5).translate(0, 0, d / 2), darkMat);
     this.rod = new THREE.Mesh(unitCylinder, rodMat);
-    this.boss = new THREE.Mesh(new RoundedBoxGeometry(9, 12, 9, 2, 1.5), darkMat);
-    this.arm = new THREE.Mesh(unitBox, rodMat);
-    this.jaw = new THREE.Mesh(new THREE.BoxGeometry(12, 9, 4), darkMat);
-    this.parts = [this.base, this.rod, this.boss, this.arm, this.jaw];
+    this.rod.rotation.x = Math.PI / 2;
+    this.jaw = new THREE.Mesh(new RoundedBoxGeometry(ARM_JAW.w, ARM_JAW.h, ARM_JAW.d, 2, 1).translate(0, 0, -ARM_JAW.d / 2), darkMat);
+    this.parts = [this.plate, this.rod, this.jaw];
     for (const m of this.parts) m.castShadow = m.receiveShadow = true;
     this.group.add(...this.parts);
     scene.add(this.group);
   }
 
-  /** Stand it with its base on a surface `y` high: its rod always STAND_ROD tall, and its clamp wherever it holds. */
-  update(s: Stand, y: number): void {
-    const h = STAND_BASE.h;
-    this.group.position.set(s.x, 0, s.z);
-    this.group.rotation.y = s.yaw;
-    this.base.position.y = y + h / 2;
-    const top = y + STAND_ROD;
-    this.rod.position.y = (y + h + top) / 2;
-    this.rod.scale.set(2.4, top - y - h, 2.4);
-    this.boss.position.y = s.clampY;
-    // the clamp's arm reaches forward, along what it holds' own z, to it
-    const len = Math.max(1, Math.hypot(s.to.x - s.x, s.to.z - s.z));
-    this.arm.position.set(0, s.clampY, len / 2);
-    this.arm.scale.set(2.6, 2.6, len);
-    this.jaw.position.set(0, s.clampY, len);
+  /** Reach from the wall straight out to `at`, where it grips what it holds. */
+  update(at: Vec3): void {
+    this.group.position.set(at.x, at.y, 0);
+    const len = Math.max(0, at.z - ARM_JAW.d - ARM_PLATE.d);
+    this.rod.visible = len > 0.5;
+    this.rod.position.z = ARM_PLATE.d + len / 2;
+    this.rod.scale.set(2.4, Math.max(0.5, len), 2.4);
+    this.jaw.position.z = Math.max(ARM_PLATE.d + ARM_JAW.d, at.z);
   }
 }
 
@@ -2656,9 +2669,10 @@ class StandView {
 const PORT_DEPTH = 40;
 
 /**
- * The stars, all round the ship, far enough off that they don't move as the player walks: seen only through the
- * porthole. Kept centered on the eye (see View.render), like a sky. Most are tiny and dim, fewer middling, and a few
- * bright, each a little warm or cool, never strongly colored.
+ * The stars, all round the ship, far enough off that they don't move as the view does: seen only through the
+ * porthole. Kept centered on the eye (see View.look), like a sky, and drawn as if infinitely far, behind everything
+ * (see sky): the room is longer than they are far off. Most are tiny and dim, fewer middling, and a few bright, each
+ * a little warm or cool, never strongly colored.
  */
 function starField(): THREE.Group {
   let seed = 7;
@@ -2684,14 +2698,21 @@ function starField(): THREE.Group {
       new THREE.BufferGeometry()
         .setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
         .setAttribute('color', new THREE.Float32BufferAttribute(col, 3)),
-      new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: true }),
+      new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: true, ...SKY }),
     );
   };
   const sky = new THREE.Group();
   sky.add(layer(16000, 1, 0.12, 0.45), layer(3500, 1.4, 0.3, 0.75), layer(350, 2, 0.55, 1));
   sky.add(milkyWay(rnd));
+  sky.traverse((o) => (o.renderOrder = -1000));
   return sky;
 }
+
+/**
+ * What the sky's materials are drawn with: neither hidden by nor hiding anything, and (see starField) drawn before
+ * everything else, so that whatever's in the room is drawn over them however far off it is.
+ */
+const SKY = { depthTest: false, depthWrite: false } as const;
 
 /** How wide the Milky Way is, as the spread of its stars about its middle, in radians. */
 const BAND_SPREAD = 0.13;
@@ -2727,7 +2748,7 @@ function milkyWay(rnd: () => number): THREE.Group {
       new THREE.BufferGeometry()
         .setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
         .setAttribute('color', new THREE.Float32BufferAttribute(col, 3)),
-      new THREE.PointsMaterial({ size: 1, sizeAttenuation: false, vertexColors: true }),
+      new THREE.PointsMaterial({ size: 1, sizeAttenuation: false, vertexColors: true, ...SKY }),
     ),
   );
   // its glow, painted round a sphere just inside the stars: longitude across, latitude down
@@ -2759,28 +2780,31 @@ function milkyWay(rnd: () => number): THREE.Group {
   const glow = new THREE.Mesh(
     // just the strip of sphere the canvas covers, either side of the band's middle
     new THREE.SphereGeometry(STAR_R * 1.01, 96, 16, 0, Math.PI * 2, Math.PI / 2 - cover / 2, cover),
-    new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide }),
+    // not transparent, so that it's drawn with the opaque things, first of all (see starField), but added on all the same
+    new THREE.MeshBasicMaterial({ map: tex, opacity: 0.22, blending: THREE.AdditiveBlending, side: THREE.BackSide, ...SKY }),
   );
-  glow.renderOrder = -1;
   band.add(glow);
-  // tipped toward the left wall, so that its middle passes BAND_OFF from the porthole's axis (−x), whichever way the
-  // stars have turned about it
-  band.rotation.z = -BAND_OFF;
+  // tipped toward the porthole's axis (+z, straight out of the front wall), so that its middle passes BAND_OFF from
+  // it, whichever way the stars have turned about it
+  band.rotation.x = BAND_OFF;
   return band;
 }
-/** How far off the stars are drawn: inside the camera's reach, outside the room's. */
+/**
+ * How far off the stars are drawn: inside the camera's reach (see CAMERA_FAR). They're drawn behind everything,
+ * whatever's nearer (see SKY), so it needn't be outside the room.
+ */
 const STAR_R = 6000;
 
 /**
- * A wall w long and as tall as the room, standing on its middle, facing +z; with a hole in it if `hole` is given, in
- * the wall's own units from its middle.
+ * A wall w long and as tall as the room, standing on its middle, facing +z; with `holes` in it, in the wall's own
+ * units from its middle.
  */
-function wallMesh(w: number, hole?: THREE.Path): THREE.Mesh {
+function wallMesh(w: number, ...holes: THREE.Path[]): THREE.Mesh {
   const H = ROOM.y1;
   let geom: THREE.BufferGeometry;
-  if (hole) {
+  if (holes.length) {
     const shape = new THREE.Shape().moveTo(-w / 2, -H / 2).lineTo(w / 2, -H / 2).lineTo(w / 2, H / 2).lineTo(-w / 2, H / 2).lineTo(-w / 2, -H / 2);
-    shape.holes.push(hole);
+    shape.holes.push(...holes);
     geom = new THREE.ShapeGeometry(shape, 24);
   } else geom = new THREE.PlaneGeometry(w, H, 1, 1);
   // three panels from floor to ceiling, from the wall's left end
@@ -2828,19 +2852,24 @@ function portOutline<P extends THREE.Path>(path: P, p: Porthole, y: number, d: n
 }
 
 /**
- * The left wall, with a porthole through it onto the stars (see starField) taking up `frac` of it (see porthole): a
- * frame round it, and the hull's thickness behind.
+ * Where the porthole is (see porthole): a frame for things on the front wall round it, with its x along the wall to
+ * the right as it's faced from the room (toward −x), y up from the floor, and z out into the room, its origin on the
+ * floor under the porthole's middle (see PORT_WALL).
+ */
+function portFrame(): THREE.Group {
+  const g = new THREE.Group();
+  g.position.set(PORT_WALL.x, 0, ROOM.z1);
+  g.rotation.y = Math.PI;
+  return g;
+}
+
+/**
+ * The porthole through the front wall onto the stars (see starField), taking up `frac` of its stretch of the wall (see
+ * porthole): a frame round it, and the hull's thickness behind. The hole itself is in the front wall (see buildRoom).
  */
 function buildPort(frac: number): THREE.Group {
-  const H = ROOM.y1;
   const p = porthole(frac);
-  const g = new THREE.Group();
-  // turned to face in, the wall's own x runs toward −z
-  g.position.set(ROOM.x0, 0, (ROOM.z0 + ROOM.z1) / 2);
-  g.rotation.y = Math.PI / 2;
-  const w = wallMesh(PORT_WALL.w, portOutline(new THREE.Path(), p, p.cy - H / 2, 0));
-  w.position.y = H / 2;
-  g.add(w);
+  const g = portFrame();
   const band = (d0: number, d1: number, depth: number, z: number, mat: THREE.Material, bevel: boolean) => {
     const shape = portOutline(new THREE.Shape(), p, p.cy, d1);
     shape.holes.push(portOutline(new THREE.Path(), p, p.cy, d0));
@@ -2926,34 +2955,38 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
     m.rotation.y = ry;
     scene.add(m);
   };
-  wall(W, cx, ROOM.z0, 0);
-  // the front wall has the airlock's doorway in it (see AirlockView); turned to face in, its own x runs toward −x
-  const front = wallMesh(W, rectPath(cx - AIRLOCK.x, AIRLOCK.door.h / 2 - H / 2 + 0.25, AIRLOCK.door.w, AIRLOCK.door.h - 0.5));
+  // the back wall, where the bench is, with a hole for the supply station's block (see ToolView.buildStation)
+  const { block: bk, out } = STATION;
+  const [a, b] = [toWorld(STATION_POSE, { x: bk.x0, y: -bk.y1, z: -out }), toWorld(STATION_POSE, { x: bk.x1, y: -bk.y0, z: -out })];
+  const back = wallMesh(W, rectPath((a.x + b.x) / 2 - cx, (a.y + b.y) / 2 - H / 2, Math.abs(b.x - a.x), b.y - a.y));
+  back.position.set(cx, H / 2, ROOM.z0);
+  scene.add(back);
+  // the front wall has the airlock's doorway in it (see AirlockView), and the porthole (see buildPort); turned to face
+  // in, its own x runs toward −x
+  const p = porthole(PORT_FRAC);
+  const front = wallMesh(
+    W,
+    rectPath(cx - AIRLOCK.x, AIRLOCK.door.h / 2 - H / 2 + 0.25, AIRLOCK.door.w, AIRLOCK.door.h - 0.5),
+    roundRect(new THREE.Path(), cx - PORT_WALL.x, p.cy - H / 2, p.w, p.h, p.c),
+  );
   front.position.set(cx, H / 2, ROOM.z1);
   front.rotation.y = Math.PI;
   scene.add(front);
-  // the left wall, with the porthole through it, is built apart (see buildPort)
-  // the right wall, with a hole for the supply station's block (see ToolView.buildStation); turned to face in,
-  // its own x runs toward +z
-  const { block: bk, out } = STATION;
-  const [a, b] = [toWorld(STATION_POSE, { x: bk.x0, y: -bk.y1, z: -out }), toWorld(STATION_POSE, { x: bk.x1, y: -bk.y0, z: -out })];
-  const right = wallMesh(Dp, rectPath((a.z + b.z) / 2 - cz, (a.y + b.y) / 2 - H / 2, Math.abs(b.z - a.z), b.y - a.y));
-  right.position.set(ROOM.x1, H / 2, cz);
-  right.rotation.y = -Math.PI / 2;
-  scene.add(right);
-  // ceiling light fixtures: a dark frame round a glowing diffuser behind louvers
+  // the ends, plain
+  wall(Dp, ROOM.x0, cz, Math.PI / 2);
+  wall(Dp, ROOM.x1, cz, -Math.PI / 2);
+  // ceiling light fixtures, in rows down the room: a dark frame round a glowing diffuser behind louvers, all of each
+  // made one mesh
   const frameMat = new THREE.MeshStandardMaterial({ color: 0x2c3231, metalness: 0.6, roughness: 0.45 });
   const diffuser = new THREE.MeshBasicMaterial({ map: diffuserTexture(), toneMapped: false });
+  const frames: THREE.BufferGeometry[] = [];
+  const panes: THREE.BufferGeometry[] = [];
   for (let x = ROOM.x0 + 300; x < ROOM.x1; x += 500)
     for (let z = 350; z < ROOM.z1; z += 600) {
-      const f = new THREE.Mesh(new THREE.BoxGeometry(240, 8, 110), frameMat);
-      f.position.set(x, H - 4, z);
-      scene.add(f);
-      const p = new THREE.Mesh(new THREE.PlaneGeometry(220, 90), diffuser);
-      p.rotation.x = Math.PI / 2;
-      p.position.set(x, H - 8.5, z);
-      scene.add(p);
+      frames.push(new THREE.BoxGeometry(240, 8, 110).translate(x, H - 4, z));
+      panes.push(new THREE.PlaneGeometry(220, 90).rotateX(Math.PI / 2).translate(x, H - 8.5, z));
     }
+  scene.add(new THREE.Mesh(mergeGeometries(frames), frameMat), new THREE.Mesh(mergeGeometries(panes), diffuser));
   // a dark rubber kick strip along the foot of every wall, but across the airlock's doorway
   const kickMat = new THREE.MeshStandardMaterial({ color: 0x1e2322, roughness: 0.8, metalness: 0.1 });
   const KICK = 48;
@@ -2969,11 +3002,10 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
   strip(ROOM.x0, ROOM.x1, ROOM.z0, ROOM.z0 + 3);
   strip(ROOM.x0, doorX[0], ROOM.z1 - 3, ROOM.z1);
   strip(doorX[1], ROOM.x1, ROOM.z1 - 3, ROOM.z1);
-  // the sink counters along the back wall and under the faucets, and the islands out in the room: whatever falls past
-  // everything ends up on one of them, or on the floor
+  // the counter along the foot of the back wall, under the bench: a steel top with a drain grate in it, over a row of
+  // cabinets set in a little at the foot. Whatever falls past everything ends up on it, or on the floor.
   const steel = surfaceMat('brushedSteel', { metalness: 0.85 });
   const doors = surfaceMat('cabinet', { metalness: 0.3 });
-  const top = surfaceMat('epoxy', { metalness: 0.05 });
   const drain = surfaceMat('grate', { metalness: 0.7 });
   for (const c of COUNTERS) {
     const w = c.x1 - c.x0;
@@ -2983,39 +3015,30 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
     const kick = new THREE.Mesh(new THREE.BoxGeometry(w - 60, KICK, d - 60), kickMat);
     kick.position.set(x, KICK / 2, z);
     scene.add(kick);
-    // a cabinet, set in a little at the foot, under a dark epoxy top (the islands) or a steel one with a drain grate
-    // in it (the sink counters)
-    const th = c.island ? 24 : 30;
-    // the sink counters run into the walls, so only their fronts need setting in
-    const inset = c.island ? 12 : 6;
+    // it runs between the cabinet and the wall, so only its front needs setting in
+    const th = 30;
+    const inset = 6;
     const [bw, bd, bh] = [w - 2 * inset, d - 2 * inset, LIFT - th - KICK];
-    // a whole number of doors along each face, from the kick to the top
-    const [nx, nz] = [Math.max(1, Math.round(bw / 250)), Math.max(1, Math.round(bd / 250))];
-    const body = new THREE.Mesh(boxUV(new THREE.BoxGeometry(bw, bh, bd), 'cabinet', { x: bw / nx, y: bh, z: bd / nz }), doors);
+    // a whole number of doors along its front, from the kick to the top
+    const nx = Math.max(1, Math.round(bw / 250));
+    const body = new THREE.Mesh(boxUV(new THREE.BoxGeometry(bw, bh, bd), 'cabinet', { x: bw / nx, y: bh, z: bd }), doors);
     body.position.set(x, KICK + bh / 2, z);
-    const slab = c.island
-      ? new THREE.Mesh(boxUV(new THREE.BoxGeometry(w, th, d), 'epoxy'), top)
-      : new THREE.Mesh(boxUV(new THREE.BoxGeometry(w, th, d), 'brushedSteel'), steel);
+    const slab = new THREE.Mesh(boxUV(new THREE.BoxGeometry(w, th, d), 'brushedSteel'), steel);
     slab.position.set(x, LIFT - th / 2, z);
     for (const m of [body, slab]) {
       m.receiveShadow = m.castShadow = true;
       scene.add(m);
     }
-    // a pull near the top of each door, on every side that's out in the room
+    // a pull near the top of each door
     const hy = KICK + bh - 34;
-    const faces: [number, number][] = c.island ? [[0, -1], [0, 1], [-1, 0], [1, 0]] : c.z0 === ROOM.z0 && c.x1 < ROOM.x1 ? [[0, 1]] : [[-1, 0]];
-    for (const [fx, fz] of faces) {
-      if (fz) for (let i = 0; i < nx; i++) pull(scene, x - bw / 2 + (i + 0.5) * (bw / nx), hy, z + fz * (bd / 2), 0, fz);
-      else for (let i = 0; i < nz; i++) pull(scene, x + fx * (bw / 2), hy, z - bd / 2 + (i + 0.5) * (bd / nz), fx, 0);
-    }
-    if (c.island) continue;
+    for (let i = 0; i < nx; i++) pull(scene, x - bw / 2 + (i + 0.5) * (bw / nx), hy, z + bd / 2, 0, 1);
     const g = new THREE.Mesh(planeUV(new THREE.PlaneGeometry(w - 16, d - 16), 'grate', 0, 0), drain);
     g.rotation.x = -Math.PI / 2;
     g.position.set(x, LIFT + 0.5, z);
     g.receiveShadow = true;
     scene.add(g);
   }
-  // an emergency beacon over the door, turning slowly
+  // an emergency beacon high on the wall behind the bench, over the alarms' button, pulsing slowly
   const lamp = new THREE.Mesh(new THREE.SphereGeometry(14, 16, 10), new THREE.MeshStandardMaterial({ color: 0x5a1010, emissive: 0xff2010, emissiveIntensity: 0.6 }));
   lamp.position.set(cx, H - 120, ROOM.z1 - 16);
   scene.add(lamp);
@@ -3126,7 +3149,7 @@ function messageCanvas(blocks: readonly Block[]): HTMLCanvasElement {
   return c;
 }
 
-/** The OK button's face, lit brighter when the crosshair is on it. */
+/** The OK button's face, lit brighter when the pointer is on it. */
 function okTexture(hot: boolean): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = OK_PX.w;
@@ -3159,7 +3182,7 @@ export interface AirlockLook {
   dark: number;
   /** Whether the message shows on the inside of its front, with its OK button. */
   message: boolean;
-  /** Whether the crosshair is on the OK button. */
+  /** Whether the pointer is on the OK button. */
   okHot: boolean;
   /**
    * What the message says: the notice that wakes the player, with the litres of cryostabilizer on board, and of
@@ -3174,8 +3197,9 @@ export interface AirlockLook {
 
 /**
  * The airlock (see airlock.ts): its chamber behind the front wall, the doorway's sides, the two doors that slide
- * apart into the wall, and the standing cryopod at the back, with the message projected inside its front, in front of the face of
- * whoever's in it. The doorway itself is a hole in the room's front wall (see buildRoom).
+ * apart into the wall, and the standing cryopod at the back, with the message projected inside its front, in front of the
+ * face of whoever's in it. The doorway itself is a hole in the room's front wall (see buildRoom), with an invisible pane
+ * across it that the pointer can be on (see Pick's airlock).
  */
 class AirlockView {
   private doors: THREE.Mesh[] = [];
@@ -3265,6 +3289,15 @@ class AirlockView {
       far.position.set(x + (side * door.w) / 4, door.h / 2, z1 + wall + d - 6);
       g.add(far);
     }
+    // across the doorway, in the wall's face, a pane that draws nothing, for the pointer to be on it (and for its
+    // outline, which is drawn from its silhouette, see Outliner)
+    const doorway = new THREE.Mesh(
+      new THREE.PlaneGeometry(door.w, door.h),
+      new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    doorway.position.set(x, door.h / 2, z1 - 0.5);
+    g.add(doorway);
+    pickables.set(doorway, { kind: 'airlock' });
     // the green lamp over the doorway, on the lab's side: a lens in a dark housing, and a glow round it (a glow, not a
     // light, since every light in the scene costs every surface it might fall on)
     const housing = new THREE.Mesh(new THREE.BoxGeometry(70, 30, 12), darkMat);
@@ -3378,7 +3411,7 @@ class AirlockView {
     for (const m of this.doors) m.position.x = x + m.userData.side * (door.w / 4 + a.door * (door.w / 2 + 6));
     // its door swings out on its hinge
     this.front.rotation.y = -a.front * POD.swing;
-    // off its layer it's neither drawn nor hit by the crosshair
+    // off its layer it's neither drawn nor hit by the pointer
     for (const m of [this.message, this.ok]) m.layers.set(a.message ? 0 : 1);
     (this.ok.material as THREE.MeshBasicMaterial).map = this.okTex[a.okHot ? 1 : 0];
   }
@@ -3492,10 +3525,8 @@ class BlindsButton {
 
   constructor(scene: THREE.Scene, pickables: Map<THREE.Object3D, Pick>) {
     const p = porthole(PORT_FRAC);
-    // in the porthole's frame (see buildPort): x along the wall toward −z, y up, z out into the room
-    const g = new THREE.Group();
-    g.position.set(ROOM.x0, 0, (ROOM.z0 + ROOM.z1) / 2);
-    g.rotation.y = Math.PI / 2;
+    // in the porthole's frame (see portFrame)
+    const g = portFrame();
     this.blind = new THREE.Mesh(new THREE.ShapeGeometry(portOutline(new THREE.Shape(), p, p.cy, 2), 24), new THREE.MeshBasicMaterial({ color: 0x000000 }));
     this.blind.position.z = -1.5;
     g.add(this.blind);
@@ -3526,10 +3557,20 @@ class BlindsButton {
   }
 }
 
+/** How high the supply line the faucets are fed from runs along the back wall: just under the ceiling, over everything that hangs on it. */
+const SUPPLY_Y = 1240;
+/** The radius of the supply line, its risers, and the manifolds they feed. */
+const SUPPLY_R = 6;
+/** A faucet closer than this to the next along the wall shares a manifold with it. */
+const MANIFOLD_GAP = 150;
+/** How far apart the brackets holding the supply line to the wall are, at most. */
+const BRACKET_EVERY = 600;
+
 /**
- * The faucets: a manifold along a wall, with each of its faucets a pipe out over the counter; and on each island, a
- * chrome riser up from the counter with a pipe out over it. Each has a knob of its color (the solvent's clear, see
- * View.update), and a spout.
+ * The faucets, all on the back wall (see faucetPipes in bodies.ts), and what feeds them: a supply line along the wall
+ * high up, from the right end wall, with a riser down from it to each faucet, or to a short manifold along the wall
+ * that a row of them come out of. All of it is held to the wall by brackets. Each faucet is a pipe out from the wall
+ * and down over the counter, with a knob of its color over its spout (the solvent's clear, see View.render).
  */
 function buildFaucets(
   scene: THREE.Scene,
@@ -3539,57 +3580,84 @@ function buildFaucets(
   if (!faucets.length) return { mats: [], notes: [] };
   const g = new THREE.Group();
   const at = (p: Vec3) => new THREE.Vector3(p.x, p.y, p.z);
-  const onWall = faucets.filter((fa) => !fa.base);
-  const out = onWall.length
-    ? new THREE.Vector3(onWall[0].spout.x - onWall[0].wall.x, 0, onWall[0].spout.z - onWall[0].wall.z).normalize()
-    : new THREE.Vector3();
-  if (onWall.length) {
-    const first = at(onWall[0].wall);
-    const last = at(onWall[onWall.length - 1].wall);
-    const along = last.clone().sub(first).normalize().multiplyScalar(60);
-    rod(g, chromeMat, first.clone().sub(along), last.clone().add(along), 6);
-    // the manifold's end caps, and brackets holding it to the wall
-    for (const [end, s] of [[first, -1], [last, 1]] as const) {
-      const cap = new THREE.Mesh(unitSphere, chromeMat);
-      cap.position.copy(end).addScaledVector(along, s);
-      cap.scale.setScalar(6);
-      g.add(cap);
-      const foot = end.clone().addScaledVector(along, s * 0.5);
-      rod(g, darkMat, foot.clone().addScaledVector(out, -12), foot, 3);
-      const plate = new THREE.Mesh(unitCylinder, darkMat);
-      plate.position.copy(foot).addScaledVector(out, -12);
-      plate.scale.set(12, 3, 12);
-      plate.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), out);
-      g.add(plate);
-    }
+  const ball = (p: THREE.Vector3) => {
+    const m = new THREE.Mesh(unitSphere, chromeMat);
+    m.position.copy(p);
+    m.scale.setScalar(SUPPLY_R);
+    g.add(m);
+  };
+  // a bracket: a dark plate on the wall, a stem out to the pipe, and a band round it, along `axis`
+  const bracket = (p: THREE.Vector3, axis: 'x' | 'y') => {
+    const plate = new THREE.Mesh(unitCylinder, darkMat);
+    plate.rotation.x = Math.PI / 2;
+    plate.scale.set(10, 3, 10);
+    plate.position.set(p.x, p.y, 1.5);
+    rod(g, darkMat, new THREE.Vector3(p.x, p.y, 3), p, 2.5);
+    const band = new THREE.Mesh(unitCylinder, darkMat);
+    band.scale.set(SUPPLY_R + 1.2, 6, SUPPLY_R + 1.2);
+    if (axis === 'x') band.rotation.z = Math.PI / 2;
+    band.position.copy(p);
+    g.add(plate, band);
+  };
+  // the rows of faucets along the wall, each fed by one riser
+  const order = faucets.map((fa) => fa.wall).sort((a, b) => a.x - b.x);
+  const rows: Vec3[][] = [];
+  for (const w of order) {
+    const row = rows[rows.length - 1];
+    if (row && w.x - row[row.length - 1].x <= MANIFOLD_GAP) row.push(w);
+    else rows.push([w]);
   }
+  const wz = order[0].z;
+  const risers = rows.map((row) => {
+    const [first, last] = [at(row[0]), at(row[row.length - 1])];
+    if (row.length === 1) {
+      // straight down to the faucet, ending in a cap under it
+      ball(first);
+      return first;
+    }
+    // a manifold along the wall, capped at its left end, and turning up into the riser at its right
+    const along = new THREE.Vector3(60, 0, 0);
+    const [a, b] = [first.clone().sub(along), last.clone().add(along)];
+    rod(g, chromeMat, a, b, SUPPLY_R);
+    ball(a);
+    ball(b);
+    bracket(a.clone().addScaledVector(along, 0.3), 'x');
+    return b;
+  });
+  // the supply line, from the right end wall to the first riser, and each riser down from it
+  const x0 = risers[0].x;
+  const top = (x: number) => new THREE.Vector3(x, SUPPLY_Y, wz);
+  rod(g, chromeMat, top(x0), top(ROOM.x1), SUPPLY_R);
+  ball(top(x0));
+  const flange = new THREE.Mesh(unitCylinder, darkMat);
+  flange.rotation.z = Math.PI / 2;
+  flange.scale.set(SUPPLY_R + 6, 4, SUPPLY_R + 6);
+  flange.position.set(ROOM.x1 - 2, SUPPLY_Y, wz);
+  g.add(flange);
+  for (const r of risers) {
+    rod(g, chromeMat, r, top(r.x), SUPPLY_R);
+    ball(top(r.x));
+    bracket(new THREE.Vector3(r.x, (r.y + SUPPLY_Y) / 2, wz), 'y');
+  }
+  // brackets along the supply line, evenly, as near BRACKET_EVERY apart as fits between each two risers and to the end
+  const stops = [...risers.map((r) => r.x), ROOM.x1];
+  for (let i = 0; i + 1 < stops.length; i++) {
+    const n = Math.max(1, Math.round((stops[i + 1] - stops[i]) / BRACKET_EVERY));
+    for (let k = 0; k < n; k++) bracket(top(stops[i] + ((k + 0.5) * (stops[i + 1] - stops[i])) / n), 'x');
+  }
+
   const notes: Label[] = [];
-  const mats = faucets.map(({ wall, spout, base }, i) => {
+  const mats = faucets.map(({ wall, spout }, i) => {
     const elbow = new THREE.Vector3(spout.x, wall.y, spout.z);
     pickables.set(rod(g, chromeMat, at(wall), elbow, 3.5), { kind: 'faucet', i });
     pickables.set(rod(g, chromeMat, elbow, new THREE.Vector3(spout.x, spout.y + 6, spout.z), 3), { kind: 'faucet', i, spout: true });
-    if (base) {
-      // a riser up from a flange on the counter, rounded over at its top
-      pickables.set(rod(g, chromeMat, at(base), at(wall), 6), { kind: 'faucet', i });
-      const flange = new THREE.Mesh(unitCylinder, chromeMat);
-      flange.position.set(base.x, base.y + 1.5, base.z);
-      flange.scale.set(16, 3, 16);
-      g.add(flange);
-      pickables.set(flange, { kind: 'faucet', i });
-      const top = new THREE.Mesh(unitSphere, chromeMat);
-      top.position.copy(at(wall));
-      top.scale.setScalar(6);
-      g.add(top);
-      pickables.set(top, { kind: 'faucet', i });
-    } else {
-      // a collar where it leaves the manifold
-      const collar = new THREE.Mesh(unitCylinder, chromeMat);
-      collar.position.copy(at(wall)).addScaledVector(out, 7);
-      collar.scale.set(5, 6, 5);
-      collar.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), out);
-      g.add(collar);
-      pickables.set(collar, { kind: 'faucet', i });
-    }
+    // a collar where it leaves the manifold or riser
+    const collar = new THREE.Mesh(unitCylinder, chromeMat);
+    collar.position.copy(at(wall)).add(new THREE.Vector3(0, 0, SUPPLY_R + 1));
+    collar.scale.set(5, 6, 5);
+    collar.rotation.x = Math.PI / 2;
+    g.add(collar);
+    pickables.set(collar, { kind: 'faucet', i });
     notes.push(new Label(g, elbow.clone().setY(elbow.y + 16 + LABEL_H / 2)));
     const tip = new THREE.Mesh(new THREE.CylinderGeometry(5, 4, 7, 16), chromeMat);
     tip.position.set(spout.x, spout.y + 3.5, spout.z);
@@ -3604,6 +3672,7 @@ function buildFaucets(
     pickables.set(tip, { kind: 'faucet', i, spout: true });
     return mat;
   });
+  g.traverse((o) => (o.castShadow = o.receiveShadow = o instanceof THREE.Mesh));
   scene.add(g);
   return { mats, notes };
 }
@@ -3981,7 +4050,7 @@ class IconStudio {
 }
 
 /**
- * The outline round whatever the crosshair is on (see OUTLINE in outline.ts), drawn over the finished frame. Its
+ * The outline round whatever the pointer is on, or what's held (see OUTLINE in outline.ts), drawn over the finished frame. Its
  * silhouette, the whole of it whatever's in front, goes into a mask; then each pixel finds how far it is from the
  * mask, along its row and then down its column (the nearest along each row first, so the second pass gets the true
  * distance), and the pixels within the outline's width of it are painted, the outermost blended for a smooth edge.
@@ -4048,8 +4117,8 @@ class Outliner {
     this.quad.frustumCulled = false;
   }
 
-  /** Outline `meshes` over what `renderer` last drew of `scene`. */
-  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, meshes: THREE.Object3D[]): void {
+  /** Outline `meshes` in `color` over what `renderer` last drew of `scene`. */
+  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, meshes: THREE.Object3D[], color: THREE.ColorRepresentation): void {
     const width = OUTLINE.width * renderer.getPixelRatio();
     if (width <= 0 || !meshes.length) return;
     const reach = Math.min(254, Math.ceil(width + 0.5));
@@ -4091,7 +4160,7 @@ class Outliner {
     u.texel.value = texel;
     u.reach.value = reach;
     u.width.value = width;
-    (u.color.value as THREE.Color).set(OUTLINE.color);
+    (u.color.value as THREE.Color).set(color);
     this.quad.material = this.down;
     renderer.setRenderTarget(null);
     renderer.autoClear = false;
@@ -4106,10 +4175,26 @@ class Outliner {
   }
 }
 
-/** Draws the lab with Three.js, from the player's eyes, and says what's under the crosshair. */
+/**
+ * How far the camera sees: the whole room, end to end and corner to corner, whatever's beyond it never drawn but the
+ * stars (see SKY), which are inside this.
+ */
+const CAMERA_FAR = 12000;
+
+/**
+ * The directional light's shadows (see View): they're drawn only round where the view is, `half` either side of it
+ * along the room (x) and `deep` either side of the room's middle front to back, on a map of `map` texels, which comes to
+ * under a world unit a texel each way.
+ */
+const SHADOW = { half: 1800, deep: 1600, map: { x: 4608, y: 4096 } };
+
+/** Where metal and glass reflect the room from (see View's environment): in front of the start of the bench, mid-room. */
+const REFLECT_FROM = { x: 2300, z: (ROOM.z0 + ROOM.z1) / 2 };
+
+/** Draws the lab with Three.js, from wherever the view is, and says what's under the pointer. */
 export class View {
-  /** The field of view is 90°, top to bottom, until the player zooms in (see look). */
-  readonly camera = new THREE.PerspectiveCamera(90, 1, 2, 8000);
+  /** The camera, which the engine places each frame (see look and Frame.cam). */
+  readonly camera = new THREE.PerspectiveCamera(45, 1, 2, CAMERA_FAR);
   private renderer: THREE.WebGLRenderer;
   /** What the white void of Mu Ceti is drawn with (see renderArrival), once it's needed. */
   private void?: ReturnType<View['buildVoid']>;
@@ -4119,7 +4204,7 @@ export class View {
   private tools = new Map<Tool, ToolView>();
   private scales = new Map<Scale, ScaleView>();
   private hoses = new Map<Hose, HoseView>();
-  private stands: StandView[] = [];
+  private arms: ArmView[] = [];
   private faucetMats: THREE.MeshStandardMaterial[] = [];
   private faucetNotes: Label[] = [];
   private streams: THREE.Mesh[] = [];
@@ -4127,6 +4212,8 @@ export class View {
   private rims: { g: THREE.Group; mat: THREE.MeshBasicMaterial; sides: THREE.Mesh[]; ring: THREE.Mesh }[] = [];
   private drops: THREE.Mesh[] = [];
   private beacon: { beacon: THREE.PointLight; lamp: THREE.Mesh };
+  /** The light from the ceiling, whose shadows follow the view along the room (see SHADOW). */
+  private sun: THREE.DirectionalLight;
   private alarmButton: AlarmButton;
   private blindsButton: BlindsButton;
   private airlock: AirlockView;
@@ -4141,7 +4228,7 @@ export class View {
   private clock = 0;
   private stars = starField();
 
-  /** `eye` is how high the player's eyes are standing, for the message inside the cryopod. */
+  /** `eye` is how high the player's eyes are in the cryopod, for the message inside it. */
   constructor(canvas: HTMLCanvasElement, faucets: readonly FaucetSpot[], eye: number) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.localClippingEnabled = true;
@@ -4152,23 +4239,25 @@ export class View {
     this.scene.add(this.stars);
     const sky = new THREE.HemisphereLight(0xe4eef0, 0x4a4440, 1.5);
     this.scene.add(sky);
-    // the ceiling panels, as one light from overhead, so what hangs casts its shadow on the counter and floor
+    // the ceiling panels, as one light from overhead, a little from the front, so what hangs casts its shadow on the
+    // counter and floor. It's turned only about x, so that its shadow map's rows run along the room, and sliding it
+    // along the room a whole number of texels (see placeShadow) moves its shadows by exactly that.
     const sun = new THREE.DirectionalLight(0xf4f8ff, 1.3);
-    const [cx, cz] = [(ROOM.x0 + ROOM.x1) / 2, (ROOM.z0 + ROOM.z1) / 2];
-    sun.position.set(cx - 50, ROOM.y1 + 1500, cz + 200);
-    sun.target.position.set(cx, 0, cz);
+    const cz = (ROOM.z0 + ROOM.z1) / 2;
+    sun.position.set(0, ROOM.y1 + 1500, cz + 200);
+    sun.target.position.set(0, 0, cz);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(4096, 4096);
+    sun.shadow.mapSize.set(SHADOW.map.x, SHADOW.map.y);
     const sc = sun.shadow.camera;
-    const half = Math.max(ROOM.x1 - ROOM.x0, ROOM.z1 - ROOM.z0) / 2 + 100;
-    sc.left = -half;
-    sc.right = half;
-    sc.top = half;
-    sc.bottom = -half;
+    sc.left = -SHADOW.half;
+    sc.right = SHADOW.half;
+    sc.top = SHADOW.deep;
+    sc.bottom = -SHADOW.deep;
     sc.near = 500;
     sc.far = 4500;
     sun.shadow.bias = -0.0005;
     this.scene.add(sun, sun.target);
+    this.sun = sun;
     this.roomLights = [sky, sun].map((light) => ({ light, base: light.intensity }));
     this.beacon = buildRoom(this.scene);
     this.scene.add(buildPort(PORT_FRAC));
@@ -4176,12 +4265,13 @@ export class View {
     this.blindsButton = new BlindsButton(this.scene, this.pickables);
     this.airlock = new AirlockView(this.scene, this.pickables, eye);
     this.cabinet = new CabinetView(this.scene, this.pickables);
-    // what metal and glass reflect: the room itself, seen from its middle at eye height, before anything's in it, and
-    // again once its surfaces have their textures (see textures.ts)
+    // what metal and glass reflect: the room itself, seen from in front of the bench (see REFLECT_FROM) at eye height,
+    // before anything's in it, and again once its surfaces have their textures (see textures.ts)
     const reflect = () => {
       const pmrem = new THREE.PMREMGenerator(this.renderer);
       const was = this.scene.environment;
-      this.scene.environment = pmrem.fromScene(this.scene, 0.02, 10, 8000, { size: 256, position: new THREE.Vector3(cx, eye, cz) }).texture;
+      const from = new THREE.Vector3(REFLECT_FROM.x, eye, REFLECT_FROM.z);
+      this.scene.environment = pmrem.fromScene(this.scene, 0.02, 10, CAMERA_FAR, { size: 256, position: from }).texture;
       was?.dispose();
       pmrem.dispose();
       this.drawnIcons = this.studio.render(this.renderer, this.scene.environment);
@@ -4217,27 +4307,38 @@ export class View {
     for (const k of items) if (!map.has(k)) map.set(k, make(k));
   }
 
-  /**
-   * Put the camera at the player's eyes, looking their way, with a field of view of `fov` degrees, top to bottom
-   * (as it was, if it's not given).
-   */
-  look(eye: Vec3, yaw: number, pitch: number, fov = this.camera.fov): void {
-    if (this.camera.fov !== fov) {
-      this.camera.fov = fov;
+  /** Put the camera where `cam` says, looking its way, with its field of view. */
+  look(cam: Camera): void {
+    if (this.camera.fov !== cam.fov) {
+      this.camera.fov = cam.fov;
       this.camera.updateProjectionMatrix();
     }
-    this.camera.position.set(eye.x, eye.y, eye.z);
-    // the stars are too far off to move as the player does
+    this.camera.position.set(cam.x, cam.y, cam.z);
+    // the stars are too far off to move as the view does
     this.stars.position.copy(this.camera.position);
-    this.camera.rotation.set(pitch, yaw, 0);
+    this.camera.rotation.set(cam.pitch, cam.yaw, 0);
     this.camera.updateMatrixWorld();
+    this.placeShadow(cam.x);
+  }
+
+  /**
+   * Center the sun's shadows on x along the room (see SHADOW), to the nearest whole texel of its shadow map, so that
+   * they stay put, unshimmering, as the view moves.
+   */
+  private placeShadow(x: number): void {
+    const texel = (2 * SHADOW.half) / SHADOW.map.x;
+    const at = Math.round(x / texel) * texel;
+    if (this.sun.position.x === at) return;
+    this.sun.position.x = at;
+    this.sun.target.position.x = at;
   }
 
   render(fr: Frame): void {
     this.clock += fr.dt;
     const { scene, pickables } = this;
-    this.look(fr.eye, fr.yaw, fr.pitch);
-    this.stars.rotation.x = fr.spin;
+    this.look(fr.cam);
+    // the ship turns about the axis straight out of the porthole
+    this.stars.rotation.z = fr.spin;
 
     this.sync(this.flasks, fr.flasks, (f) => new FlaskView(f, scene, pickables));
     this.sync(this.tools, fr.tools, (t) => new ToolView(t, scene, pickables));
@@ -4265,7 +4366,7 @@ export class View {
       this.faucetNotes[i]?.set(fa.note);
     });
 
-    this.updateStands(fr);
+    this.updateArms(fr);
     this.updateStreams(fr);
     this.updateGuides(fr);
 
@@ -4292,7 +4393,7 @@ export class View {
     this.renderer.render(scene, this.camera);
     this.camera.layers.disable(REFRACT_LAYER);
     this.renderGuides();
-    this.renderOutline(fr.hot);
+    this.renderOutline(fr.hot, fr.bad);
   }
 
   /**
@@ -4396,30 +4497,31 @@ export class View {
     scene.background = bg;
   }
 
-  /** The outline round everything that's part of what the crosshair is on (see Outliner). */
-  private renderOutline(hot: Pick | null): void {
+  /** The outline round everything that's part of what the pointer is on, or what's held (see Outliner). */
+  private renderOutline(hot: Pick | null, bad: boolean): void {
     if (!hot) return;
+    const color = bad ? BAD_OUTLINE : OUTLINE.color;
     if (hot.kind === 'stock') {
-      this.outliner.render(this.renderer, this.scene, this.camera, this.cabinet.outline(hot.item, hot.slot));
+      this.outliner.render(this.renderer, this.scene, this.camera, this.cabinet.outline(hot.item, hot.slot), color);
       return;
     }
     const thing = thingOf(hot);
     if (thing === null) return;
     const meshes = [...this.pickables].filter(([, p]) => thingOf(p) === thing).map(([o]) => o);
-    this.outliner.render(this.renderer, this.scene, this.camera, meshes);
+    this.outliner.render(this.renderer, this.scene, this.camera, meshes, color);
   }
 
-  /** Every stand, its base on whatever's under it: a counter, or the floor under something held out over it. */
-  private updateStands(fr: Frame): void {
-    while (this.stands.length < fr.stands.length) this.stands.push(new StandView(this.scene));
-    this.stands.forEach((v, i) => {
-      const st = fr.stands[i];
-      v.group.visible = !!st;
+  /** Every arm out of the back wall, each grabbable as what it holds. */
+  private updateArms(fr: Frame): void {
+    while (this.arms.length < fr.arms.length) this.arms.push(new ArmView(this.scene));
+    this.arms.forEach((v, i) => {
+      const arm = fr.arms[i];
+      v.group.visible = !!arm;
       for (const m of v.parts) {
-        if (st) this.pickables.set(m, st.of);
+        if (arm) this.pickables.set(m, arm.of);
         else this.pickables.delete(m);
       }
-      if (st) v.update(st.s, groundAt(st.s.x, st.s.z));
+      if (arm) v.update(arm.at);
     });
   }
 
@@ -4449,8 +4551,7 @@ export class View {
       mat.alphaMap!.offset.set(0, Math.ceil(reps) - reps);
     });
     // each mouth a guide ends at, outlined once, in the look of the strongest guide into it
-    const mouths = new Map<string, Frame['guides'][number]['mouth'] & { look: keyof typeof GUIDE_LOOKS }>();
-    for (const f of fr.footprints) mouths.set(`f${f.x},${f.y},${f.z}`, { ...f, look: f.ok ? 'place' : 'bad' });
+    const mouths = new Map<string, Frame['guides'][number]['mouth'] & { look: GuideLook }>();
     for (const g of fr.guides) {
       const m = g.mouth;
       const key = `${m.x},${m.y},${m.z}`;
@@ -4539,12 +4640,12 @@ export class View {
   }
 
   /**
-   * What's under the crosshair (or under (ndcX, ndcY)), within `reach`, skipping anything belonging to `skip`;
-   * with where it was hit.
+   * What's under the pointer at (ndcX, ndcY), skipping anything belonging to `skip`, however far off it is; with where
+   * it was hit.
    */
-  pick(reach: number, skip: object | null, ndcX = 0, ndcY = 0): (Pick & { point: Vec3; distance: number }) | null {
+  pick(ndcX: number, ndcY: number, skip: object | null): (Pick & { point: Vec3; distance: number }) | null {
     this.raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
-    this.raycaster.far = reach;
+    this.raycaster.far = this.camera.far;
     const hits = this.raycaster
       .intersectObjects([...this.pickables.keys()], false)
       .map((h) => ({ h, p: this.pickables.get(h.object)! }))
@@ -4569,21 +4670,21 @@ export class View {
     return { ...best.p, point: { x: point.x, y: point.y, z: point.z }, distance };
   }
 
-  /** Where a point in the room is on the canvas, in CSS pixels; null if it's behind the player. */
+  /** Where a point in the room is on the canvas, in CSS pixels; null if it's behind the camera. */
   project(p: Vec3, w: number, h: number): { x: number; y: number } | null {
     const v = new THREE.Vector3(p.x, p.y, p.z).project(this.camera);
     if (v.z > 1) return null;
     return { x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h };
   }
 
-  /** A ray from the eye through (ndcX, ndcY). */
+  /** A ray from the camera through (ndcX, ndcY) on the canvas. */
   ray(ndcX: number, ndcY: number): { o: Vec3; d: Vec3 } {
     this.raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
     const { origin: o, direction: d } = this.raycaster.ray;
     return { o: { x: o.x, y: o.y, z: o.z }, d: { x: d.x, y: d.y, z: d.z } };
   }
 
-  /** A point in the room relative to the player's head: x right, y up, z behind. */
+  /** A point in the room relative to the camera, which is where the player hears from: x right, y up, z behind. */
   toHead(p: Vec3): Vec3 {
     const v = new THREE.Vector3(p.x, p.y, p.z).applyMatrix4(this.camera.matrixWorldInverse);
     return { x: v.x, y: v.y, z: v.z };
