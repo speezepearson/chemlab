@@ -25,7 +25,7 @@ import { litresOf, type Supply } from './supply';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
-  clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
+  clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, Tool,
 } from './tools';
@@ -1077,18 +1077,27 @@ function drawBonds(sc: Screen, t: Tool): void {
   sc.tex.needsUpdate = true;
 }
 
-/** The spectroscope's number for 10^k of its f axis's unit: 1, 10, 100, ..., and under 1, .1, .01, .... */
-function fLabel(k: number): string {
-  return k < 0 ? '.' + '0'.repeat(-k - 1) + '1' : String(10 ** k);
+/**
+ * Number a tick on the spectroscope's f axis 10^k, right-aligned to x and centered on y: "10" with k raised after it in
+ * a smaller type (`px` is the type's size).
+ */
+function fLabel(ctx: CanvasRenderingContext2D, k: number, x: number, y: number, px: number, font: (px: number) => string): void {
+  const exp = String(k).replace('-', '\u2212');
+  ctx.font = font(px * 0.7);
+  ctx.fillText(exp, x, y - px * 0.35);
+  const w = ctx.measureText(exp).width;
+  ctx.font = font(px);
+  ctx.fillText('10', x - w, y);
 }
 
 /**
- * A spectroscope's screen: a graph of the bonds passing through it lately, by energy (see spectroscopeAt). E, in uB,
+ * A spectroscope's screen: a graph of the bonds passing through it lately, by energy (see spectroscopeAt). E
  * runs across on a log scale, along a baseline halfway up, with ticks as on log paper (at 1 to 9 times each power of
- * ten, the powers of ten longer, and numbered along the screen's foot). f, in S with a prefix to suit the range (see spectroscopeUnit), runs up from the baseline for stable
+ * ten, the powers of ten longer, and numbered along the screen's foot). f runs up from the baseline for stable
  * bonds and down from it for uphill ones, on a log scale that ranges itself to the tallest line (see spectroscopeTop
  * and spectroscopeY), with log-paper ticks both ways along the left, the powers of ten numbered, so they slide as the
- * flow changes; clipped at the plot's top and bottom.
+ * flow changes; clipped at the plot's top and bottom. Neither axis names a unit, and f's powers of ten are numbered
+ * as such (10^-2, 10^3), so their numbers never jump.
  */
 function drawSpectroscope(sc: Screen, t: Tool, energies: readonly number[]): void {
   const key = `${t.bonds.map((c) => c.toPrecision(3)).join(',')}|${energies.join(',')}`;
@@ -1109,7 +1118,6 @@ function drawSpectroscope(sc: Screen, t: Tool, energies: readonly number[]): voi
   const n = Math.round((p.x1 - p.x0) * ppu);
   const lines = Array.from({ length: n + 1 }, (_, i) => spectroscopeAt(lnE0 + (i / n) * (lnE1 - lnE0), t.bonds, energies));
   const top = spectroscopeTop(Math.max(0, ...lines.map((l) => Math.max(l.up, l.down))));
-  const unit = spectroscopeUnit(top);
   const Y = (v: number) => base - Math.max(-1, Math.min(1, v)) * half;
   ctx.strokeStyle = ctx.fillStyle = ctx.shadowColor = green(0.75);
   ctx.shadowBlur = 1.5 * ppu;
@@ -1139,9 +1147,9 @@ function drawSpectroscope(sc: Screen, t: Tool, energies: readonly number[]): voi
     }
   ctx.font = mono(5);
   ctx.textAlign = 'right';
-  ctx.fillText('E (uB)', p.x1, p.y1 + 1.5);
+  ctx.fillText('E', p.x1, p.y1 + 1.5);
   ctx.textAlign = 'left';
-  ctx.fillText(`f (${unit.name})`, s.x0 + 2, s.y0 + 1.5);
+  ctx.fillText('f', s.x0 + 2, s.y0 + 1.5);
   ctx.font = mono(3.5);
   // f's ticks, the same both ways from the baseline, numbered at the powers of ten that have room
   ctx.textAlign = 'right';
@@ -1164,8 +1172,8 @@ function drawSpectroscope(sc: Screen, t: Tool, energies: readonly number[]): voi
         ctx.stroke();
         if (m === 1 && h >= 3 && h - last >= 3.8) {
           last = h;
-          ctx.fillText(fLabel(d - unit.exp), p.x0 - 2.5, base - h);
-          ctx.fillText(fLabel(d - unit.exp), p.x0 - 2.5, base + h);
+          fLabel(ctx, d, p.x0 - 2.5, base - h, 3.5, mono);
+          fLabel(ctx, d, p.x0 - 2.5, base + h, 3.5, mono);
         }
       }
   }

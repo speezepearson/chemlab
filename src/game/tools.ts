@@ -1298,8 +1298,8 @@ export const ANALYZER = {
  * The spectroscope's graph (see spectroscopeAt): its x axis runs from lnE0 to lnE1, and each bond's line is a Gaussian
  * `width` wide (its standard deviation), in lnE. Its y axis, f, is logarithmic and ranges itself to what's passing
  * (see spectroscopeTop and spectroscopeY): its top is `headroom` times the tallest line, and it shows `decades` powers
- * of ten below that, so a line that much weaker than the strongest still shows. It reads f in S, `perS` bonds a sim
- * second each, with an SI prefix to suit the range shown (see spectroscopeUnit).
+ * of ten below that, so a line that much weaker than the strongest still shows. It reads f in units of `perS` bonds a
+ * sim second, unnamed on the screen.
  */
 export const SPECTROSCOPE = { lnE0: -0.5, lnE1: 3.5, width: 0.02, decades: 4, headroom: 10 ** 0.5, perS: 1e6 };
 
@@ -1354,24 +1354,6 @@ export function spectroscopeY(f: number, top: number): number {
   if (!(top > 0)) return 0;
   const floor = top / 10 ** SPECTROSCOPE.decades;
   return Math.log1p(f / floor) / Math.log1p(top / floor);
-}
-
-/** The SI prefixes the spectroscope's f axis can take, by power of ten (see spectroscopeUnit). */
-const SI_PREFIXES: Record<number, string> = { [-9]: 'n', [-6]: 'u', [-3]: 'm', 0: '', 3: 'k', 6: 'M', 9: 'G' };
-
-/**
- * The unit the spectroscope's f axis is numbered in, for an axis topped at `top` bonds a sim second (see
- * spectroscopeTop): S with the SI prefix whose power of ten, `exp`, is a multiple of three as near as can be to the
- * middle of the powers of ten the axis shows, so their numbers stay short (1, 10, 100; .1, .01). `name` is the unit,
- * as "mS"; a power of ten 10^d S on the axis is numbered 10^(d − exp). With nothing to show, plain S.
- */
-export function spectroscopeUnit(top: number): { name: string; exp: number } {
-  if (!(top > 0)) return { name: 'S', exp: 0 };
-  const { perS, decades } = SPECTROSCOPE;
-  const hi = Math.floor(Math.log10(top / perS) + 1e-9);
-  const lo = Math.ceil(Math.log10(top / perS) - decades - 1e-9);
-  const exp = Math.max(-9, Math.min(9, 3 * Math.round((lo + hi) / 6)));
-  return { name: SI_PREFIXES[exp] + 'S', exp };
 }
 
 /**
