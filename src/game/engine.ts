@@ -1956,24 +1956,33 @@ export class GameEngine {
   }
 
   /**
-   * The right button went down: a held flask tips to pour and a held hose lets fluid out for as long as it's down;
-   * with empty hands, on a valve, it turns it, the lever pointing at the pointer until it's let go.
+   * The right button went down. At the bench, a held flask tips to pour and a held hose lets fluid out for as long as
+   * it's down; with empty hands, on a valve, it turns it, the lever pointing at the pointer until it's let go. With
+   * nothing else to do, it takes hold of the wall where the pointer is, and drags the view across it, whatever the
+   * pointer is on.
    */
   private rightDown(): void {
-    if (this.dozing() || inPod(this.wake) || this.glide || this.facing !== 'bench') return;
-    this.rightHeld = true;
-    if (this.held || this.turning) return;
-    this.retarget();
-    const k = this.valveAimed();
-    if (!k) return;
-    this.mark();
-    this.turning = k;
-    this.aimTurning();
+    if (this.dozing() || inPod(this.wake) || this.glide || this.previewing || !this.pointer) return;
+    if (this.facing === 'bench') {
+      this.rightHeld = true;
+      if (this.held || this.turning) return;
+      this.retarget();
+      const k = this.valveAimed();
+      if (k) {
+        this.mark();
+        this.turning = k;
+        this.aimTurning();
+        return;
+      }
+    }
+    if (this.canSteer()) this.panning = this.planeAt(this.pointer.x, this.pointer.y);
   }
 
   /** The right button came up. */
   private rightUp(): void {
     this.rightHeld = false;
+    // (a drag of the view, or a turn of a valve, with the left button goes on)
+    if (!this.press) this.panning = null;
     if (!this.press?.valve) this.endTurn();
   }
 
