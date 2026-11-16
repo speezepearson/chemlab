@@ -888,6 +888,11 @@ export function cultureLevel(share: number): number {
 
 /** How many digits the meter's display has. */
 export const METER_DIGITS = 4;
+/**
+ * How often the meter's display takes up its reading, in sim seconds: it holds each number that long, so a changing
+ * flow is still readable rather than a blur of digits (see Tool.shown).
+ */
+export const METER_EVERY = 0.5;
 
 /**
  * What the meter's display shows for a flow of `rate` (by volume, see VOLUME) per sim second: millions per second,
@@ -1511,7 +1516,8 @@ export function separatorShares(): number[][] {
  *   a trickle through its faucet, the second spout, as far as its one valve is open. With enough in its reservoir,
  *   it's changed for the next supply's (see CHANGEOVER).
  * - A **flow meter** is an inline instrument (see INLINE_TOOLS): its tube drains straight through to one spout, and
- *   it shows what flows out, averaged over the recent past (see INSTRUMENT_TAU, rate and meterText).
+ *   it shows what flows out, averaged over the recent past (see INSTRUMENT_TAU, rate and meterText), taking up a
+ *   new number every METER_EVERY (see shown).
  * - **Swell bulbs** are two little round tanks with narrow necks (see BULB), pressed together so the necks stand
  *   side by side, each draining at up to PIPETTE_FLOW, heated alike by one wire whose temperature a dial sets (see
  *   wireTemperature and heatBy), so how much each swells shows side by side.
@@ -1580,6 +1586,10 @@ export class Tool {
    * once that's down to less than TRACE a sim second.
    */
   rate = 0;
+  /** What a meter's display shows: its reading as of the last time it took it up (see METER_EVERY). */
+  shown = 0;
+  /** How long until a meter's display next takes up its reading, in sim seconds. */
+  private showIn = 0;
   /**
    * A wicking strip's paper, stretch by stretch from its foot to its top (see STRIP.cells), each holding what's on
    * that stretch; it doesn't react or cool, having lost its heat as the paper took it up (see scorch). Empty for any
@@ -1707,7 +1717,7 @@ export class Tool {
     if (!this.shape.spouts.length) return this.none();
     // with nothing in it and its readings faded to nothing, a step would do nothing; an instrument's smoothing starts
     // again from nothing measured, as it would have to within less than TRACE
-    if (this.tanks.every((tk) => tk.N <= 0) && this.rate === 0 && !this.reading && !this.links && this.bonds.every((b) => b === 0)) {
+    if (this.tanks.every((tk) => tk.N <= 0) && this.rate === 0 && this.shown === 0 && !this.reading && !this.links && this.bonds.every((b) => b === 0)) {
       this.smoothed = null;
       return this.none();
     }
@@ -1744,6 +1754,11 @@ export class Tool {
     if (this.kind === 'meter') {
       const [v] = this.smooth(h, [volume(packets[0])]);
       this.rate = v >= TRACE ? v : 0;
+      this.showIn -= h;
+      if (this.showIn <= 0) {
+        this.shown = this.rate;
+        this.showIn = METER_EVERY;
+      }
     }
     if (this.kind === 'analyzer') {
       const [v, ...spec] = this.smooth(h, [volume(packets[1]), ...composition(packets[1], 1)]);

@@ -13,7 +13,7 @@ import { tankMouth } from './bodies';
 import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, METER_EVERY, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
   clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
 } from './tools';
 
@@ -225,6 +225,32 @@ describe('flow meter', () => {
     // and starts again from nothing: an idle meter isn't stepped, but nothing it read is left over
     run(INSTRUMENT_TAU, true);
     expect(m.rate / feed).toBeCloseTo(1 - Math.exp(-1), 1);
+  });
+
+  it(`shows its reading as of every ${METER_EVERY} sim s, holding each number till the next`, () => {
+    const m = new Tool('meter', 0);
+    const src = filled(new Vessel(Infinity), R, CAP, 1);
+    const feed = 0.25 * CAP; // per sim second
+    const steps = Math.round(METER_EVERY / 0.02);
+    // the first step's reading shows at once
+    m.tanks[0].addFrom(src, feed * 0.02);
+    m.step(0.02);
+    const first = m.rate;
+    expect(m.shown).toBe(first);
+    // then it holds while the reading climbs, until METER_EVERY has passed
+    for (let i = 1; i < steps; i++) {
+      m.tanks[0].addFrom(src, feed * 0.02);
+      m.step(0.02);
+    }
+    expect(m.rate).toBeGreaterThan(first);
+    expect(m.shown).toBe(first);
+    m.tanks[0].addFrom(src, feed * 0.02);
+    m.step(0.02);
+    expect(m.shown).toBe(m.rate);
+    // with the flow stopped, it's stepped on till it shows nothing, not left showing its last number
+    for (let i = 0; i < Math.round((40 * INSTRUMENT_TAU + 2 * METER_EVERY) / 0.02); i++) m.step(0.02);
+    expect(m.rate).toBe(0);
+    expect(m.shown).toBe(0);
   });
 
   it('lets nothing out while empty', () => {

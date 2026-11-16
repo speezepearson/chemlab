@@ -2414,7 +2414,7 @@ class ToolView {
     if (t.kind === 'culture') this.drawCulture(clock);
     if (t.kind === 'meter' && this.screen) {
       const s = this.screen;
-      const text = meterText(t.rate);
+      const text = meterText(t.shown);
       if (s.key !== text) {
         s.key = text;
         const d = METER_BODY.display;
