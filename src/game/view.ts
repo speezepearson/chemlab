@@ -4677,13 +4677,6 @@ export class View {
     return { x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h };
   }
 
-  /** A ray from the camera through (ndcX, ndcY) on the canvas. */
-  ray(ndcX: number, ndcY: number): { o: Vec3; d: Vec3 } {
-    this.raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
-    const { origin: o, direction: d } = this.raycaster.ray;
-    return { o: { x: o.x, y: o.y, z: o.z }, d: { x: d.x, y: d.y, z: d.z } };
-  }
-
   /** A point in the room relative to the camera, which is where the player hears from: x right, y up, z behind. */
   toHead(p: Vec3): Vec3 {
     const v = new THREE.Vector3(p.x, p.y, p.z).applyMatrix4(this.camera.matrixWorldInverse);

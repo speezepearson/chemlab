@@ -12,9 +12,6 @@ export class View {
   pick(_ndcX: number, _ndcY: number, _skip: object | null): null {
     return null;
   }
-  ray(_ndcX: number, _ndcY: number): { o: Vec3; d: Vec3 } {
-    return { o: { x: 0, y: 0, z: 0 }, d: { x: 0, y: 0, z: -1 } };
-  }
   project(_p: Vec3, _w: number, _h: number): null {
     return null;
   }

@@ -1170,9 +1170,26 @@ export class GameEngine {
     return [(x / Math.max(1, this.viewW)) * 2 - 1, 1 - (y / Math.max(1, this.viewH)) * 2];
   }
 
+  /**
+   * The line of sight through (x, y) on the view, in CSS pixels: from the view's place in the room, and which way.
+   * It's worked out from where the view is now, not from the frame last drawn, so that it's right however many times
+   * the view moves between frames.
+   */
+  private sight(x: number, y: number): { o: Vec3; d: Vec3 } {
+    const c = this.cam;
+    const [nx, ny] = this.ndc(x, y);
+    const t = Math.tan((c.fov * Math.PI) / 360);
+    // in the view's own frame, x right and y up, looking along −z; then tipped up by its pitch, and turned by its yaw
+    const v = { x: (nx * t * this.viewW) / Math.max(1, this.viewH), y: ny * t, z: -1 };
+    const [cp, sp] = [Math.cos(c.pitch), Math.sin(c.pitch)];
+    const w = { x: v.x, y: v.y * cp - v.z * sp, z: v.y * sp + v.z * cp };
+    const [cy, sy] = [Math.cos(c.yaw), Math.sin(c.yaw)];
+    return { o: { x: c.x, y: c.y, z: c.z }, d: { x: w.x * cy + w.z * sy, y: w.y, z: -w.x * sy + w.z * cy } };
+  }
+
   /** The point of the upright plane `z` out from the back wall that (x, y) on the view is on; null if it's on none of it. */
   private planeAt(x: number, y: number, z = this.wallZ()): Vec3 | null {
-    const { o, d } = this.view.ray(...this.ndc(x, y));
+    const { o, d } = this.sight(x, y);
     if (Math.abs(d.z) < 1e-6) return null;
     const s = (z - o.z) / d.z;
     return s > 0 ? { x: o.x + d.x * s, y: o.y + d.y * s, z } : null;
@@ -1235,16 +1252,16 @@ export class GameEngine {
     const side = this.facing === 'away' ? -1 : 1;
     const far = Math.abs(this.cam.z - this.wallZ());
     const step = PAN_RATE * far * dt;
-    let { x, y } = this.cam;
-    x += side * across * step;
-    y += up * step;
+    this.cam = this.inView({ ...this.cam, x: this.cam.x + side * across * step, y: this.cam.y + up * step });
+    this.dragView();
+  }
+
+  /** While the wall is being dragged (see panning), move the view so that the point of it taken hold of is under the pointer. */
+  private dragView(): void {
     const drag = this.panning;
-    const now = drag && at ? this.planeAt(at.x, at.y) : null;
-    if (drag && now) {
-      x += drag.x - now.x;
-      y += drag.y - now.y;
-    }
-    this.cam = this.inView({ ...this.cam, x, y });
+    const at = this.pointer;
+    const now = drag && at && this.canSteer() ? this.planeAt(at.x, at.y) : null;
+    if (drag && now) this.cam = this.inView({ ...this.cam, x: this.cam.x + drag.x - now.x, y: this.cam.y + drag.y - now.y });
   }
 
   /**
@@ -1432,6 +1449,7 @@ export class GameEngine {
       }
     }
     if (this.turning) this.aimTurning();
+    this.dragView();
   }
 
   /**
