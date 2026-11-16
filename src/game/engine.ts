@@ -3,6 +3,7 @@ import { Lag, temperature, type Fluid, type NetReaction, type ReactionNetwork } 
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
+import { hearing } from './audio';
 import {
   FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, newGrip, type Grip, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
   flaskLip, flaskMouth, nozzleBox, tankFluid, docked, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
@@ -2205,6 +2206,8 @@ export class GameEngine {
       nap.lids = Math.max(0, Math.min(1, nap.lids + (nap.waking ? -dt / NAP_S.open : dt / NAP_S.close)));
       if (nap.waking && nap.lids <= 0) this.napping = null;
     }
+    // shut in the pod or napping, everything's muffled; and once they've won (or god mode previews the end), silent
+    hearing(this.muffled(), this.arrival || !!this.previewing);
     // asleep, the screen is black: nothing to draw, and the lab runs on its own (see fallAsleep)
     if (this.asleep()) {
       if (!this.sleeping) this.fallAsleep();
@@ -3242,6 +3245,27 @@ export class GameEngine {
     else if (this.wake === 'open' && this.station().steady === 0 && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
   }
 
+  /**
+   * How far up the pod's front is, 0 to 1: sliding up as they wake, down as they settle in, and otherwise up but while
+   * they're shut in it.
+   */
+  private podUp(): number {
+    const w = this.wake;
+    const t = this.wakeT;
+    return w === 'opening' || w === 'arriving' ? ease(t / WAKE_S.open)
+      : w === 'boarding' ? 1 - ease(t / WAKE_S.open)
+      : w === 'pod' || w === 'flicker' || w === 'asleep' ? 0
+      : 1;
+  }
+
+  /**
+   * How muffled everything sounds to the player, 0 to 1: as much as the pod's front is shut on them, or their eyes are
+   * closed for a nap.
+   */
+  private muffled(): number {
+    return Math.max(inPod(this.wake) ? 1 - this.podUp() : 0, this.napping?.lids ?? 0);
+  }
+
   /** How the airlock looks just now, for the view. */
   private airlockLook(): AirlockLook {
     const w = this.wake;
@@ -3251,13 +3275,7 @@ export class GameEngine {
       const notice = { arrival: true } as const;
       return { door: 1, front: up, dark: 1 - up, message: false, notice, okHot: false, lamp: false, arrival: true };
     }
-    // how far up the pod's front is: sliding up as they wake, down as they settle in, and otherwise up but while
-    // they're shut in it
-    const up =
-      w === 'opening' || w === 'arriving' ? ease(t / WAKE_S.open)
-      : w === 'boarding' ? 1 - ease(t / WAKE_S.open)
-      : w === 'pod' || w === 'flicker' || w === 'asleep' ? 0
-      : 1;
+    const up = this.podUp();
     // the message flickers, on less and less of the time, until it's gone
     const flick = w === 'flicker' && Math.sin(t * 90) + Math.sin(t * 37) > 2.6 * (t / WAKE_S.flicker) - 0.6;
     return {

@@ -46,6 +46,24 @@ export function gainOf(slider: number): number {
   return (Math.max(0, Math.min(1, slider)) / MIDDLE) ** 2;
 }
 
+/**
+ * How the player's hearing muffles everything, through the pod's shut front or their own closed eyes, at full
+ * muffling: a low-pass filter's cutoff in Hz, and a gain. Open, it's the whole range at full volume.
+ */
+export const MUFFLE = { hz: 350, gain: 0.45, openHz: 20000 };
+
+/**
+ * What everything heard goes through, `muffled` from 0 (not at all) to 1 (shut in the pod, or eyes shut), or
+ * `silent`: a low-pass cutoff, falling geometrically from MUFFLE.openHz to MUFFLE.hz, and a gain.
+ */
+export function earsAt(muffled: number, silent: boolean): { hz: number; gain: number } {
+  const m = Math.max(0, Math.min(1, muffled));
+  return {
+    hz: MUFFLE.openHz * (MUFFLE.hz / MUFFLE.openHz) ** m,
+    gain: silent ? 0 : 1 + (MUFFLE.gain - 1) * m,
+  };
+}
+
 /** Volumes from stored JSON, tolerating junk: anything missing or not a number in [0, 1] gets its default. */
 export function parseVolumes(json: string | null): Volumes {
   const out = defaultVolumes();

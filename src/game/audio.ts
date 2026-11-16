@@ -1,13 +1,17 @@
 import { CENTER, type Placement } from './place';
-import { CHANNELS, gainOf, storeVolumes, storedVolumes, type Channel, type Volumes } from './volumes';
+import { CHANNELS, earsAt, gainOf, storeVolumes, storedVolumes, type Channel, type Volumes } from './volumes';
 
 /**
  * The one audio context and its mixer: each kind of sound plays into its own channel's bus, each bus into a master
- * bus, and that through a compressor (so a crowd of streams can't clip) to the speakers. Browsers keep audio off
+ * bus, that through the player's ears (see hearing), and that through a compressor (so a crowd of streams can't clip) to the speakers. Browsers keep audio off
  * until a user gesture, so the context resumes on the first click or key; until then everything is silent.
  */
 let ctx: AudioContext | null | undefined;
 let buses: Record<Channel, GainNode> | null = null;
+/** The player's ears: a low-pass filter and a gain, between the master bus and the compressor (see hearing). */
+let ears: { lp: BiquadFilterNode; gain: GainNode } | null = null;
+/** How muffled the player's hearing is, 0 to 1, and whether it's silent (see hearing). */
+let heard = { muffled: 0, silent: false };
 
 /** The current slider positions (see volumes.ts). */
 export const VOLUMES: Volumes = storedVolumes();
@@ -30,7 +34,15 @@ export function audio(): AudioContext | null {
   comp.threshold.value = -12;
   comp.connect(c.destination);
   const master = c.createGain();
-  master.connect(comp);
+  const lp = c.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.Q.value = 0.5;
+  const gain = c.createGain();
+  const at = earsAt(heard.muffled, heard.silent);
+  lp.frequency.value = at.hz;
+  gain.gain.value = at.gain;
+  master.connect(lp).connect(gain).connect(comp);
+  ears = { lp, gain };
   const b = { master } as Record<Channel, GainNode>;
   for (const ch of CHANNELS) {
     if (ch === 'master') continue;
@@ -81,6 +93,23 @@ export class Spot {
     this.input.disconnect();
     this.pan.disconnect();
   }
+}
+
+/**
+ * How the player hears everything, the ship's ambience included: `muffled` from 0 to 1, as through the cryopod's
+ * shut front or their own closed eyes (see earsAt), or not at all, `silent`, once they've won. Muffling follows within
+ * a few hundredths of a second, as the pod's front or their eyelids move; silence fades in over about a second. Call
+ * it as often as you like: it only does anything when something's changed, and doesn't start the audio.
+ */
+export function hearing(muffled: number, silent: boolean): void {
+  if (Math.abs(muffled - heard.muffled) < 1e-3 && silent === heard.silent) return;
+  const quieting = silent !== heard.silent;
+  heard = { muffled, silent };
+  if (!ctx || !ears) return;
+  const at = earsAt(muffled, silent);
+  const now = ctx.currentTime;
+  ears.lp.frequency.setTargetAtTime(at.hz, now, 0.03);
+  ears.gain.gain.setTargetAtTime(at.gain, now, quieting && silent ? 0.3 : 0.03);
 }
 
 /** Move a slider, and remember it. */
