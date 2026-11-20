@@ -905,11 +905,13 @@ export function cultureLevel(share: number): number {
  *   it reaches either side of the lamp's middle line (`x`), how wide each of the two posts at its ends is, and how
  *   tall the rail between their feet, which the sheet stands on;
  * - dim: how much fluid dims its light, per world unit of the light's way through fluid all of whose molecules have a
- *   ring in them (see lampLight): so that a full flask of nothing but rings, about 50 across inside, lets through
- *   about e^−4 of it, all but none, and one with a few rings in a hundred casts a faint shadow.
+ *   ring in them (see lampLight): so that a flask with a few rings in a hundred molecules, about 50 across inside,
+ *   takes a quarter of it, a faint shadow but one that shows on the sheet (see darkness: the sheet's darkening levels
+ *   off, so much less than that never shows at all), one with ten in a hundred takes most of it through its middle
+ *   and visibly less toward its edges, and a full flask of nothing but rings lets through e^−10 of it, none.
  */
 export const LAMP = {
-  h: 300, w: 5 * CELL, d: 3 * CELL, dim: 0.08,
+  h: 300, w: 5 * CELL, d: 3 * CELL, dim: 0.2,
   housing: { x0: -110, x1: 110, z0: -150, z1: -50 },
   bulb: { y: 290, z: -135, r: 5 },
   mouth: { x: 50, y0: 196, y1: 298 },

@@ -2710,22 +2710,33 @@ describe("the shadow lamp's light through fluid", () => {
     expect(lampLight(1, -10)).toBe(1);
   });
 
-  it('is all but stopped by a flask of nothing but rings, and only faintly shadowed by one with a few in a hundred', () => {
+  it('is stopped by a flask of nothing but rings, and faintly but visibly shadowed by one with a few in a hundred', () => {
     expect(across).toBeGreaterThan(40);
     expect(across).toBeLessThan(60);
     const full = new Vessel(CAP);
     full.setMolecules(TARGET, CAP / 3);
-    expect(Math.log(lampLight(ringShare(full), across))).toBeGreaterThan(-5);
-    expect(Math.log(lampLight(ringShare(full), across))).toBeLessThan(-3);
-    // 3 rings in a hundred molecules, the rest solvent
+    // under a hundredth of it gets through the flask's middle, and still under a twentieth through a fifth as much
+    expect(lampLight(ringShare(full), across)).toBeLessThan(0.01);
+    expect(lampLight(ringShare(full), across / 5)).toBeLessThan(0.2);
+    // 3 rings in a hundred molecules, the rest solvent: most of the light gets through
     const thin = new Vessel(CAP);
     thin.setMolecules(TARGET, 3e7);
     thin.setMolecules(SOLVENT_SPECIES, 9.7e8);
     const light = lampLight(ringShare(thin), across);
-    expect(light).toBeGreaterThan(0.8);
-    expect(light).toBeLessThan(0.95);
-    // which shows on the sheet: lit for a second, it's a few shades lighter there, of the 255 a save keeps
-    expect(Math.round(255 * (darkness(1) - darkness(light)))).toBeGreaterThanOrEqual(5);
+    expect(light).toBeGreaterThan(0.6);
+    expect(light).toBeLessThan(0.85);
+    // which still shows on the sheet: lit for a second, it's a good twenty shades lighter there, of the 255 from new
+    // to as dark as it gets; and fainter the longer the lamp's left on, as the sheet round it has less left to darken
+    const paler = (s: number) => Math.round(255 * (darkness(s) - darkness(s * light)));
+    expect(paler(1)).toBeGreaterThanOrEqual(20);
+    expect(paler(SHEET.tau)).toBeGreaterThanOrEqual(paler(1));
+    expect(paler(2)).toBeLessThan(paler(1) / 2);
+    // ten in a hundred is plainly paler through the flask's middle than through a third as much of it, toward its edge
+    const tenth = new Vessel(CAP);
+    tenth.setMolecules(TARGET, 1e8);
+    tenth.setMolecules(SOLVENT_SPECIES, 9e8);
+    const [mid, edge] = [across, across / 3].map((L) => darkness(lampLight(ringShare(tenth), L)));
+    expect(Math.round(255 * (edge - mid))).toBeGreaterThanOrEqual(40);
     // and a flask of chains of the same atoms, or of anything else with no ring, casts none at all
     const chains = new Vessel(CAP);
     chains.setMolecules(speciesIndex(['R', 'G', 'B'], bondMask(['R', 'G'], ['G', 'B'])), CAP / 3);
