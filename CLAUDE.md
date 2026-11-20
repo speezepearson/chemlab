@@ -25,7 +25,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - Set up a scene by writing a save before the page loads:
   `page.addInitScript(s => localStorage.setItem('slurry-lab.save', s), JSON.stringify(save))`. The format is
   `SaveState` in `src/game/save.ts`; tool positions are fractions of the old bench's home area (see `fromFrac`).
-- Set `localStorage['slurry-lab.view']` to a `ViewMode` (`wall`, `iso`, ...) to load in that way of seeing the lab.
+- Set `localStorage['slurry-lab.view']` to a `ViewMode` (`wall`, `walk`, `iso`, `flat`) to load in that way of seeing
+  the lab. The flat one needs no WebGL, so it's fast, and good for checking anything that isn't about the 3D drawing.
 - Set `localStorage['slurry-lab.introSeen'] = '1'` to skip the intro. A start button still covers the page (it's
   the click that lets sound play), and the lab stays paused under it, so click `.intro-start` first.
 - WebGL needs a software renderer. Launch with
@@ -72,7 +73,13 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     pointer is on the wall without asking the renderer.
   - `view.ts` draws it all with Three.js, from wherever the engine puts the camera (`Camera`), and raycasts for what
     the pointer is on (`pick`); `project` goes the other way. `LabView` is what the engine asks of whatever draws
-    the lab. It draws the arms out of the wall (`ArmView`), the
+    the lab.
+  - `view2d.ts` is the other thing that draws it: `FlatView`, for the flat mode, on a plain 2D canvas, with no
+    three.js at all (`view2d.test.ts` checks nothing it loads imports it). `flatTools.ts` draws every tool kind, flasks
+    and scales from their flat outlines, `flatRoom.ts` the wall, counter, cabinet, faucets, hoses, streams and guides,
+    and `sketch.ts` is the drawing kit, which keeps each shape drawn with what it's part of, for picking. `screens.ts`
+    is the canvas drawing both views share (the instruments' screens, inks, scales, readouts, the pod's message, the
+    alarms' plate), and `thing.ts` says what a pick is part of, for outlining. It draws the arms out of the wall (`ArmView`), the
     faucets' supply line, and hoses bowed back toward the wall. It also draws the equipment wheels' icons
     (`IconStudio`): a new one of each kind, drawn as in the lab, so there are no icons to keep up to date.
   - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room; what fluid a
@@ -188,7 +195,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   don't give other materials `transmission` lightly.
 - **Adding a tool kind** touches all of these:
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
-  - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially. Its
+  - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially, and
+    the same in the flat view's `drawTool` (`flatTools.ts`), which draws every kind too. Anything either draws on a
+    canvas (a screen, a scale, an ink) goes in `screens.ts`, for both. Its
     mouths and spouts a whole number of `CELL` apart along it, so a row of flasks or tanks that far apart can stand
     under them (`bodies.test.ts` checks every shape).
   - A place on one of the equipment wheels (`WHEELS` in `wheel.ts`: 1's is for experimenting and learning, 2's for

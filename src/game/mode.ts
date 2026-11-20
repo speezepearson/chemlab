@@ -14,6 +14,7 @@ export const VIEW_MODES: readonly { id: ViewMode; name: string }[] = [
   { id: 'wall', name: 'Wall' },
   { id: 'walk', name: 'Walk round' },
   { id: 'iso', name: 'Isometric' },
+  { id: 'flat', name: 'Flat' },
 ];
 
 /** Every mode there is, offered or not. */
