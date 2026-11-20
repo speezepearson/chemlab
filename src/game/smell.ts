@@ -1,8 +1,9 @@
+import { T_ROOM } from '../chem/params';
 import { NS, SPECIES } from '../chem/species';
 
 /**
  * Something that smells: a species, by its name (see species.ts), what it smells like to Nadia, and how potent it is:
- * the share of a fluid's molecules it has to be for her to smell it at all. `sweet` marks the
+ * the share of a fluid's molecules it has to be, at room temperature, for her to smell it at all. `sweet` marks the
  * one kinship written into the table (see ODORANTS).
  */
 export interface Odorant {
@@ -60,13 +61,27 @@ export const WORDS = ['a trace of', 'a whiff of', 'smells of', 'smells strongly 
 const VERBS = 2;
 
 /**
- * How strong each of ODORANTS is in a fluid, in multiples of its threshold: its share of the fluid's molecules (the
- * solvent's count too, so diluting weakens a smell) over that threshold. All 0 for no fluid.
+ * How much more a warm fluid gives off than one at room temperature, and how much less a cold one: exp(VOLATILITY ×
+ * (1 − T_ROOM / T)), as a vapor's pressure goes. That's 1 at room temperature, falls smoothly to nothing as T goes to
+ * 0 (a fifth at half the room's), and levels off when hot (twice at double the room's, never more than e^VOLATILITY,
+ * four and a half times: a little under one step of STEP). It's the same for every odorant, so warming a fluid makes
+ * all its smells stronger together.
  */
-export function strengths(n: ArrayLike<number>): number[] {
+export const VOLATILITY = 1.5;
+export function waft(T: number): number {
+  return T > 0 ? Math.exp(VOLATILITY * (1 - T_ROOM / T)) : 0;
+}
+
+/**
+ * How strong each of ODORANTS is in a fluid at temperature T, in multiples of its threshold: its share of the fluid's
+ * molecules (the solvent's count too, so diluting weakens a smell), times what the warmth does (see waft), over that
+ * threshold. All 0 for no fluid.
+ */
+export function strengths(n: ArrayLike<number>, T = T_ROOM): number[] {
   let all = 0;
   for (let s = 0; s < NS; s++) all += Math.max(0, n[s]);
-  return ODORANTS.map((o, i) => (all > 0 ? Math.max(0, n[INDEX[i]]) / all / o.threshold : 0));
+  const warm = waft(T);
+  return ODORANTS.map((o, i) => (all > 0 ? (Math.max(0, n[INDEX[i]]) / all) * warm / o.threshold : 0));
 }
 
 /** A strength (see strengths) as a level: the steps of STEP it is over the threshold, 0 at it and negative under it. */
@@ -85,10 +100,10 @@ export interface Smelled {
   level: number;
 }
 
-/** What can be smelled in a fluid, from its molecule counts: every odorant at or over its threshold, strongest first. */
-export function smell(n: ArrayLike<number>): Smelled[] {
+/** What can be smelled in a fluid, from its molecule counts and temperature: every odorant at or over its threshold, strongest first. */
+export function smell(n: ArrayLike<number>, T = T_ROOM): Smelled[] {
   const smelled: Smelled[] = [];
-  strengths(n).forEach((x, i) => {
+  strengths(n, T).forEach((x, i) => {
     if (x >= 1) smelled.push({ odorant: ODORANTS[i], level: levelOf(x) });
   });
   return smelled.sort((a, b) => b.level - a.level);

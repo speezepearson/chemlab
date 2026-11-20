@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { NS, SOLVENT_SPECIES, SPECIES } from '../chem/species';
-import { ODORANTS, STEP, WORDS, levelOf, sentence, smell, strengths, type Odorant } from './smell';
+import {
+  ODORANTS, STEP, VOLATILITY, WORDS, levelOf, sentence, smell, strengths, waft, type Odorant,
+} from './smell';
 
 const named = (species: string): Odorant => ODORANTS.find((o) => o.species === species)!;
 const index = (species: string) => SPECIES.find((s) => s.name === species)!.i;
@@ -17,13 +19,13 @@ function fluid(shares: Record<string, number>): Float64Array {
   return n;
 }
 
-/** The share of a fluid an odorant is at `steps` steps over its threshold. */
+/** The share of a fluid an odorant is at `steps` steps over its threshold, at room temperature. */
 const shareAt = (o: Odorant, steps: number) => o.threshold * STEP ** steps;
 /** A fluid of these odorants (by species' name), each at this many steps over its threshold, in solvent. */
 const mix = (steps: Record<string, number>) =>
   fluid(Object.fromEntries(Object.entries(steps).map(([species, at]) => [species, shareAt(named(species), at)])));
-/** How strong an odorant is in a fluid, as a level. */
-const level = (species: string, n: Float64Array) => levelOf(strengths(n)[ODORANTS.indexOf(named(species))]);
+/** How strong an odorant is in a fluid at temperature T, as a level. */
+const level = (species: string, n: Float64Array, T?: number) => levelOf(strengths(n, T)[ODORANTS.indexOf(named(species))]);
 const species = (smelled: readonly { odorant: Odorant }[]) => smelled.map((s) => s.odorant.species);
 
 describe('ODORANTS', () => {
@@ -111,6 +113,8 @@ describe('smell', () => {
       const n = new Float64Array(NS);
       n[s.i] = 1e9;
       expect(smell(n), s.name).toEqual([]);
+      // however hot
+      expect(smell(n, 50), s.name).toEqual([]);
     }
     expect(smell(new Float64Array(NS))).toEqual([]);
     expect(sentence([])).toBe('Nothing.');
@@ -130,6 +134,34 @@ describe('smell', () => {
 
   it('lists what it finds strongest first', () => {
     expect(species(smell(mix({ R: 1.0, K: 2.5, 'G–B': 1.5 })))).toEqual(['K', 'G–B', 'R']);
+  });
+});
+
+describe('waft', () => {
+  it('is 1 at room temperature, nothing at absolute zero, and more the warmer, leveling off', () => {
+    expect(waft(1)).toBe(1);
+    expect(waft(0)).toBe(0);
+    expect(waft(1e-3)).toBeLessThan(1e-9);
+    for (let T = 0.05; T < 40; T *= 1.1) expect(waft(T * 1.1)).toBeGreaterThan(waft(T));
+    expect(waft(1e6)).toBeLessThan(Math.exp(VOLATILITY));
+    expect(waft(1e6)).toBeCloseTo(Math.exp(VOLATILITY), 3);
+    // heat alone never adds as much as a whole step
+    expect(Math.exp(VOLATILITY)).toBeLessThan(STEP);
+  });
+
+  it('makes a warm fluid smell stronger and a cold one fainter, every odorant alike', () => {
+    const n = mix({ K: 1.6, 'R–G': 0.5 });
+    for (const T of [0.5, 0.8, 1.5, 3]) {
+      const by = levelOf(waft(T));
+      expect(by > 0).toBe(T > 1);
+      for (const s of ['K', 'R–G']) expect(level(s, n, T)).toBeCloseTo(level(s, n) + by, 9);
+    }
+    expect(sentence(smell(n))).toBe(`A whiff of ${named('K').simile} and a trace of ${named('R–G').simile}.`);
+    // hot, each is a word stronger; cold, the fainter is gone and the stronger is a trace
+    expect(sentence(smell(n, 3))).toBe(`Smells of ${named('K').simile}, with a whiff of ${named('R–G').simile}.`);
+    expect(sentence(smell(n, 0.5))).toBe(`A trace of ${named('K').simile}.`);
+    // and cold enough, nothing
+    expect(smell(n, 0.25)).toEqual([]);
   });
 });
 

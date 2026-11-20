@@ -1970,7 +1970,7 @@ export class GameEngine {
 
   /**
    * F: sniff what's in the vessel the crosshair is on, or in the flask in hand (see sniffAim), as it is just now, by
-   * what it's made of. What it smells of (see smell) comes up on the display, in a line (see
+   * what it's made of and how warm it is. What it smells of (see smell) comes up on the display, in a line (see
    * sentence), and fades after SMELL_MS. Sniffing is her own doing, so it works while the lab's paused.
    */
   private sniff(): void {
@@ -1981,7 +1981,7 @@ export class GameEngine {
       this.say('It’s sealed');
       return;
     }
-    this.smelled = { text: sentence(smell(v.n)), n: ++this.sniffs, until: performance.now() + SMELL_MS };
+    this.smelled = { text: sentence(smell(v.n, temperature(v))), n: ++this.sniffs, until: performance.now() + SMELL_MS };
   }
 
   private rightDown(): void {
