@@ -28,7 +28,7 @@ import { WHEELS, wheelMove, wheelPick, type WheelAim } from './wheel';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
 import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
-import { sentence, smell } from './smell';
+import { Nose, sentence } from './smell';
 import {
   CELL, COUNTERS, LIFT, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toCardinal, toFrac, toLocal, toWorld, wrapAngle,
   type Pose, type Vec3,
@@ -384,6 +384,8 @@ export class GameEngine {
   private target: (Pick & { point: Vec3; distance: number }) | null = null;
   /** A brief note on the display, like there being no room for something (see say). */
   private flash: { text: string; until: number; tip?: boolean } | null = null;
+  /** The player's nose, which tires of what it's just smelled, and recovers on sim time (see sniff). Not saved. */
+  private nose = new Nose();
   /** What the last sniff smelled of (see sniff), until it's faded from the display, and how many sniffs there have been. */
   private smelled: { text: string; n: number; until: number } | null = null;
   private sniffs = 0;
@@ -692,6 +694,7 @@ export class GameEngine {
     this.falling = [];
     this.held = this.turning = this.tarePress = null;
     this.smelled = null;
+    this.nose.clear();
     this.history.clear();
   }
 
@@ -1970,8 +1973,9 @@ export class GameEngine {
 
   /**
    * F: sniff what's in the vessel the crosshair is on, or in the flask in hand (see sniffAim), as it is just now, by
-   * what it's made of and how warm it is. What it smells of (see smell) comes up on the display, in a line (see
-   * sentence), and fades after SMELL_MS. Sniffing is her own doing, so it works while the lab's paused.
+   * what it's made of and how warm it is. What her nose makes of it (see Nose) comes up on the display, in a line (see
+   * sentence), and fades after SMELL_MS. Sniffing is her own doing, so it works while the lab's paused, but her nose
+   * doesn't recover then.
    */
   private sniff(): void {
     if (this.dozing() || inPod(this.wake) || this.turning || this.wheel) return;
@@ -1981,7 +1985,8 @@ export class GameEngine {
       this.say('It’s sealed');
       return;
     }
-    this.smelled = { text: sentence(smell(v.n, temperature(v))), n: ++this.sniffs, until: performance.now() + SMELL_MS };
+    const { smelled, stale } = this.nose.sniff(v.n, temperature(v));
+    this.smelled = { text: sentence(smelled, stale), n: ++this.sniffs, until: performance.now() + SMELL_MS };
   }
 
   private rightDown(): void {
@@ -2444,6 +2449,7 @@ export class GameEngine {
       };
       for (let i = 0; i < sub; i++) {
         this.stepWake(step);
+        this.nose.step(step);
         if (D && this.pour) {
           const out = new Vessel(Infinity);
           transfer(D, out, POUR_RATE * step);
@@ -3175,6 +3181,7 @@ export class GameEngine {
         this.clock += dt;
         this.spin = (this.spin + SPIN * dt) % (2 * Math.PI);
         this.station().steady += dt;
+        this.nose.step(dt);
       },
     };
   }
