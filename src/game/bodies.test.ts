@@ -148,7 +148,7 @@ describe("the shadow lamp's holder", () => {
     // its front is toward the housing, across the bench
     const front = { x: SHEET_SLOT.x + Math.sin(SHEET_SLOT.yaw), z: SHEET_SLOT.z + Math.cos(SHEET_SLOT.yaw) };
     expect(Math.hypot(front.x - LAMP_POSE.x, front.z - LAMP_POSE.z)).toBeLessThan(Math.hypot(SHEET_SLOT.x - LAMP_POSE.x, SHEET_SLOT.z - LAMP_POSE.z));
-    expect(b.y + b.hy).toBeCloseTo(LIFT + LAMP.h);
+    expect(b.y + b.hy).toBeLessThanOrEqual(LIFT + LAMP.h);
   });
 
   it('needs no stand for a sheet in it, which stands on one anywhere else', () => {

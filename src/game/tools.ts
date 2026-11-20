@@ -893,11 +893,13 @@ export function cultureLevel(share: number): number {
  * - h: how tall it stands on its bench: its housing, and its holder's posts; w and d: how far across and front to
  *   back it and its bench are, in whole grid cells;
  * - housing: the cabinet the lamp is in, at the back, as tall as it stands;
- * - bulb: the bulb, deep in a recess in the housing's face: how far down from the top its middle is, where it is front
- *   to back, and its radius;
- * - mouth: how far the recess's square opening in the housing's face reaches either side of the bulb's axis, across
- *   and up: wide enough for the bulb's light to reach all of a sheet in the holder, and no wider, so it lights
- *   nothing else;
+ * - bulb: the bulb, deep in a recess at the foot of the housing's face: how far down from the top its middle is,
+ *   where it is front to back, and its radius. It's just above the bench, level with the foot of a sheet in the
+ *   holder, so the shadow of whatever stands on the bench stands on the sheet's bottom edge, however near the lamp it
+ *   is; were it higher, the shadow of anything below it would be thrown down past the foot of the sheet;
+ * - mouth: the recess's opening in the housing's face: how far it reaches either side of the bulb, across, and from
+ *   how far down from the top to how far: just big enough for the bulb's light to reach all of a sheet in the holder,
+ *   and no bigger, so it lights nothing else;
  * - console: the box beside the housing that the switch is on, and switch, the switch's middle on the box's front;
  * - holder: the frame a sheet stands in, at the front: where it is front to back, how thick it is that way, how wide
  *   each of its two posts is, and how tall the rail between their feet, which the sheet stands on.
@@ -905,11 +907,11 @@ export function cultureLevel(share: number): number {
 export const LAMP = {
   h: 300, w: 3 * CELL, d: 3 * CELL,
   housing: { x0: -110, x1: 110, z0: -150, z1: -50 },
-  bulb: { y: 150, z: -135, r: 5 },
-  mouth: 50,
+  bulb: { y: 290, z: -135, r: 5 },
+  mouth: { x: 50, y0: 196, y1: 298 },
   console: { x0: -150, x1: -110, y0: 180 },
   switch: { x: -130, y: 216 },
-  holder: { z: 145, d: 10, post: 8.5, rail: 10 },
+  holder: { z: 145, d: 10, post: 8.5, rail: 4 },
 };
 
 /**

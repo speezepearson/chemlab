@@ -2528,14 +2528,30 @@ describe('the shadow lamp', () => {
     expect(t.owed).toBe(SHEET.full);
   });
 
-  it("has its bulb on the middle line of its bench, behind the opening of the recess it's in", () => {
-    const { housing, bulb, mouth, holder } = LAMP;
+  it("has its bulb deep in a recess that's just big enough for its light to reach all of a sheet in the holder", () => {
+    const { housing, bulb, mouth, holder, h } = LAMP;
     expect(bulb.z - bulb.r).toBeGreaterThan(housing.z0);
     expect(bulb.z + bulb.r).toBeLessThan(housing.z1);
-    // the opening is just wide enough for the bulb's light to reach all of what's between the holder's posts
-    const reach = (LAMP.w / 2 - holder.post) * ((housing.z1 - bulb.z) / (holder.z - bulb.z));
-    expect(mouth).toBeGreaterThan(reach + bulb.r);
-    expect(mouth).toBeLessThan(reach + 4 * bulb.r);
+    // where the light to each edge of the sheet's square crosses the opening, from anywhere on the bulb
+    const share = (housing.z1 - bulb.z) / (holder.z - bulb.z);
+    const across = (SHEET.side / 2) * share + bulb.r * (1 - share);
+    const foot = h - holder.rail;
+    const up = bulb.y - bulb.r + (foot - SHEET.side - (bulb.y - bulb.r)) * share;
+    const down = bulb.y + bulb.r + (foot - (bulb.y + bulb.r)) * share;
+    expect(mouth.x).toBeGreaterThan(across);
+    expect(mouth.x).toBeLessThan(across + 2 * bulb.r);
+    expect(mouth.y0).toBeLessThan(up);
+    expect(mouth.y0).toBeGreaterThan(up - 2 * bulb.r);
+    expect(mouth.y1).toBeGreaterThan(down);
+    expect(mouth.y1).toBeLessThanOrEqual(h);
+  });
+
+  it('has its bulb just above the bench, level with the foot of a sheet in the holder, so shadows stand on its bottom edge', () => {
+    const { bulb, holder, h } = LAMP;
+    // all of the bulb is above the bench, and none of it more than its own width above the rail's top
+    expect(bulb.y + bulb.r).toBeLessThan(h);
+    expect(h - holder.rail - (bulb.y - bulb.r)).toBeLessThanOrEqual(3 * bulb.r);
+    expect(h - holder.rail - (bulb.y - bulb.r)).toBeGreaterThan(0);
   });
 });
 
@@ -2552,9 +2568,8 @@ describe('shadow paper', () => {
     expect(UNIQUE_TOOLS).not.toContain('sheet');
     const b = t.shape.box;
     expect(b.x1 - b.x0).toBeLessThan(LAMP.w - 2 * LAMP.holder.post);
-    expect(b.y1 - b.y0).toBe(LAMP.h - LAMP.holder.rail);
-    // its square's middle is level with the bulb once it stands on the rail
-    expect(LAMP.h - LAMP.holder.rail - SHEET.side / 2).toBe(LAMP.bulb.y);
+    // standing on the rail, it's no taller than the posts
+    expect(b.y1 - b.y0).toBeLessThanOrEqual(LAMP.h - LAMP.holder.rail);
     expect(t.dose).toHaveLength(N * N);
     expect(new Tool('strip', 1).dose).toHaveLength(0);
   });

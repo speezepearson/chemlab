@@ -1825,8 +1825,8 @@ class ToolView {
   }
 
   /**
-   * The shadow lamp (see LAMP): at the back, a housing with a square recess in its face, flaring out from a bulb deep
-   * inside it, so the bulb lights only what's straight in front of the recess; beside the housing, a console with a
+   * The shadow lamp (see LAMP): at the back, a housing with a recess at the foot of its face, flaring out and up from a
+   * bulb deep inside it, so the bulb lights only what's in front of the recess; beside the housing, a console with a
    * toggle switch on its front; and at the front, a holder for a sheet: two posts and a rail between their feet. The
    * bulb and the recess's lining glow lavender while it's on, and that's all the light it gives: it lights nothing in
    * the room.
@@ -1840,29 +1840,29 @@ class ToolView {
       art.add(m);
       return m;
     };
-    // the housing: a cabinet with a square hole through its face, back to where the bulb is
+    // the housing: a cabinet with a hole through the foot of its face, back to where the bulb is
     const face = new THREE.Shape([
       new THREE.Vector2(hs.x0, -h), new THREE.Vector2(hs.x1, -h), new THREE.Vector2(hs.x1, 0), new THREE.Vector2(hs.x0, 0),
     ]);
-    const sq = (half: number) => [[-1, -1], [-1, 1], [1, 1], [1, -1]].map(([sx, sy]) => new THREE.Vector2(sx * half, -bulb.y + sy * half));
-    face.holes.push(new THREE.Path(sq(mouth)));
+    const rect = (hx: number, y0: number, y1: number) => [[-hx, y1], [-hx, y0], [hx, y0], [hx, y1]].map(([x, y]) => new THREE.Vector2(x, -y));
+    face.holes.push(new THREE.Path(rect(mouth.x, mouth.y0, mouth.y1)));
     solid(new THREE.Mesh(new THREE.ExtrudeGeometry(face, { depth: hs.z1 - hs.z0, bevelEnabled: false }).translate(0, 0, hs.z0), panelMat));
-    // a dark bezel round the recess's opening
+    // a dark bezel round the recess's opening, and vents across the face above it
     const lip = 4;
     for (const [x0, x1, y0, y1] of [
-      [-mouth - lip, mouth + lip, bulb.y - mouth - lip, bulb.y - mouth], [-mouth - lip, mouth + lip, bulb.y + mouth, bulb.y + mouth + lip],
-      [-mouth - lip, -mouth, bulb.y - mouth, bulb.y + mouth], [mouth, mouth + lip, bulb.y - mouth, bulb.y + mouth],
+      [-mouth.x - lip, mouth.x + lip, mouth.y0 - lip, mouth.y0], [-mouth.x - lip, -mouth.x, mouth.y0, mouth.y1], [mouth.x, mouth.x + lip, mouth.y0, mouth.y1],
     ])
       block(art, darkMat, x0, x1, y0, y1, hs.z1, hs.z1 + 1.5);
+    for (let y = 40; y < 100; y += 12) block(art, darkMat, -60, 60, y, y + 4, hs.z1 - 1, hs.z1 + 0.4);
     // the recess's lining, flaring from a little plate behind the bulb out to the opening: dark and dull, glowing
     // with the bulb's light while it's on
     const lining = new THREE.MeshStandardMaterial({
       color: 0x17181d, roughness: 0.9, metalness: 0.1, side: THREE.DoubleSide, emissive: LAMP_GLOW, emissiveIntensity: 0,
     });
-    const back = 14;
+    const back = 9;
     const zb = bulb.z - bulb.r - 2;
-    const ring = (half: number, z: number) => sq(half).map((p) => new THREE.Vector3(p.x, p.y, z));
-    const [outer, inner] = [ring(mouth, hs.z1 - 0.2), ring(back, zb)];
+    const ring = (hx: number, y0: number, y1: number, z: number) => rect(hx, y0, y1).map((p) => new THREE.Vector3(p.x, p.y, z));
+    const [outer, inner] = [ring(mouth.x, mouth.y0, mouth.y1, hs.z1 - 0.2), ring(back, bulb.y - back, Math.min(mouth.y1, bulb.y + back), zb)];
     const quads: THREE.Vector3[] = [];
     for (let i = 0; i < 4; i++) {
       const j = (i + 1) % 4;
@@ -4407,6 +4407,7 @@ class Exposer {
         this.beam.expandByPoint(new THREE.Vector3(p.x, to.y - half - bulb.r, p.z));
         this.beam.expandByPoint(new THREE.Vector3(p.x, to.y + half + bulb.r, p.z));
       }
+    this.beam.expandByPoint(new THREE.Vector3(from.x, from.y - bulb.r, from.z)).expandByPoint(new THREE.Vector3(from.x, from.y + bulb.r, from.z));
     this.used = 0;
     const skip = new Set(own);
     const visit = (o: THREE.Object3D): void => {
