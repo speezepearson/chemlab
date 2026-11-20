@@ -8,7 +8,7 @@ import { Vessel, roomFor, volume } from './flask';
 import { boxesOverlap } from './physics';
 import { CELL, LIFT, toCell } from './space';
 import {
-  ATOM_PLACE, Blotter, DRIP, SECTOR_ATOMS, SHAPES, STRIP, TEST_PAPER, Tool, analyzerSector, composition, mouthBelow, overMouth, paperReading, paperTriangles,
+  ATOM_PLACE, Blotter, DRIP, SECTOR_ATOMS, SHAPES, STRIP, TEST_PAPER, Tool, atomSector, composition, mouthBelow, overMouth, paperReading, paperTriangles,
   sectorInset, wetness,
 } from './tools';
 
@@ -142,7 +142,7 @@ describe("test paper's print", () => {
     };
     const m = 0.06;
     for (const a of SECTOR_ATOMS) {
-      const whole = analyzerSector(a);
+      const whole = atomSector(a);
       const stain = sectorInset(a, m);
       expect(sectorInset(a, 0)).toEqual(whole);
       expect(mid(stain)[0]).toBeCloseTo(mid(whole)[0], 9);

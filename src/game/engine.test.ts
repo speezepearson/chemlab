@@ -10,7 +10,7 @@ import { Vessel, volume, type Flask } from './flask';
 import { DEFAULT_PRESET, LAMP_POSE } from './presets';
 import type { SaveState } from './save';
 import { CELL, LIFT, toCell } from './space';
-import { SHAPES, SHEET, TEST_PAPER, darkness, paperReading, type Tool } from './tools';
+import { INLINE_TOOLS, SHAPES, SHEET, TEST_PAPER, UNIQUE_TOOLS, darkness, paperReading, type Tool } from './tools';
 
 /*
  * The engine itself, with nothing to draw on and nothing to hear: the view and the sounds are stood in for, as they
@@ -38,9 +38,8 @@ vi.mock('./view', () => ({
     dispose(): void {}
   },
 }));
-const quiet = () => ({ place() {}, level() {}, swing() {}, run() {}, clunk() {}, stop() {} });
+const quiet = () => ({ place() {}, swing() {}, run() {}, clunk() {}, stop() {} });
 vi.mock('./water', () => ({ WaterSounds: class { update(): void {} stop(): void {} } }));
-vi.mock('./rumble', () => ({ rumble: quiet }));
 vi.mock('./diverter', () => ({ diverter: quiet }));
 vi.mock('./changeover', () => ({ changeover: quiet }));
 vi.mock('./chime', () => ({ chime() {} }));
@@ -355,6 +354,59 @@ describe('test paper', () => {
     const [c, d] = l.in.tools.filter((t) => t.kind === 'testpaper');
     expect(paperOf(c).N).toBe(0);
     expect(volume(paperOf(d))).toBe(TEST_PAPER.cap);
+  });
+});
+
+describe('the composition analyzer, which is gone', () => {
+  /** A lab's save with an analyzer in it, as every lab had: fed by a hose from a pipette, and with a hose out of each of its spouts. */
+  function withAnalyzer(l: { e: GameEngine; in: Inside }): SaveState {
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    const spectro = s.tools.find((t) => t.kind === 'spectroscope')!;
+    const tube = { n: { R: 1e6, 'R–G': 2e6 }, Q: 12e6 };
+    const analyzer = { ...spectro, kind: 'analyzer', id: 901, fx: 1.15, tanks: [tube], drops: [tube, { n: {}, Q: 0 }], reading: [0.5, 0, 0, 0] };
+    const pipette = { ...spectro, kind: 'pipette', id: 902, fx: 0.55, fy: 0.3, z: 750, valves: [0.5], tanks: [{ n: { G: 5e7 }, Q: 15e7 }], drops: [{ n: {}, Q: 0 }] };
+    s.tools.unshift(analyzer as unknown as SaveState['tools'][number], pipette as SaveState['tools'][number]);
+    s.hoses.push(
+      // into its tube, out of its spout and out of its waste spout
+      { outlet: { x: 1.15, y: 0.46, z: 150, yaw: 0, reach: 50 }, on: { tool: 902, spout: 0 } },
+      { outlet: { x: 0.25, y: 0.6, z: 750, yaw: 0, reach: 50 }, on: { tool: 901, spout: 0 } },
+      { outlet: { x: 0.35, y: 0.6, z: 750, yaw: 0, reach: 50 }, on: { tool: 901, spout: 1 } },
+    );
+    return s;
+  }
+  const kinds = (l: Inside) => l.tools.map((t) => t.kind as string);
+
+  it('is in no new lab, which still has its spectroscope and bond visualizer where they were', () => {
+    const l = lab();
+    expect(kinds(l.in)).not.toContain('analyzer');
+    expect(kinds(l.in).filter((k) => k === 'spectroscope' || k === 'visualizer').sort()).toEqual(['spectroscope', 'visualizer']);
+    expect(UNIQUE_TOOLS).not.toContain('analyzer');
+    expect(INLINE_TOOLS).not.toContain('analyzer');
+    expect(Object.keys(SHAPES)).not.toContain('analyzer');
+    const at = (kind: string) => l.in.tools.find((t) => t.kind === kind)!.pose;
+    expect([at('spectroscope').x, at('visualizer').x]).toEqual([1450, 1750]);
+  });
+
+  it('is lost from an older save as it loads, without error, with the hoses out of its spouts; the rest loads as it was', () => {
+    const l = lab();
+    const before = l.in.tools.map((t) => [t.kind, t.id]);
+    const s = withAnalyzer(l);
+    expect(() => l.e.restore(s, DEFAULT_PRESET)).not.toThrow();
+    expect(kinds(l.in)).not.toContain('analyzer');
+    // everything else is there, the pipette with what it held, and its hose where it was, now over nothing
+    expect(l.in.tools.map((t) => [t.kind, t.id])).toEqual([['pipette', 902], ...before]);
+    const pip = l.in.tools.find((t) => t.kind === 'pipette')!;
+    expect(pip.tanks[0].N).toBe(5e7);
+    const hoses = (l.in as unknown as { hoses: { on: { tool?: Tool } }[] }).hoses;
+    expect(hoses).toHaveLength(1);
+    expect(hoses[0].on.tool).toBe(pip);
+    // and the lab runs: what the hose lets out falls to the counter
+    expect(() => {
+      for (let i = 0; i < 40; i++) l.in.simulate(0.05);
+    }).not.toThrow();
+    expect(pip.tanks[0].N).toBeLessThan(5e7);
+    // saved again, there's no trace of it
+    expect(JSON.stringify(l.e.snapshot())).not.toContain('analyzer');
   });
 });
 

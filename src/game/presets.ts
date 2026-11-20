@@ -26,12 +26,9 @@ export interface Spot {
 }
 
 /**
- * Where the one and only composition analyzer starts, unless a preset places it itself: there's always exactly one. It
- * stands over the back counter, its spouts high enough for a flask under them.
+ * Where the one and only spectroscope starts, unless a preset places it itself: there's always exactly one. It stands
+ * over the back counter, its spout high enough for a flask under it.
  */
-export const ANALYZER_AT: Spot = { at: [1.15, 0.5] };
-
-/** Where the one and only spectroscope starts, the same way: past the composition analyzer. */
 export const SPECTROSCOPE_AT: Spot = { at: [1.45, 0.5] };
 
 /** Where the one and only bond visualizer starts, the same way: past the spectroscope. */

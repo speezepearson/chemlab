@@ -430,8 +430,8 @@ describe('stands', () => {
   });
 
   it("find somewhere for a nozzle's stand clear of a cabinet behind the tube it's over", () => {
-    // turned a quarter, the analyzer's cabinet reaches back from its tube, toward the wall, standing on the counter
-    const spec = new Tool('analyzer', 0, at(500, LIFT + 96, 250, Math.PI / 2));
+    // turned a quarter, the spectroscope's cabinet reaches back from its tube, toward the wall, standing on the counter
+    const spec = new Tool('spectroscope', 0, at(500, LIFT + 96, 250, Math.PI / 2));
     const tube = tankMouth(spec, 0);
     const e = { x: tube.x, y: tube.y + 40, z: tube.z };
     const clear = (m: { turn: number; reach: number }) => !boxesOverlap(standBase(nozzleStand(e, m.turn, m.reach), LIFT), toolBox(spec));
@@ -443,7 +443,7 @@ describe('stands', () => {
 
 describe('docking', () => {
   it("snaps a nozzle down onto an inline instrument's tube it's over, from not too far above, and nothing else", () => {
-    const a = new Tool('analyzer', 0, at(450, 800, 150));
+    const a = new Tool('spectroscope', 0, at(450, 800, 150));
     const d = new Tool('dispenser', 1, at(750, 800, 150));
     const top = tankMouth(a, 0);
     const over = (dy: number, x = top.x) => ({ x, y: top.y + dy, z: top.z, yaw: 0 });

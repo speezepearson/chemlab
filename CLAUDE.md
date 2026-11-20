@@ -93,7 +93,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     (`CabinetView`), so it's cheap however much it holds.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
-    `volumes.ts`); `rumble.ts` is the composition analyzer, `diverter.ts` the supply station's diverter, `changeover.ts` its changeover, `ambience.ts` the ship, `water.ts` drips and streams, `shatter.ts` a thermometer
+    `volumes.ts`); `diverter.ts` is the supply station's diverter, `changeover.ts` its changeover, `ambience.ts` the ship, `water.ts` drips and streams, `shatter.ts` a thermometer
     shattering.
     New sounds play into a channel's `bus()`, never straight to the destination, so the sliders reach them. A sound
     in the lab goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),
@@ -109,7 +109,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Volume isn't atoms.** Capacities and flows are in `volume()` units: molecules by default, or atoms when the
   "volume counts molecules" toggle is off. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
 - **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
-  chemistry, cooling, the composition analyzer's reading and hum, the supply station's diverter, display and needle, and its changeover (block, door, lamp and alarm), a thermometer's bulb and its crack as it shatters, the shadow lamp's light on the sheet in its holder, and the drip and stream sounds. All of it
+  chemistry, cooling, the instruments' readings, the supply station's diverter, display and needle, and its changeover (block, door, lamp and alarm), a thermometer's bulb and its crack as it shatters, the shadow lamp's light on the sheet in its holder, and the drip and stream sounds. All of it
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The one exception to the
   substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
@@ -185,7 +185,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - A tank needn't be under its opening: one with a `neck` (the swell bulbs') has its bulb and neck where the flag
     says, and its own `x0` and `x1` are its inlet's, since it's the openings and spouts that go on the grid.
   - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `neck`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `flat`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
-- **Unique tools** (`UNIQUE_TOOLS`: the composition analyzer, the spectroscope, the bond visualizer, the receptacle and the shadow lamp) aren't on
+- **Unique tools** (`UNIQUE_TOOLS`: the spectroscope, the bond visualizer, the receptacle and the shadow lamp) aren't on
   an equipment wheel and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
   whole supply station (`STATION` in `tools.ts`): its tanks are the funnel and the ship's reservoir, in that
   order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved. The
@@ -196,7 +196,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   `t.supply` (its species, goal, start and reservoir's capacity), never by `TARGET` or `GOAL_TARGET`. With enough in
   its reservoir it's changed for the next (`Tool.swap`, `CHANGEOVER`, `changeoverAt`): while its block is `away`,
   it has no mouth and lets nothing out, and through the whole changeover nothing on it can be worked.
-- **Inline instruments** (`INLINE_TOOLS`: the composition analyzer, the spectroscope, the bond visualizer and the flow meter) are a tube draining straight through at a fixed rate past a cabinet
+- **Inline instruments** (`INLINE_TOOLS`: the spectroscope, the bond visualizer and the flow meter) are a tube draining straight through at a fixed rate past a cabinet
   (or the flow meter's little readout, `METER_BODY`) that reads what goes by, as an exponentially weighted average that fades the past smoothly (`INSTRUMENT_TAU`,
   `Tool.smooth`). A hose's nozzle let go of over the tube snaps onto its
   top (`docked` in `bodies.ts`, via the engine's `gridded`).
@@ -205,11 +205,13 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Saves** stay at format v1. New fields are optional and the loaders tolerate their absence. Species are stored by
   name. A tool's own state goes in `Tool.memory` as numbers; a sheet of shadow paper's image, which is thousands of
   cells, goes beside it as a packed string (`Tool.image`, `Tool.develop`).
+  A saved tool of a kind there no longer is (the composition analyzer, which the test paper replaced) is dropped as
+  the save loads, with the hoses on its spouts; so is a stored volume slider for a sound that's gone (`parseVolumes`).
 
 ## Design preferences
 
-- Don't give away the chemistry. The player is meant to work it out. The composition analyzer has no text and no
-  divider lines between its sectors, nor the bond visualizer, whose points are unlabeled, the size sorter's screens look plain, the equipment wheels have no names, and the faucets aren't labeled (they're the five pure
+- Don't give away the chemistry. The player is meant to work it out. The bond visualizer has no text, and its points are
+  unlabeled, the size sorter's screens look plain, the equipment wheels have no names, and the faucets aren't labeled (they're the five pure
   atoms, the four colors and the solvent, which the user chose). A sheet of test paper has no text either, but its four sectors are outlined in black, at the user's request. The spectroscope's axes are labeled E (uB) and f (in S, with an SI prefix to suit the range, as mS), at the user's request: both on log scales with
   base-10 log-paper ticks, only the powers of ten numbered, f's ranging itself to the tallest line, and no peak labeled. It plots each bond at the size of its
   energy, a stable one as a peak above the baseline and an uphill one as a dip below it, at the user's request. Ask before adding any visual cue that reveals how a tool or reaction works.

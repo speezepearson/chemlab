@@ -20,8 +20,7 @@ import { Flask, Vessel, roomFor, sustenance, transfer, volume, volumeUnit } from
 import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
-import { ANALYZER_AT, DEFAULT_PRESET, LAMP_POSE, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
-import { rumble, type Rumble } from './rumble';
+import { DEFAULT_PRESET, LAMP_POSE, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
 import { CRYOSTABILIZER, FIRST_SUPPLY, litresOf, type Supply } from './supply';
 import { shatter } from './shatter';
 import { WHEELS, wheelMove, wheelPick, type WheelAim } from './wheel';
@@ -33,7 +32,7 @@ import {
   type Pose, type Vec3,
 } from './space';
 import {
-  changeoverAt, ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
+  changeoverAt, BOND_KEYS, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
   TANK_H, TOOL_NAMES, isDipper, isThermometer, Blotter, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
   type Mouth, type ToolKind,
 } from './tools';
@@ -446,7 +445,6 @@ export class GameEngine {
   private nextToolId = 0;
   private viewW = 0;
   private viewH = 0;
-  private rumbles = new Map<Tool, Rumble>();
   private water = new WaterSounds();
   /** This frame's streams, for their sound: how much ran into each vessel, by volume. */
   private inflow = new Map<Vessel, number>();
@@ -499,7 +497,6 @@ export class GameEngine {
     this.pumper.port1.close();
     this.resizeObserver.disconnect();
     for (const c of this.cleanups) c();
-    for (const r of this.rumbles.values()) r.stop();
     this.water.stop();
     this.view.dispose();
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
@@ -894,8 +891,8 @@ export class GameEngine {
   }
 
   /**
-   * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a composition analyzer, a
-   * spectroscope, a bond visualizer, a station and a shadow lamp: if there's none, one is added where it starts, or as
+   * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a spectroscope, a bond
+   * visualizer, a station and a shadow lamp: if there's none, one is added where it starts, or as
    * near there as it has room (see roomy), the station fitted for the cryostabilizer, its reservoir holding what's
    * left on board (see Tool.stock), as a save from before it was fitted for anything else would have it. The
    * station is built into the wall, and the shadow lamp stands on its own bench, so they're always where they are.
@@ -917,7 +914,6 @@ export class GameEngine {
     this.station().pose = { ...STATION_POSE };
     add('shadowlamp', LAMP_POSE);
     this.tools.find((t) => t.kind === 'shadowlamp')!.pose = { ...LAMP_POSE };
-    add('analyzer', spotPose(ANALYZER_AT));
     add('spectroscope', spotPose(SPECTROSCOPE_AT));
     add('visualizer', spotPose(VISUALIZER_AT));
   }
@@ -2102,15 +2098,11 @@ export class GameEngine {
     return placement(h.x, h.y, h.z);
   }
 
-  /** Where a tool's machinery sounds from: the middle of its cabinet, or the supply station's display. */
+  /** Where a tool's machinery sounds from: the supply station's display. */
   private machineAt(t: Tool): Vec3 {
     if (t.shape.wall) {
       const d = STATION.display;
       return onTool(t, (d.x0 + d.x1) / 2, (d.y0 + d.y1) / 2, -STATION.out);
-    }
-    if (t.kind === 'analyzer') {
-      const b = INSTRUMENT.body;
-      return onTool(t, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
     }
     return onTool(t, 0, 60);
   }
@@ -2492,21 +2484,6 @@ export class GameEngine {
         t.streaming.fill(false);
       }
       return;
-    }
-
-    // an analyzer hums quietly while it has something to read, on sim time, so silent while paused
-    for (const t of this.tools) {
-      if (t.kind !== 'analyzer' || !t.reading || this.rumbles.has(t)) continue;
-      this.rumbles.set(t, rumble(this.hear(this.machineAt(t))));
-    }
-    for (const [t, r] of this.rumbles) {
-      if (!this.tools.includes(t) || !t.reading) {
-        r.stop(); // done, put away, or the lab was replaced
-        this.rumbles.delete(t);
-        continue;
-      }
-      r.place(this.hear(this.machineAt(t)));
-      r.level(simDt > 0 ? ANALYZER_HUM : 0);
     }
 
     // the station's diverter goes by sim time too: a clunk as it swings
@@ -3124,8 +3101,6 @@ export class GameEngine {
    */
   private fallAsleep(): void {
     this.water.update(0.1, [], new Map());
-    for (const r of this.rumbles.values()) r.stop();
-    this.rumbles.clear();
     for (const d of this.diverters.values()) d.stop();
     this.diverters.clear();
     this.changing?.sound.stop();

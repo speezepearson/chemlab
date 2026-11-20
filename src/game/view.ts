@@ -26,7 +26,7 @@ import { litresOf, type Supply } from './supply';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
-  clockText, ANALYZER, LAMP, SHEET, darkness, ringShare, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
+  clockText, LAMP, SHEET, darkness, ringShare, atomSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, TEST_PAPER, paperReading, paperTriangles, sectorInset, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, Tool,
 } from './tools';
@@ -1002,7 +1002,7 @@ function drawTestPaper(sc: Screen, t: Tool): void {
     ctx.strokeStyle = ink;
     ctx.lineWidth = line;
     ctx.lineJoin = 'miter';
-    for (const ps of [(['G', 'B', 'R'] as const).map((a) => analyzerSector(a)[0]), analyzerSector('K')]) {
+    for (const ps of [(['G', 'B', 'R'] as const).map((a) => atomSector(a)[0]), atomSector('K')]) {
       ctx.beginPath();
       for (const [dx, dy] of ps) ctx.lineTo(cx + r * dx, cy + r * dy);
       ctx.closePath();
@@ -1101,55 +1101,6 @@ function drawNeedle(sc: Screen, u: number): void {
   ctx.arc(cx, cy, 2.2, 0, 2 * Math.PI);
   ctx.fillStyle = '#17161a';
   ctx.fill();
-  sc.tex.needsUpdate = true;
-}
-
-/**
- * A composition analyzer's screen: a triangle per molecule size (1 to 4 atoms), each cut into four smaller ones, one
- * per color (see analyzerSector): its three corners, and the upside-down one in the middle. Each glows as bright as its
- * share of what it's reading, and is dark while it has nothing to read. No words, no lines between the sectors: reading
- * it is part of the game.
- */
-function drawAnalysis(sc: Screen, t: Tool): void {
-  const key = t.reading?.map((x) => x.toFixed(2)).join(',') ?? '';
-  if (key === sc.key) return;
-  sc.key = key;
-  const { ctx, ppu } = sc;
-  const { screen: s } = INSTRUMENT;
-  const { triangles } = ANALYZER;
-  const n = SECTOR_ATOMS.length;
-  const sectors = SECTOR_ATOMS.map(analyzerSector);
-  const outline = (['G', 'B', 'R'] as const).map((a) => analyzerSector(a)[0]);
-  const green = (a: number) => `rgba(${PHOSPHOR}, ${a})`;
-  ctx.setTransform(ppu, 0, 0, ppu, -s.x0 * ppu, -s.y0 * ppu);
-  ctx.fillStyle = '#040a06';
-  ctx.fillRect(s.x0, s.y0, s.x1 - s.x0, s.y1 - s.y0);
-  triangles.xs.forEach((cx, w) => {
-    const { y: cy, r } = triangles;
-    const path = (ps: readonly (readonly [number, number])[]) => {
-      ctx.beginPath();
-      for (const [dx, dy] of ps) ctx.lineTo(cx + r * dx, cy + r * dy);
-      ctx.closePath();
-    };
-    if (t.reading)
-      for (let j = 0; j < n; j++) {
-        const b = Math.min(1, t.reading[w * n + j]);
-        if (b <= 0) continue;
-        ctx.fillStyle = ctx.shadowColor = green(b);
-        ctx.shadowBlur = 5 * ppu;
-        path(sectors[j]);
-        ctx.fill();
-      }
-    ctx.shadowColor = green(0.85);
-    ctx.shadowBlur = 2 * ppu;
-    ctx.strokeStyle = green(0.85);
-    ctx.lineWidth = 0.9;
-    path(outline);
-    ctx.stroke();
-  });
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-  for (let y = s.y0; y < s.y1; y += 1.5) ctx.fillRect(s.x0, y, s.x1 - s.x0, 0.6);
   sc.tex.needsUpdate = true;
 }
 
@@ -1598,15 +1549,10 @@ class ToolView {
       pipes(art, [[tankX(sh.tanks[0]), TH], [tankX(sh.tanks[0]), y - r + 1]]);
       for (const x of sh.spouts) pipes(art, [[x, y + r - 1], [x, sh.spoutY - 4]]);
     } else if (INLINE_TOOLS.includes(t.kind)) {
-      // straight down from the tube to its spout, with a branch into the cabinet, if it has one; and the analyzer's
-      // out of the cabinet's far side to its waste spout
+      // straight down from the tube to its spout, with a branch into the cabinet, if it has one
       const { body: b, inY } = INSTRUMENT;
       pipes(art, [[0, TH], [0, sh.spoutY - 4]]);
       if (t.kind !== 'meter') pipes(art, [[0, inY], [b.x0, inY]], 1.3);
-      if (t.kind === 'analyzer') {
-        const x = sh.spouts[1];
-        pipes(art, [[b.x1, ANALYZER.wasteY], [x, ANALYZER.wasteY], [x, sh.spoutY - 4]]);
-      }
     } else if (sh.neck) {
       // from under each bulb, out to its spout, under its inlet
       sh.neck.bodies.forEach((bx, k) => pipes(art, [[bx, floor], [bx, floor + 4], [sh.spouts[k], floor + 4], [sh.spouts[k], sh.spoutY - 4]]));
@@ -2640,7 +2586,6 @@ class ToolView {
       setRGB(this.wire.color, rgb);
       setRGB(this.wire.emissive, rgb).multiplyScalar(Math.min(1, 1.3 * dial));
     }
-    if (t.kind === 'analyzer' && this.screen) drawAnalysis(this.screen, t);
     if (t.kind === 'spectroscope' && this.screen) drawSpectroscope(this.screen, t, energies);
     if (t.kind === 'visualizer' && this.screen) drawBonds(this.screen, t);
     if (this.thread) {

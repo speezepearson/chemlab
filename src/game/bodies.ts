@@ -5,7 +5,7 @@ import { LAMP_POSE } from './presets';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { CELL, groundAt, toCardinal, toCell, toLocal, toWorld, wrapAngle, type Pose, type Vec3 } from './space';
 import {
-  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, LAMP, METER_BODY, SHAPES, SHEET, STATION, STRIP, TANK_H, TEST_PAPER, THERMOMETER_ROD, dipUnder, footY, isThermometer, levelIn,
+  HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, LAMP, METER_BODY, SHAPES, SHEET, STATION, STRIP, TANK_H, TEST_PAPER, THERMOMETER_ROD, dipUnder, footY, isThermometer, levelIn,
   tankDepth, tankPieces, tankX, overMouth, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
 } from './tools';
 
@@ -21,7 +21,7 @@ import {
  * as deep as its bench, and a sheet of test paper, lying flat, as deep as the sheet.
  */
 const CABINET_DEPTH: Partial<Record<ToolKind, number>> = {
-  analyzer: 50, spectroscope: 50, visualizer: 50, shadowlamp: LAMP.d, testpaper: TEST_PAPER.d,
+  spectroscope: 50, visualizer: 50, shadowlamp: LAMP.d, testpaper: TEST_PAPER.d,
 };
 
 /**
@@ -130,7 +130,7 @@ export function tankNoteY(t: Tool, k: number): number {
  * reaching `hz` either side of `z` (its middle, if left out) front to back: its tanks (round, for a round tank), and
  * under them the pipes, valves and spouts there, across only as far as they reach. The supply station's are
  * its funnel, the plate in the wall, and its spouts' pipes out from it. An inline instrument's are its
- * tube and the pipe down from it, and the cabinet beside them, and any pipe on to a spout past the cabinet, or the
+ * tube and the pipe down from it, and the cabinet beside them, or the
  * flow meter's readout round the pipe; the tube's top is flush with its opening, for a nozzle to snap onto (see
  * INLINE_DOCK). A dipper's (see DIPPERS) is only its top, where its stand's clamp holds it: a thermometer's rod's, or
  * a wicking strip's clip; the rest of it bumps into nothing, so it can stand down in a flask or a tank. A sheet of
@@ -190,12 +190,7 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
       const m = METER_BODY;
       return [...tube, { x0: m.x0, x1: m.x1, y0: m.y0, y1: m.y1, hz: m.hz }];
     }
-    const past = sh.spouts.filter((x) => x > c.x1);
-    return [
-      ...tube,
-      { x0: c.x0, x1: c.x1, y0: c.y0, y1: c.y1, hz: D.body / 2 },
-      ...past.map((x) => ({ x0: c.x1, x1: x + 6, y0: ANALYZER.wasteY - 6, y1: b.y1, hz: 6 })),
-    ];
+    return [...tube, { x0: c.x0, x1: c.x1, y0: c.y0, y1: c.y1, hz: D.body / 2 }];
   }
   const x0s = sh.tanks.map((k) => (sh.cup ? Math.min(k.x0, tankX(k) - sh.cup.w) : k.x0));
   const x1s = sh.tanks.map((k) => (sh.cup ? Math.max(k.x1, tankX(k) + sh.cup.w) : k.x1));
