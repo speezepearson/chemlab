@@ -25,7 +25,7 @@ import { litresOf, type Supply } from './supply';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
-  clockText, ANALYZER, LAMP, SHEET, darkness, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
+  clockText, ANALYZER, LAMP, SHEET, darkness, ringShare, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, Tool,
 } from './tools';
@@ -386,6 +386,22 @@ function bentMat(plane: THREE.Plane): THREE.MeshPhysicalMaterial {
   return mat;
 }
 
+/**
+ * What a material that fluid is drawn in tells the shadow lamp about it (see Exposer), in its userData as `shade`: the
+ * share of the fluid's molecules that have a ring in them (see ringShare), which is what dims the lamp's light; and
+ * how high in the room the fluid's surface is, where what's drawn of it is cut off (see FluidMesh), or Infinity if all
+ * of what's drawn is fluid. Whatever draws fluid tells it so, each time it's drawn (see shade).
+ */
+interface Shade {
+  ring: number;
+  level: number;
+}
+
+/** Mark a material as drawing fluid f, up to height `level` in the room if it's cut off there (see Shade). */
+function shade(mat: THREE.Material, f: Fluid, level = Infinity): void {
+  mat.userData.shade = { ring: ringShare(f), level } satisfies Shade;
+}
+
 /** The fluid in a vessel: drawn from a solid the shape of its inside, cut off at the fluid's level. */
 class FluidMesh {
   readonly mat: THREE.MeshLambertMaterial;
@@ -409,7 +425,6 @@ class FluidMesh {
     private open = true,
   ) {
     this.mat = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide, clippingPlanes: [this.plane] });
-    this.mat.userData.fluid = true;
     // a see-through fluid (one thinned by the solvent) thickens toward its edges, seen edge on, and shows a bright
     // line where its surface meets the glass, as clear liquid in glass does, so even pure solvent reads as a body of
     // liquid with a surface rather than nothing; an opaque one is unchanged
@@ -475,6 +490,7 @@ class FluidMesh {
       cut = Math.min(level, this.reach.max.y - FLUID_TOP);
     }
     this.plane.constant = cut;
+    shade(this.mat, f, cut);
     const key = `${rgb.map(Math.round)}:${a.toFixed(2)}`;
     if (key === this.key) return;
     this.key = key;
@@ -1359,10 +1375,10 @@ const setRGB = (c: THREE.Color, rgb: readonly number[]) => c.setRGB(rgb[0] / 255
 
 /**
  * Make a material as see-through as fluid f looks (see fluidAlpha: the solvent thins it), turning it transparent only
- * while it needs to be, since that rebuilds its shader. It's marked as fluid's, for the shadow lamp (see Exposer).
+ * while it needs to be, since that rebuilds its shader. It's marked as that fluid's, for the shadow lamp (see shade).
  */
 function fluidOpacity(mat: THREE.Material, f: Fluid): void {
-  mat.userData.fluid = true;
+  shade(mat, f);
   const a = fluidAlpha(f);
   mat.opacity = a;
   if (mat.transparent !== a < 1) {
@@ -4273,15 +4289,44 @@ class Outliner {
 /**
  * How the shadow lamp's light is worked out (see Exposer): how many sim seconds of it, at most, go by one look from
  * a point on the bulb (`per`), so the more light there is to cast at once, the more points it's cast from, between
- * `min` and `max` a frame.
+ * `min` and `max` a frame. And, only where the graphics card can't keep the pictures it needs to measure the light's
+ * way through fluid (see Exposer's `float`): how long each body of fluid in the way is taken to be instead, in world
+ * units (`flat`), and the most dimming, as a power of e, that all the fluid in the way of one cell can then come to
+ * (`most`).
  */
-const EXPOSURE = { per: 0.008, min: 2, max: 24 };
+const EXPOSURE = { per: 0.008, min: 2, max: 24, flat: 40, most: 8 };
 
 /** The nth number, from 1, of the van der Corput sequence in a base: evenly spread over 0 to 1, however many are taken. */
 function corput(n: number, base: number): number {
   let [x, f] = [0, 1 / base];
   for (; n > 0; n = Math.floor(n / base), f /= base) x += (n % base) * f;
   return x;
+}
+
+/** Which way round each solid's faces are wound (see winding), worked out once. */
+const windings = new WeakMap<THREE.BufferGeometry, number>();
+
+/**
+ * Which way round a closed solid's triangles are wound: 1 if their fronts face out of it, as three.js's own solids'
+ * do, or −1 if they face into it, as a lathed outline's can, by which way its outline runs. By the sign of its volume.
+ */
+function winding(g: THREE.BufferGeometry): number {
+  let w = windings.get(g);
+  if (w !== undefined) return w;
+  const p = g.attributes.position;
+  const [a, b, c] = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+  let vol = 0;
+  const n = g.index ? g.index.count : p.count;
+  const at = (i: number) => (g.index ? g.index.getX(i) : i);
+  for (let i = 0; i + 2 < n; i += 3) {
+    a.fromBufferAttribute(p, at(i));
+    b.fromBufferAttribute(p, at(i + 1));
+    c.fromBufferAttribute(p, at(i + 2));
+    vol += a.dot(b.cross(c));
+  }
+  w = vol < 0 ? -1 : 1;
+  windings.set(g, w);
+  return w;
 }
 
 /**
@@ -4294,7 +4339,21 @@ function corput(n: number, base: number): number {
  * way of the light from that point to that cell. Only what's between the recess's opening and the sheet is drawn, in
  * place of each thing a stand-in of the same shape drawn in a plain material: everything opaque counts as in the way,
  * all the way; glass, and whatever else is see-through, isn't drawn at all, so the light goes straight through it,
- * neither dimmed nor bent, and nor are labels, lines, the lamp itself or the sheet. That's done from several points
+ * neither dimmed nor bent, and nor are labels, lines, the lamp itself or the sheet.
+ *
+ * Fluid dims the light by how many of its molecules have a ring in them and how far through it the light goes (see
+ * lampLight), whatever it looks like to the eye. Whatever draws fluid says so (see Shade), and its stand-in is drawn
+ * so as to measure that way through it: each face of the fluid's solid adds to its pixel how far along the line of
+ * sight it is, the far side of the solid as it is and the near side taken away, so a pair leaves the length between
+ * them, times how strongly that fluid dims; and all the fluids in the way add up. A fluid's solid is drawn cut off at
+ * the fluid's surface, with nothing drawn across the cut (see FluidMesh), so a line of sight through the surface would
+ * meet one face without its pair. So every face's distance is measured not from the eye but from where its line of
+ * sight crosses the level of the surface (no further off than the solid reaches, which only matters to lines that
+ * never cross it within it, whose faces come in pairs anyway): for a pair that changes nothing, and a face without one
+ * is paired with the surface. Where pictures can't hold such numbers (see `float`), each body of fluid in the way
+ * counts as EXPOSURE.flat long instead, however far through it the light goes.
+ *
+ * That's done from several points
  * spread over the bulb, each also looking through its cells a little off their middles, and averaged: so a shadow's
  * edge is soft, the softer the nearer the lamp what casts it is, since the bulb isn't a point, and smooth, though the
  * cells are coarse. The points are a fixed sequence, carried on from frame to frame, so what's lit over several frames
@@ -4304,7 +4363,10 @@ function corput(n: number, base: number): number {
  */
 class Exposer {
   private n = SHEET.cells;
-  /** Seen from one point on the bulb: in green, how many opaque things are in the way of each cell. */
+  /**
+   * Seen from one point on the bulb: in green, how many opaque things are in the way of each cell; in red, how much
+   * the fluid in the way dims the light to it, as a power of e (over EXPOSURE.most, if not `float`).
+   */
   private seen: THREE.WebGLRenderTarget;
   /** The light reaching each cell, in red, added up over the points looked from. */
   private sum: THREE.WebGLRenderTarget;
@@ -4322,17 +4384,29 @@ class Exposer {
     side: THREE.DoubleSide, depthTest: false, depthWrite: false,
     blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
   });
-  /** Adds to the sum the light that got past what one point saw: none where anything opaque was in the way, else all. */
+  /**
+   * The window the scene is seen through, on the near plane, for the fluids' stand-ins: its left and bottom edges, and
+   * how wide and tall each pixel of it is, in the camera's own frame; and how far off the near plane is.
+   */
+  private win = { value: new THREE.Vector4() };
+  private near = { value: 1 };
+  /** Each fluid's stand-in's material (see fluid), by the mesh it stands in for. */
+  private fluids = new WeakMap<THREE.Mesh, THREE.ShaderMaterial>();
+  /**
+   * Adds to the sum the light that got past what one point saw: none where anything opaque was in the way, else what
+   * the fluid in the way let through.
+   */
   private gather = new THREE.ShaderMaterial({
-    uniforms: { seen: { value: null }, share: { value: 1 } },
+    uniforms: { seen: { value: null }, share: { value: 1 }, scale: { value: 1 } },
     vertexShader: quadVertex,
     fragmentShader: /* glsl */ `
       uniform sampler2D seen;
       uniform float share;
+      uniform float scale;
       varying vec2 vUv;
       void main() {
         vec4 c = texture2D(seen, vUv);
-        float light = c.g > 0.5 ? 0.0 : 1.0;
+        float light = c.g > 0.5 ? 0.0 : exp(-max(c.r * scale, 0.0));
         gl_FragColor = vec4(light * share, 0.0, 0.0, 0.0);
       }`,
     depthTest: false, depthWrite: false,
@@ -4363,8 +4437,11 @@ class Exposer {
   private ball = new THREE.Sphere();
   private beam = new THREE.Box3();
 
-  /** `float`: whether pictures can be kept as (half) floats, which the sum is, where they can, for a finer average. */
-  constructor(float: boolean) {
+  /**
+   * `float`: whether pictures can be kept as (half) floats, as they are where they can be: for the lengths of the
+   * light's way through fluid, which are far too many and too fine for a byte, and for a finer average.
+   */
+  constructor(private float: boolean) {
     const n = this.n;
     const opts = { depthBuffer: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter };
     const type = float ? THREE.HalfFloatType : THREE.UnsignedByteType;
@@ -4376,7 +4453,65 @@ class Exposer {
     this.quad.frustumCulled = false;
     this.stage.matrixWorldAutoUpdate = false;
     this.gather.uniforms.seen.value = this.seen.texture;
+    this.gather.uniforms.scale.value = float ? 1 : EXPOSURE.most;
     this.pack.uniforms.sum.value = this.sum.texture;
+  }
+
+  /**
+   * A material for a fluid's stand-in (see Exposer): each face adds how strongly the fluid dims (`dim`, a power of e a
+   * world unit) times how far along its pixel's line of sight it is, past where that line crosses the fluid's surface
+   * (at height `level`), the solid's far faces as they are and its near ones taken away (`turn` says which are which,
+   * see winding); nothing above the surface is drawn. The crossing is taken no further from the solid's middle
+   * (`mid`) than the solid reaches (`reach`). Without `float`, each far face adds `dim` times EXPOSURE.flat instead,
+   * as a share of EXPOSURE.most.
+   */
+  private fluid(): THREE.ShaderMaterial {
+    return new THREE.ShaderMaterial({
+      uniforms: {
+        win: this.win, nearAt: this.near, dim: { value: 0 }, level: { value: 0 }, mid: { value: new THREE.Vector3() }, reach: { value: 0 },
+        turn: { value: 1 },
+      },
+      defines: this.float ? {} : { FLAT: (EXPOSURE.flat / EXPOSURE.most).toFixed(4) },
+      vertexShader: /* glsl */ `
+        varying vec3 vWorld;
+        varying float vAhead;
+        void main() {
+          vec4 w = modelMatrix * vec4(position, 1.0);
+          vec4 v = viewMatrix * w;
+          vWorld = w.xyz;
+          vAhead = -v.z;
+          gl_Position = projectionMatrix * v;
+        }`,
+      fragmentShader: /* glsl */ `
+        uniform vec4 win;
+        uniform float nearAt;
+        uniform float dim;
+        uniform float level;
+        uniform vec3 mid;
+        uniform float reach;
+        uniform float turn;
+        varying vec3 vWorld;
+        varying float vAhead;
+        void main() {
+          if (vWorld.y > level) discard;
+          float away = (gl_FrontFacing ? -1.0 : 1.0) * turn;
+          #ifdef FLAT
+            gl_FragColor = vec4(away > 0.0 ? dim * FLAT : 0.0, 0.0, 0.0, 0.0);
+          #else
+            // this pixel's line of sight, the same for every face drawn over it: how far along it per unit ahead of
+            // the camera, and how steeply it climbs
+            vec3 ray = vec3(win.x + win.z * gl_FragCoord.x, win.y + win.w * gl_FragCoord.y, -nearAt);
+            float along = length(ray) / nearAt;
+            float climb = ray.y / length(ray);
+            float off = distance(mid, cameraPosition);
+            float surface = abs(climb) > 1e-7 ? (level - cameraPosition.y) / climb : off;
+            float from = clamp(surface, off - reach, off + reach);
+            gl_FragColor = vec4(away * dim * (vAhead * along - from), 0.0, 0.0, 0.0);
+          #endif
+        }`,
+      side: THREE.DoubleSide, depthTest: false, depthWrite: false,
+      blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+    });
   }
 
   /**
@@ -4440,6 +4575,8 @@ class Exposer {
       const [x0, y0] = [(-half - dx + jx) * s, (to.y - half - camera.position.y + jy) * s];
       const [w, t] = [SHEET.side * s, SHEET.side * s];
       camera.projectionMatrix.makePerspective(x0, x0 + w, y0 + t, y0, near, far);
+      this.win.value.set(x0, y0, w / n, t / n);
+      this.near.value = near;
       camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
       renderer.setRenderTarget(this.seen);
       renderer.render(this.stage, camera);
@@ -4474,19 +4611,35 @@ class Exposer {
     this.ball.copy(g.boundingSphere!).applyMatrix4(o.matrixWorld);
     if (!this.beam.intersectsSphere(this.ball)) return;
     const mats: THREE.Material[] = Array.isArray(o.material) ? o.material : [o.material];
-    // glass, and whatever else is see-through, lets the light straight through; so, for now, does fluid
-    const opaque = (m: THREE.Material) => m.visible && m.colorWrite && !m.transparent && !m.userData.fluid;
-    if (!mats.some(opaque)) return;
+    // fluid dims the light, by its rings; one with none lets it all through, however it looks
+    const wet = mats[0].userData.shade as Shade | undefined;
+    let mat: THREE.Material = this.solid;
+    if (wet) {
+      if (!mats[0].visible || !(wet.ring > 0)) return;
+      let fm = this.fluids.get(o);
+      if (!fm) this.fluids.set(o, (fm = this.fluid()));
+      const u = fm.uniforms;
+      u.dim.value = LAMP.dim * wet.ring;
+      u.level.value = Math.min(wet.level, 1e9);
+      (u.mid.value as THREE.Vector3).copy(this.ball.center);
+      u.reach.value = this.ball.radius;
+      u.turn.value = winding(g);
+      mat = fm;
+    } else {
+      // glass, and whatever else is see-through, lets the light straight through
+      const opaque = (m: THREE.Material) => m.visible && m.colorWrite && !m.transparent;
+      if (!mats.some(opaque)) return;
+    }
     let m = this.standIns[this.used];
     if (!m) {
-      m = new THREE.Mesh(g, this.solid);
+      m = new THREE.Mesh(g, mat);
       m.matrixAutoUpdate = false;
       this.stage.add(m);
       this.standIns.push(m);
     }
     this.used++;
     m.geometry = g;
-    m.material = this.solid;
+    m.material = mat;
     m.matrixWorld.copy(o.matrixWorld);
     m.visible = true;
   }
@@ -4909,7 +5062,6 @@ export class View {
   private updateStreams(fr: Frame): void {
     while (this.streams.length < fr.streams.length) {
       const m = new THREE.Mesh(unitCylinder, new THREE.MeshBasicMaterial({ transparent: true }));
-      m.material.userData.fluid = true;
       this.scene.add(m);
       this.streams.push(m);
     }
@@ -4925,6 +5077,7 @@ export class View {
       const mat = m.material as THREE.MeshBasicMaterial;
       mat.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
       mat.opacity = fluidAlpha(s.fluid);
+      shade(mat, s.fluid);
       const r = (STREAM_WIDTH * Math.sqrt(s.flow)) / 2;
       const len = Math.max(0.1, s.from.y - s.toY);
       m.position.set(s.from.x, s.from.y - len / 2, s.from.z);
@@ -4932,7 +5085,6 @@ export class View {
     });
     while (this.drops.length < fr.drops.length) {
       const m = new THREE.Mesh(unitSphere, new THREE.MeshBasicMaterial({ transparent: true }));
-      m.material.userData.fluid = true;
       this.scene.add(m);
       this.drops.push(m);
     }
@@ -4944,6 +5096,7 @@ export class View {
       const mat = m.material as THREE.MeshBasicMaterial;
       mat.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
       mat.opacity = fluidAlpha(d.v);
+      shade(mat, d.v);
       const r = DROP_R * Math.cbrt(d.v.N / DROP_R_ATOMS);
       // a hanging drop swells from the outlet's tip; a falling one is centered where it is
       m.position.set(d.at.x, d.hanging ? d.at.y - r : d.at.y, d.at.z);

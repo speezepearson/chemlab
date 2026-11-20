@@ -153,6 +153,11 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   fluid (`bentMat` in `view.ts`), on a layer of its own (`REFRACT_LAYER`) drawn only in the frame's main render. It's
   the only thing using three.js's `transmission`, whose extra pass runs whenever anything transmissive is in view, so
   don't give other materials `transmission` lightly.
+- **What's drawn is what casts a shadow.** The shadow lamp's light (`Exposer` in `view.ts`) goes by the meshes in the
+  scene between its recess and its holder: opaque ones stop it, see-through ones (`transparent` materials) don't, and
+  fluid dims it by its rings. So whatever draws fluid, in any material, must mark that material with `shade()` each
+  time it's drawn (`FluidMesh` and `fluidOpacity` do), or it'll be taken for glass or for something solid, by whether
+  it happens to be see-through; and a fluid's solid must be closed, but for where it's cut off at its surface.
 - **Adding a tool kind** touches all of these:
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
   - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially.

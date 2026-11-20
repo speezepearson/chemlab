@@ -902,10 +902,13 @@ export function cultureLevel(share: number): number {
  *   and no bigger, so it lights nothing else;
  * - console: the box beside the housing that the switch is on, and switch, the switch's middle on the box's front;
  * - holder: the frame a sheet stands in, at the front: where it is front to back, how thick it is that way, how wide
- *   each of its two posts is, and how tall the rail between their feet, which the sheet stands on.
+ *   each of its two posts is, and how tall the rail between their feet, which the sheet stands on;
+ * - dim: how much fluid dims its light, per world unit of the light's way through fluid all of whose molecules have a
+ *   ring in them (see lampLight): so that a full flask of nothing but rings, about 50 across inside, lets through
+ *   about e^−4 of it, all but none, and one with a few rings in a hundred casts a faint shadow.
  */
 export const LAMP = {
-  h: 300, w: 3 * CELL, d: 3 * CELL,
+  h: 300, w: 3 * CELL, d: 3 * CELL, dim: 0.08,
   housing: { x0: -110, x1: 110, z0: -150, z1: -50 },
   bulb: { y: 290, z: -135, r: 5 },
   mouth: { x: 50, y0: 196, y1: 298 },
@@ -913,6 +916,16 @@ export const LAMP = {
   switch: { x: -130, y: 216 },
   holder: { z: 145, d: 10, post: 8.5, rail: 4 },
 };
+
+/**
+ * How much of the shadow lamp's light gets through `length` world units of a fluid, `ring` of whose molecules have a
+ * ring in them (see ringShare): e^(−LAMP.dim · ring · length), so each further stretch of the same fluid takes the
+ * same share of what's left. All of it gets through a fluid with no rings, however much of it there is. Fluids one
+ * after another each take their share.
+ */
+export function lampLight(ring: number, length: number): number {
+  return Math.exp(-LAMP.dim * Math.max(0, ring) * Math.max(0, length));
+}
 
 /**
  * A sheet of shadow paper (see SHAPES.sheet), which the shadow lamp's light darkens, for good, where it falls on it:

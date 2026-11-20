@@ -14,7 +14,7 @@ import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SHEET, darkness, type Mouth,
+  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SHEET, darkness, lampLight, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -2682,6 +2682,45 @@ describe('ringShare', () => {
     v.setMolecules(TARGET, 300);
     v.setMolecules(SOLVENT_SPECIES, 700);
     expect(ringShare(v)).toBeCloseTo(0.3);
+  });
+});
+
+describe("the shadow lamp's light through fluid", () => {
+  // a flask's inside is about 50 across at its base (see flaskRadius)
+  const across = 2 * 0.95 * flaskRadius(60);
+
+  it('is dimmed by the share of its molecules with a ring, and by how far through it the light goes', () => {
+    expect(lampLight(0, 1000)).toBe(1);
+    expect(lampLight(1, 0)).toBe(1);
+    expect(lampLight(0.5, 30)).toBeCloseTo(Math.exp(-LAMP.dim * 0.5 * 30));
+    // twice the rings in half the length dim it just as much
+    expect(lampLight(0.2, 40)).toBeCloseTo(lampLight(0.4, 20));
+    // each stretch takes its share of what's left, so two fluids one after another multiply
+    expect(lampLight(0.3, 25) * lampLight(0.3, 35)).toBeCloseTo(lampLight(0.3, 60));
+    expect(lampLight(-1, 10)).toBe(1);
+    expect(lampLight(1, -10)).toBe(1);
+  });
+
+  it('is all but stopped by a flask of nothing but rings, and only faintly shadowed by one with a few in a hundred', () => {
+    expect(across).toBeGreaterThan(40);
+    expect(across).toBeLessThan(60);
+    const full = new Vessel(CAP);
+    full.setMolecules(TARGET, CAP / 3);
+    expect(Math.log(lampLight(ringShare(full), across))).toBeGreaterThan(-5);
+    expect(Math.log(lampLight(ringShare(full), across))).toBeLessThan(-3);
+    // 3 rings in a hundred molecules, the rest solvent
+    const thin = new Vessel(CAP);
+    thin.setMolecules(TARGET, 3e7);
+    thin.setMolecules(SOLVENT_SPECIES, 9.7e8);
+    const light = lampLight(ringShare(thin), across);
+    expect(light).toBeGreaterThan(0.8);
+    expect(light).toBeLessThan(0.95);
+    // which shows on the sheet: lit for a second, it's a few shades lighter there, of the 255 a save keeps
+    expect(Math.round(255 * (darkness(1) - darkness(light)))).toBeGreaterThanOrEqual(5);
+    // and a flask of chains of the same atoms, or of anything else with no ring, casts none at all
+    const chains = new Vessel(CAP);
+    chains.setMolecules(speciesIndex(['R', 'G', 'B'], bondMask(['R', 'G'], ['G', 'B'])), CAP / 3);
+    expect(lampLight(ringShare(chains), across)).toBe(1);
   });
 });
 
