@@ -12,6 +12,7 @@ export type ViewMode = 'wall' | 'walk' | 'iso' | 'flat';
 /** The modes that are offered, in the order they're offered, each with its name as the player sees it. */
 export const VIEW_MODES: readonly { id: ViewMode; name: string }[] = [
   { id: 'wall', name: 'Wall' },
+  { id: 'walk', name: 'Walk round' },
   { id: 'iso', name: 'Isometric' },
 ];
 

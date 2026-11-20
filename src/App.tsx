@@ -5,7 +5,7 @@ import { AppearancePanel } from './components/AppearancePanel';
 import { ArrivalPanel } from './components/ArrivalPanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
 import { FlaskEditor } from './components/FlaskEditor';
-import { Hud, TouchControls } from './components/Hud';
+import { Hud, StartHint, TouchControls } from './components/Hud';
 import { LabelEditor } from './components/LabelEditor';
 import { Ending, SleepScreen } from './components/Sleep';
 import { SoundPanel } from './components/SoundPanel';
@@ -246,6 +246,8 @@ export function App() {
           <canvas key={mode} ref={canvasRef} />
           {engine && hud && <Hud engine={engine} hud={hud} help={help} />}
           {engine && hud && <TouchControls engine={engine} hud={hud} />}
+          {/* in the walk mode, with the mouse free, a click captures it (but not while a note's being typed) */}
+          {hud?.capture && !intro && editing === null && labeling === null && <StartHint />}
           {inspection && <InfoPanel info={inspection} />}
           {engine && editing !== null && <FlaskEditor engine={engine} id={editing} onClose={() => setEditing(null)} />}
           {engine && labeling !== null && (

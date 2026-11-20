@@ -43,7 +43,12 @@ export interface SaveState {
    * filled. Left out (as in saves from before the cabinet), it's full but for what's out in the lab.
    */
   cabinet?: Record<string, number[]>;
-  /** From when the lab was a room to walk round: where the player stood and looked. Ignored now. */
+  /**
+   * Where the player stands and looks in the walk mode (see ViewMode): across the room and out from the back wall,
+   * and their yaw and pitch (see GameEngine's Player); just outside the airlock if left out, or if it's somewhere they
+   * couldn't stand. A save from when the lab was a room to walk round (one without `wall`) has where they stood in
+   * that, which is ignored.
+   */
   player?: { x: number; z: number; yaw: number; pitch: number };
   /** Where the view is (see GameEngine): across the wall, up it, and out from it; where it starts if left out. */
   view?: { x: number; y: number; z: number };

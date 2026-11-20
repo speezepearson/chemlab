@@ -182,16 +182,22 @@ function Wheel({ wheel, engine }: { wheel: NonNullable<HudState['wheel']>; engin
 }
 
 /**
- * Over the view: an equipment wheel while it's held open, a brief note when there is one, and, on a screen with a
- * mouse and keys, everything that can be done just now, in a corner, unless `/` has hidden it. None of it takes the
- * pointer: that all goes to the view.
+ * Over the view: in the walk mode, the crosshair while the mouse is captured; an equipment wheel while it's held open,
+ * a brief note when there is one, and, on a screen with a mouse and keys, everything that can be done just now, in a
+ * corner, unless `/` has hidden it. None of it takes the pointer: that all goes to the view.
  */
 export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; help: boolean }) {
   return (
     <>
+      {hud.cross && <div className="crosshair" />}
       {hud.wheel && <Wheel wheel={hud.wheel} engine={engine} />}
       {hud.note && <div className={hud.tip ? 'note tip' : 'note'}>{hud.note}</div>}
       {!TOUCH && help && <Actions actions={hud.actions} />}
     </>
   );
+}
+
+/** In the walk mode, while the mouse is free, what a click on the view does: capture it, to look around. */
+export function StartHint() {
+  return <div className="start-hint">Click to look around</div>;
 }

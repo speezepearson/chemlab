@@ -31,7 +31,7 @@ import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './sa
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
 import { axes, onPlaneZ, sightAt } from './sight';
 import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
-import { BENCH, CELL, LIFT, PLANE_Z, ROOM, SPIN, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, type Pose, type Vec3 } from './space';
+import { BENCH, CELL, LIFT, PLANE_Z, ROOM, SPIN, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, wrapAngle, type Pose, type Vec3 } from './space';
 import {
   changeoverAt, ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
   TANK_H, TOOL_NAMES, dipUnder, isDipper, isThermometer, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
@@ -40,6 +40,7 @@ import {
 import { typingIn } from './typing';
 import { ARRIVAL, View, type AirlockLook, type Camera, type FaucetSpot, type Frame, type GuideLook, type Icons, type LabView, type Pick } from './view';
 import { FlatView } from './view2d';
+import { canStand, walk, type Stand } from './walk';
 import { WaterSounds } from './water';
 
 /** What the info panel shows for one vessel: all of it in god mode, otherwise just its color. */
@@ -113,6 +114,16 @@ export interface Hud {
   away: boolean;
   /** Whether the airlock stands open, and the player could get into the cryopod (see GameEngine.board). */
   pod: boolean;
+  /**
+   * Whether to draw the crosshair in the middle of the view: in the walk mode, while the mouse is captured, out of the
+   * pod, with no equipment wheel open (whose own pointer stands in for it).
+   */
+  cross: boolean;
+  /**
+   * Whether a click on the view would capture the mouse, to look around: in the walk mode, while it's free, out of
+   * the pod and the preview of the end.
+   */
+  capture: boolean;
 }
 
 /**
@@ -234,6 +245,19 @@ const FOV = 45;
 const POD_FOV = 90;
 /** The view from in the pod: out at the lab, eyes a little down. */
 const POD_VIEW: Camera = { x: POD.x, y: EYE, z: POD.z, yaw: 0, pitch: -0.12, fov: POD_FOV };
+/** In the walk mode (see ViewMode), the field of view, top to bottom, in degrees: wide, as it was when the lab was walked round. */
+const WALK_FOV = 90;
+/** How fast the player walks, in world units per real second (it's their own movement). */
+const WALK = 840;
+/** Radians the view turns per pixel the captured mouse moves, in the walk mode. */
+const LOOK_SENS = 0.0022;
+/** How far up or down the player can look, in radians from level. */
+const PITCH_MAX = 1.45;
+/**
+ * Where the player stands in the walk mode as they come out of the airlock (see emerge), and in a lab saved without
+ * them: just outside its doorway, a few hundred units into the room, facing the bench, level.
+ */
+const WALK_START: Player = { x: AIRLOCK.x, z: ROOM.z1 - 400, yaw: 0, pitch: 0 };
 /**
  * The isometric view (see ViewMode): which way it looks at the wall, a little from its right and from above, with no
  * perspective.
@@ -311,6 +335,15 @@ const FUNNEL_STEM = 6;
 /** Where a tool hangs on the wall, from a preset's spot for it. */
 const spotPose = (s: Spot): Pose => ({ ...fromFrac({ x: s.at[0], y: s.at[1] }), yaw: 0 });
 
+/**
+ * In the walk mode (see ViewMode), where the player stands (see walk.ts), and which way they look: a yaw of 0 is
+ * square at the back wall, and pitch is up, in radians. Their eyes are EYE above the floor.
+ */
+interface Player extends Stand {
+  yaw: number;
+  pitch: number;
+}
+
 /** A pose on the bench's plane (see PLANE_Z), at (x, y). */
 const onPlane = (x: number, y: number): Pose => ({ x, y, z: PLANE_Z, yaw: 0 });
 
@@ -352,9 +385,18 @@ export class GameEngine {
   /**
    * Where the view is on the wall it's on (see facing), as a view square on to that wall with perspective would have
    * it: across, up, and out from the back wall. Whatever the mode (see ViewMode), the camera is worked out from this
-   * (see camOf), so that the view keeps to the same bounds, and a save's view means the same, in all of them.
+   * (see camOf), so that the view keeps to the same bounds, and a save's view means the same, in all of them; but
+   * the walk mode, whose camera is the player's eyes (see player).
    */
   private at = { ...START_VIEW };
+  /** In the walk mode, where the player stands and looks: out of the pod, the camera is their eyes (see aim). */
+  private player: Player = { ...WALK_START };
+  /**
+   * In the walk mode, whether the mouse is captured (pointer lock): only then does the lab respond to it, or to the
+   * keys, the pointer being always the crosshair in the middle of the view (see crosshair), and moving the mouse
+   * turning the view (see look). A click on the view captures it, and Esc lets it go, as browsers do.
+   */
+  private locked = false;
   /** Where the view is from, and which way it looks (see Camera): worked out from `at`, but while it glides or is in the pod. */
   private cam: Camera = { ...START_VIEW, yaw: 0, pitch: 0, fov: FOV };
   /**
@@ -374,7 +416,8 @@ export class GameEngine {
   /** Where the pointer is on the view, in CSS pixels from its top left; null while it's off it. */
   private pointer: { x: number; y: number } | null = null;
   /**
-   * The left button, while it's down: where it went down, whether the pointer has moved far enough since for it to
+   * The left button, while it's down: where it went down (in the walk mode, where that spot of the view has gone as
+   * the view turned since, so that looking away from it is a drag), whether the pointer has moved far enough since for it to
    * be a drag, the valve it went down on, if any (a drag turns it; a click picks its tool up), and whether it picked
    * something up, which a drag then leaves where the button's let go.
    */
@@ -525,6 +568,7 @@ export class GameEngine {
     for (const r of this.rumbles.values()) r.stop();
     this.water.stop();
     this.view.dispose();
+    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
 
   /**
@@ -770,6 +814,8 @@ export class GameEngine {
       ...(this.blindsShut ? { blindsShut: true } : {}),
       ...(this.napKnown ? { nap: true } : {}),
       view: { x: view.x, y: view.y, z: view.z },
+      // (kept whatever the mode, so that switching from the walk mode and back keeps it)
+      player: { ...this.player },
       chem: saveChem(this.chem.params),
     };
   }
@@ -857,6 +903,12 @@ export class GameEngine {
     this.napKnown = !!s.nap;
     const v = s.view;
     this.bench = v && [v.x, v.y, v.z].every(Number.isFinite) ? this.inView({ x: v.x, y: v.y, z: v.z }) : { ...START_VIEW };
+    // where the player stood in the walk mode; not where they stood in the room a save from before the wall had
+    const pl = saved.wall ? s.player : undefined;
+    this.player =
+      pl && [pl.x, pl.z, pl.yaw, pl.pitch].every(Number.isFinite) && canStand(pl)
+        ? { x: pl.x, z: pl.z, yaw: wrapAngle(pl.yaw), pitch: Math.max(-PITCH_MAX, Math.min(PITCH_MAX, pl.pitch)) }
+        : { ...WALK_START };
     if (this.facing !== 'pod') this.toBench();
     // the cabinet as saved; or for a save from before it, full but for what's out
     if (s.cabinet) {
@@ -1209,9 +1261,71 @@ export class GameEngine {
     return { x: cam.x + ahead.x * on, y: cam.y + ahead.y * on, z: cam.z + ahead.z * on, yaw: cam.yaw, pitch: cam.pitch, fov: FOV };
   }
 
-  /** Put the camera where the view is (see GameEngine.at), on the wall it's on. */
+  /** Put the camera where the view is (see GameEngine.at), on the wall it's on; in the walk mode, at the player's eyes. */
   private aim(): void {
-    if (this.facing !== 'pod') this.cam = this.camOf(this.at, this.facing === 'away');
+    if (this.facing === 'pod') return;
+    this.cam = this.mode === 'walk' ? this.eyes() : this.camOf(this.at, this.facing === 'away');
+  }
+
+  /** The camera at the player's eyes, in the walk mode (see player). */
+  private eyes(): Camera {
+    const { x, z, yaw, pitch } = this.player;
+    return { x, y: EYE, z, yaw, pitch, fov: WALK_FOV };
+  }
+
+  /**
+   * The captured mouse moved (dx, dy) pixels, in the walk mode: an equipment wheel's pointer moves, if one's open
+   * (see wheelMove); or else the view turns, which, with the left button down, may make a drag of it (see moved).
+   */
+  private look(dx: number, dy: number): void {
+    const w = this.wheel;
+    if (w) {
+      this.wheel = { ...w, ...wheelMove(w, dx, dy) };
+      return;
+    }
+    if (this.glide || this.facing === 'pod' || this.dozing() || this.previewing) return;
+    const p = this.player;
+    p.yaw = wrapAngle(p.yaw - dx * LOOK_SENS);
+    p.pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, p.pitch - dy * LOOK_SENS));
+    this.aim();
+    // what was under the crosshair as the button went down goes the other way across the view
+    const pr = this.press;
+    if (pr) {
+      pr.x -= dx;
+      pr.y -= dy;
+    }
+    this.moved();
+  }
+
+  /**
+   * In the walk mode, the pointer is the crosshair, in the middle of the view, while the mouse is captured, and off
+   * it while it isn't; but in the pod, where the free pointer can press OK, it's wherever that is.
+   */
+  private crosshair(): void {
+    if (this.mode !== 'walk') return;
+    if (this.locked) this.pointer = { x: this.viewW / 2, y: this.viewH / 2 };
+    else if (!inPod(this.wake)) this.pointer = null;
+  }
+
+  /** In the walk mode, let go of the mouse, if it's captured: to type a note, or in the pod, to press OK with it. */
+  private unlock(): void {
+    if (!this.locked) return;
+    this.locked = false;
+    this.uncaptured();
+    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
+  }
+
+  /**
+   * The mouse has been let go of, in the walk mode: no key or button is held any longer, as far as the lab knows,
+   * so a press under way ends as if its button came up, and an equipment wheel open closes making nothing. The
+   * pointer is off the view until the free mouse moves over it.
+   */
+  private uncaptured(): void {
+    this.keys.clear();
+    this.wheel = null;
+    this.rightUp();
+    this.leftUp(false);
+    this.pointer = null;
   }
 
   /** Put the view at the bench, where it last was there, at once. */
@@ -1244,10 +1358,10 @@ export class GameEngine {
   /**
    * Space: turn the view round to the wall behind the bench, where the airlock, the porthole and the alarms' button
    * are, from far enough back to see them all (see BEHIND_VIEW); or back to the bench, where it was. With something
-   * in hand it stays put. The flat view has no wall behind.
+   * in hand it stays put. The flat view has no wall behind, and in the walk mode the player just looks behind them.
    */
   turnRound(): void {
-    if (this.mode === 'flat') return;
+    if (this.mode === 'flat' || this.mode === 'walk') return;
     if (this.glide || inPod(this.wake) || this.dozing() || this.previewing || this.wheel || this.turning) return;
     if (this.held) {
       this.say('Hands full');
@@ -1269,7 +1383,7 @@ export class GameEngine {
   /**
    * Move the view for a frame of dt real seconds (it's the player's own doing, like carrying): on along a glide, if
    * it's on one; or else across the wall with the keys, with a drag of the wall itself, or, with something in hand,
-   * with the pointer at the view's edge.
+   * with the pointer at the view's edge. In the walk mode, the keys walk the player instead (see stroll).
    */
   private steer(dt: number): void {
     const g = this.glide;
@@ -1288,6 +1402,7 @@ export class GameEngine {
       return;
     }
     if (this.facing === 'pod' || this.wheel) return;
+    if (this.mode === 'walk') return this.stroll(dt);
     const k = this.keys;
     let across = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
     let up = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
@@ -1303,6 +1418,23 @@ export class GameEngine {
     this.at = this.inView({ ...this.at, x: this.at.x + side * across * step, y: this.at.y + up * step });
     this.aim();
     this.dragView();
+  }
+
+  /**
+   * In the walk mode, walk for dt real seconds (it's the player's own movement) as the keys say, at WALK, whichever
+   * way: W and S (or up and down) ahead and back, A and D (or left and right) to the sides, as they look, as far as
+   * they can go (see walk.ts).
+   */
+  private stroll(dt: number): void {
+    const k = this.keys;
+    const ahead = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
+    const side = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
+    if (!this.locked || (!ahead && !side)) return;
+    const p = this.player;
+    const step = (WALK * dt) / Math.hypot(ahead, side);
+    const [sin, cos] = [Math.sin(p.yaw), Math.cos(p.yaw)];
+    Object.assign(p, walk(p, (-sin * ahead + cos * side) * step, (-cos * ahead - sin * side) * step));
+    this.aim();
   }
 
   /** While the wall is being dragged (see panning), move the view so that the point of it taken hold of is under the pointer. */
@@ -1325,7 +1457,8 @@ export class GameEngine {
    * nearer is only seeing less of the wall, bigger.)
    */
   private zoom(px: number): void {
-    if (this.glide || this.facing === 'pod' || this.wheel || this.dozing()) return;
+    // (in the walk mode, the player walks nearer)
+    if (this.mode === 'walk' || this.glide || this.facing === 'pod' || this.wheel || this.dozing()) return;
     const at = this.pointer ?? { x: this.viewW / 2, y: this.viewH / 2 };
     const p = this.planeAt(at.x, at.y);
     if (!p) return;
@@ -1373,8 +1506,37 @@ export class GameEngine {
       const r = c.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
+    // in the walk mode, the mouse is captured to look around, and the pointer is always the crosshair (see locked)
+    const walking = this.mode === 'walk';
+    if (walking) {
+      const onLock = () => {
+        const now = document.pointerLockElement === c;
+        if (now === this.locked) return;
+        this.locked = now;
+        if (now) this.crosshair();
+        else this.uncaptured();
+      };
+      document.addEventListener('pointerlockchange', onLock);
+      this.cleanups.push(() => document.removeEventListener('pointerlockchange', onLock));
+    }
     on(c, 'pointerdown', (e) => {
       e.preventDefault();
+      if (walking && !this.locked) {
+        // the mouse is free: in the pod, it can press OK where it points; out of it, a click captures it
+        if (inPod(this.wake)) {
+          this.pointer = at(e);
+          this.retarget();
+          if (e.button === 0 && this.target?.kind === 'wake') this.pressOk();
+        } else if (e.button === 0) c.requestPointerLock?.()?.catch?.(() => {});
+        return;
+      }
+      if (walking) {
+        this.crosshair();
+        this.retarget();
+        if (e.button === 0) this.leftDown(e.shiftKey);
+        if (e.button === 2) this.rightDown();
+        return;
+      }
       c.setPointerCapture?.(e.pointerId);
       this.pointer = at(e);
       if (e.pointerType === 'touch') {
@@ -1388,6 +1550,11 @@ export class GameEngine {
       if (e.button === 2) this.rightDown();
     });
     on(c, 'pointermove', (e) => {
+      if (walking) {
+        if (this.locked) this.look(e.movementX, e.movementY);
+        else if (inPod(this.wake)) this.pointer = at(e);
+        return;
+      }
       if (e.pointerType === 'touch') {
         if (this.fingers.has(e.pointerId)) this.fingerMove(e.pointerId, at(e));
         return;
@@ -1396,6 +1563,11 @@ export class GameEngine {
       this.moved();
     });
     const up = (e: PointerEvent) => {
+      if (walking) {
+        if (e.button === 0) this.leftUp(false);
+        if (e.button === 2) this.rightUp();
+        return;
+      }
       if (e.pointerType === 'touch') {
         this.fingerUp(e.pointerId);
         return;
@@ -1408,11 +1580,12 @@ export class GameEngine {
     on(c, 'pointercancel', up);
     on(c, 'pointerleave', (e) => {
       // off the view, it's on nothing; a button held keeps the pointer, wherever it goes
-      if (e.pointerType !== 'touch' && !e.buttons) this.pointer = null;
+      if (walking ? !this.locked : e.pointerType !== 'touch' && !e.buttons) this.pointer = null;
     });
     on(c, 'contextmenu', (e) => e.preventDefault());
     on(c, 'wheel', (e) => {
       e.preventDefault();
+      // (the walk mode has no zooming: see zoom)
       this.zoom(e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1));
     });
     on(window, 'keydown', (e) => {
@@ -1436,6 +1609,8 @@ export class GameEngine {
         if (!e.repeat) this.previewArrival(!this.previewing);
         return;
       }
+      // in the walk mode, with the mouse free, the lab doesn't respond to the keys
+      if (walking && !this.locked) return;
       this.keys.add(e.code);
       if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
       if (e.repeat || inPod(this.wake) || this.previewing || this.glide) return;
@@ -1449,7 +1624,8 @@ export class GameEngine {
         this.leftDown(e.shiftKey);
         this.leftUp(false);
       }
-      if (e.code === 'KeyQ' || e.code === 'Escape') this.putBack();
+      // (in the walk mode, Esc lets go of the mouse instead)
+      if (e.code === 'KeyQ' || (e.code === 'Escape' && this.mode !== 'walk')) this.putBack();
       if (e.code === 'Enter') {
         // the note's text box opens at once, and this Enter mustn't be taken as finishing it
         e.preventDefault();
@@ -1478,9 +1654,12 @@ export class GameEngine {
     });
   }
 
-  /** Whether the view can be moved by hand just now: at the bench or the wall behind, and not on its way anywhere. */
+  /**
+   * Whether the view can be moved by hand just now: at the bench or the wall behind, and not on its way anywhere. In
+   * the walk mode it never can, but by walking and looking.
+   */
   private canSteer(): boolean {
-    return !this.glide && this.facing !== 'pod' && !this.dozing() && !this.wheel;
+    return this.mode !== 'walk' && !this.glide && this.facing !== 'pod' && !this.dozing() && !this.wheel;
   }
 
   /** What the pointer is on, as of now (see View.pick); what a valve being turned is on stays as it was. */
@@ -1566,7 +1745,7 @@ export class GameEngine {
       }
     }
     // the bare wall: a drag moves the view across it
-    this.panning = this.planeAt(this.pointer.x, this.pointer.y);
+    if (this.canSteer()) this.panning = this.planeAt(this.pointer.x, this.pointer.y);
   }
 
   /**
@@ -1989,6 +2168,8 @@ export class GameEngine {
     this.retarget();
     const id = this.targetNote();
     if (!id || inPod(this.wake)) return;
+    // in the walk mode, the mouse is let go of, to type it
+    this.unlock();
     if (this.god && /^(f\d+|t\d+\.\d+)$/.test(id)) this.cb.onEdit(id);
     else this.cb.onLabel(id);
   }
@@ -2069,10 +2250,20 @@ export class GameEngine {
 
   /**
    * For checks in a browser: put the view somewhere (see Camera), at the bench. The mouse works as ever, so there's
-   * nothing else to stand in for.
+   * nothing else to stand in for. In the walk mode, stand the player somewhere instead, looking some way (see Player;
+   * `y` is ignored), and with `locked`, act as if the mouse were captured, or let go of, since a browser without a
+   * screen can't capture it.
    */
-  debug(p: Partial<{ x: number; y: number; z: number }>): void {
-    this.bench = this.inView({ ...this.bench, ...p });
+  debug(p: Partial<{ x: number; y: number; z: number; yaw: number; pitch: number; locked: boolean }>): void {
+    // (only what's given)
+    const given = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>;
+    const { x, y, z, yaw, pitch, locked } = p;
+    if (this.mode === 'walk') {
+      Object.assign(this.player, given({ x, z, yaw, pitch }));
+      if (locked === false) this.unlock();
+      else if (locked) this.locked = true;
+      this.crosshair();
+    } else this.bench = this.inView({ ...this.bench, ...given({ x, y, z }) });
     this.toBench();
     this.view.look(this.cam);
   }
@@ -2222,6 +2413,9 @@ export class GameEngine {
   private frame = (now: number): void => {
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
+    // in the walk mode, the mouse is let go of in the pod, to press OK with it, or carry on from the end
+    if (inPod(this.wake)) this.unlock();
+    this.crosshair();
     // a nap: their eyes close, or open again, in their own time
     const nap = this.napping;
     // (the alarm of the station's changeover wakes them, even as they nod off)
@@ -2840,7 +3034,19 @@ export class GameEngine {
       add(['/'], 'hide this list');
       return out;
     }
+    const walking = this.mode === 'walk';
+    // in the walk mode, nothing's done with the mouse free, but capturing it
+    if (walking && !this.locked) {
+      add(['LMB'], 'look around');
+      add(['/'], 'hide this list');
+      return out;
+    }
     const view = () => {
+      if (walking) {
+        add(['WASD'], 'walk');
+        add(['Esc'], 'let go of the mouse');
+        return;
+      }
       add(['WASD'], 'move the view');
       add(['Wheel'], 'move nearer or further');
     };
@@ -2864,7 +3070,11 @@ export class GameEngine {
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it back in the cabinet');
       add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it back in the cabinet') : 'put it back');
     } else {
-      if (this.valveGrabbed()) add(['Drag'], 'turn the valve');
+      if (this.valveGrabbed()) {
+        // (a captured mouse doesn't drag: the button's held as the player looks round)
+        if (walking) add(['LMB', 'Mouse'], 'hold and look to turn the valve');
+        else add(['Drag'], 'turn the valve');
+      }
       add([WHEEL_KEYS.join(', ')], 'hold to grab equipment');
     }
     if (this.pressable()) add(['LMB'], 'press it');
@@ -2882,7 +3092,7 @@ export class GameEngine {
     if (!h && this.history.canUndo) add([MOD, 'Z'], 'undo');
     if (!h && this.history.canRedo) add([MOD, 'Shift', 'Z'], 'redo');
     view();
-    if (!h && this.mode !== 'flat') add(['Space'], 'look behind you');
+    if (!h && this.mode !== 'flat' && !walking) add(['Space'], 'look behind you');
     add(['/'], 'hide this list');
     return out;
   }
@@ -3006,9 +3216,14 @@ export class GameEngine {
     this.facing = 'pod';
   }
 
-  /** The pod's door has swung open: the view glides out of it and across the lab to the bench, where it was last. */
+  /**
+   * The pod's door has swung open: the view glides out of it and across the lab to the bench, where it was last; in
+   * the walk mode, to where the player first stands (see WALK_START).
+   */
   private emerge(): void {
     const from = { ...this.cam };
+    // in the walk mode, to just outside the airlock's doorway, from where they walk
+    if (this.mode === 'walk') this.player = { ...WALK_START };
     this.toBench();
     if (this.mode === 'flat') return;
     this.glide = { from, to: this.standIn(this.cam), t: 0, s: EMERGE_S, door: true };
@@ -3355,6 +3570,8 @@ export class GameEngine {
       nap: this.canNap(),
       away: this.facing === 'away',
       pod: this.wake === 'open',
+      cross: this.mode === 'walk' && this.locked && !inPod(this.wake) && !this.previewing && !this.wheel,
+      capture: this.mode === 'walk' && !this.locked && !inPod(this.wake) && !this.previewing,
     };
     const key = JSON.stringify(hud);
     if (key === this.lastHud) return;

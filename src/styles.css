@@ -124,6 +124,19 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
   color:#f3d9d4;background:rgba(40,14,10,.6);padding:3px 10px;border-radius:6px;font-size:13px;
 }
 .note.tip{top:22%;color:#e9f1ec;background:rgba(14,30,24,.72);padding:6px 14px;font-size:14px}
+/* the walk mode's crosshair, in the middle of the view while the mouse is captured */
+.crosshair{
+  position:absolute;left:50%;top:50%;width:14px;height:14px;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
+  background:
+    linear-gradient(#fff,#fff) center/2px 14px no-repeat,
+    linear-gradient(#fff,#fff) center/14px 2px no-repeat;
+  opacity:.75;mix-blend-mode:difference;
+}
+/* and while it isn't, what a click does */
+.start-hint{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
+  color:#eef0eb;background:rgba(8,12,11,.55);padding:6px 14px;border-radius:8px;font-size:15px;font-weight:600;
+}
 /* a touch screen's buttons, in a column at the bottom right */
 .touch-buttons{
   position:absolute;right:20px;bottom:24px;display:flex;flex-direction:column;align-items:center;gap:10px;z-index:3;
