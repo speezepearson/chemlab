@@ -82,6 +82,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     `openWheel`, `closeWheel`) and `Wheel` in `Hud.tsx` draws it.
   - `outline.ts` is the player's settings for the outline round what the crosshair is on; the view's `Outliner` draws
     it over the finished frame, from a mask of the meshes registered as that thing's parts.
+  - `smell.ts` is what a sniff (F) makes of a fluid, pure and DOM-free: the ten odorants and Nadia's similes for them
+    (`ODORANTS`), how strong each is for a composition and temperature, masking, her nose's fatigue (`Nose`, which the
+    engine owns one of and steps on sim time inside `simulate()`), and the line it's all put into (`sentence`).
   - `supply.ts` is what the ship is short of, in the order the station is fitted for them (`SUPPLIES`): the
     antinucleant (R–B), then the cryostabilizer.
   - `cabinet.ts` is the equipment cabinet: its layout (each kind's slots on its shelves) and its stock, which the
@@ -193,6 +196,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   atoms, the four colors and the solvent, which the user chose). The spectroscope's axes are labeled E (uB) and f (in S, with an SI prefix to suit the range, as mS), at the user's request: both on log scales with
   base-10 log-paper ticks, only the powers of ten numbered, f's ranging itself to the tallest line, and no peak labeled. It plots each bond at the size of its
   energy, a stable one as a peak above the baseline and an uphill one as a dip below it, at the user's request. Ask before adding any visual cue that reveals how a tool or reaction works.
+- A smell's simile (`ODORANTS` in `smell.ts`) gives nothing away either: none goes with its species' colors (and
+  black's is nothing burnt), a pair's shares nothing with its two atoms', and none is a real chemical's. The one
+  kinship, which the user asked for, is that the three pairs with a blue atom are sweet. Ask before adding another.
 - The game's text matches the intro's premise. The player is Nadia Hassan, the target species is the cryostabilizer,
   and the ship belongs to Celestia Starlines.
 - Commits are small, one behavior per commit, with a message explaining why. The README changes in the same commit.
