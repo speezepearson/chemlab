@@ -891,7 +891,7 @@ export function cultureLevel(share: number): number {
  * bench at a holder for a sheet at its front. In its own frame (x right, y down from its top, z toward its front,
  * from the middle of the bench), in world units:
  * - h: how tall it stands on its bench: its housing, and its holder's posts; w and d: how far across and front to
- *   back it and its bench are, in whole grid cells;
+ *   back its bench is, in whole grid cells, the lamp in the middle of it across;
  * - housing: the cabinet the lamp is in, at the back, as tall as it stands;
  * - bulb: the bulb, deep in a recess at the foot of the housing's face: how far down from the top its middle is,
  *   where it is front to back, and its radius. It's just above the bench, level with the foot of a sheet in the
@@ -901,20 +901,21 @@ export function cultureLevel(share: number): number {
  *   how far down from the top to how far: just big enough for the bulb's light to reach all of a sheet in the holder,
  *   and no bigger, so it lights nothing else;
  * - console: the box beside the housing that the switch is on, and switch, the switch's middle on the box's front;
- * - holder: the frame a sheet stands in, at the front: where it is front to back, how thick it is that way, how wide
- *   each of its two posts is, and how tall the rail between their feet, which the sheet stands on;
+ * - holder: the frame a sheet stands in, at the front: where it is front to back, how thick it is that way, how far
+ *   it reaches either side of the lamp's middle line (`x`), how wide each of the two posts at its ends is, and how
+ *   tall the rail between their feet, which the sheet stands on;
  * - dim: how much fluid dims its light, per world unit of the light's way through fluid all of whose molecules have a
  *   ring in them (see lampLight): so that a full flask of nothing but rings, about 50 across inside, lets through
  *   about e^−4 of it, all but none, and one with a few rings in a hundred casts a faint shadow.
  */
 export const LAMP = {
-  h: 300, w: 3 * CELL, d: 3 * CELL, dim: 0.08,
+  h: 300, w: 5 * CELL, d: 3 * CELL, dim: 0.08,
   housing: { x0: -110, x1: 110, z0: -150, z1: -50 },
   bulb: { y: 290, z: -135, r: 5 },
   mouth: { x: 50, y0: 196, y1: 298 },
   console: { x0: -150, x1: -110, y0: 180 },
   switch: { x: -130, y: 216 },
-  holder: { z: 145, d: 10, post: 8.5, rail: 4 },
+  holder: { z: 145, d: 10, x: 150, post: 8.5, rail: 4 },
 };
 
 /**

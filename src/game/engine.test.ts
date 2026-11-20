@@ -148,11 +148,16 @@ describe('shadow paper', () => {
     l.e.debug({ x, z, yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(dy, Math.hypot(dx, dz)) });
     l.in.move(0);
   }
-  /** Take a sheet out of the cabinet, by the wheel, standing by the lamp's bench with it held up to the holder. */
-  function sheetAtHolder(l: { e: GameEngine; in: Inside }): Tool {
-    look(l, SHEET_SLOT.x + 220, SHEET_SLOT.z + 30, SHEET_SLOT.x, SHEET_SLOT.y - 100, SHEET_SLOT.z + 30);
+  /**
+   * Take a sheet out of the cabinet, by the wheel, standing out in the room in front of the lamp's bench, with the
+   * sheet held up to the holder: turned to face the lamp, or as it comes, facing whoever holds it.
+   */
+  function sheetAtHolder(l: { e: GameEngine; in: Inside }, turned = true): Tool {
+    const at = () => look(l, SHEET_SLOT.x, SHEET_SLOT.z - 240, SHEET_SLOT.x, SHEET_SLOT.y - 150, SHEET_SLOT.z);
+    at();
     expect(l.e.spawn('sheet')).toBe(true);
-    look(l, SHEET_SLOT.x + 220, SHEET_SLOT.z + 30, SHEET_SLOT.x, SHEET_SLOT.y - 100, SHEET_SLOT.z + 30);
+    if (turned) l.in.held!.relYaw = Math.PI;
+    at();
     return l.in.held!.t!;
   }
 
@@ -208,10 +213,8 @@ describe('shadow paper', () => {
 
   it('goes in with its back to the lamp, if that is how it is held', () => {
     const l = lab();
-    const sheet = sheetAtHolder(l);
-    // held facing the player, who's turned from the lamp to it a quarter turn: turned another, it has its back to the lamp
-    l.in.held!.relYaw += Math.PI / 2;
-    l.in.move(0);
+    // as it comes out of the cabinet it faces whoever holds it, who's looking at the lamp across the holder
+    const sheet = sheetAtHolder(l, false);
     l.in.release();
     expect(sheet.pose).toEqual(slotPose(SHEET_SLOT.yaw + Math.PI));
     expect(Math.cos(sheet.pose.yaw - SHEET_SLOT.yaw)).toBeCloseTo(-1);

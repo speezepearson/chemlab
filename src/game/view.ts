@@ -1850,7 +1850,6 @@ class ToolView {
   private buildLamp(pick: (m: THREE.Object3D, part: 'switch') => void): void {
     const { art } = this;
     const { h, housing: hs, bulb, mouth, console: c, holder: hd } = LAMP;
-    const b = this.t.shape.box;
     const solid = <T extends THREE.Mesh>(m: T): T => {
       m.castShadow = m.receiveShadow = true;
       art.add(m);
@@ -1917,9 +1916,9 @@ class ToolView {
     pick(tip, 'switch');
     // the holder: two posts, and the rail between their feet that a sheet stands on
     const [z0, z1] = [hd.z - hd.d / 2, hd.z + hd.d / 2];
-    block(art, darkMat, b.x0, b.x0 + hd.post, 0, h, z0, z1, 1);
-    block(art, darkMat, b.x1 - hd.post, b.x1, 0, h, z0, z1, 1);
-    block(art, darkMat, b.x0, b.x1, h - hd.rail, h, z0, z1, 1);
+    block(art, darkMat, -hd.x, -hd.x + hd.post, 0, h, z0, z1, 1);
+    block(art, darkMat, hd.x - hd.post, hd.x, 0, h, z0, z1, 1);
+    block(art, darkMat, -hd.x, hd.x, h - hd.rail, h, z0, z1, 1);
     this.lamp = { bulb: glass, lining, lever };
   }
 

@@ -134,7 +134,7 @@ export function tankNoteY(t: Tool, k: number): number {
  * a wicking strip's clip; the rest of it bumps into nothing, so it can stand down in a flask or a tank. A sheet of
  * shadow paper's is all of it. The shadow
  * lamp's are its housing and the console beside it, and its holder's two posts and the rail between them (see LAMP):
- * the bench between housing and holder is clear, for things to stand in its light.
+ * the bench between housing and holder, and either side of them, is clear, for things to stand in its light.
  */
 export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean }[] {
   const sh = t.shape;
@@ -158,9 +158,9 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
     return [
       { x0: hs.x0, x1: hs.x1, y0: 0, y1: h, ...back },
       { x0: c.x0, x1: c.x1, y0: c.y0, y1: h, ...back },
-      { x0: b.x0, x1: b.x0 + hd.post, y0: 0, y1: h, ...front },
-      { x0: b.x1 - hd.post, x1: b.x1, y0: 0, y1: h, ...front },
-      { x0: b.x0, x1: b.x1, y0: h - hd.rail, y1: h, ...front },
+      { x0: -hd.x, x1: -hd.x + hd.post, y0: 0, y1: h, ...front },
+      { x0: hd.x - hd.post, x1: hd.x, y0: 0, y1: h, ...front },
+      { x0: -hd.x, x1: hd.x, y0: h - hd.rail, y1: h, ...front },
     ];
   }
   if (isThermometer(t.kind)) {

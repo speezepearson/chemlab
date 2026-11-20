@@ -8,6 +8,7 @@ import { SOLVENT_SPECIES, singleOf } from '../chem/species';
 import { CAP } from './config';
 import { Flask } from './flask';
 import { FLASK_H } from './flaskShape';
+import { AIRLOCK } from './airlock';
 import { boxesOverlap, solids } from './physics';
 import { LAMP_POSE } from './presets';
 import { Scale } from './scale';
@@ -84,12 +85,13 @@ describe('the shadow lamp', () => {
     return f;
   };
 
-  it('stands on a bench of its own in the front left corner, which it covers, with no clamp stand', () => {
+  it('stands on a bench of its own in the front left corner, in the middle of it, with no clamp stand', () => {
     expect(COUNTERS.filter((c) => c.lamp)).toEqual([{ ...LAMP_AREA, lamp: true }]);
     expect([LAMP_AREA.x0, LAMP_AREA.z1]).toEqual([ROOM.x0, ROOM.z1]);
-    // clear of every other counter, with room to walk between
+    // clear of every other counter, with room to squeeze between (the player is 90 across), and of the airlock's doorway
     for (const c of COUNTERS.filter((k) => !k.lamp))
-      expect(Math.max(c.x0 - LAMP_AREA.x1, LAMP_AREA.x0 - c.x1, c.z0 - LAMP_AREA.z1, LAMP_AREA.z0 - c.z1)).toBeGreaterThanOrEqual(0);
+      expect(Math.max(c.x0 - LAMP_AREA.x1, LAMP_AREA.x0 - c.x1, c.z0 - LAMP_AREA.z1, LAMP_AREA.z0 - c.z1)).toBeGreaterThanOrEqual(CELL);
+    expect(LAMP_AREA.x1).toBeLessThan(AIRLOCK.x - AIRLOCK.door.w / 2);
     const b = toolBox(lamp);
     expect([b.x - b.hx, b.x + b.hx, b.z - b.hz, b.z + b.hz]).toEqual([LAMP_AREA.x0, LAMP_AREA.x1, LAMP_AREA.z0, LAMP_AREA.z1]);
     expect(b.y - b.hy).toBeCloseTo(LIFT);
@@ -114,8 +116,9 @@ describe('the shadow lamp', () => {
         expect(counterUnder(flaskBox(f))).toBe(LIFT);
         expect(boxesOverlap(flaskBox(f), b), `${x}, ${z}`).toBe(false);
       }
-    // but nothing stands in the row its housing and console are in
-    for (let x = LAMP_AREA.x0 + CELL / 2; x < LAMP_AREA.x1; x += CELL) expect(boxesOverlap(flaskBox(flaskAt(x, LAMP_AREA.z1 - CELL / 2)), b)).toBe(true);
+    // in the row by the wall, its housing and console have the three cells in the middle, and the two at the ends are clear
+    const byWall = [0, 1, 2, 3, 4].map((i) => boxesOverlap(flaskBox(flaskAt(LAMP_AREA.x0 + (i + 0.5) * CELL, LAMP_AREA.z1 - CELL / 2)), b));
+    expect(byWall).toEqual([false, true, true, true, false]);
     // a scale along a row fits between the walls, and a dispenser on its stand in one row, its stand in the other
     const sc = new Scale(onGrid(at(LAMP_POSE.x, LIFT + 40, LAMP_AREA.z0 + CELL / 2), SCALE_ANCHOR));
     expect(boxesOverlap({ ...sc.pose, hx: 92, hy: 20, hz: 36 }, b)).toBe(false);
@@ -127,6 +130,22 @@ describe('the shadow lamp', () => {
         expect(counterUnder(standBase(st, 0))).toBe(LIFT);
         expect(boxesOverlap(standBase(st, LIFT), b)).toBe(false);
       }
+    }
+  });
+
+  it('has room for the longest tools across its light, both stands on the bench', () => {
+    const b = toolBox(lamp);
+    for (const kind of ['heater', 'sorter', 'separator'] as const) {
+      // somewhere along the row by the holder, with its back to the lamp or facing it, on the grid
+      const fits = [0, Math.PI].some((yaw) =>
+        [0, 1, 2, 3, 4].some((i) => {
+          const t = new Tool(kind, 1);
+          t.pose = onGrid(at(LAMP_AREA.x0 + (i + 0.5) * CELL, LIFT + 260, LAMP_AREA.z0 + CELL / 2, yaw), toolAnchor(t));
+          const stands = toolStands(t);
+          return stands.length === 2 && !boxesOverlap(toolBox(t), b) && stands.every((st) => counterUnder(standBase(st, 0)) === LIFT && !boxesOverlap(standBase(st, LIFT), b));
+        }),
+      );
+      expect(fits, kind).toBe(true);
     }
   });
 });

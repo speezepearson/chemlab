@@ -65,11 +65,12 @@ const ISLAND = { w: 10 * CELL, d: 4 * CELL, x0: -4 * CELL, z0: 6 * CELL, dx: 13 
  */
 export const CABINET_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 18 * CELL, z0: ROOM.z0, z1: ROOM.z0 + 3 * CELL };
 /**
- * Where the shadow lamp stands (see LAMP in tools.ts): on a bench of its own in the room's front left corner, three
- * grid cells each way, as high as the counters. Nothing could be set down there before it was, so no save has
- * anything standing in its way.
+ * Where the shadow lamp stands (see LAMP in tools.ts): on a bench of its own in the room's front left corner, five
+ * grid cells along the front wall and three out from it, as high as the counters. Nothing could be set down there
+ * before it was, so no save has anything standing in its way. It's long enough for the longest tools (a heater, a
+ * sorter, a separator) to stand across it on their two stands, and stops short of the airlock's doorway.
  */
-export const LAMP_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 3 * CELL, z0: ROOM.z1 - 3 * CELL, z1: ROOM.z1 };
+export const LAMP_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 5 * CELL, z0: ROOM.z1 - 3 * CELL, z1: ROOM.z1 };
 /**
  * A counter: its x and z extents, and whether it's an island out in the room rather than a sink counter on a wall, or
  * the shadow lamp's own bench.

@@ -2567,7 +2567,7 @@ describe('shadow paper', () => {
     expect(t.step(0.02)).toEqual([]);
     expect(UNIQUE_TOOLS).not.toContain('sheet');
     const b = t.shape.box;
-    expect(b.x1 - b.x0).toBeLessThan(LAMP.w - 2 * LAMP.holder.post);
+    expect(b.x1 - b.x0).toBeLessThan(2 * (LAMP.holder.x - LAMP.holder.post));
     // standing on the rail, it's no taller than the posts
     expect(b.y1 - b.y0).toBeLessThanOrEqual(LAMP.h - LAMP.holder.rail);
     expect(t.dose).toHaveLength(N * N);
