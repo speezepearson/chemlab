@@ -4851,6 +4851,11 @@ export class View {
       const sheet = lamp.sheet;
       const sv = sheet && this.tools.get(sheet);
       if (lamp.kind !== 'shadowlamp' || !(lamp.owed > 0) || !sheet || !sv) continue;
+      // (a sheet that's as dark as it gets all over has nothing left to show, so there's nothing to work out)
+      if (sheet.spent) {
+        lamp.owed = 0;
+        continue;
+      }
       const ext = this.renderer.extensions;
       this.exposer ??= new Exposer(ext.has('EXT_color_buffer_float') || ext.has('EXT_color_buffer_half_float'));
       sheet.expose(this.exposer.expose(this.renderer, this.scene, lamp, sheet, [v.root, sv.root], lamp.owed), lamp.owed);

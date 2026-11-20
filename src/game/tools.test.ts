@@ -2606,8 +2606,17 @@ describe('shadow paper', () => {
     t.expose(light((_, j) => (j < N / 2 ? 1 : 0)), 0.5);
     const at = (i: number, j: number) => t.dose[j * N + i];
     expect([at(0, 0), at(N - 1, 0), at(0, N - 1), at(N - 1, N - 1)].map((d) => +d.toFixed(3))).toEqual([1, 0.5, 0.5, 0]);
+    // it's spent only once every cell has had its fill
+    expect(t.spent).toBe(false);
     for (let k = 0; k < 20; k++) t.expose(all, 1);
     expect(Math.max(...t.dose)).toBeCloseTo(SHEET.full);
+    expect(t.spent).toBe(true);
+    // and it's still spent out of a save
+    const saved = new Tool('sheet', 2);
+    saved.develop(t.image);
+    expect(saved.spent).toBe(true);
+    expect(new Tool('sheet', 3).spent).toBe(false);
+    expect(new Tool('strip', 4).spent).toBe(false);
     // light is never more than all of the lamp's, nor less than none
     const u = new Tool('sheet', 1);
     u.expose(light((i) => (i % 2 ? 7 : -7)), 1);

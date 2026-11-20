@@ -2138,6 +2138,15 @@ export class Tool {
   }
 
   /**
+   * Whether a sheet of shadow paper is as dark as it gets all over (see SHEET.full), so that no more light can show on
+   * it; never, for any other tool.
+   */
+  get spent(): boolean {
+    // (a cell holds its fill only to a float's precision)
+    return this.dose.length > 0 && this.dose.every((d) => d >= SHEET.full - 1e-4);
+  }
+
+  /**
    * What a save keeps of a sheet of shadow paper's image, or undefined for one that's had no light (or any other
    * tool): how dark each cell is (see darkness), as a byte, 0 as new to 255 as dark as it gets, in dose's order,
    * packed whichever way comes out shorter, as base64: after a byte of 1, each run of the same byte as two, how many
