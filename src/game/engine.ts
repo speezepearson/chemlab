@@ -28,6 +28,7 @@ import { WHEELS, wheelMove, wheelPick, type WheelAim } from './wheel';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
 import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
+import { sentence, smell } from './smell';
 import {
   CELL, COUNTERS, LIFT, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toCardinal, toFrac, toLocal, toWorld, wrapAngle,
   type Pose, type Vec3,
@@ -118,6 +119,11 @@ export interface Hud {
   napping: boolean;
   /** Whether N would start a nap just now. */
   nap: boolean;
+  /**
+   * What the last sniff smelled of, in a line (see smell.ts), for SMELL_MS after it; `n` counts the sniffs, so the
+   * same line twice running shows as new. Otherwise null.
+   */
+  smell: { text: string; n: number } | null;
 }
 
 /**
@@ -303,6 +309,8 @@ const ISLAND_FAUCET_OUT = CELL / 2;
 const RISER_R = 6;
 /** How long a note stays up, in ms. */
 const NOTE_MS = 1600;
+/** How long what a sniff smelled of stays up, in ms, fading out at the end (it's on the display, not in the lab). */
+export const SMELL_MS = 5000;
 /** How long the note that she can nap stays up, in ms: long enough to read. */
 const NAP_HINT_MS = 9000;
 /** Real seconds the player's eyes take to close for a nap, and to open again as they wake (see GameEngine.nap). */
@@ -376,6 +384,9 @@ export class GameEngine {
   private target: (Pick & { point: Vec3; distance: number }) | null = null;
   /** A brief note on the display, like there being no room for something (see say). */
   private flash: { text: string; until: number; tip?: boolean } | null = null;
+  /** What the last sniff smelled of (see sniff), until it's faded from the display, and how many sniffs there have been. */
+  private smelled: { text: string; n: number; until: number } | null = null;
+  private sniffs = 0;
   /** Whether the alarms are silenced, by the button under the beacon (see hushAlarms). Saved, and kept through Reset. */
   private alarmsOff = false;
   /** Whether the porthole's blinds are shut, by the button beside it. Saved, and kept through Reset. */
@@ -680,6 +691,7 @@ export class GameEngine {
     this.changing = null;
     this.falling = [];
     this.held = this.turning = this.tarePress = null;
+    this.smelled = null;
     this.history.clear();
   }
 
@@ -1427,6 +1439,7 @@ export class GameEngine {
         this.writeNote();
       }
       if (e.code === 'KeyN') this.nap();
+      if (e.code === 'KeyF') this.sniff();
       const wheel = WHEEL_CODES.indexOf(e.code);
       if (wheel >= 0) {
         this.openWheel(wheel);
@@ -1941,6 +1954,34 @@ export class GameEngine {
     if (p.kind === 'scale') return `s${this.scales.indexOf(p.sc)}`;
     if (p.kind === 'faucet') return `F${p.i}`;
     return null;
+  }
+
+  /**
+   * What F would sniff: the flask or tank the crosshair is on, if it's open on top (see mouths), or 'sealed' if it
+   * isn't, since nothing can be smelled through glass; or, with the crosshair on neither, the flask in hand, even
+   * tipped. Null if there's nothing to sniff, as when the station's block is back in the wall.
+   */
+  private sniffAim(): Vessel | 'sealed' | null {
+    const p = this.target;
+    const v = p?.kind === 'flask' ? p.f : p?.kind === 'tool' && p.part === 'tank' && !p.t.away ? p.t.tanks[p.k] : null;
+    if (v) return this.open.some((m) => m.v === v) ? v : 'sealed';
+    return this.held?.kind === 'flask' ? this.held.f : null;
+  }
+
+  /**
+   * F: sniff what's in the vessel the crosshair is on, or in the flask in hand (see sniffAim), as it is just now, by
+   * what it's made of. What it smells of (see smell) comes up on the display, in a line (see
+   * sentence), and fades after SMELL_MS. Sniffing is her own doing, so it works while the lab's paused.
+   */
+  private sniff(): void {
+    if (this.dozing() || inPod(this.wake) || this.turning || this.wheel) return;
+    const v = this.sniffAim();
+    if (!v) return;
+    if (v === 'sealed') {
+      this.say('It’s sealed');
+      return;
+    }
+    this.smelled = { text: sentence(smell(v.n)), n: ++this.sniffs, until: performance.now() + SMELL_MS };
   }
 
   private rightDown(): void {
@@ -2948,6 +2989,9 @@ export class GameEngine {
     }
     const id = this.targetNote();
     if (id) add(['Enter'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
+    const nose = this.sniffAim();
+    if (nose === 'sealed') add(['F'], 'sniff it: it’s sealed', true);
+    else if (nose) add(['F'], h?.kind === 'flask' && nose === h.f ? 'sniff what’s in hand' : 'sniff it');
     if (this.canNap()) add(['N'], 'nap');
     if (!h && this.history.canUndo) add([MOD, 'Z'], 'undo');
     if (!h && this.history.canRedo) add([MOD, 'Shift', 'Z'], 'redo');
@@ -3350,6 +3394,7 @@ export class GameEngine {
 
   private hud(now: number): void {
     if (this.flash && now > this.flash.until) this.flash = null;
+    if (this.smelled && now > this.smelled.until) this.smelled = null;
     const p = this.target;
     const h = this.held;
     const hud: Hud = {
@@ -3386,6 +3431,7 @@ export class GameEngine {
       lids: this.napping ? ease(this.napping.lids) : 0,
       napping: this.dozing(),
       nap: this.canNap(),
+      smell: this.smelled && { text: this.smelled.text, n: this.smelled.n },
     };
     const key = JSON.stringify(hud);
     if (key === this.lastHud) return;

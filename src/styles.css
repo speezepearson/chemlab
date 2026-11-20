@@ -140,6 +140,18 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
   color:#f3d9d4;background:rgba(40,14,10,.6);padding:3px 10px;border-radius:6px;font-size:13px;
 }
 .note.tip{top:22%;color:#e9f1ec;background:rgba(14,30,24,.72);padding:6px 14px;font-size:14px}
+/*
+  what a sniff smelled of: under the crosshair, clear of a note, up at once and fading out over the last of its time.
+  It's as wide as its line, up to the view's width (not half of it, as it would shrink to from left:50%), and over the
+  corner's list, which a long line reaches in a small window
+*/
+.smell{
+  position:absolute;left:50%;top:calc(50% + 74px);transform:translateX(-50%);pointer-events:none;z-index:3;
+  width:max-content;max-width:calc(100% - 32px);box-sizing:border-box;text-align:center;
+  color:#eef0eb;background:rgba(12,17,15,.8);padding:5px 12px;border-radius:6px;font-size:14px;font-style:italic;
+  animation:smell 5s linear forwards;
+}
+@keyframes smell{0%{opacity:0}4%{opacity:1}78%{opacity:1}100%{opacity:0}}
 .start-hint{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
   color:#eef0eb;background:rgba(8,12,11,.55);padding:6px 14px;border-radius:8px;font-size:15px;font-weight:600;
