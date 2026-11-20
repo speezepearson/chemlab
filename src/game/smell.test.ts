@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NS, SOLVENT_SPECIES, SPECIES } from '../chem/species';
 import {
-  ODORANTS, STEP, VOLATILITY, WORDS, levelOf, sentence, smell, strengths, waft, type Odorant,
+  MASK, NAMED, ODORANTS, STEP, VOLATILITY, WORDS, levelOf, mask, sentence, smell, strengths, waft, type Odorant,
 } from './smell';
 
 const named = (species: string): Odorant => ODORANTS.find((o) => o.species === species)!;
@@ -162,6 +162,65 @@ describe('waft', () => {
     expect(sentence(smell(n, 0.5))).toBe(`A trace of ${named('K').simile}.`);
     // and cold enough, nothing
     expect(smell(n, 0.25)).toEqual([]);
+  });
+});
+
+describe('mask', () => {
+  it('hides a trace under a reek', () => {
+    const n = mix({ 'B–K': 4.3, 'R–K': 0.5 });
+    expect(sentence(smell(n))).toBe(`Reeks of ${named('B–K').simile}.`);
+    // though it's there to be found, without the reek
+    expect(level('R–K', n)).toBeCloseTo(0.5, 3);
+    expect(sentence(smell(mix({ 'R–K': 0.5 })))).toBe(`A trace of ${named('R–K').simile}.`);
+  });
+
+  it('isn’t got round by thinning, which weakens everything alike', () => {
+    const n = fluid({ 'B–K': 0.5, 'R–K': 0.4 });
+    expect(species(smell(n))).toEqual(['B–K']);
+    for (const thin of [3, 10, 30, 100, 300]) {
+      const thinned = fluid({ 'B–K': 0.5 / thin, 'R–K': 0.4 / thin });
+      expect(species(smell(thinned)), `1 in ${thin}`).toEqual(['B–K']);
+    }
+    // nor by warming or cooling it
+    for (const T of [0.6, 2, 5]) expect(species(smell(n, T))).toEqual(['B–K']);
+  });
+
+  it('reports a second smell that’s nearly as strong, and one just within its reach, but nothing past it', () => {
+    expect(species(smell(mix({ 'B–K': 4.3, K: 4.1 })))).toEqual(['B–K', 'K']);
+    expect(species(smell(mix({ 'B–K': 3.3, 'R–K': 3.3 - MASK + 0.1 })))).toEqual(['B–K', 'R–K']);
+    expect(species(smell(mix({ 'B–K': 3.3, 'R–K': 3.3 - MASK - 0.1 })))).toEqual(['B–K']);
+  });
+
+  it('names three at most, the strongest', () => {
+    expect(NAMED).toBe(3);
+    const found = smell(mix({ K: 3.0, 'R–B': 2.8, 'G–K': 2.6, 'B–K': 2.4, 'G–B': 2.2 }));
+    expect(species(found)).toEqual(['K', 'R–B', 'G–K']);
+    const at = (s: string, l: number) => ({ odorant: named(s), level: l });
+    expect(species(mask([at('R', 1), at('G', 1.2), at('B', 1.4), at('K', 1.6)]))).toEqual(['K', 'B', 'G']);
+    expect(mask([])).toEqual([]);
+  });
+
+  it('names the antinucleant where R–K and blue, mixed one to one, have made a few percent of it, and of free black', () => {
+    // the antinucleant is the most potent thing but free black
+    const potent = [...ODORANTS].sort((a, b) => a.threshold - b.threshold).map((o) => o.species);
+    expect(potent.slice(0, 2)).toEqual(['K', 'R–B']);
+    const n = fluid({ 'R–K': 0.47, B: 0.47, 'R–B': 0.03, K: 0.03 });
+    const found = smell(n);
+    expect(species(found).slice(0, 2)).toEqual(['K', 'R–B']);
+    // a clear step above a trace, and clearly within free black's reach
+    const rb = found[1];
+    expect(rb.level).toBeGreaterThan(2);
+    expect(found[0].level - rb.level).toBeLessThan(MASK - 0.5);
+    expect(sentence(found)).toBe('Smells strongly of swimming pool and smells of overripe banana, with a whiff of chalk dust.');
+    // and still named with half as much of it beside the same free black, or a third the free black beside as much
+    expect(species(smell(fluid({ 'R–K': 0.47, B: 0.47, 'R–B': 0.015, K: 0.03 })))).toContain('R–B');
+    expect(species(smell(fluid({ 'R–K': 0.47, B: 0.47, 'R–B': 0.03, K: 0.09 })))).toContain('R–B');
+    // or with a few percent of other things beside them, B–K and free red, as there may be; or cold, with a third as much of each
+    const more = fluid({ 'R–K': 0.43, B: 0.44, K: 0.04, R: 0.04, 'R–B': 0.025, 'B–K': 0.022 });
+    expect(species(smell(more))).toEqual(['K', 'R–B', 'B–K']);
+    const cold = fluid({ 'R–K': 0.478, B: 0.478, K: 0.012, R: 0.01, 'R–B': 0.012, 'B–K': 0.01 });
+    expect(species(smell(cold, 0.7)).slice(0, 2)).toEqual(['K', 'R–B']);
+    expect(smell(cold, 0.7)[1].level).toBeGreaterThan(1.5);
   });
 });
 

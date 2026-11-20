@@ -28,7 +28,8 @@ const odorant = (species: string, simile: string, threshold: number, sweet = fal
  * The thresholds span three orders of magnitude. Free black is the most potent, since a trace of it is what spoils the
  * cryostabilizer, and nothing else in the lab shows a trace well. What's waded through in bulk (the faucets' R, G and
  * B, R–G, and the R–K the antinucleant is made from) is weak, so it doesn't drown the rest. The antinucleant, R–B, is
- * the most potent after free black.
+ * the most potent after free black, and well within MASK of it: where a few percent of each turn up together, as when
+ * R–K and blue are mixed, both are named, whatever else is beside them.
  */
 export const ODORANTS: readonly Odorant[] = [
   odorant('R', 'wet coats', 0.02),
@@ -65,7 +66,7 @@ const VERBS = 2;
  * (1 − T_ROOM / T)), as a vapor's pressure goes. That's 1 at room temperature, falls smoothly to nothing as T goes to
  * 0 (a fifth at half the room's), and levels off when hot (twice at double the room's, never more than e^VOLATILITY,
  * four and a half times: a little under one step of STEP). It's the same for every odorant, so warming a fluid makes
- * all its smells stronger together.
+ * all its smells stronger together, and never changes which masks which.
  */
 export const VOLATILITY = 1.5;
 export function waft(T: number): number {
@@ -100,13 +101,27 @@ export interface Smelled {
   level: number;
 }
 
-/** What can be smelled in a fluid, from its molecule counts and temperature: every odorant at or over its threshold, strongest first. */
+/**
+ * A strong smell wipes out much fainter ones: of what's smelled, only what's within MASK steps of the strongest is
+ * made out, and never more than NAMED of them. Thinning a fluid weakens all its smells alike, so it never brings out
+ * what's masked: a trace of one thing under a reek of another has to be found by taking the fluid apart.
+ */
+export const MASK = 2;
+export const NAMED = 3;
+
+/** What's made out of everything smelled (see MASK), strongest first. */
+export function mask(smelled: readonly Smelled[]): Smelled[] {
+  const sorted = [...smelled].sort((a, b) => b.level - a.level);
+  return sorted.filter((s) => s.level > sorted[0].level - MASK).slice(0, NAMED);
+}
+
+/** What's made out of a fluid, by its molecule counts and temperature: of every odorant at or over its threshold, what isn't masked. */
 export function smell(n: ArrayLike<number>, T = T_ROOM): Smelled[] {
   const smelled: Smelled[] = [];
   strengths(n, T).forEach((x, i) => {
     if (x >= 1) smelled.push({ odorant: ODORANTS[i], level: levelOf(x) });
   });
-  return smelled.sort((a, b) => b.level - a.level);
+  return mask(smelled);
 }
 
 /** "a", "a and b", "a, b and c"; with a comma before the "and" if something before it has an "and" of its own. */
@@ -117,7 +132,7 @@ function list(xs: readonly string[]): string {
 }
 
 /**
- * What Nadia makes of a sniff, in a line: what was smelled, strongest first (see smell), each by its simile and a word for its
+ * What Nadia makes of a sniff, in a line: what was made out, strongest first, each by its simile and a word for its
  * strength (see WORDS), as "Smells strongly of floor wax, with a whiff of struck match." Odorants as strong as each
  * other share the word, as "A whiff of wet coats and floor wax." It's terse: no pronouns, no numbers, and nothing of
  * what the fluid is or looks like. Nothing smelled is "Nothing."
