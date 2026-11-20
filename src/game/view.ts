@@ -1877,7 +1877,9 @@ class ToolView {
     const back = 9;
     const zb = bulb.z - bulb.r - 2;
     const ring = (hx: number, y0: number, y1: number, z: number) => rect(hx, y0, y1).map((p) => new THREE.Vector3(p.x, p.y, z));
-    const [outer, inner] = [ring(mouth.x, mouth.y0, mouth.y1, hs.z1 - 0.2), ring(back, bulb.y - back, Math.min(mouth.y1, bulb.y + back), zb)];
+    // (its floor a hair above the hole's own, so the two don't fight over the same pixels)
+    const floor = mouth.y1 - 0.8;
+    const [outer, inner] = [ring(mouth.x, mouth.y0, floor, hs.z1 - 0.2), ring(back, bulb.y - back, Math.min(floor, bulb.y + back), zb)];
     const quads: THREE.Vector3[] = [];
     for (let i = 0; i < 4; i++) {
       const j = (i + 1) % 4;
