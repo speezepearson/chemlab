@@ -3,6 +3,7 @@ import { Lag, temperature, type Fluid, type NetReaction, type ReactionNetwork } 
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { AIRLOCK, BLINDED_S, EMERGE_S, POD, RISE_S, SETTLE_S, WAKE_S, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
+import type { ViewMode } from './mode';
 import {
   FLASK_CENTER, NOZZLE_H, SCALE_SLOTS, aimValve, dippedIn, docked, faucetBox, faucetPipes, flaskArm, flaskBox, flaskLip, flaskMouth, footAt, insideVessel, isDocked,
   nozzleArm, nozzleBox, onScale, onTool, scaleArm, scaleBox, scaleCenter, scaleSpot, spoutAt, spoutNear, tankMouth, tankNoteY, toolArms, toolBox, toolCenter, valveNear, valveZ,
@@ -28,6 +29,7 @@ import { shatter } from './shatter';
 import { WHEEL, WHEELS, wheelMove, wheelPick, type WheelAim } from './wheel';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
+import { axes, onPlaneZ, sightAt } from './sight';
 import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
 import { BENCH, CELL, LIFT, PLANE_Z, ROOM, SPIN, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, type Pose, type Vec3 } from './space';
 import {
@@ -36,7 +38,8 @@ import {
   type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
-import { ARRIVAL, View, type AirlockLook, type Camera, type FaucetSpot, type Frame, type GuideLook, type Icons, type Pick } from './view';
+import { ARRIVAL, View, type AirlockLook, type Camera, type FaucetSpot, type Frame, type GuideLook, type Icons, type LabView, type Pick } from './view';
+import { FlatView } from './view2d';
 import { WaterSounds } from './water';
 
 /** What the info panel shows for one vessel: all of it in god mode, otherwise just its color. */
@@ -232,6 +235,16 @@ const POD_FOV = 90;
 /** The view from in the pod: out at the lab, eyes a little down. */
 const POD_VIEW: Camera = { x: POD.x, y: EYE, z: POD.z, yaw: 0, pitch: -0.12, fov: POD_FOV };
 /**
+ * The isometric view (see ViewMode): which way it looks at the wall, a little from its right and from above, with no
+ * perspective.
+ */
+const ISO = { yaw: 0.4, pitch: -0.3 };
+/**
+ * How far back along its line of sight, from the middle of the stretch of wall it sees, a view with no perspective
+ * is from: it makes no odds to what it sees, so long as everything on the wall is in front of it.
+ */
+const ORTHO_BACK = 2000;
+/**
  * Where the view starts at the bench: straight out of the airlock, square on to the faucets, the supply station and
  * the instruments, far enough back to take them all in.
  */
@@ -311,7 +324,9 @@ const mix = (a: number, b: number, t: number) => a + (b - a) * t;
  */
 function glideAt(from: Camera, to: Camera, u: number, door: boolean): Camera {
   const t = ease(u);
-  const turn = { yaw: mix(from.yaw, to.yaw, t), pitch: mix(from.pitch, to.pitch, t), fov: mix(from.fov, to.fov, t) };
+  const turn: { yaw: number; pitch: number; fov: number; ortho?: number } = { yaw: mix(from.yaw, to.yaw, t), pitch: mix(from.pitch, to.pitch, t), fov: mix(from.fov, to.fov, t) };
+  // (one with no perspective at either end has none on the way)
+  if (from.ortho !== undefined && to.ortho !== undefined) turn.ortho = mix(from.ortho, to.ortho, t);
   if (!door) return { x: mix(from.x, to.x, t), y: mix(from.y, to.y, t), z: mix(from.z, to.z, t), ...turn };
   // s of the way from the pod's end of it to the lab's
   const out = from.z > to.z;
@@ -326,7 +341,7 @@ export class GameEngine {
   speed = 1;
   god = true;
 
-  private view: View;
+  private view: LabView;
   private flasks: Flask[] = [];
   private tools: Tool[] = [];
   private scales: Scale[] = [];
@@ -334,7 +349,13 @@ export class GameEngine {
   private faucets: (FaucetSpot & { start: (typeof FAUCETS)[number] })[];
   /** What's in the equipment cabinet (see cabinet.ts): what the equipment wheels make comes out of it, and goes back in. */
   private stock: Stock = stockWith({});
-  /** Where the view is from, and which way it looks (see Camera): square at the bench, but when it's turned round or in the pod. */
+  /**
+   * Where the view is on the wall it's on (see facing), as a view square on to that wall with perspective would have
+   * it: across, up, and out from the back wall. Whatever the mode (see ViewMode), the camera is worked out from this
+   * (see camOf), so that the view keeps to the same bounds, and a save's view means the same, in all of them.
+   */
+  private at = { ...START_VIEW };
+  /** Where the view is from, and which way it looks (see Camera): worked out from `at`, but while it glides or is in the pod. */
   private cam: Camera = { ...START_VIEW, yaw: 0, pitch: 0, fov: FOV };
   /**
    * What the view is on: the bench, where the lab is worked; the wall behind it, turned round (see turnRound); or
@@ -479,11 +500,14 @@ export class GameEngine {
     private chem: ReactionNetwork,
     private cb: EngineCallbacks,
     private preset: Preset = DEFAULT_PRESET,
+    /** How the lab is seen and worked (see ViewMode). */
+    readonly mode: ViewMode = 'wall',
   ) {
     // the colors' in a row along the wall, then the solvent's, along the bench (see FAUCET_X)
     const pipes = faucetPipes();
     this.faucets = FAUCETS.map((start, i) => ({ start, output: faucetOutput(start, chem), note: '', ...pipes[i] }));
-    this.view = new View(canvas, this.faucets, EYE);
+    this.view = mode === 'flat' ? new FlatView(canvas, this.faucets, EYE) : new View(canvas, this.faucets, EYE);
+    this.aim();
     this.resizeObserver = new ResizeObserver(() => this.layout());
     this.resizeObserver.observe(stage);
     this.layout();
@@ -713,7 +737,7 @@ export class GameEngine {
 
   /** Everything in the lab, plus the chemistry parameters, for saving. */
   snapshot(): SaveState {
-    const view = this.facing === 'bench' && !this.glide ? this.cam : this.bench;
+    const view = this.facing === 'bench' && !this.glide ? this.at : this.bench;
     return {
       v: 1,
       wall: true,
@@ -1153,11 +1177,49 @@ export class GameEngine {
     };
   }
 
+  /** Whether the view has no perspective (see ViewMode): isometric, or flat. */
+  private ortho(): boolean {
+    return this.mode === 'iso' || this.mode === 'flat';
+  }
+
+  /**
+   * The camera for a view at `at` (see GameEngine.at), on the bench, or on the wall behind if `away`. With
+   * perspective, it's just there, square on. Without, it sees as much of the wall, top to bottom, as that would,
+   * from ORTHO_BACK back along its own line of sight from the middle of it: square on for the flat view, and the way
+   * ISO says for the isometric one.
+   */
+  private camOf(at: Vec3, away = false): Camera {
+    const turn = away ? Math.PI : 0;
+    if (!this.ortho()) return { x: at.x, y: at.y, z: at.z, yaw: turn, pitch: 0, fov: FOV };
+    const look = this.mode === 'iso' ? { yaw: turn + ISO.yaw, pitch: ISO.pitch } : { yaw: turn, pitch: 0 };
+    const wall = away ? ROOM.z1 : PLANE_Z;
+    const { ahead } = axes(look);
+    const ortho = Math.abs(at.z - wall) * Math.tan((FOV * Math.PI) / 360);
+    return { x: at.x - ahead.x * ORTHO_BACK, y: at.y - ahead.y * ORTHO_BACK, z: wall - ahead.z * ORTHO_BACK, ...look, fov: FOV, ortho };
+  }
+
+  /**
+   * A camera with perspective that sees, as near as one can, what `cam` sees without: the same way, the same stretch
+   * of the wall. The view glides to and from the pod with perspective, whatever the mode.
+   */
+  private standIn(cam: Camera): Camera {
+    if (cam.ortho === undefined) return cam;
+    const { ahead } = axes(cam);
+    const on = ORTHO_BACK - cam.ortho / Math.tan((FOV * Math.PI) / 360);
+    return { x: cam.x + ahead.x * on, y: cam.y + ahead.y * on, z: cam.z + ahead.z * on, yaw: cam.yaw, pitch: cam.pitch, fov: FOV };
+  }
+
+  /** Put the camera where the view is (see GameEngine.at), on the wall it's on. */
+  private aim(): void {
+    if (this.facing !== 'pod') this.cam = this.camOf(this.at, this.facing === 'away');
+  }
+
   /** Put the view at the bench, where it last was there, at once. */
   private toBench(): void {
-    this.cam = { ...this.bench, yaw: 0, pitch: 0, fov: FOV };
+    this.at = { ...this.bench };
     this.facing = 'bench';
     this.glide = null;
+    this.aim();
   }
 
   /** The upright plane the view is on: the bench's, or the wall's behind it. */
@@ -1171,50 +1233,36 @@ export class GameEngine {
   }
 
   /**
-   * The line of sight through (x, y) on the view, in CSS pixels: from the view's place in the room, and which way.
-   * It's worked out from where the view is now, not from the frame last drawn, so that it's right however many times
-   * the view moves between frames.
+   * The point of the upright plane `z` out from the back wall that (x, y) on the view is on; null if it's on none of
+   * it. It's worked out from where the view is now (see sightAt), not from the frame last drawn, so that it's right
+   * however many times the view moves between frames.
    */
-  private sight(x: number, y: number): { o: Vec3; d: Vec3 } {
-    const c = this.cam;
-    const [nx, ny] = this.ndc(x, y);
-    const t = Math.tan((c.fov * Math.PI) / 360);
-    // in the view's own frame, x right and y up, looking along −z; then tipped up by its pitch, and turned by its yaw
-    const v = { x: (nx * t * this.viewW) / Math.max(1, this.viewH), y: ny * t, z: -1 };
-    const [cp, sp] = [Math.cos(c.pitch), Math.sin(c.pitch)];
-    const w = { x: v.x, y: v.y * cp - v.z * sp, z: v.y * sp + v.z * cp };
-    const [cy, sy] = [Math.cos(c.yaw), Math.sin(c.yaw)];
-    return { o: { x: c.x, y: c.y, z: c.z }, d: { x: w.x * cy + w.z * sy, y: w.y, z: -w.x * sy + w.z * cy } };
-  }
-
-  /** The point of the upright plane `z` out from the back wall that (x, y) on the view is on; null if it's on none of it. */
   private planeAt(x: number, y: number, z = this.wallZ()): Vec3 | null {
-    const { o, d } = this.sight(x, y);
-    if (Math.abs(d.z) < 1e-6) return null;
-    const s = (z - o.z) / d.z;
-    return s > 0 ? { x: o.x + d.x * s, y: o.y + d.y * s, z } : null;
+    return onPlaneZ(sightAt(this.cam, ...this.ndc(x, y), this.viewW / Math.max(1, this.viewH)), z);
   }
 
   /**
    * Space: turn the view round to the wall behind the bench, where the airlock, the porthole and the alarms' button
    * are, from far enough back to see them all (see BEHIND_VIEW); or back to the bench, where it was. With something
-   * in hand it stays put.
+   * in hand it stays put. The flat view has no wall behind.
    */
   turnRound(): void {
+    if (this.mode === 'flat') return;
     if (this.glide || inPod(this.wake) || this.dozing() || this.previewing || this.wheel || this.turning) return;
     if (this.held) {
       this.say('Hands full');
       return;
     }
+    const from = { ...this.cam };
     if (this.facing === 'bench') {
-      const { x, y, z } = this.cam;
-      this.bench = { x, y, z };
-      this.glide = { from: { ...this.cam }, to: { ...this.cam, ...BEHIND_VIEW, yaw: Math.PI }, t: 0, s: TURN_S, door: false };
+      this.bench = { ...this.at };
+      this.at = { ...BEHIND_VIEW };
       this.facing = 'away';
     } else if (this.facing === 'away') {
-      this.glide = { from: { ...this.cam }, to: { ...this.bench, yaw: 0, pitch: 0, fov: FOV }, t: 0, s: TURN_S, door: false };
+      this.at = { ...this.bench };
       this.facing = 'bench';
-    }
+    } else return;
+    this.glide = { from, to: this.camOf(this.at, this.facing === 'away'), t: 0, s: TURN_S, door: false };
     this.press = this.panning = null;
   }
 
@@ -1230,6 +1278,7 @@ export class GameEngine {
       this.cam = glideAt(g.from, g.to, g.t / g.s, g.door);
       if (g.t >= g.s) {
         this.glide = null;
+        this.aim();
         // settled into the pod, its door shuts
         if (this.wake === 'settling') {
           this.wake = 'boarding';
@@ -1250,9 +1299,9 @@ export class GameEngine {
     }
     // screen right is +x facing the bench, and −x facing the wall behind
     const side = this.facing === 'away' ? -1 : 1;
-    const far = Math.abs(this.cam.z - this.wallZ());
-    const step = PAN_RATE * far * dt;
-    this.cam = this.inView({ ...this.cam, x: this.cam.x + side * across * step, y: this.cam.y + up * step });
+    const step = PAN_RATE * Math.abs(this.at.z - this.wallZ()) * dt;
+    this.at = this.inView({ ...this.at, x: this.at.x + side * across * step, y: this.at.y + up * step });
+    this.aim();
     this.dragView();
   }
 
@@ -1261,23 +1310,30 @@ export class GameEngine {
     const drag = this.panning;
     const at = this.pointer;
     const now = drag && at && this.canSteer() ? this.planeAt(at.x, at.y) : null;
-    if (drag && now) this.cam = this.inView({ ...this.cam, x: this.cam.x + drag.x - now.x, y: this.cam.y + drag.y - now.y });
+    if (drag && now) this.slide(drag.x - now.x, drag.y - now.y);
+  }
+
+  /** Move the view (dx, dy) across the wall it's on, as far as it can go. */
+  private slide(dx: number, dy: number): void {
+    this.at = this.inView({ ...this.at, x: this.at.x + dx, y: this.at.y + dy });
+    this.aim();
   }
 
   /**
    * The wheel turned by `px` pixels (down is positive), or two fingers pinched: move the view in toward the point of
-   * the wall the pointer is on, or back out from it, so that point stays under the pointer.
+   * the wall the pointer is on, or back out from it, so that point stays under the pointer. (Without perspective,
+   * nearer is only seeing less of the wall, bigger.)
    */
   private zoom(px: number): void {
     if (this.glide || this.facing === 'pod' || this.wheel || this.dozing()) return;
     const at = this.pointer ?? { x: this.viewW / 2, y: this.viewH / 2 };
     const p = this.planeAt(at.x, at.y);
     if (!p) return;
-    const c = this.cam;
-    const want = p.z + (c.z - p.z) * Math.exp(px * ZOOM_RATE);
-    const z = this.inView({ ...c, z: want }).z;
-    const k = (z - p.z) / (c.z - p.z);
-    this.cam = this.inView({ ...c, x: p.x + (c.x - p.x) * k, y: p.y + (c.y - p.y) * k, z });
+    const wall = this.wallZ();
+    this.at = this.inView({ ...this.at, z: wall + (this.at.z - wall) * Math.exp(px * ZOOM_RATE) });
+    this.aim();
+    const q = this.planeAt(at.x, at.y);
+    if (q) this.slide(p.x - q.x, p.y - q.y);
   }
 
   /* ---------------- input ---------------- */
@@ -1573,7 +1629,7 @@ export class GameEngine {
     // the wall under the fingers' middle stays under it, and as they spread, comes nearer
     const grabbed = this.planeAt(was.x, was.y);
     const under = this.planeAt(now.x, now.y);
-    if (grabbed && under) this.cam = this.inView({ ...this.cam, x: this.cam.x + grabbed.x - under.x, y: this.cam.y + grabbed.y - under.y });
+    if (grabbed && under) this.slide(grabbed.x - under.x, grabbed.y - under.y);
     if (was.d > 0 && now.d > 0) this.zoom(Math.log(was.d / now.d) / ZOOM_RATE);
     this.pinch = now;
   }
@@ -2018,6 +2074,7 @@ export class GameEngine {
   debug(p: Partial<{ x: number; y: number; z: number }>): void {
     this.bench = this.inView({ ...this.bench, ...p });
     this.toBench();
+    this.view.look(this.cam);
   }
 
   /* ---------------- layout ---------------- */
@@ -2825,7 +2882,7 @@ export class GameEngine {
     if (!h && this.history.canUndo) add([MOD, 'Z'], 'undo');
     if (!h && this.history.canRedo) add([MOD, 'Shift', 'Z'], 'redo');
     view();
-    if (!h) add(['Space'], 'look behind you');
+    if (!h && this.mode !== 'flat') add(['Space'], 'look behind you');
     add(['/'], 'hide this list');
     return out;
   }
@@ -2911,16 +2968,15 @@ export class GameEngine {
   private intoPod(): void {
     this.emptyHanded();
     this.leaveBench();
-    this.cam = { ...POD_VIEW };
+    // (the flat view has no pod to see out of: it shows the pod's message over the bench)
+    if (this.mode !== 'flat') this.cam = { ...POD_VIEW };
     this.facing = 'pod';
     this.glide = null;
   }
 
   /** The view is leaving the bench for the pod: remember where it was there, to go back to. */
   private leaveBench(): void {
-    if (this.facing !== 'bench' || this.glide) return;
-    const { x, y, z } = this.cam;
-    this.bench = { x, y, z };
+    if (this.facing === 'bench' && !this.glide) this.bench = { ...this.at };
   }
 
   /** Leave the player empty-handed: whatever they held is left where it is if it can be, or else put away. */
@@ -2942,16 +2998,22 @@ export class GameEngine {
     if (this.wake !== 'open' || this.glide || this.dozing() || this.previewing) return;
     this.emptyHanded();
     this.leaveBench();
-    this.glide = { from: { ...this.cam }, to: { ...POD_VIEW }, t: 0, s: SETTLE_S, door: true };
-    this.facing = 'pod';
     this.wake = 'settling';
     this.wakeT = 0;
+    // the flat view has no pod to glide into: its door shuts at once
+    if (this.mode === 'flat') this.wake = 'boarding';
+    else this.glide = { from: this.standIn(this.cam), to: { ...POD_VIEW }, t: 0, s: SETTLE_S, door: true };
+    this.facing = 'pod';
   }
 
   /** The pod's door has swung open: the view glides out of it and across the lab to the bench, where it was last. */
   private emerge(): void {
-    this.glide = { from: { ...this.cam }, to: { ...this.bench, yaw: 0, pitch: 0, fov: FOV }, t: 0, s: EMERGE_S, door: true };
-    this.facing = 'bench';
+    const from = { ...this.cam };
+    this.toBench();
+    if (this.mode === 'flat') return;
+    this.glide = { from, to: this.standIn(this.cam), t: 0, s: EMERGE_S, door: true };
+    // (it's still in the pod until the glide moves it)
+    this.cam = from;
   }
 
   /**
@@ -3166,7 +3228,8 @@ export class GameEngine {
    * runs on as ever, unseen.
    */
   previewArrival(on: boolean): void {
-    if (on === !!this.previewing || (on && (inPod(this.wake) || this.glide))) return;
+    // (the flat view has no pod to see it from)
+    if (on === !!this.previewing || (on && (inPod(this.wake) || this.glide || this.mode === 'flat'))) return;
     if (on) {
       this.emptyHanded();
       this.previewing = { cam: { ...this.cam }, facing: this.facing };

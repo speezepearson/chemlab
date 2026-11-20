@@ -25,6 +25,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - Set up a scene by writing a save before the page loads:
   `page.addInitScript(s => localStorage.setItem('slurry-lab.save', s), JSON.stringify(save))`. The format is
   `SaveState` in `src/game/save.ts`; tool positions are fractions of the old bench's home area (see `fromFrac`).
+- Set `localStorage['slurry-lab.view']` to a `ViewMode` (`wall`, `iso`, ...) to load in that way of seeing the lab.
 - Set `localStorage['slurry-lab.introSeen'] = '1'` to skip the intro. A start button still covers the page (it's
   the click that lets sound play), and the lab stays paused under it, so click `.intro-start` first.
 - WebGL needs a software renderer. Launch with
@@ -56,9 +57,16 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
 - `src/game/`: everything else in the game.
   - `engine.ts` owns the lab: what's in it, the view (`steer`, `zoom`, `turnRound`, and its glides out of the pod and
-    back, `emerge` and `board`), input, carrying and placing (`carry`, `placement`), and the sim loop.
+    back, `emerge` and `board`), input, carrying and placing (`carry`, `placement`), and the sim loop. It keeps where
+    the view is on the wall as a square-on view with perspective would have it (`at`), and works each mode's camera
+    out from that (`camOf`).
+  - `mode.ts` is the ways of seeing and working the lab that the header's menu switches between (`ViewMode`), kept in
+    local storage; the engine is made anew for each, on a canvas of its own. `sight.ts` is the camera (`Camera`, with
+    perspective or without) and its lines of sight (`sightAt`, `onPlaneZ`), by which the engine tells where the
+    pointer is on the wall without asking the renderer.
   - `view.ts` draws it all with Three.js, from wherever the engine puts the camera (`Camera`), and raycasts for what
-    the pointer is on (`pick`); `project` goes the other way. It draws the arms out of the wall (`ArmView`), the
+    the pointer is on (`pick`); `project` goes the other way. `LabView` is what the engine asks of whatever draws
+    the lab. It draws the arms out of the wall (`ArmView`), the
     faucets' supply line, and hoses bowed back toward the wall. It also draws the equipment wheels' icons
     (`IconStudio`): a new one of each kind, drawn as in the lab, so there are no icons to keep up to date.
   - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room; what fluid a

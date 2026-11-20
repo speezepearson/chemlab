@@ -28,20 +28,9 @@ import {
   type Hose, type Piece, Tool,
 } from './tools';
 import { CABINET, CABINET_BUILD, STOCK, type Stock, type Stocked } from './cabinet';
+import type { Camera } from './sight';
 
-/**
- * Where the view is from, in the room: the camera's place, which way it looks (a yaw of 0 is square at the back wall,
- * where the bench is, and π at the wall behind; pitch is up, in radians), and its field of view, top to bottom, in
- * degrees.
- */
-export interface Camera {
-  x: number;
-  y: number;
-  z: number;
-  yaw: number;
-  pitch: number;
-  fov: number;
-}
+export type { Camera };
 
 /** What the pointer is on. */
 export type Pick =
@@ -2929,7 +2918,7 @@ function pull(scene: THREE.Object3D, x: number, y: number, z: number, nx: number
   scene.add(g);
 }
 
-function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.Mesh } {
+function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.Mesh; fixtures: THREE.Object3D[] } {
   const W = ROOM.x1 - ROOM.x0;
   const Dp = ROOM.z1 - ROOM.z0;
   const H = ROOM.y1;
@@ -2986,7 +2975,8 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
       frames.push(new THREE.BoxGeometry(240, 8, 110).translate(x, H - 4, z));
       panes.push(new THREE.PlaneGeometry(220, 90).rotateX(Math.PI / 2).translate(x, H - 8.5, z));
     }
-  scene.add(new THREE.Mesh(mergeGeometries(frames), frameMat), new THREE.Mesh(mergeGeometries(panes), diffuser));
+  const fixtures = [new THREE.Mesh(mergeGeometries(frames), frameMat), new THREE.Mesh(mergeGeometries(panes), diffuser)];
+  scene.add(...fixtures);
   // a dark rubber kick strip along the foot of every wall, but across the airlock's doorway
   const kickMat = new THREE.MeshStandardMaterial({ color: 0x1e2322, roughness: 0.8, metalness: 0.1 });
   const KICK = 48;
@@ -3045,7 +3035,7 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
   const beacon = new THREE.PointLight(0xff2a14, 0, 2600, 1.4);
   beacon.position.copy(lamp.position).add(new THREE.Vector3(0, 0, -30));
   scene.add(beacon);
-  return { beacon, lamp };
+  return { beacon, lamp, fixtures };
 }
 
 /** How far in front of the player's eyes, in the pod, the message projected on its front is, and how wide. */
@@ -4191,10 +4181,41 @@ const SHADOW = { half: 1800, deep: 1600, map: { x: 4608, y: 4096 } };
 /** Where metal and glass reflect the room from (see View's environment): in front of the start of the bench, mid-room. */
 const REFLECT_FROM = { x: 2300, z: (ROOM.z0 + ROOM.z1) / 2 };
 
+/**
+ * What the engine asks of whatever draws the lab (see View, which draws it with Three.js, and FlatView in view2d.ts,
+ * which draws it flat on a 2D canvas):
+ * - icons: a little picture of each kind of thing the equipment wheels make;
+ * - resize: the canvas is now w by h CSS pixels, at dpr device pixels to each;
+ * - look: where the view is from now (see Camera), for what follows until the next frame's;
+ * - render: draw a frame;
+ * - pick: what's under (ndcX, ndcY) on the view, each from −1 to 1 across and up, skipping anything belonging to
+ *   `skip` (what's held), with where on it, in the room, and how far off;
+ * - project: where a point in the room is on the canvas, in CSS pixels; null if it's behind the view;
+ * - toHead: a point in the room relative to where the player hears from: x right, y up, z behind;
+ * - dispose: let go of everything.
+ */
+export interface LabView {
+  icons(): Readonly<Icons>;
+  resize(w: number, h: number, dpr: number): void;
+  look(cam: Camera): void;
+  render(fr: Frame): void;
+  pick(ndcX: number, ndcY: number, skip: object | null): (Pick & { point: Vec3; distance: number }) | null;
+  project(p: Vec3, w: number, h: number): { x: number; y: number } | null;
+  toHead(p: Vec3): Vec3;
+  dispose(): void;
+}
+
 /** Draws the lab with Three.js, from wherever the view is, and says what's under the pointer. */
-export class View {
-  /** The camera, which the engine places each frame (see look and Frame.cam). */
-  readonly camera = new THREE.PerspectiveCamera(45, 1, 2, CAMERA_FAR);
+export class View implements LabView {
+  /** The camera with perspective, and the one without (see Camera.ortho): the engine says which each frame, and where (see look). */
+  private persp = new THREE.PerspectiveCamera(45, 1, 2, CAMERA_FAR);
+  private flat = new THREE.OrthographicCamera(-1, 1, 1, -1, 2, CAMERA_FAR);
+  /** The one of them in use. */
+  camera: THREE.PerspectiveCamera | THREE.OrthographicCamera = this.persp;
+  /** The view's width over its height. */
+  private aspect = 1;
+  /** The ceiling's light fixtures, which a view from above it, without perspective, would see the backs of: hidden then. */
+  private fixtures: THREE.Object3D[] = [];
   private renderer: THREE.WebGLRenderer;
   /** What the white void of Mu Ceti is drawn with (see renderArrival), once it's needed. */
   private void?: ReturnType<View['buildVoid']>;
@@ -4211,7 +4232,7 @@ export class View {
   private guides: THREE.Mesh[] = [];
   private rims: { g: THREE.Group; mat: THREE.MeshBasicMaterial; sides: THREE.Mesh[]; ring: THREE.Mesh }[] = [];
   private drops: THREE.Mesh[] = [];
-  private beacon: { beacon: THREE.PointLight; lamp: THREE.Mesh };
+  private beacon: { beacon: THREE.PointLight; lamp: THREE.Mesh; fixtures: THREE.Object3D[] };
   /** The light from the ceiling, whose shadows follow the view along the room (see SHADOW). */
   private sun: THREE.DirectionalLight;
   private alarmButton: AlarmButton;
@@ -4234,7 +4255,7 @@ export class View {
     this.renderer.localClippingEnabled = true;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    this.camera.rotation.order = 'YXZ';
+    this.persp.rotation.order = this.flat.rotation.order = 'YXZ';
     this.scene.background = new THREE.Color(0x010206);
     this.scene.add(this.stars);
     const sky = new THREE.HemisphereLight(0xe4eef0, 0x4a4440, 1.5);
@@ -4260,6 +4281,7 @@ export class View {
     this.sun = sun;
     this.roomLights = [sky, sun].map((light) => ({ light, base: light.intensity }));
     this.beacon = buildRoom(this.scene);
+    this.fixtures = this.beacon.fixtures;
     this.scene.add(buildPort(PORT_FRAC));
     this.alarmButton = new AlarmButton(this.scene, this.pickables);
     this.blindsButton = new BlindsButton(this.scene, this.pickables);
@@ -4291,8 +4313,9 @@ export class View {
   resize(w: number, h: number, dpr: number): void {
     this.renderer.setPixelRatio(dpr);
     this.renderer.setSize(w, h, false);
-    this.camera.aspect = w / Math.max(1, h);
-    this.camera.updateProjectionMatrix();
+    this.aspect = w / Math.max(1, h);
+    this.persp.aspect = this.aspect;
+    this.persp.updateProjectionMatrix();
   }
 
   /** Keep a view for each of `items`, made with `make`, and drop views of things that are gone. */
@@ -4307,12 +4330,27 @@ export class View {
     for (const k of items) if (!map.has(k)) map.set(k, make(k));
   }
 
-  /** Put the camera where `cam` says, looking its way, with its field of view. */
+  /**
+   * Put the camera where `cam` says, looking its way: with its field of view, or with no perspective, seeing as far
+   * up and down as it says (see Camera.ortho).
+   */
   look(cam: Camera): void {
-    if (this.camera.fov !== cam.fov) {
-      this.camera.fov = cam.fov;
-      this.camera.updateProjectionMatrix();
+    if (cam.ortho !== undefined) {
+      const f = this.flat;
+      const [w, h] = [cam.ortho * this.aspect, cam.ortho];
+      if (f.right !== w || f.top !== h) {
+        [f.left, f.right, f.top, f.bottom] = [-w, w, h, -h];
+        f.updateProjectionMatrix();
+      }
+      this.camera = f;
+    } else {
+      if (this.persp.fov !== cam.fov) {
+        this.persp.fov = cam.fov;
+        this.persp.updateProjectionMatrix();
+      }
+      this.camera = this.persp;
     }
+    for (const o of this.fixtures) o.visible = cam.ortho === undefined;
     this.camera.position.set(cam.x, cam.y, cam.z);
     // the stars are too far off to move as the view does
     this.stars.position.copy(this.camera.position);
@@ -4402,7 +4440,8 @@ export class View {
    * is `open`, with what's brighter than the bloom's threshold bleeding over everything, and toned down to the screen.
    */
   private renderArrival(open: number): void {
-    const { renderer, scene, camera } = this;
+    // (it's seen from in the pod, which is always with perspective)
+    const { renderer, scene, persp: camera } = this;
     const v = (this.void ??= this.buildVoid());
     v.sky.material.color.setScalar(ARRIVAL.void);
     v.sun.intensity = ARRIVAL.light * open;
@@ -4430,7 +4469,7 @@ export class View {
 
   /** What renderArrival draws with, made the first time it's needed. */
   private buildVoid() {
-    const { renderer, scene, camera } = this;
+    const { renderer, scene, persp: camera } = this;
     const at = new THREE.Vector3(POD.x, 600, POD.z);
     const onVoid = <T extends THREE.Object3D>(o: T): T => {
       o.layers.set(VOID_LAYER);

@@ -24,3 +24,6 @@ export class View {
   render(_fr: unknown): void {}
   dispose(): void {}
 }
+
+/** The flat view (src/game/view2d.ts) is stood in for the same way. */
+export { View as FlatView };
