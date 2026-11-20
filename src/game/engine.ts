@@ -20,7 +20,7 @@ import { Flask, Vessel, roomFor, sustenance, transfer, volume, volumeUnit } from
 import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
-import { ANALYZER_AT, DEFAULT_PRESET, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
+import { ANALYZER_AT, DEFAULT_PRESET, LAMP_POSE, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
 import { CRYOSTABILIZER, FIRST_SUPPLY, litresOf, type Supply } from './supply';
 import { shatter } from './shatter';
@@ -886,10 +886,10 @@ export class GameEngine {
 
   /**
    * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a composition analyzer, a
-   * spectroscope, a bond visualizer and a station: if there's none, one is added where it starts, or as
+   * spectroscope, a bond visualizer, a station and a shadow lamp: if there's none, one is added where it starts, or as
    * near there as it has room (see roomy), the station fitted for the cryostabilizer, its reservoir holding what's
    * left on board (see Tool.stock), as a save from before it was fitted for anything else would have it. The
-   * station is built into the wall, so it's always where it is.
+   * station is built into the wall, and the shadow lamp stands on its own bench, so they're always where they are.
    */
   private uniqueTools(): void {
     for (const kind of UNIQUE_TOOLS) {
@@ -900,12 +900,14 @@ export class GameEngine {
       if (this.tools.some((t) => t.kind === kind)) return;
       const t = new Tool(kind, this.nextToolId++, at);
       if (kind === 'receptacle') t.stock(CRYOSTABILIZER);
-      else t.pose = this.roomy(t);
+      else if (!t.shape.fixed) t.pose = this.roomy(t);
       this.tools.push(t);
     };
-    // the station first, since it's always where it is, for the others to keep clear of
+    // the station and the shadow lamp first, since they're always where they are, for the others to keep clear of
     add('receptacle', STATION_POSE);
     this.station().pose = { ...STATION_POSE };
+    add('shadowlamp', LAMP_POSE);
+    this.tools.find((t) => t.kind === 'shadowlamp')!.pose = { ...LAMP_POSE };
     add('analyzer', spotPose(ANALYZER_AT));
     add('spectroscope', spotPose(SPECTROSCOPE_AT));
     add('visualizer', spotPose(VISUALIZER_AT));
@@ -991,7 +993,8 @@ export class GameEngine {
   private toGrid(): void {
     const onCounter = (t: Tool) => toolStands(t).every((st) => counterUnder(standBase(st, 0)) !== null);
     for (const t of this.tools) {
-      if (t.shape.wall) continue;
+      // (what's fixed is where it is)
+      if (t.shape.fixed) continue;
       t.pose = onGrid(t.pose, toolAnchor(t));
       for (let i = 0; i < 2 && !onCounter(t); i++) t.pose = { ...toWorld(t.pose, { x: 0, y: 0, z: CELL }), yaw: t.pose.yaw };
     }
@@ -1905,6 +1908,10 @@ export class GameEngine {
     if (p?.kind === 'scale' && p.part === 'tare') {
       this.change(() => p.sc.zero());
       this.tarePress = p.sc;
+      return;
+    }
+    if (p?.kind === 'tool' && p.part === 'switch') {
+      this.change(() => (p.t.lit = !p.t.lit));
       return;
     }
     // anywhere else, what's held is set down, or with empty hands, what's looked at picked up
@@ -2938,6 +2945,7 @@ export class GameEngine {
     }
     if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
     else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
+    else if (p?.kind === 'tool' && p.part === 'switch') add(['LMB'], p.t.lit ? 'switch it off' : 'switch it on');
     else if (this.pressable()) add(['LMB'], 'press it');
     const m = h ? null : this.mountAimed();
     if (m) add(['LMB'], this.hoseOn(m) ? 'take hold of its hose' : 'pull out its hose');
@@ -2977,7 +2985,7 @@ export class GameEngine {
   private onButton(): boolean {
     const p = this.target;
     return (
-      (p?.kind === 'scale' && p.part === 'tare') ||
+      (p?.kind === 'scale' && p.part === 'tare') || (p?.kind === 'tool' && p.part === 'switch') ||
       p?.kind === 'alarm' || p?.kind === 'blinds' || p?.kind === 'wake'
     );
   }
@@ -2987,6 +2995,7 @@ export class GameEngine {
     const p = this.target;
     return (
       (p?.kind === 'scale' && p.part === 'tare') ||
+      (p?.kind === 'tool' && p.part === 'switch') ||
       p?.kind === 'alarm' ||
       p?.kind === 'blinds' ||
       p?.kind === 'wake'

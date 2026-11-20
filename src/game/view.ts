@@ -25,7 +25,7 @@ import { litresOf, type Supply } from './supply';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
-  clockText, ANALYZER, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
+  clockText, ANALYZER, LAMP, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, Tool,
 } from './tools';
@@ -34,7 +34,8 @@ import { CABINET, CABINET_BUILD, STOCK, type Stock, type Stocked } from './cabin
 /** What the crosshair is on. */
 export type Pick =
   | { kind: 'flask'; f: Flask }
-  | { kind: 'tool'; t: Tool; part: 'body' | 'tank' | 'valve' | 'spout'; k: number }
+  /** A tool: its body, or one of its tanks, valves or spouts; or the shadow lamp's switch. */
+  | { kind: 'tool'; t: Tool; part: 'body' | 'tank' | 'valve' | 'spout' | 'switch'; k: number }
   | { kind: 'scale'; sc: Scale; part: 'body' | 'tare' }
   /** A hose's nozzle. */
   | { kind: 'hose'; h: Hose }
@@ -224,6 +225,8 @@ const keyMats = {
   hot: new THREE.MeshStandardMaterial({ color: 0xf06358, roughness: 0.45, emissive: 0x401010 }),
   down: new THREE.MeshStandardMaterial({ color: 0x9c2d28, roughness: 0.6 }),
 };
+/** The shadow lamp's light, as its bulb glows with it: a faint lavender, like a blacklight's. */
+const LAMP_GLOW = 0xb9a6ff;
 /** Blotting paper, for the wicking strip. */
 const paperMat = new THREE.MeshStandardMaterial({ color: 0xe6dfc8, roughness: 0.95, metalness: 0 });
 const hidden = new THREE.MeshBasicMaterial({ visible: false });
@@ -1409,6 +1412,11 @@ class ToolView {
    * and its column), and the jagged end it's left with once it's shattered (see buildThermometer).
    */
   private spirit?: { column: THREE.Mesh; whole: THREE.Group; stump: THREE.Group };
+  /**
+   * The shadow lamp's bulb and the lining of the recess it's in, which glow while it's on, and its switch's lever (see
+   * buildLamp).
+   */
+  private lamp?: { bulb: THREE.MeshStandardMaterial; lining: THREE.MeshStandardMaterial; lever: THREE.Group };
   /** The supply station's gauge's segments, bottom up. */
   private segments: THREE.MeshStandardMaterial[] = [];
   /**
@@ -1427,7 +1435,7 @@ class ToolView {
     const sh = t.shape;
     const { art } = this;
     const D = TOOL_DEPTH[t.kind];
-    const pick = (m: THREE.Object3D, part: 'body' | 'tank' | 'valve' | 'spout', k = 0) => pickables.set(m, { kind: 'tool', t, part, k });
+    const pick = (m: THREE.Object3D, part: 'body' | 'tank' | 'valve' | 'spout' | 'switch', k = 0) => pickables.set(m, { kind: 'tool', t, part, k });
     this.body.add(art);
     this.root.add(this.body);
 
@@ -1485,6 +1493,7 @@ class ToolView {
       sh.neck.bodies.forEach((bx, k) => pipes(art, [[bx, floor], [bx, floor + 4], [sh.spouts[k], floor + 4], [sh.spouts[k], sh.spoutY - 4]]));
     }
     else if (t.kind === 'strip') this.buildStrip();
+    else if (t.kind === 'shadowlamp') this.buildLamp(pick);
     else if (t.kind === 'dish') {
       // a little base under the dish, for its stand to clamp
       block(art, darkMat, -12, 12, TH + 0.6, sh.box.y1, -D.body / 2, D.body / 2, 1);
@@ -1803,6 +1812,89 @@ class ToolView {
     pts.push(v3(lead, y - 4), v3(lead, B.y1));
     this.wire = new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.6 });
     this.art.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), pts.length, 0.65, 5), this.wire));
+  }
+
+  /**
+   * The shadow lamp (see LAMP): at the back, a housing with a square recess in its face, flaring out from a bulb deep
+   * inside it, so the bulb lights only what's straight in front of the recess; beside the housing, a console with a
+   * toggle switch on its front; and at the front, a holder for a sheet: two posts and a rail between their feet. The
+   * bulb and the recess's lining glow lavender while it's on, and that's all the light it gives: it lights nothing in
+   * the room.
+   */
+  private buildLamp(pick: (m: THREE.Object3D, part: 'switch') => void): void {
+    const { art } = this;
+    const { h, housing: hs, bulb, mouth, console: c, holder: hd } = LAMP;
+    const b = this.t.shape.box;
+    const solid = <T extends THREE.Mesh>(m: T): T => {
+      m.castShadow = m.receiveShadow = true;
+      art.add(m);
+      return m;
+    };
+    // the housing: a cabinet with a square hole through its face, back to where the bulb is
+    const face = new THREE.Shape([
+      new THREE.Vector2(hs.x0, -h), new THREE.Vector2(hs.x1, -h), new THREE.Vector2(hs.x1, 0), new THREE.Vector2(hs.x0, 0),
+    ]);
+    const sq = (half: number) => [[-1, -1], [-1, 1], [1, 1], [1, -1]].map(([sx, sy]) => new THREE.Vector2(sx * half, -bulb.y + sy * half));
+    face.holes.push(new THREE.Path(sq(mouth)));
+    solid(new THREE.Mesh(new THREE.ExtrudeGeometry(face, { depth: hs.z1 - hs.z0, bevelEnabled: false }).translate(0, 0, hs.z0), panelMat));
+    // a dark bezel round the recess's opening
+    const lip = 4;
+    for (const [x0, x1, y0, y1] of [
+      [-mouth - lip, mouth + lip, bulb.y - mouth - lip, bulb.y - mouth], [-mouth - lip, mouth + lip, bulb.y + mouth, bulb.y + mouth + lip],
+      [-mouth - lip, -mouth, bulb.y - mouth, bulb.y + mouth], [mouth, mouth + lip, bulb.y - mouth, bulb.y + mouth],
+    ])
+      block(art, darkMat, x0, x1, y0, y1, hs.z1, hs.z1 + 1.5);
+    // the recess's lining, flaring from a little plate behind the bulb out to the opening: dark and dull, glowing
+    // with the bulb's light while it's on
+    const lining = new THREE.MeshStandardMaterial({
+      color: 0x17181d, roughness: 0.9, metalness: 0.1, side: THREE.DoubleSide, emissive: LAMP_GLOW, emissiveIntensity: 0,
+    });
+    const back = 14;
+    const zb = bulb.z - bulb.r - 2;
+    const ring = (half: number, z: number) => sq(half).map((p) => new THREE.Vector3(p.x, p.y, z));
+    const [outer, inner] = [ring(mouth, hs.z1 - 0.2), ring(back, zb)];
+    const quads: THREE.Vector3[] = [];
+    for (let i = 0; i < 4; i++) {
+      const j = (i + 1) % 4;
+      quads.push(outer[i], outer[j], inner[j], outer[i], inner[j], inner[i]);
+    }
+    quads.push(inner[0], inner[1], inner[2], inner[0], inner[2], inner[3]);
+    const flare = new THREE.BufferGeometry().setFromPoints(quads);
+    flare.computeVertexNormals();
+    solid(new THREE.Mesh(flare, lining));
+    // the bulb, in a little socket on the plate
+    rod(art, darkMat, new THREE.Vector3(0, -bulb.y, zb), new THREE.Vector3(0, -bulb.y, bulb.z - bulb.r + 1), 2.2);
+    const glass = new THREE.MeshStandardMaterial({ color: 0x6f6a86, roughness: 0.25, metalness: 0, emissive: LAMP_GLOW, emissiveIntensity: 0 });
+    const globe = new THREE.Mesh(unitSphere, glass);
+    globe.position.set(0, -bulb.y, bulb.z);
+    globe.scale.setScalar(bulb.r);
+    art.add(globe);
+    // the console beside it, with the switch on its front: a plate, and a toggle's lever
+    block(art, panelMat, c.x0, c.x1, c.y0, h, hs.z0, hs.z1, 3);
+    const sw = LAMP.switch;
+    pick(block(art, darkMat, sw.x - 11, sw.x + 11, sw.y - 17, sw.y + 17, hs.z1, hs.z1 + 1.5, 0.6), 'switch');
+    const boss = solid(new THREE.Mesh(unitCylinder, pipeMat));
+    boss.rotation.x = Math.PI / 2;
+    boss.scale.set(5.5, 3, 5.5);
+    boss.position.set(sw.x, -sw.y, hs.z1 + 2.5);
+    pick(boss, 'switch');
+    const lever = new THREE.Group();
+    lever.position.set(sw.x, -sw.y, hs.z1 + 3);
+    const stem = rod(lever, pipeMat, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 13), 2);
+    const tip = new THREE.Mesh(unitSphere, pipeMat);
+    tip.position.set(0, 0, 13);
+    tip.scale.setScalar(3);
+    tip.castShadow = true;
+    lever.add(tip);
+    art.add(lever);
+    pick(stem, 'switch');
+    pick(tip, 'switch');
+    // the holder: two posts, and the rail between their feet that a sheet stands on
+    const [z0, z1] = [hd.z - hd.d / 2, hd.z + hd.d / 2];
+    block(art, darkMat, b.x0, b.x0 + hd.post, 0, h, z0, z1, 1);
+    block(art, darkMat, b.x1 - hd.post, b.x1, 0, h, z0, z1, 1);
+    block(art, darkMat, b.x0, b.x1, h - hd.rail, h, z0, z1, 1);
+    this.lamp = { bulb: glass, lining, lever };
   }
 
   /**
@@ -2401,6 +2493,12 @@ class ToolView {
       const T = t.reads;
       if (T !== null) column.scale.y = bulb.y0 + 1 - foot + (foot - top) * thermometerAt(t.kind as ThermometerKind, T);
     }
+    if (this.lamp) {
+      // on, its bulb glows, and the lining round it a little; its switch's lever is up
+      this.lamp.bulb.emissiveIntensity = t.lit ? 1.5 : 0;
+      this.lamp.lining.emissiveIntensity = t.lit ? 0.09 : 0;
+      this.lamp.lever.rotation.x = t.lit ? -0.55 : 0.55;
+    }
     if (t.kind === 'strip' && this.screen) drawStrip(this.screen, t);
     if (t.kind === 'column' && this.screen) drawColumn(this.screen, t);
     if (t.kind === 'culture') this.drawCulture(clock);
@@ -2467,6 +2565,8 @@ class ToolView {
     this.needle?.tex.dispose();
     this.changeover?.lamp.dispose();
     this.changeover?.glow.material.dispose();
+    this.lamp?.bulb.dispose();
+    this.lamp?.lining.dispose();
   }
 }
 
@@ -2985,15 +3085,17 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
     scene.add(kick);
     // a cabinet, set in a little at the foot, under a dark epoxy top (the islands) or a steel one with a drain grate
     // in it (the sink counters)
-    const th = c.island ? 24 : 30;
+    // (the shadow lamp's bench is built as the islands are, with no faucet)
+    const dark = c.island || c.lamp;
+    const th = dark ? 24 : 30;
     // the sink counters run into the walls, so only their fronts need setting in
-    const inset = c.island ? 12 : 6;
+    const inset = dark ? 12 : 6;
     const [bw, bd, bh] = [w - 2 * inset, d - 2 * inset, LIFT - th - KICK];
     // a whole number of doors along each face, from the kick to the top
     const [nx, nz] = [Math.max(1, Math.round(bw / 250)), Math.max(1, Math.round(bd / 250))];
     const body = new THREE.Mesh(boxUV(new THREE.BoxGeometry(bw, bh, bd), 'cabinet', { x: bw / nx, y: bh, z: bd / nz }), doors);
     body.position.set(x, KICK + bh / 2, z);
-    const slab = c.island
+    const slab = dark
       ? new THREE.Mesh(boxUV(new THREE.BoxGeometry(w, th, d), 'epoxy'), top)
       : new THREE.Mesh(boxUV(new THREE.BoxGeometry(w, th, d), 'brushedSteel'), steel);
     slab.position.set(x, LIFT - th / 2, z);
@@ -3003,12 +3105,17 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
     }
     // a pull near the top of each door, on every side that's out in the room
     const hy = KICK + bh - 34;
-    const faces: [number, number][] = c.island ? [[0, -1], [0, 1], [-1, 0], [1, 0]] : c.z0 === ROOM.z0 && c.x1 < ROOM.x1 ? [[0, 1]] : [[-1, 0]];
+    const faces: [number, number][] =
+      c.island ? [[0, -1], [0, 1], [-1, 0], [1, 0]]
+      // (the lamp's bench is in the front left corner)
+      : c.lamp ? [[0, -1], [1, 0]]
+      : c.z0 === ROOM.z0 && c.x1 < ROOM.x1 ? [[0, 1]]
+      : [[-1, 0]];
     for (const [fx, fz] of faces) {
       if (fz) for (let i = 0; i < nx; i++) pull(scene, x - bw / 2 + (i + 0.5) * (bw / nx), hy, z + fz * (bd / 2), 0, fz);
       else for (let i = 0; i < nz; i++) pull(scene, x + fx * (bw / 2), hy, z - bd / 2 + (i + 0.5) * (bd / nz), fx, 0);
     }
-    if (c.island) continue;
+    if (dark) continue;
     const g = new THREE.Mesh(planeUV(new THREE.PlaneGeometry(w - 16, d - 16), 'grate', 0, 0), drain);
     g.rotation.x = -Math.PI / 2;
     g.position.set(x, LIFT + 0.5, z);
@@ -3613,14 +3720,17 @@ function buildFaucets(
 /**
  * The thing a pick is part of, to outline all of it: a tool for any of its parts, a faucet for its knob or spout. The
  * supply station, built into the wall, is outlined a part at a time: its funnel, its reservoir's window, or one
- * of its two faucets (its spout's pipe, with its valve); its plate, nothing. Null for nothing.
+ * of its two faucets (its spout's pipe, with its valve); its plate, nothing. Of the shadow lamp, which stays where it
+ * is too, only the switch is. Null for nothing.
  */
 function thingOf(p: Pick): unknown {
   switch (p.kind) {
     case 'flask': return p.f;
     case 'tool': {
       const { t } = p;
-      if (!t.shape.wall) return t;
+      // (the shadow lamp, which stays where it is too: only its switch)
+      if (p.part === 'switch') return `tool ${t.id} switch`;
+      if (!t.shape.fixed) return t;
       if (p.part === 'tank') return `tool ${t.id} tank ${p.k}`;
       if (p.part === 'spout') return `tool ${t.id} spout ${p.k}`;
       if (p.part === 'valve') return `tool ${t.id} spout ${t.shape.spouts.indexOf(valveLocal(t, p.k).x)}`;

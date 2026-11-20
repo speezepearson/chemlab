@@ -8,10 +8,11 @@ import { SOLVENT_SPECIES, singleOf } from '../chem/species';
 import { CAP } from './config';
 import { Flask } from './flask';
 import { FLASK_H } from './flaskShape';
-import { boxesOverlap } from './physics';
+import { boxesOverlap, solids } from './physics';
+import { LAMP_POSE } from './presets';
 import { Scale } from './scale';
-import { CELL, COUNTERS, LIFT, counterUnder, fromFrac, toCell, toFrac } from './space';
-import { BULB_Y, Hose, INLINE_DOCK, SHAPES, STRIP, STRIP_FOOT, THERMOMETER_ROD, Tool, dipUnder, footY, mouthBelow, tankX, type ToolKind } from './tools';
+import { CELL, COUNTERS, LAMP_AREA, LIFT, ROOM, counterUnder, fromFrac, toCell, toFrac } from './space';
+import { BULB_Y, Hose, INLINE_DOCK, LAMP, SHAPES, STRIP, STRIP_FOOT, THERMOMETER_ROD, Tool, dipUnder, footY, mouthBelow, tankX, type ToolKind } from './tools';
 
 const at = (x: number, y: number, z: number, yaw = 0) => ({ x, y, z, yaw });
 
@@ -70,6 +71,61 @@ describe('the grid', () => {
       for (const x of xs) {
         const cells = (x - xs[0]) / CELL;
         expect(cells, kind).toBeCloseTo(Math.round(cells), 9);
+      }
+    }
+  });
+});
+
+describe('the shadow lamp', () => {
+  const lamp = new Tool('shadowlamp', 0, { ...LAMP_POSE });
+  const flaskAt = (x: number, z: number) => {
+    const f = new Flask(CAP);
+    f.pose = at(x, LIFT + FLASK_H, z);
+    return f;
+  };
+
+  it('stands on a bench of its own in the front left corner, which it covers, with no clamp stand', () => {
+    expect(COUNTERS.filter((c) => c.lamp)).toEqual([{ ...LAMP_AREA, lamp: true }]);
+    expect([LAMP_AREA.x0, LAMP_AREA.z1]).toEqual([ROOM.x0, ROOM.z1]);
+    // clear of every other counter, with room to walk between
+    for (const c of COUNTERS.filter((k) => !k.lamp))
+      expect(Math.max(c.x0 - LAMP_AREA.x1, LAMP_AREA.x0 - c.x1, c.z0 - LAMP_AREA.z1, LAMP_AREA.z0 - c.z1)).toBeGreaterThanOrEqual(0);
+    const b = toolBox(lamp);
+    expect([b.x - b.hx, b.x + b.hx, b.z - b.hz, b.z + b.hz]).toEqual([LAMP_AREA.x0, LAMP_AREA.x1, LAMP_AREA.z0, LAMP_AREA.z1]);
+    expect(b.y - b.hy).toBeCloseTo(LIFT);
+    expect(toolStands(lamp)).toEqual([]);
+  });
+
+  it('has its housing against the front wall, and its holder at the edge of the bench toward the room', () => {
+    const parts = solids(toolBox(lamp));
+    const housing = parts[0];
+    expect(housing.z + housing.hz).toBeCloseTo(ROOM.z1);
+    expect(housing.hy).toBeCloseTo(LAMP.h / 2);
+    const rail = parts[parts.length - 1];
+    expect(rail.z - rail.hz).toBeCloseTo(LAMP_AREA.z0);
+    expect(rail.y - rail.hy).toBeCloseTo(LIFT);
+  });
+
+  it('leaves the bench between them clear, two rows of cells for things to stand in its light', () => {
+    const b = toolBox(lamp);
+    for (const z of [LAMP_AREA.z0 + CELL / 2, LAMP_AREA.z0 + 1.5 * CELL])
+      for (let x = LAMP_AREA.x0 + CELL / 2; x < LAMP_AREA.x1; x += CELL) {
+        const f = flaskAt(x, z);
+        expect(counterUnder(flaskBox(f))).toBe(LIFT);
+        expect(boxesOverlap(flaskBox(f), b), `${x}, ${z}`).toBe(false);
+      }
+    // but nothing stands in the row its housing and console are in
+    for (let x = LAMP_AREA.x0 + CELL / 2; x < LAMP_AREA.x1; x += CELL) expect(boxesOverlap(flaskBox(flaskAt(x, LAMP_AREA.z1 - CELL / 2)), b)).toBe(true);
+    // a scale along a row fits between the walls, and a dispenser on its stand in one row, its stand in the other
+    const sc = new Scale(onGrid(at(LAMP_POSE.x, LIFT + 40, LAMP_AREA.z0 + CELL / 2), SCALE_ANCHOR));
+    expect(boxesOverlap({ ...sc.pose, hx: 92, hy: 20, hz: 36 }, b)).toBe(false);
+    // (in the row by the holder with its back to the lamp, or in the row by the lamp, facing it)
+    for (const [row, yaw] of [[0.5, Math.PI], [1.5, 0]]) {
+      const d = new Tool('dispenser', 1, onGrid(at(LAMP_POSE.x, LIFT + 250, LAMP_AREA.z0 + row * CELL, yaw)));
+      expect(boxesOverlap(toolBox(d), b)).toBe(false);
+      for (const st of toolStands(d)) {
+        expect(counterUnder(standBase(st, 0))).toBe(LIFT);
+        expect(boxesOverlap(standBase(st, LIFT), b)).toBe(false);
       }
     }
   });

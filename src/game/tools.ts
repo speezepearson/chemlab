@@ -886,6 +886,32 @@ export function cultureLevel(share: number): number {
   return levelIn(cultureInside, share);
 }
 
+/**
+ * The shadow lamp (see SHAPES.shadowlamp): a lamp in a housing at the back of a bench of its own, shining along the
+ * bench at a holder for a sheet at its front. In its own frame (x right, y down from its top, z toward its front,
+ * from the middle of the bench), in world units:
+ * - h: how tall it stands on its bench: its housing, and its holder's posts; w and d: how far across and front to
+ *   back it and its bench are, in whole grid cells;
+ * - housing: the cabinet the lamp is in, at the back, as tall as it stands;
+ * - bulb: the bulb, deep in a recess in the housing's face: how far down from the top its middle is, where it is front
+ *   to back, and its radius;
+ * - mouth: how far the recess's square opening in the housing's face reaches either side of the bulb's axis, across
+ *   and up: wide enough for the bulb's light to reach all of a sheet in the holder, and no wider, so it lights
+ *   nothing else;
+ * - console: the box beside the housing that the switch is on, and switch, the switch's middle on the box's front;
+ * - holder: the frame a sheet stands in, at the front: where it is front to back, how thick it is that way, how wide
+ *   each of its two posts is, and how tall the rail between their feet, which the sheet stands on.
+ */
+export const LAMP = {
+  h: 300, w: 3 * CELL, d: 3 * CELL,
+  housing: { x0: -110, x1: 110, z0: -150, z1: -50 },
+  bulb: { y: 150, z: -135, r: 5 },
+  mouth: 50,
+  console: { x0: -150, x1: -110, y0: 180 },
+  switch: { x: -130, y: 216 },
+  holder: { z: 145, d: 10, post: 8.5, rail: 10 },
+};
+
 /** How many digits the meter's display has. */
 export const METER_DIGITS = 4;
 
@@ -936,13 +962,13 @@ export function analyzerSector(atom: ColorAtom): (readonly [number, number])[] {
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater' | 'analyzer'
   | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'dish' | 'column' | 'culture' | 'tank'
-  | 'receptacle';
+  | 'receptacle' | 'shadowlamp';
 
 /**
  * Tools there's only ever one of: not on an equipment wheel, and never put away. The receptacle is the whole cryostabilizer
- * station (see STATION), reservoir included.
+ * station (see STATION), reservoir included, and the shadow lamp stands on a bench of its own (see LAMP).
  */
-export const UNIQUE_TOOLS: readonly ToolKind[] = ['analyzer', 'spectroscope', 'visualizer', 'receptacle'];
+export const UNIQUE_TOOLS: readonly ToolKind[] = ['analyzer', 'spectroscope', 'visualizer', 'receptacle', 'shadowlamp'];
 
 /**
  * A tool's geometry in local units: multiply by the stage scale and offset by
@@ -991,7 +1017,7 @@ export interface ToolShape {
   dial?: number;
   /** Whether its tanks are upright cylinders, as wide front to back as across, rather than boxes; a sump too. */
   round?: boolean;
-  /** Whether it stays where it is: it can't be picked up and carried. */
+  /** Whether it stays where it is: it can't be picked up and carried, and has no clamp stand. */
   fixed?: boolean;
   /** Whether it's built into a wall, with no stand: only the supply station (see STATION). */
   wall?: boolean;
@@ -1236,6 +1262,16 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: 74,
     box: { x0: -24, x1: 24, y0: -14, y1: 76 },
   },
+  shadowlamp: {
+    // a lamp's housing, and a holder for a sheet across the bench from it (see LAMP), with no tanks, spouts or valves
+    tanks: [],
+    noValve: true,
+    fixed: true,
+    spouts: [],
+    valveY: 0,
+    spoutY: LAMP.h,
+    box: { x0: -LAMP.w / 2, x1: LAMP.w / 2, y0: 0, y1: LAMP.h },
+  },
   // the thermometers: a glass rod each (see THERMOMETER_ROD), with no tanks, spouts or valves
   thermometer: THERMOMETER_SHAPE,
   thermometerWide: THERMOMETER_SHAPE,
@@ -1466,6 +1502,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   analyzer: 'Composition analyzer',
   spectroscope: 'Spectroscope',
   visualizer: 'Bond visualizer',
+  shadowlamp: 'Shadow lamp',
 };
 
 /**
@@ -1569,6 +1606,8 @@ export function separatorShares(): number[][] {
  *   the recent past (see INSTRUMENT_TAU and bondCounts) and showing them by energy as a graph (see spectroscopeAt).
  * - A **bond visualizer** is an inline instrument too, which lets everything through, showing which atoms are bonded
  *   in what passed over the recent past (see INSTRUMENT_TAU and bondShares) as lines between the corners and middle of a triangle (see BOND_TRIANGLE).
+ * - A **shadow lamp** has no tanks either: it's a lamp in a housing (see LAMP), fixed on a bench of its own, with a
+ *   switch (see lit).
  *
  * Tools run on sim time, so a slow drip into a reacting flask gives the same
  * result at any sim speed.
@@ -1655,6 +1694,8 @@ export class Tool {
   bath: Vessel | null = null;
   /** Whether a thermometer has shattered (see warm): for good, reading nothing. */
   broken = false;
+  /** Whether a shadow lamp is switched on. */
+  lit = false;
   /** An inline instrument's exponentially weighted average of what it's measured, per sim second (see smooth). */
   private smoothed: number[] | null = null;
   /**
@@ -1959,9 +2000,11 @@ export class Tool {
    * temperature, and 1 if it's broken or 0 if not; how much a wicking strip's paper has drunk, a 0 where how dry it
    * was used to be, when strips dried, and how scorched each stretch is (what's on its paper is saved as vessels, see paper); how much a column's bed has drunk (what's on it is
    * saved as vessels, see bed); which of a sleeper culture's cells are dead (see dead); which supply a receptacle is
-   * fitted for (its place in SUPPLIES), and how far into its changeover it is, or −1 if none is under way.
+   * fitted for (its place in SUPPLIES), and how far into its changeover it is, or −1 if none is under way; 1 if a
+   * shadow lamp is switched on, or 0 if not.
    */
   get memory(): number[] | undefined {
+    if (this.kind === 'shadowlamp') return [+this.lit];
     if (this.kind === 'strip') return [this.soaked, 0, ...this.scorch];
     if (this.kind === 'column') return [this.soaked];
     if (this.kind === 'culture') return Array.from(this.dead!);
@@ -1978,6 +2021,7 @@ export class Tool {
     const old = this.kind === 'strip' && Array.isArray(m) && m.length === 3;
     if (!Array.isArray(m) || (m.length !== want && !old) || !m.every((x) => typeof x === 'number' && Number.isFinite(x))) return;
     if (isThermometer(this.kind)) [this.temp, this.broken] = [m[0] as number, (m[1] as number) > 0];
+    if (this.kind === 'shadowlamp') this.lit = (m[0] as number) > 0;
     if (this.kind === 'strip') {
       // the second was how dry it was, when strips dried
       const [soaked, , ...scorch] = (m as number[]).map((x) => Math.max(0, Math.min(1, x)));

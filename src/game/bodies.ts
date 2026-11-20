@@ -4,7 +4,7 @@ import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { CELL, groundAt, toCardinal, toCell, toLocal, toWorld, type Pose, type Vec3 } from './space';
 import {
-  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, STRIP, TANK_H, THERMOMETER_ROD, dipUnder, footY, isThermometer, levelIn,
+  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, LAMP, METER_BODY, SHAPES, STATION, STRIP, TANK_H, THERMOMETER_ROD, dipUnder, footY, isThermometer, levelIn,
   tankDepth, tankPieces, tankX, overMouth, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
 } from './tools';
 
@@ -15,8 +15,11 @@ import {
  * room (see space.ts).
  */
 
-/** How deep a tool's cabinet is front to back, for the tools that have one deeper than their tanks. */
-const CABINET_DEPTH: Partial<Record<ToolKind, number>> = { analyzer: 50, spectroscope: 50, visualizer: 50 };
+/**
+ * How deep a tool's cabinet is front to back, for the tools that have one deeper than their tanks; the shadow lamp is
+ * as deep as its bench.
+ */
+const CABINET_DEPTH: Partial<Record<ToolKind, number>> = { analyzer: 50, spectroscope: 50, visualizer: 50, shadowlamp: LAMP.d };
 
 /**
  * How deep each tool is front to back, all told, and how deep its tanks are inside: as deep as they need to be to
@@ -127,7 +130,9 @@ export function tankNoteY(t: Tool, k: number): number {
  * tube and the pipe down from it, and the cabinet beside them, and any pipe on to a spout past the cabinet, or the
  * flow meter's readout round the pipe; the tube's top is flush with its opening, for a nozzle to snap onto (see
  * INLINE_DOCK). A dipper's (see DIPPERS) is only its top, where its stand's clamp holds it: a thermometer's rod's, or
- * a wicking strip's clip; the rest of it bumps into nothing, so it can stand down in a flask or a tank.
+ * a wicking strip's clip; the rest of it bumps into nothing, so it can stand down in a flask or a tank. The shadow
+ * lamp's are its housing and the console beside it, and its holder's two posts and the rail between them (see LAMP):
+ * the bench between housing and holder is clear, for things to stand in its light.
  */
 export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean }[] {
   const sh = t.shape;
@@ -142,6 +147,18 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
       { x0: x - f.w - 2, x1: x + f.w + 2, y0: f.y - 2, y1: f.y + f.h + 8, hz: f.w + 1 },
       { x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, hz: plate / 2 + 1.5, z: face - plate / 2 + 1.5 },
       ...sh.spouts.map((x) => ({ x0: x - 8, x1: x + 8, y0: H + 10, y1: sh.spoutY, hz: (out + 8) / 2, z: (8 - out) / 2 })),
+    ];
+  }
+  if (t.kind === 'shadowlamp') {
+    const { h, housing: hs, console: c, holder: hd } = LAMP;
+    const back = { hz: (hs.z1 - hs.z0) / 2, z: (hs.z0 + hs.z1) / 2 };
+    const front = { hz: hd.d / 2, z: hd.z };
+    return [
+      { x0: hs.x0, x1: hs.x1, y0: 0, y1: h, ...back },
+      { x0: c.x0, x1: c.x1, y0: c.y0, y1: h, ...back },
+      { x0: b.x0, x1: b.x0 + hd.post, y0: 0, y1: h, ...front },
+      { x0: b.x1 - hd.post, x1: b.x1, y0: 0, y1: h, ...front },
+      { x0: b.x0, x1: b.x1, y0: h - hd.rail, y1: h, ...front },
     ];
   }
   if (isThermometer(t.kind)) {
@@ -501,9 +518,9 @@ const TWO_STANDS = 300;
 const STAND_CLEAR = 6;
 const rodBack = (body: number) => Math.max(body / 2, FLASK_R) + STAND_CLEAR + STAND_BASE.hz;
 
-/** The stands holding up a tool, unless it's built into a wall: clamped near its top, behind it. */
+/** The stands holding up a tool, unless it's fixed where it is (built into a wall, or on its own bench): clamped near its top, behind it. */
 export function toolStands(t: Tool, pose = t.pose): Stand[] {
-  if (t.shape.wall) return [];
+  if (t.shape.fixed) return [];
   const at = (x: number, y: number, z: number) => toWorld(pose, { x, y: -y, z });
   const b = t.shape.box;
   const body = TOOL_DEPTH[t.kind].body;

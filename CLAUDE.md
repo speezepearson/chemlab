@@ -168,10 +168,12 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - A tank needn't be under its opening: one with a `neck` (the swell bulbs') has its bulb and neck where the flag
     says, and its own `x0` and `x1` are its inlet's, since it's the openings and spouts that go on the grid.
   - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `neck`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
-- **Unique tools** (`UNIQUE_TOOLS`: the composition analyzer, the spectroscope, the bond visualizer and the receptacle) aren't on
+- **Unique tools** (`UNIQUE_TOOLS`: the composition analyzer, the spectroscope, the bond visualizer, the receptacle and the shadow lamp) aren't on
   an equipment wheel and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
   whole supply station (`STATION` in `tools.ts`): its tanks are the funnel and the ship's reservoir, in that
-  order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved.
+  order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved. The
+  `shadowlamp` (`LAMP` in `tools.ts`) is `fixed` too, at `LAMP_POSE` on a bench of its own (`LAMP_AREA`, the last of
+  `COUNTERS`), with no tanks and no stand; its switch is a part of its own for the crosshair (`'switch'`).
 - **The station is fitted for a supply** (`Tool.supply`, see `supply.ts`): the antinucleant in a new lab, the
   cryostabilizer in a save from before there was any other. Anything about what it takes or wants goes by
   `t.supply` (its species, goal, start and reservoir's capacity), never by `TARGET` or `GOAL_TARGET`. With enough in

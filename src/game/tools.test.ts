@@ -14,7 +14,7 @@ import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, type Mouth,
+  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -2464,6 +2464,43 @@ describe('dripping', () => {
       // no long tail of drops that hang on and on
       expect(biggest).toBeLessThan(2.6e6);
     }
+  });
+});
+
+describe('the shadow lamp', () => {
+  it('is one of a kind, fixed where it is, with no tanks, spouts or valves', () => {
+    const t = new Tool('shadowlamp', 0);
+    expect(UNIQUE_TOOLS).toContain('shadowlamp');
+    expect(t.shape.fixed).toBe(true);
+    expect(t.shape.wall).toBeUndefined();
+    expect([t.tanks.length, t.shape.spouts.length, t.valves.length]).toEqual([0, 0, 0]);
+    expect(t.step(0.02)).toEqual([]);
+  });
+
+  it('starts off, and a save keeps whether it is on', () => {
+    const t = new Tool('shadowlamp', 0);
+    expect(t.lit).toBe(false);
+    expect(t.memory).toEqual([0]);
+    t.lit = true;
+    const u = new Tool('shadowlamp', 1);
+    u.remember(JSON.parse(JSON.stringify(t.memory)));
+    expect(u.lit).toBe(true);
+    u.remember([0]);
+    expect(u.lit).toBe(false);
+    // anything else is ignored
+    u.lit = true;
+    for (const bad of [undefined, 'on', [], [1, 2], [NaN]]) u.remember(bad);
+    expect(u.lit).toBe(true);
+  });
+
+  it("has its bulb on the middle line of its bench, behind the opening of the recess it's in", () => {
+    const { housing, bulb, mouth, holder } = LAMP;
+    expect(bulb.z - bulb.r).toBeGreaterThan(housing.z0);
+    expect(bulb.z + bulb.r).toBeLessThan(housing.z1);
+    // the opening is just wide enough for the bulb's light to reach all of what's between the holder's posts
+    const reach = (LAMP.w / 2 - holder.post) * ((housing.z1 - bulb.z) / (holder.z - bulb.z));
+    expect(mouth).toBeGreaterThan(reach + bulb.r);
+    expect(mouth).toBeLessThan(reach + 4 * bulb.r);
   });
 });
 
