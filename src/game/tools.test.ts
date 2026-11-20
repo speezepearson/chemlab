@@ -14,7 +14,7 @@ import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, type Mouth,
+  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SHEET, darkness, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -2501,6 +2501,111 @@ describe('the shadow lamp', () => {
     const reach = (LAMP.w / 2 - holder.post) * ((housing.z1 - bulb.z) / (holder.z - bulb.z));
     expect(mouth).toBeGreaterThan(reach + bulb.r);
     expect(mouth).toBeLessThan(reach + 4 * bulb.r);
+  });
+});
+
+describe('shadow paper', () => {
+  const N = SHEET.cells;
+  /** Light on every cell: `at(i, j)` of the lamp's, i across and j up. */
+  const light = (at: (i: number, j: number) => number) => Float32Array.from({ length: N * N }, (_, k) => at(k % N, Math.floor(k / N)));
+  const all = light(() => 1);
+
+  it('is a square of paper with no tanks, spouts or valves, which fits between the posts of the lamp\'s holder', () => {
+    const t = new Tool('sheet', 0);
+    expect([t.tanks.length, t.shape.spouts.length, t.valves.length]).toEqual([0, 0, 0]);
+    expect(t.step(0.02)).toEqual([]);
+    expect(UNIQUE_TOOLS).not.toContain('sheet');
+    const b = t.shape.box;
+    expect(b.x1 - b.x0).toBeLessThan(LAMP.w - 2 * LAMP.holder.post);
+    expect(b.y1 - b.y0).toBe(LAMP.h - LAMP.holder.rail);
+    // its square's middle is level with the bulb once it stands on the rail
+    expect(LAMP.h - LAMP.holder.rail - SHEET.side / 2).toBe(LAMP.bulb.y);
+    expect(t.dose).toHaveLength(N * N);
+    expect(new Tool('strip', 1).dose).toHaveLength(0);
+  });
+
+  it('darkens quickly at first and ever more slowly: most of the way in a second, all but all in two', () => {
+    expect(darkness(0)).toBe(0);
+    expect(darkness(SHEET.tau)).toBeCloseTo(1 - 1 / Math.E);
+    expect(darkness(1)).toBeGreaterThan(0.8);
+    expect(darkness(2)).toBeGreaterThan(0.97);
+    expect(darkness(2)).toBeLessThan(1);
+    expect(darkness(-1)).toBe(0);
+    // as dark as it gets is as dark as a save's byte can say
+    expect(Math.round(255 * darkness(SHEET.full))).toBe(255);
+    expect(Math.round(255 * darkness(SHEET.full / 2))).toBeLessThan(255);
+  });
+
+  it('takes light cell by cell, by how much of it reaches each', () => {
+    const t = new Tool('sheet', 0);
+    // the right half in half shadow
+    t.expose(light((i) => (i < N / 2 ? 1 : 0.5)), 0.4);
+    expect(t.dose[0]).toBeCloseTo(0.4);
+    expect(t.dose[N - 1]).toBeCloseTo(0.2);
+    expect(t.dosed).toBe(1);
+    // no time, or light for some other sheet, is nothing
+    t.expose(all, 0);
+    t.expose(new Float32Array(10).fill(1), 1);
+    expect(t.dosed).toBe(1);
+    expect(t.dose[0]).toBeCloseTo(0.4);
+  });
+
+  it('only ever darkens, so lit twice it shows both, and no cell takes more than its fill', () => {
+    const t = new Tool('sheet', 0);
+    t.expose(light((i) => (i < N / 2 ? 1 : 0)), 0.5);
+    t.expose(light((_, j) => (j < N / 2 ? 1 : 0)), 0.5);
+    const at = (i: number, j: number) => t.dose[j * N + i];
+    expect([at(0, 0), at(N - 1, 0), at(0, N - 1), at(N - 1, N - 1)].map((d) => +d.toFixed(3))).toEqual([1, 0.5, 0.5, 0]);
+    for (let k = 0; k < 20; k++) t.expose(all, 1);
+    expect(Math.max(...t.dose)).toBeCloseTo(SHEET.full);
+    // light is never more than all of the lamp's, nor less than none
+    const u = new Tool('sheet', 1);
+    u.expose(light((i) => (i % 2 ? 7 : -7)), 1);
+    expect([u.dose[0], u.dose[1]]).toEqual([0, 1]);
+  });
+
+  it('keeps its image through a save, to within a byte a cell of how dark it is', () => {
+    const t = new Tool('sheet', 0);
+    expect(t.image).toBeUndefined();
+    expect(t.memory).toBeUndefined();
+    // a soft-edged shadow across the middle, and a corner lit until it's as dark as it gets
+    t.expose(light((i) => Math.max(0, Math.min(1, Math.abs(i - N / 2) / 10 - 0.5))), 0.7);
+    t.expose(light((i, j) => (i < 10 && j < 10 ? 1 : 0)), 50);
+    const u = new Tool('sheet', 1);
+    u.develop(JSON.parse(JSON.stringify(t.image)));
+    expect(u.dosed).toBe(1);
+    t.dose.forEach((d, k) => expect(Math.abs(darkness(u.dose[k]) - darkness(d))).toBeLessThanOrEqual(0.5 / 255 + 1e-6));
+    expect(u.dose[0]).toBe(t.dose[0]);
+    // and saved again it's just the same
+    expect(u.image).toBe(t.image);
+  });
+
+  it('saves compactly: a small fraction of a byte a cell for a picture of flat shades, and never much more than one', () => {
+    const flat = new Tool('sheet', 0);
+    flat.expose(light((i, j) => (Math.hypot(i - 48, j - 30) < 20 ? 0 : 1)), 1);
+    expect(flat.image!.length).toBeLessThan(N * N / 8);
+    // one with no two cells alike in a row, which runs can't shorten, is kept byte for byte
+    const noisy = new Tool('sheet', 1);
+    noisy.expose(light((i, j) => ((i * 7 + j * 13) % 32) / 32), 0.5);
+    expect(noisy.image!.length).toBeLessThan((N * N * 4) / 3 + 8);
+    const back = new Tool('sheet', 2);
+    back.develop(noisy.image);
+    noisy.dose.forEach((d, k) => expect(Math.abs(darkness(back.dose[k]) - darkness(d))).toBeLessThanOrEqual(0.5 / 255 + 1e-6));
+  });
+
+  it("leaves a sheet as it is when a save's image isn't one, or is some other size", () => {
+    const t = new Tool('sheet', 0);
+    t.expose(all, 0.3);
+    const was = Array.from(t.dose);
+    const short = new Tool('sheet', 1);
+    short.expose(all, 1);
+    for (const bad of [undefined, 7, '', '!!!', btoa('\x01\x05\x09'), btoa('\x00abc'), btoa('\x02' + 'a'.repeat(N * N)), short.image!.slice(0, 4)]) t.develop(bad);
+    expect(Array.from(t.dose)).toEqual(was);
+    expect(t.dosed).toBe(1);
+    // and other tools have no image at all
+    const strip = new Tool('strip', 2);
+    strip.develop(short.image);
+    expect(strip.image).toBeUndefined();
   });
 });
 

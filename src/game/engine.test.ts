@@ -1,10 +1,12 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
+import { SHEET_SLOT, inSlot, sheetIn, slotPose, toolStands } from './bodies';
+import { STOCK } from './cabinet';
 import type { GameEngine } from './engine';
 import { DEFAULT_PRESET, LAMP_POSE } from './presets';
 import type { SaveState } from './save';
-import type { Tool } from './tools';
+import { SHEET, darkness, type Tool } from './tools';
 
 /*
  * The engine itself, with nothing to draw on and nothing to hear: the view and the sounds are stood in for, as they
@@ -44,8 +46,16 @@ vi.mock('./ambience', () => ({ hushAlarms() {} }));
 /** The engine's own things, which these tests reach into. */
 interface Inside {
   tools: Tool[];
+  held: { kind: string; t?: Tool; relYaw: number } | null;
   target: unknown;
+  stock: Record<string, boolean[]>;
   leftDown(shift: boolean): void;
+  release(): void;
+  putAway(): void;
+  putBack(): void;
+  move(dt: number): void;
+  placement(h: unknown): { rest: { pose: Tool['pose'] } } | { why: string };
+  stands(): { of: { t?: Tool } }[];
 }
 
 let Engine: typeof GameEngine;
@@ -126,5 +136,105 @@ describe('the shadow lamp', () => {
     expect(lamp.lit).toBe(false);
     l.e.restore(s, DEFAULT_PRESET);
     expect(lampOf(l.in)[0].lit).toBe(true);
+  });
+});
+
+describe('shadow paper', () => {
+  /** Stand at (x, z) with eyes on (tx, ty, tz), carrying along what's held. */
+  function look(l: { e: GameEngine; in: Inside }, x: number, z: number, tx: number, ty: number, tz: number): void {
+    const [dx, dy, dz] = [tx - x, ty - 620, tz - z];
+    l.e.debug({ x, z, yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(dy, Math.hypot(dx, dz)) });
+    l.in.move(0);
+  }
+  /** Take a sheet out of the cabinet, by the wheel, standing by the lamp's bench with it held up to the holder. */
+  function sheetAtHolder(l: { e: GameEngine; in: Inside }): Tool {
+    look(l, SHEET_SLOT.x + 220, SHEET_SLOT.z + 30, SHEET_SLOT.x, SHEET_SLOT.y - 100, SHEET_SLOT.z + 30);
+    expect(l.e.spawn('sheet')).toBe(true);
+    look(l, SHEET_SLOT.x + 220, SHEET_SLOT.z + 30, SHEET_SLOT.x, SHEET_SLOT.y - 100, SHEET_SLOT.z + 30);
+    return l.in.held!.t!;
+  }
+
+  it('comes out of the cabinet as often as wanted, and is thrown away when put away', () => {
+    const l = lab();
+    for (let i = 0; i < STOCK.sheet + 3; i++) {
+      expect(l.e.spawn('sheet')).toBe(true);
+      expect(l.in.held?.t?.kind).toBe('sheet');
+      l.in.putAway();
+      expect(l.in.held).toBeNull();
+    }
+    expect(l.in.tools.some((t) => t.kind === 'sheet')).toBe(false);
+    expect(l.in.stock.sheet.every(Boolean)).toBe(true);
+  });
+
+  it("goes into the lamp's holder when it's let go of there, with no stand, and out again when it's picked up", () => {
+    const l = lab();
+    const sheet = sheetAtHolder(l);
+    // in hand it has no stand, and where it would go is the holder
+    expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(false);
+    const pl = l.in.placement(l.in.held);
+    expect('rest' in pl && pl.rest.pose).toEqual(SHEET_SLOT);
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    expect(sheet.pose).toEqual(SHEET_SLOT);
+    expect(sheetIn(l.in.tools)).toBe(sheet);
+    expect(toolStands(sheet)).toEqual([]);
+    expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(false);
+    // a second sheet held there has to go somewhere else: on a stand, over the bench
+    const second = sheetAtHolder(l);
+    const pl2 = l.in.placement(l.in.held);
+    if ('rest' in pl2) expect(inSlot(pl2.rest.pose)).toBe(false);
+    l.in.putAway();
+    expect(l.in.tools).not.toContain(second);
+    // picked up with the crosshair on it, and set down on an island, it's on a stand like any tool
+    l.in.target = { kind: 'tool', t: sheet, part: 'body', k: 0, point: { ...SHEET_SLOT }, distance: 200 };
+    l.in.leftDown(false);
+    expect(l.in.held?.t).toBe(sheet);
+    look(l, 100, 1200, 100, 700, 800);
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    expect(sheetIn(l.in.tools)).toBeNull();
+    expect(toolStands(sheet)).toHaveLength(1);
+    expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(true);
+    // undo puts it back in the holder, and Q puts back one picked up from there
+    l.e.undo();
+    expect(sheet.pose).toEqual(SHEET_SLOT);
+    l.in.leftDown(false);
+    look(l, 100, 1200, 100, 700, 800);
+    l.in.putBack();
+    expect(sheet.pose).toEqual(SHEET_SLOT);
+  });
+
+  it('goes in with its back to the lamp, if that is how it is held', () => {
+    const l = lab();
+    const sheet = sheetAtHolder(l);
+    // held facing the player, who's turned from the lamp to it a quarter turn: turned another, it has its back to the lamp
+    l.in.held!.relYaw += Math.PI / 2;
+    l.in.move(0);
+    l.in.release();
+    expect(sheet.pose).toEqual(slotPose(SHEET_SLOT.yaw + Math.PI));
+    expect(Math.cos(sheet.pose.yaw - SHEET_SLOT.yaw)).toBeCloseTo(-1);
+    expect(sheetIn(l.in.tools)).toBe(sheet);
+  });
+
+  it('keeps its image, and its place in the holder, through a save', () => {
+    const l = lab();
+    const sheet = sheetAtHolder(l);
+    l.in.release();
+    const N = SHEET.cells;
+    sheet.expose(Float32Array.from({ length: N * N }, (_, k) => (k % N < N / 3 ? 0 : 1)), 0.6);
+    const loose = sheetAtHolder(l);
+    look(l, 100, 1200, 100, 700, 800);
+    l.in.release();
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    expect(s.tools.filter((t) => t.kind === 'sheet').map((t) => typeof t.image)).toEqual(['string', 'undefined']);
+    l.e.restore(s, DEFAULT_PRESET);
+    const [a, b] = l.in.tools.filter((t) => t.kind === 'sheet');
+    expect(a.pose).toEqual(SHEET_SLOT);
+    expect(sheetIn(l.in.tools)).toBe(a);
+    expect(darkness(a.dose[N - 1])).toBeCloseTo(darkness(0.6), 2);
+    expect(a.dose[0]).toBe(0);
+    expect(b.pose.x).toBeCloseTo(loose.pose.x);
+    expect(b.pose.z).toBeCloseTo(loose.pose.z);
+    expect(Math.max(...b.dose)).toBe(0);
   });
 });

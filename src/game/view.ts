@@ -25,7 +25,7 @@ import { litresOf, type Supply } from './supply';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
-  clockText, ANALYZER, LAMP, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
+  clockText, ANALYZER, LAMP, SHEET, darkness, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, Tool,
 } from './tools';
@@ -227,6 +227,11 @@ const keyMats = {
 };
 /** The shadow lamp's light, as its bulb glows with it: a faint lavender, like a blacklight's. */
 const LAMP_GLOW = 0xb9a6ff;
+/**
+ * Shadow paper (see SHEET): its color as new, a paper cream, and where the shadow lamp's light has darkened it all
+ * the way, a dark purple-brown; in between, a blend of the two by how dark it is (see darkness). 0 to 255 a channel.
+ */
+const SHEET_COLORS = { fresh: [230, 223, 200], dark: [46, 29, 41] } as const;
 /** Blotting paper, for the wicking strip. */
 const paperMat = new THREE.MeshStandardMaterial({ color: 0xe6dfc8, roughness: 0.95, metalness: 0 });
 const hidden = new THREE.MeshBasicMaterial({ visible: false });
@@ -1417,6 +1422,8 @@ class ToolView {
    * buildLamp).
    */
   private lamp?: { bulb: THREE.MeshStandardMaterial; lining: THREE.MeshStandardMaterial; lever: THREE.Group };
+  /** A sheet of shadow paper's image (see buildSheet), and the dose it was last drawn from (see Tool.dosed). */
+  private sheet?: { tex: THREE.DataTexture; mat: THREE.MeshStandardMaterial; drawn: number };
   /** The supply station's gauge's segments, bottom up. */
   private segments: THREE.MeshStandardMaterial[] = [];
   /**
@@ -1494,6 +1501,7 @@ class ToolView {
     }
     else if (t.kind === 'strip') this.buildStrip();
     else if (t.kind === 'shadowlamp') this.buildLamp(pick);
+    else if (t.kind === 'sheet') this.buildSheet();
     else if (t.kind === 'dish') {
       // a little base under the dish, for its stand to clamp
       block(art, darkMat, -12, 12, TH + 0.6, sh.box.y1, -D.body / 2, D.body / 2, 1);
@@ -1895,6 +1903,45 @@ class ToolView {
     block(art, darkMat, b.x1 - hd.post, b.x1, 0, h, z0, z1, 1);
     block(art, darkMat, b.x0, b.x1, h - hd.rail, h, z0, z1, 1);
     this.lamp = { bulb: glass, lining, lever };
+  }
+
+  /**
+   * A sheet of shadow paper (see SHEET): a square of paper with no thickness, hanging from a dark bar clipped along
+   * its top edge, with its image on it (see drawSheet), seen from both sides, from behind as through the paper.
+   */
+  private buildSheet(): void {
+    const { side, top, clip, cells } = SHEET;
+    block(this.art, darkMat, -side / 2 - 1, side / 2 + 1, 0, clip.h, -clip.d / 2, clip.d / 2, 0.8);
+    const tex = new THREE.DataTexture(new Uint8Array(4 * cells * cells), cells, cells, THREE.RGBAFormat);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.generateMipmaps = true;
+    // lit like paper, but glowing a little with its own image too, so that shows whichever way the sheet faces the
+    // room's lights
+    const mat = new THREE.MeshStandardMaterial({
+      map: tex, roughness: 0.95, metalness: 0, side: THREE.DoubleSide, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.3,
+    });
+    const paper = new THREE.Mesh(new THREE.PlaneGeometry(side, side).translate(0, -(top + side / 2), 0), mat);
+    paper.castShadow = paper.receiveShadow = true;
+    this.art.add(paper);
+    this.sheet = { tex, mat, drawn: -1 };
+  }
+
+  /** Draw a sheet of shadow paper's image, if the light it's had has changed since it was last drawn: each cell as dark as it is. */
+  private drawSheet(): void {
+    const sh = this.sheet!;
+    const { dose, dosed } = this.t;
+    if (sh.drawn === dosed) return;
+    sh.drawn = dosed;
+    const { fresh, dark } = SHEET_COLORS;
+    const px = sh.tex.image.data as Uint8Array;
+    for (let i = 0; i < dose.length; i++) {
+      const d = darkness(dose[i]);
+      for (let c = 0; c < 3; c++) px[4 * i + c] = Math.round(fresh[c] + (dark[c] - fresh[c]) * d);
+      px[4 * i + 3] = 255;
+    }
+    sh.tex.needsUpdate = true;
   }
 
   /**
@@ -2499,6 +2546,7 @@ class ToolView {
       this.lamp.lining.emissiveIntensity = t.lit ? 0.09 : 0;
       this.lamp.lever.rotation.x = t.lit ? -0.55 : 0.55;
     }
+    if (this.sheet) this.drawSheet();
     if (t.kind === 'strip' && this.screen) drawStrip(this.screen, t);
     if (t.kind === 'column' && this.screen) drawColumn(this.screen, t);
     if (t.kind === 'culture') this.drawCulture(clock);
@@ -2567,6 +2615,8 @@ class ToolView {
     this.changeover?.glow.material.dispose();
     this.lamp?.bulb.dispose();
     this.lamp?.lining.dispose();
+    this.sheet?.tex.dispose();
+    this.sheet?.mat.dispose();
   }
 }
 

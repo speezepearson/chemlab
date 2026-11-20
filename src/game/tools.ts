@@ -912,6 +912,29 @@ export const LAMP = {
   holder: { z: 145, d: 10, post: 8.5, rail: 10 },
 };
 
+/**
+ * A sheet of shadow paper (see SHAPES.sheet), which the shadow lamp's light darkens, for good, where it falls on it:
+ * - side: the paper, a square, this far across and tall; top: how far down from the sheet's top its square starts;
+ * - clip: the bar clipped along its top edge, `h` tall and `d` front to back, which a stand's clamp holds;
+ * - cells: how many cells a side the light it's had is kept in (see Tool.dose);
+ * - tau: how many sim seconds of the lamp's light, unshadowed, darken it all but 1/e of the way (see darkness): so
+ *   it's most of the way dark in a second, and all but dark in two;
+ * - full: the most light a cell takes, in sim seconds of it unshadowed: as dark as it gets, to within what a save
+ *   keeps of it (see Tool.image).
+ */
+export const SHEET = { side: 280, top: 10, clip: { h: 14, d: 5 }, cells: 96, tau: 0.5, full: 3.2 };
+
+/**
+ * How dark shadow paper is, from 0 (as new) to 1, where it's had `dose` sim seconds of the lamp's unshadowed light:
+ * 1 − e^(−dose / SHEET.tau). It only ever darkens, quickly at first and ever more slowly.
+ */
+export function darkness(dose: number): number {
+  return 1 - Math.exp(-Math.max(0, dose) / SHEET.tau);
+}
+
+/** How many of each byte value in a row a sheet's saved image counts at most (see Tool.image). */
+const RUN = 255;
+
 /** How many digits the meter's display has. */
 export const METER_DIGITS = 4;
 
@@ -962,7 +985,7 @@ export function analyzerSector(atom: ColorAtom): (readonly [number, number])[] {
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater' | 'analyzer'
   | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'dish' | 'column' | 'culture' | 'tank'
-  | 'receptacle' | 'shadowlamp';
+  | 'receptacle' | 'shadowlamp' | 'sheet';
 
 /**
  * Tools there's only ever one of: not on an equipment wheel, and never put away. The receptacle is the whole cryostabilizer
@@ -1272,6 +1295,15 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: LAMP.h,
     box: { x0: -LAMP.w / 2, x1: LAMP.w / 2, y0: 0, y1: LAMP.h },
   },
+  sheet: {
+    // a square of paper hanging from a bar clipped along its top edge (see SHEET), with no tanks, spouts or valves
+    tanks: [],
+    noValve: true,
+    spouts: [],
+    valveY: 0,
+    spoutY: SHEET.top + SHEET.side,
+    box: { x0: -SHEET.side / 2 - 1, x1: SHEET.side / 2 + 1, y0: 0, y1: SHEET.top + SHEET.side },
+  },
   // the thermometers: a glass rod each (see THERMOMETER_ROD), with no tanks, spouts or valves
   thermometer: THERMOMETER_SHAPE,
   thermometerWide: THERMOMETER_SHAPE,
@@ -1503,6 +1535,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   spectroscope: 'Spectroscope',
   visualizer: 'Bond visualizer',
   shadowlamp: 'Shadow lamp',
+  sheet: 'Shadow paper',
 };
 
 /**
@@ -1608,6 +1641,8 @@ export function separatorShares(): number[][] {
  *   in what passed over the recent past (see INSTRUMENT_TAU and bondShares) as lines between the corners and middle of a triangle (see BOND_TRIANGLE).
  * - A **shadow lamp** has no tanks either: it's a lamp in a housing (see LAMP), fixed on a bench of its own, with a
  *   switch (see lit).
+ * - A sheet of **shadow paper** has none: it's a square of paper (see SHEET) that darkens, for good, where the shadow
+ *   lamp's light falls on it (see dose and expose).
  *
  * Tools run on sim time, so a slow drip into a reacting flask gives the same
  * result at any sim speed.
@@ -1696,6 +1731,14 @@ export class Tool {
   broken = false;
   /** Whether a shadow lamp is switched on. */
   lit = false;
+  /**
+   * How much of the shadow lamp's light each cell of a sheet of shadow paper has had, in sim seconds of it unshadowed,
+   * up to SHEET.full: SHEET.cells a side, row by row from its bottom edge up, each row from its left edge as it faces
+   * (see darkness for how dark that leaves it). It only ever grows (see expose). Empty for any other tool.
+   */
+  readonly dose: Float32Array;
+  /** How many times a sheet's dose has changed (see expose and develop), for whoever draws it to know to draw it again. */
+  dosed = 0;
   /** An inline instrument's exponentially weighted average of what it's measured, per sim second (see smooth). */
   private smoothed: number[] | null = null;
   /**
@@ -1751,6 +1794,7 @@ export class Tool {
     this.bed = Array.from({ length: kind === 'column' ? COLUMN.cells : 0 }, () => new Vessel(Infinity));
     this.packing = kind === 'strip' ? new Bed(this.paper) : kind === 'column' ? new Bed(this.bed) : null;
     this.dead = kind === 'culture' ? new Uint8Array(cultureCells().length) : null;
+    this.dose = new Float32Array(kind === 'sheet' ? SHEET.cells ** 2 : 0);
     const nValves = SHAPES[kind].valves?.length ?? this.tanks.length;
     this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' ? 0.5 : 0));
     this.out = this.shape.spouts.map(() => null);
@@ -2038,6 +2082,69 @@ export class Tool {
       // from halfway through a changeover, it's already the next supply's, and only has to come out
       this.swap = swap >= 0 && swap < CHANGEOVER_S && (swap >= STOCKED_AT || nextSupply(this.supply)) ? swap : null;
     }
+  }
+
+  /**
+   * Light falls on a sheet of shadow paper for `s` sim seconds: on each cell (see dose), `light[i]` of the shadow
+   * lamp's unshadowed light, from 0 (in full shadow) to 1. Each takes that much more, up to SHEET.full; none ever
+   * takes less, so a sheet lit twice shows both.
+   */
+  expose(light: ArrayLike<number>, s: number): void {
+    const { dose } = this;
+    if (!(s > 0) || light.length !== dose.length) return;
+    for (let i = 0; i < dose.length; i++) dose[i] = Math.min(SHEET.full, dose[i] + s * Math.max(0, Math.min(1, light[i])));
+    this.dosed++;
+  }
+
+  /**
+   * What a save keeps of a sheet of shadow paper's image, or undefined for one that's had no light (or any other
+   * tool): how dark each cell is (see darkness), as a byte, 0 as new to 255 as dark as it gets, in dose's order,
+   * packed whichever way comes out shorter, as base64: after a byte of 1, each run of the same byte as two, how many
+   * (up to 255) and the byte; or after a byte of 0, the bytes as they are. A sheet is mostly big patches of one
+   * shade, so runs usually come to a small fraction of a byte a cell.
+   */
+  get image(): string | undefined {
+    const { dose } = this;
+    if (!dose.some((d) => d > 0)) return undefined;
+    const bytes = Array.from(dose, (d) => Math.round(255 * darkness(d)));
+    const runs: number[] = [];
+    for (let i = 0; i < bytes.length; ) {
+      let n = 1;
+      while (n < RUN && bytes[i + n] === bytes[i]) n++;
+      runs.push(n, bytes[i]);
+      i += n;
+    }
+    const packed = runs.length < bytes.length ? [1, ...runs] : [0, ...bytes];
+    let bin = '';
+    for (const b of packed) bin += String.fromCharCode(b);
+    return btoa(bin);
+  }
+
+  /**
+   * Put back a sheet's image from what a save kept of it (see image), if that's an image of a sheet this size; if it
+   * isn't, the sheet is left as it is.
+   */
+  develop(saved: unknown): void {
+    const { dose } = this;
+    if (typeof saved !== 'string' || !dose.length) return;
+    let bin: string;
+    try {
+      bin = atob(saved);
+    } catch {
+      return;
+    }
+    const packed = Array.from(bin, (c) => c.charCodeAt(0));
+    let bytes = packed.slice(1);
+    if (packed[0] === 1) {
+      bytes = [];
+      // (no more than the sheet has cells, whatever it says)
+      for (let i = 1; i + 1 < packed.length && bytes.length <= dose.length; i += 2) for (let n = packed[i]; n > 0; n--) bytes.push(packed[i + 1]);
+      if (packed.length % 2 !== 1) return;
+    } else if (packed[0] !== 0) return;
+    if (bytes.length !== dose.length) return;
+    // a cell as dark as a byte can say is as dark as it gets
+    bytes.forEach((b, i) => (dose[i] = b >= 255 ? SHEET.full : b <= 0 ? 0 : Math.min(SHEET.full, -SHEET.tau * Math.log(1 - b / 255))));
+    this.dosed++;
   }
 
   /**

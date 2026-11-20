@@ -57,8 +57,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     wheels' icons (`IconStudio`): a new one of each kind, drawn as in the lab, so there are no icons to keep up to date.
   - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room, what fluid a
     dipper's foot (a thermometer's bulb, a wicking strip's tip) is in (`bathAt`), which the engine hands each one every
-    frame (`Tool.bath`, or for a strip `Tool.dipIn`, which also says whether it may drink), and where a dipper aimed at
-    a mouth hovers and dips (`dipPoses`).
+    frame (`Tool.bath`, or for a strip `Tool.dipIn`, which also says whether it may drink), where a dipper aimed at
+    a mouth hovers and dips (`dipPoses`), and where a sheet of shadow paper stands in the shadow lamp's holder
+    (`SHEET_SLOT`, `slotted`).
   - `physics.ts` is the collisions: yawed boxes, the player's cylinder and `walk`. What's held collides with nothing; only
     where it would be set down is checked (the engine's `placement` and `rest`).
   - `space.ts` is the room, poses, and the mapping from the old flat bench to its back wall.
@@ -161,7 +162,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     used up. `cabinet.test.ts` checks it fits.
   - If it has state of its own that a save should keep, `Tool.memory` and `Tool.remember`.
   - Tests and the README.
-  - A tool needn't have tanks at all: the thermometers and the wicking strip (the `DIPPERS`) have none, nor spouts nor
+  - A tool needn't have tanks at all: the thermometers and the wicking strip (the `DIPPERS`), a sheet of shadow paper
+    and the shadow lamp have none, nor spouts nor
     valves. Then its grid anchor is its middle (`toolAnchor`), Enter writes its own `note`, and its collision is whatever
     `toolParts` gives it (a thermometer's, only the top of its rod; a strip's, its clip), so code that reaches for
     `tanks[0]` must allow for there being none. Nor need a tool with tanks have spouts (the dish): nothing drains from it.
@@ -186,7 +188,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **The goal** is enough cryostabilizer in the station's reservoir (`tanks[1]`, against its supply's `goal`, once
   it's fitted for the last of `SUPPLIES`), not what's lying around in vessels.
 - **Saves** stay at format v1. New fields are optional and the loaders tolerate their absence. Species are stored by
-  name.
+  name. A tool's own state goes in `Tool.memory` as numbers; a sheet of shadow paper's image, which is thousands of
+  cells, goes beside it as a packed string (`Tool.image`, `Tool.develop`).
 
 ## Design preferences
 
