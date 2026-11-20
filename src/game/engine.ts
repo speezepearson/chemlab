@@ -1526,6 +1526,8 @@ export class GameEngine {
       return;
     }
     if (p.kind === 'faucet' || p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake' || p.kind === 'cabinet') return;
+    // (a switch is for pressing, with the left button)
+    if (p.kind === 'tool' && p.part === 'switch') return;
     if (p.kind === 'tool' && p.t.shape.fixed) {
       this.say('That stays where it is');
       return;

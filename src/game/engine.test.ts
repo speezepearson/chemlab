@@ -49,7 +49,9 @@ interface Inside {
   held: { kind: string; t?: Tool; relYaw: number } | null;
   target: unknown;
   stock: Record<string, boolean[]>;
+  flash: { text: string } | null;
   leftDown(shift: boolean): void;
+  grabOrRelease(linked: boolean): void;
   release(): void;
   putAway(): void;
   putBack(): void;
@@ -138,6 +140,22 @@ describe('the shadow lamp', () => {
     expect(lamp.lit).toBe(false);
     l.e.restore(s, DEFAULT_PRESET);
     expect(lampOf(l.in)[0].lit).toBe(true);
+  });
+
+  it("can't be picked up, and its switch doesn't answer the key that picks things up at all", () => {
+    const l = lab();
+    const [lamp] = lampOf(l.in);
+    const on = (part: string) => (l.in.target = { kind: 'tool', t: lamp, part, k: 0, point: { x: 0, y: 0, z: 0 }, distance: 100 });
+    // the switch is for pressing, with the left button: the key neither works it nor says anything
+    on('switch');
+    l.in.grabOrRelease(false);
+    expect([l.in.held, lamp.lit, l.in.flash]).toEqual([null, false, null]);
+    // anywhere else on it, the key says why nothing's picked up
+    on('body');
+    l.in.grabOrRelease(false);
+    expect(l.in.held).toBeNull();
+    expect(l.in.flash?.text).toBe('That stays where it is');
+    expect(lamp.pose).toEqual(LAMP_POSE);
   });
 });
 
