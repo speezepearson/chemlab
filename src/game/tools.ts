@@ -1,7 +1,7 @@
 import { BOND_KEYS, BONDS, SOLVENT, type ColorAtom } from '../chem/atoms';
 import { THERMO, T_ROOM } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
-import { END_WEIGHT, LOOSE_ENDS } from '../chem/shape';
+import { END_WEIGHT, LOOSE_ENDS, RINGED } from '../chem/shape';
 import { NS, SPECIES } from '../chem/species';
 import { CAP, DELIVERY, TRACE } from './config';
 import { COOLING } from './cooling';
@@ -1403,6 +1403,22 @@ export function bondShares(f: Fluid, cap: number): number[] {
   const out = BOND_KEYS.map(() => 0);
   for (let s = 0; s < NS; s++) if (f.n[s]) for (const b of SPECIES_BONDS[s]) out[b] += (f.n[s] * roomFor(s)) / cap;
   return out;
+}
+
+/**
+ * The share of a fluid's molecules that have a ring in them (see RINGED), from 0 to 1: what dims the shadow lamp's
+ * light on its way through the fluid. Every molecule counts as one, whatever its size, and the solvent's atoms are
+ * molecules too, so diluting a fluid lowers it. 0 for an empty fluid.
+ */
+export function ringShare(f: Fluid): number {
+  let rings = 0;
+  let all = 0;
+  for (let s = 0; s < NS; s++) {
+    if (!f.n[s]) continue;
+    all += f.n[s];
+    if (RINGED[s]) rings += f.n[s];
+  }
+  return all > 0 ? rings / all : 0;
 }
 
 /**

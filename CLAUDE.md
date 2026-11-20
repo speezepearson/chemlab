@@ -47,7 +47,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     the six bonds between the colors; `species.ts` defines the 65 species
     (every connected graph on a set of distinct colors) and their names, which saves store.
   - `params.ts` holds the bond parameters.
-  - `shape.ts` is what follows from a molecule's shape alone: each atom's bonds, and its loose ends.
+  - `shape.ts` is what follows from a molecule's shape alone: each atom's bonds, its loose ends, and whether it has a ring.
   - `reactions.ts` is Arrhenius kinetics on whole molecules. The engine steps vessels through `tick`, never `step`.
   - `equilibrium.ts` is the exact full-equilibrium solver, for the editor's Equilibrate button and the bench's settled mixes. Faucets
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
