@@ -5,7 +5,7 @@ import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, 
 import { hushAlarms } from './ambience';
 import {
   FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
-  flaskLip, flaskMouth, nozzleBox, tankFluid, docked, inSlot, slotPose, slotted, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
+  flaskLip, flaskMouth, nozzleBox, tankFluid, docked, inSlot, sheetIn, slotPose, slotted, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
 import { CABINET, endless, isStocked, putIn, stockWith, takeFrom, takeSlot, type Stock, type Stocked } from './cabinet';
@@ -2389,6 +2389,7 @@ export class GameEngine {
     // what each thermometer's bulb and each strip's foot is in (see dipping)
     const whole = this.tools.map((t) => !t.broken);
     this.dipping(quiet ? 0 : dt);
+    this.slotting();
     if (simDt > 0) {
       const sub = Math.ceil(simDt / 0.02);
       const step = simDt / sub;
@@ -3153,6 +3154,8 @@ export class GameEngine {
         this.clock += dt;
         this.spin = (this.spin + SPIN * dt) % (2 * Math.PI);
         this.station().steady += dt;
+        // (and the shadow lamp, if it's on, shines on through it)
+        for (const t of this.tools) if (t.kind === 'shadowlamp') t.shine(dt);
       },
     };
   }
@@ -3352,6 +3355,16 @@ export class GameEngine {
     if (!dipped) this.dipFor = 0;
     // all the way in, its foot has touched: a tap is over, and it rises unless the button's still held
     if (this.dip >= 1) this.tapping = false;
+  }
+
+  /**
+   * Tell the shadow lamp which sheet is in its holder, if any (see Tool.sheet), from where things are now. One in
+   * hand isn't in it, though it's still where it was picked up until it's moved.
+   */
+  private slotting(): void {
+    const h = this.held;
+    const sheet = sheetIn(this.tools, h?.kind === 'tool' ? h.t : null);
+    for (const t of this.tools) if (t.kind === 'shadowlamp') t.sheet = sheet;
   }
 
   /** Whether fluid would leave a tool's spouts if it ran. */

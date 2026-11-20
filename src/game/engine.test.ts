@@ -54,6 +54,8 @@ interface Inside {
   putAway(): void;
   putBack(): void;
   move(dt: number): void;
+  simulate(dt: number, quiet?: boolean): void;
+  sleeper(): { skip(dt: number): void };
   placement(h: unknown): { rest: { pose: Tool['pose'] } } | { why: string };
   stands(): { of: { t?: Tool } }[];
 }
@@ -236,5 +238,59 @@ describe('shadow paper', () => {
     expect(b.pose.x).toBeCloseTo(loose.pose.x);
     expect(b.pose.z).toBeCloseTo(loose.pose.z);
     expect(Math.max(...b.dose)).toBe(0);
+  });
+
+  it("is owed the lamp's light while it's in the holder with the lamp on, on sim time", () => {
+    const l = lab();
+    const [lamp] = lampOf(l.in);
+    const press = () => {
+      l.in.target = { kind: 'tool', t: lamp, part: 'switch', k: 0, point: { x: 0, y: 0, z: 0 }, distance: 100 };
+      l.in.leftDown(false);
+      l.in.target = null;
+    };
+    // on, with no sheet in, nothing happens
+    press();
+    l.in.simulate(0.1);
+    expect([lamp.lit, lamp.sheet, lamp.owed]).toEqual([true, null, 0]);
+    // a sheet in hand at the holder isn't in it yet; let go of there, it is, and the light's time is the lab's
+    const sheet = sheetAtHolder(l);
+    l.in.simulate(0.1);
+    expect([lamp.sheet, lamp.owed]).toEqual([null, 0]);
+    l.in.release();
+    l.in.simulate(0.1);
+    expect(lamp.sheet).toBe(sheet);
+    expect(lamp.owed).toBeCloseTo(0.1);
+    // paused, none; at 16×, sixteen times as much
+    l.e.speed = 0;
+    l.in.simulate(0.1);
+    expect(lamp.owed).toBeCloseTo(0.1);
+    l.e.speed = 16;
+    l.in.simulate(0.05);
+    expect(lamp.owed).toBeCloseTo(0.9);
+    // off, no more; and with nothing drawing the lab, what's owed just waits, the sheet as it was
+    press();
+    l.e.speed = 1;
+    l.in.simulate(0.1);
+    expect(lamp.owed).toBeCloseTo(0.9);
+    expect(Math.max(...sheet.dose)).toBe(0);
+    // picked up, it's out of the holder, and owed nothing
+    l.in.target = { kind: 'tool', t: sheet, part: 'body', k: 0, point: { ...SHEET_SLOT }, distance: 200 };
+    l.in.leftDown(false);
+    l.in.simulate(0.1);
+    expect([lamp.sheet, lamp.owed]).toEqual([null, 0]);
+  });
+
+  it('is owed no more than darkens it all the way, through the longest sleep', () => {
+    const l = lab();
+    const [lamp] = lampOf(l.in);
+    sheetAtHolder(l);
+    l.in.release();
+    lamp.lit = true;
+    l.in.simulate(0.1, true);
+    expect(lamp.owed).toBeCloseTo(0.1);
+    l.in.sleeper().skip(100000);
+    expect(lamp.owed).toBe(SHEET.full);
+    l.in.simulate(0.1, true);
+    expect(lamp.owed).toBe(SHEET.full);
   });
 });

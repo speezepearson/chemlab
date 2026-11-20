@@ -409,6 +409,7 @@ class FluidMesh {
     private open = true,
   ) {
     this.mat = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide, clippingPlanes: [this.plane] });
+    this.mat.userData.fluid = true;
     // a see-through fluid (one thinned by the solvent) thickens toward its edges, seen edge on, and shows a bright
     // line where its surface meets the glass, as clear liquid in glass does, so even pure solvent reads as a body of
     // liquid with a surface rather than nothing; an opaque one is unchanged
@@ -1358,9 +1359,10 @@ const setRGB = (c: THREE.Color, rgb: readonly number[]) => c.setRGB(rgb[0] / 255
 
 /**
  * Make a material as see-through as fluid f looks (see fluidAlpha: the solvent thins it), turning it transparent only
- * while it needs to be, since that rebuilds its shader.
+ * while it needs to be, since that rebuilds its shader. It's marked as fluid's, for the shadow lamp (see Exposer).
  */
 function fluidOpacity(mat: THREE.Material, f: Fluid): void {
+  mat.userData.fluid = true;
   const a = fluidAlpha(f);
   mat.opacity = a;
   if (mat.transparent !== a < 1) {
@@ -4266,6 +4268,235 @@ class Outliner {
   }
 }
 
+/* ---------------- the shadow lamp's light ---------------- */
+
+/**
+ * How the shadow lamp's light is worked out (see Exposer): how many sim seconds of it, at most, go by one look from
+ * a point on the bulb (`per`), so the more light there is to cast at once, the more points it's cast from, between
+ * `min` and `max` a frame.
+ */
+const EXPOSURE = { per: 0.008, min: 2, max: 24 };
+
+/** The nth number, from 1, of the van der Corput sequence in a base: evenly spread over 0 to 1, however many are taken. */
+function corput(n: number, base: number): number {
+  let [x, f] = [0, 1 / base];
+  for (; n > 0; n = Math.floor(n / base), f /= base) x += (n % base) * f;
+  return x;
+}
+
+/**
+ * What of the shadow lamp's light reaches each cell of the sheet in its holder (see LAMP and SHEET), past whatever
+ * stands between them: worked out from what's drawn, so that what casts a shadow is just what's seen, with no model of
+ * its own of what's where.
+ *
+ * The scene is drawn as seen from a point on the bulb, looking at the sheet, through a window that is exactly the
+ * sheet's square, onto a picture with a pixel to each of the sheet's cells: whatever's drawn over a pixel is in the
+ * way of the light from that point to that cell. Only what's between the recess's opening and the sheet is drawn, in
+ * place of each thing a stand-in of the same shape drawn in a plain material: everything opaque counts as in the way,
+ * all the way; glass, and whatever else is see-through, isn't drawn at all, so the light goes straight through it,
+ * neither dimmed nor bent, and nor are labels, lines, the lamp itself or the sheet. That's done from several points
+ * spread over the bulb, each also looking through its cells a little off their middles, and averaged: so a shadow's
+ * edge is soft, the softer the nearer the lamp what casts it is, since the bulb isn't a point, and smooth, though the
+ * cells are coarse. The points are a fixed sequence, carried on from frame to frame, so what's lit over several frames
+ * is lit from more of the bulb.
+ *
+ * It lights nothing: it only says where the lamp's light falls, for the sheet to darken by (see Tool.expose).
+ */
+class Exposer {
+  private n = SHEET.cells;
+  /** Seen from one point on the bulb: in green, how many opaque things are in the way of each cell. */
+  private seen: THREE.WebGLRenderTarget;
+  /** The light reaching each cell, in red, added up over the points looked from. */
+  private sum: THREE.WebGLRenderTarget;
+  /** That, as two bytes a cell, to read back. */
+  private out: THREE.WebGLRenderTarget;
+  private camera = new THREE.PerspectiveCamera();
+  /** The stand-ins for what's in the way, each where what it stands in for is. */
+  private stage = new THREE.Scene();
+  private standIns: THREE.Mesh[] = [];
+  private used = 0;
+  /** What everything opaque is drawn in: one more thing in the way, wherever it's drawn, with nothing hiding anything. */
+  private solid = new THREE.ShaderMaterial({
+    vertexShader: /* glsl */ `void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: /* glsl */ `void main() { gl_FragColor = vec4(0.0, 1.0, 0.0, 0.0); }`,
+    side: THREE.DoubleSide, depthTest: false, depthWrite: false,
+    blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+  });
+  /** Adds to the sum the light that got past what one point saw: none where anything opaque was in the way, else all. */
+  private gather = new THREE.ShaderMaterial({
+    uniforms: { seen: { value: null }, share: { value: 1 } },
+    vertexShader: quadVertex,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D seen;
+      uniform float share;
+      varying vec2 vUv;
+      void main() {
+        vec4 c = texture2D(seen, vUv);
+        float light = c.g > 0.5 ? 0.0 : 1.0;
+        gl_FragColor = vec4(light * share, 0.0, 0.0, 0.0);
+      }`,
+    depthTest: false, depthWrite: false,
+    blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+  });
+  /** Writes the sum out as sixteen bits a cell, in two bytes: red the high one, green the low. */
+  private pack = new THREE.ShaderMaterial({
+    uniforms: { sum: { value: null } },
+    vertexShader: quadVertex,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D sum;
+      varying vec2 vUv;
+      void main() {
+        float v = floor(clamp(texture2D(sum, vUv).r, 0.0, 1.0) * 65535.0 + 0.5);
+        float hi = floor(v / 256.0);
+        gl_FragColor = vec4(hi / 255.0, (v - hi * 256.0) / 255.0, 0.0, 1.0);
+      }`,
+    blending: THREE.NoBlending, depthTest: false, depthWrite: false,
+  });
+  private quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.gather);
+  private quadScene = new THREE.Scene().add(this.quad);
+  private quadCamera = new THREE.Camera();
+  private pixels: Uint8Array;
+  private light: Float32Array;
+  /** How many points on the bulb have been looked from, ever: where the sequence of them has got to. */
+  private looks = 0;
+  private clear = new THREE.Color();
+  private ball = new THREE.Sphere();
+  private beam = new THREE.Box3();
+
+  /** `float`: whether pictures can be kept as (half) floats, which the sum is, where they can, for a finer average. */
+  constructor(float: boolean) {
+    const n = this.n;
+    const opts = { depthBuffer: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter };
+    const type = float ? THREE.HalfFloatType : THREE.UnsignedByteType;
+    this.seen = new THREE.WebGLRenderTarget(n, n, { ...opts, type });
+    this.sum = new THREE.WebGLRenderTarget(n, n, { ...opts, type });
+    this.out = new THREE.WebGLRenderTarget(n, n, opts);
+    this.pixels = new Uint8Array(4 * n * n);
+    this.light = new Float32Array(n * n);
+    this.quad.frustumCulled = false;
+    this.stage.matrixWorldAutoUpdate = false;
+    this.gather.uniforms.seen.value = this.seen.texture;
+    this.pack.uniforms.sum.value = this.sum.texture;
+  }
+
+  /**
+   * How much of `lamp`'s light reaches each cell of `sheet`, in its holder, as `scene` stands (drawn already this
+   * frame, so everything's where it is): from 0 to 1 a cell, in the order of Tool.dose; for `owed` sim seconds of it,
+   * which only sets how many points on the bulb it's worked out from. What's under `own` (the lamp's and the sheet's
+   * own drawings) casts no shadow. What's returned is good until the next call. The renderer is left drawing to the
+   * screen, as it was.
+   */
+  expose(renderer: THREE.WebGLRenderer, scene: THREE.Scene, lamp: Tool, sheet: Tool, own: readonly THREE.Object3D[], owed: number): Float32Array {
+    const { n, camera } = this;
+    const { bulb, housing, holder, h } = LAMP;
+    const half = SHEET.side / 2;
+    const pose = lamp.pose;
+    // the bulb's middle, and the middle of the sheet's square, in the room; the camera looks along the lamp's front
+    const from = toWorld(pose, { x: 0, y: -bulb.y, z: bulb.z });
+    const to = toWorld(pose, { x: 0, y: SHEET.side / 2 + holder.rail - h, z: holder.z });
+    const far = holder.z - bulb.z;
+    const near = housing.z1 - bulb.z;
+    camera.rotation.set(0, pose.yaw + Math.PI, 0);
+    const right = new THREE.Vector3(1, 0, 0).applyEuler(camera.rotation);
+
+    // what's in the way: whatever's drawn between the recess's opening and the sheet, a stand-in for each
+    this.beam.makeEmpty();
+    for (const sx of [-1, 1])
+      for (const z of [housing.z1, holder.z]) {
+        const p = toWorld(pose, { x: sx * (half + bulb.r), y: 0, z });
+        this.beam.expandByPoint(new THREE.Vector3(p.x, to.y - half - bulb.r, p.z));
+        this.beam.expandByPoint(new THREE.Vector3(p.x, to.y + half + bulb.r, p.z));
+      }
+    this.used = 0;
+    const skip = new Set(own);
+    const visit = (o: THREE.Object3D): void => {
+      if (!o.visible || skip.has(o)) return;
+      if (o instanceof THREE.Mesh && !(o instanceof THREE.InstancedMesh) && o.layers.isEnabled(0)) this.take(o);
+      for (const c of o.children) visit(c);
+    };
+    visit(scene);
+    for (let i = this.used; i < this.standIns.length; i++) this.standIns[i].visible = false;
+
+    const count = Math.max(EXPOSURE.min, Math.min(EXPOSURE.max, Math.ceil(owed / EXPOSURE.per)));
+    const clearAlpha = renderer.getClearAlpha();
+    renderer.getClearColor(this.clear);
+    renderer.setClearColor(0x000000, 0);
+    renderer.setRenderTarget(this.sum);
+    renderer.clear();
+    this.gather.uniforms.share.value = 1 / count;
+    const cell = SHEET.side / n;
+    for (let k = 0; k < count; k++) {
+      // a point on the bulb's disc, as seen from the sheet, and how far off its cells' middles this look is
+      const i = ++this.looks;
+      const r = bulb.r * Math.sqrt(corput(i, 2));
+      const a = 2 * Math.PI * corput(i, 3);
+      const [dx, dy] = [r * Math.cos(a), r * Math.sin(a)];
+      const [jx, jy] = [(corput(i, 5) - 0.5) * cell, (corput(i, 7) - 0.5) * cell];
+      camera.position.set(from.x + right.x * dx, from.y + dy, from.z + right.z * dx);
+      camera.updateMatrixWorld();
+      // the window is the sheet's square, wherever on the bulb it's seen from
+      const s = near / far;
+      const [x0, y0] = [(-half - dx + jx) * s, (to.y - half - camera.position.y + jy) * s];
+      const [w, t] = [SHEET.side * s, SHEET.side * s];
+      camera.projectionMatrix.makePerspective(x0, x0 + w, y0 + t, y0, near, far);
+      camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+      renderer.setRenderTarget(this.seen);
+      renderer.render(this.stage, camera);
+      this.quad.material = this.gather;
+      renderer.setRenderTarget(this.sum);
+      renderer.autoClear = false;
+      renderer.render(this.quadScene, this.quadCamera);
+      renderer.autoClear = true;
+    }
+    this.quad.material = this.pack;
+    renderer.setRenderTarget(this.out);
+    renderer.render(this.quadScene, this.quadCamera);
+    renderer.readRenderTargetPixels(this.out, 0, 0, n, n, this.pixels);
+    renderer.setRenderTarget(null);
+    renderer.setClearColor(this.clear, clearAlpha);
+    // as the lamp sees it, left to right is the way the sheet's own cells run if it faces the lamp; if its back is to
+    // the lamp, they run the other way
+    const flip = Math.cos(sheet.pose.yaw - pose.yaw) > 0;
+    const { pixels, light } = this;
+    for (let j = 0; j < n; j++)
+      for (let i = 0; i < n; i++) {
+        const p = 4 * (j * n + (flip ? n - 1 - i : i));
+        light[j * n + i] = (pixels[p] * 256 + pixels[p + 1]) / 65535;
+      }
+    return light;
+  }
+
+  /** Stand a stand-in for mesh `o` on the stage, if it's in the beam and in the light's way. */
+  private take(o: THREE.Mesh): void {
+    const g = o.geometry;
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    this.ball.copy(g.boundingSphere!).applyMatrix4(o.matrixWorld);
+    if (!this.beam.intersectsSphere(this.ball)) return;
+    const mats: THREE.Material[] = Array.isArray(o.material) ? o.material : [o.material];
+    // glass, and whatever else is see-through, lets the light straight through; so, for now, does fluid
+    const opaque = (m: THREE.Material) => m.visible && m.colorWrite && !m.transparent && !m.userData.fluid;
+    if (!mats.some(opaque)) return;
+    let m = this.standIns[this.used];
+    if (!m) {
+      m = new THREE.Mesh(g, this.solid);
+      m.matrixAutoUpdate = false;
+      this.stage.add(m);
+      this.standIns.push(m);
+    }
+    this.used++;
+    m.geometry = g;
+    m.material = this.solid;
+    m.matrixWorld.copy(o.matrixWorld);
+    m.visible = true;
+  }
+
+  dispose(): void {
+    for (const t of [this.seen, this.sum, this.out]) t.dispose();
+    for (const m of [this.solid, this.gather, this.pack]) m.dispose();
+    this.quad.geometry.dispose();
+  }
+}
+
 /** Draws the lab with Three.js, from the player's eyes, and says what's under the crosshair. */
 export class View {
   /** The field of view is 90°, top to bottom, until the player zooms in (see look). */
@@ -4295,6 +4526,8 @@ export class View {
   private roomLights: { light: THREE.Light; base: number }[] = [];
   private raycaster = new THREE.Raycaster();
   private outliner = new Outliner();
+  /** Works out where the shadow lamp's light falls (see Exposer), once it's first needed. */
+  private exposer?: Exposer;
   private studio = new IconStudio(Math.min(2, window.devicePixelRatio || 1));
   /** The equipment wheels' icons (see IconStudio): drawn again, on new canvases, whenever what they reflect is. */
   private drawnIcons: Icons = {};
@@ -4453,6 +4686,23 @@ export class View {
     this.camera.layers.disable(REFRACT_LAYER);
     this.renderGuides();
     this.renderOutline(fr.hot);
+    this.shine();
+  }
+
+  /**
+   * The shadow lamp's light, for as long as the sheet in its holder is owed it (see Tool.owed): the sheet is darkened
+   * by as much of it as gets past whatever stands in the way just now (see Exposer), and nothing's owed any more.
+   */
+  private shine(): void {
+    for (const [lamp, v] of this.tools) {
+      const sheet = lamp.sheet;
+      const sv = sheet && this.tools.get(sheet);
+      if (lamp.kind !== 'shadowlamp' || !(lamp.owed > 0) || !sheet || !sv) continue;
+      const ext = this.renderer.extensions;
+      this.exposer ??= new Exposer(ext.has('EXT_color_buffer_float') || ext.has('EXT_color_buffer_half_float'));
+      sheet.expose(this.exposer.expose(this.renderer, this.scene, lamp, sheet, [v.root, sv.root], lamp.owed), lamp.owed);
+      lamp.owed = 0;
+    }
   }
 
   /**
@@ -4658,6 +4908,7 @@ export class View {
   private updateStreams(fr: Frame): void {
     while (this.streams.length < fr.streams.length) {
       const m = new THREE.Mesh(unitCylinder, new THREE.MeshBasicMaterial({ transparent: true }));
+      m.material.userData.fluid = true;
       this.scene.add(m);
       this.streams.push(m);
     }
@@ -4680,6 +4931,7 @@ export class View {
     });
     while (this.drops.length < fr.drops.length) {
       const m = new THREE.Mesh(unitSphere, new THREE.MeshBasicMaterial({ transparent: true }));
+      m.material.userData.fluid = true;
       this.scene.add(m);
       this.drops.push(m);
     }
@@ -4751,6 +5003,7 @@ export class View {
 
   dispose(): void {
     this.outliner.dispose();
+    this.exposer?.dispose();
     this.studio.dispose();
     this.renderer.dispose();
   }

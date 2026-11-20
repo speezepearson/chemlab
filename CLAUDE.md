@@ -55,6 +55,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `engine.ts` owns the lab: what's in it, the player, input, carrying and the sim loop.
   - `view.ts` draws it all with Three.js, and raycasts for what the crosshair is on. It also draws the equipment
     wheels' icons (`IconStudio`): a new one of each kind, drawn as in the lab, so there are no icons to keep up to date.
+    And it works out where the shadow lamp's light falls on the sheet in its holder (`Exposer`), from what's drawn
+    between them, seen from the bulb: the engine only counts the sim seconds of light the sheet is owed (`Tool.owed`),
+    which wait while nothing's drawn (the headless bench, sleep).
   - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room, what fluid a
     dipper's foot (a thermometer's bulb, a wicking strip's tip) is in (`bathAt`), which the engine hands each one every
     frame (`Tool.bath`, or for a strip `Tool.dipIn`, which also says whether it may drink), where a dipper aimed at
@@ -106,7 +109,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Volume isn't atoms.** Capacities and flows are in `volume()` units: molecules by default, or atoms when the
   "volume counts molecules" toggle is off. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
 - **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
-  chemistry, cooling, the composition analyzer's reading and hum, the supply station's diverter, display and needle, and its changeover (block, door, lamp and alarm), a thermometer's bulb and its crack as it shatters, and the drip and stream sounds. All of it
+  chemistry, cooling, the composition analyzer's reading and hum, the supply station's diverter, display and needle, and its changeover (block, door, lamp and alarm), a thermometer's bulb and its crack as it shatters, the shadow lamp's light on the sheet in its holder, and the drip and stream sounds. All of it
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The one exception to the
   substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the

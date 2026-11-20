@@ -1640,7 +1640,7 @@ export function separatorShares(): number[][] {
  * - A **bond visualizer** is an inline instrument too, which lets everything through, showing which atoms are bonded
  *   in what passed over the recent past (see INSTRUMENT_TAU and bondShares) as lines between the corners and middle of a triangle (see BOND_TRIANGLE).
  * - A **shadow lamp** has no tanks either: it's a lamp in a housing (see LAMP), fixed on a bench of its own, with a
- *   switch (see lit).
+ *   switch (see lit). While it's on, the sheet in its holder is owed its light (see shine).
  * - A sheet of **shadow paper** has none: it's a square of paper (see SHEET) that darkens, for good, where the shadow
  *   lamp's light falls on it (see dose and expose).
  *
@@ -1732,6 +1732,17 @@ export class Tool {
   /** Whether a shadow lamp is switched on. */
   lit = false;
   /**
+   * The sheet of shadow paper in a shadow lamp's holder, if there is one, which whoever runs it sets before each step
+   * (see shine): what its light falls on.
+   */
+  sheet: Tool | null = null;
+  /**
+   * How many sim seconds of a shadow lamp's light the sheet in its holder has yet to be darkened by (see shine), up
+   * to SHEET.full: the light has fallen, but what shadows lay across the sheet is for whoever draws the lab to say
+   * (see the view's Exposer), which then hands it on (see expose) and sets this back to 0.
+   */
+  owed = 0;
+  /**
    * How much of the shadow lamp's light each cell of a sheet of shadow paper has had, in sim seconds of it unshadowed,
    * up to SHEET.full: SHEET.cells a side, row by row from its bottom edge up, each row from its left edge as it faces
    * (see darkness for how dark that leaves it). It only ever grows (see expose). Empty for any other tool.
@@ -1815,6 +1826,10 @@ export class Tool {
     if (this.kind === 'heater') return this.heat(h);
     if (this.kind === 'receptacle') return this.receive(h);
     if (this.kind === 'strip') return this.wick(h);
+    if (this.kind === 'shadowlamp') {
+      this.shine(h);
+      return this.none();
+    }
     if (isThermometer(this.kind)) {
       this.warm(h);
       return this.none();
@@ -2082,6 +2097,16 @@ export class Tool {
       // from halfway through a changeover, it's already the next supply's, and only has to come out
       this.swap = swap >= 0 && swap < CHANGEOVER_S && (swap >= STOCKED_AT || nextSupply(this.supply)) ? swap : null;
     }
+  }
+
+  /**
+   * A shadow lamp's light for `h` sim seconds: while it's on with a sheet in its holder (see sheet), that sheet is
+   * owed that much more of it (see owed), though never more than darkens it all the way. With no sheet there,
+   * nothing's owed: what a sheet taken out had yet to get is lost. It shines on nothing else.
+   */
+  shine(h: number): void {
+    if (!this.sheet) this.owed = 0;
+    else if (this.lit) this.owed = Math.min(SHEET.full, this.owed + h);
   }
 
   /**

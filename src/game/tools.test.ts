@@ -2493,6 +2493,41 @@ describe('the shadow lamp', () => {
     expect(u.lit).toBe(true);
   });
 
+  it('owes the sheet in its holder its light, sim second for sim second, while it is on', () => {
+    const t = new Tool('shadowlamp', 0);
+    const sheet = new Tool('sheet', 1);
+    // on, with nothing in its holder, it shines on nothing
+    t.lit = true;
+    for (let i = 0; i < 50; i++) t.step(0.02);
+    expect(t.owed).toBe(0);
+    t.sheet = sheet;
+    for (let i = 0; i < 25; i++) t.step(0.02);
+    expect(t.owed).toBeCloseTo(0.5);
+    // in bigger steps it comes to the same
+    t.step(0.25);
+    expect(t.owed).toBeCloseTo(0.75);
+    // switched off, the sheet is still owed what fell on it, and no more
+    t.lit = false;
+    t.step(1);
+    expect(t.owed).toBeCloseTo(0.75);
+    // the lamp never darkens the sheet itself: that's for whoever knows what's in the way
+    expect(Math.max(...sheet.dose)).toBe(0);
+    // taken out, the sheet is owed nothing
+    t.sheet = null;
+    t.step(0.02);
+    expect(t.owed).toBe(0);
+  });
+
+  it('never owes more light than darkens a sheet all the way, however long it is left on', () => {
+    const t = new Tool('shadowlamp', 0);
+    t.lit = true;
+    t.sheet = new Tool('sheet', 1);
+    t.shine(3600);
+    expect(t.owed).toBe(SHEET.full);
+    t.step(0.02);
+    expect(t.owed).toBe(SHEET.full);
+  });
+
   it("has its bulb on the middle line of its bench, behind the opening of the recess it's in", () => {
     const { housing, bulb, mouth, holder } = LAMP;
     expect(bulb.z - bulb.r).toBeGreaterThan(housing.z0);
