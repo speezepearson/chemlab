@@ -998,10 +998,60 @@ export function analyzerSector(atom: ColorAtom): (readonly [number, number])[] {
   return [own, ...corners.filter((p) => p !== own).map((p) => mid(own, p))];
 }
 
+/**
+ * An atom's sector (see analyzerSector) drawn in from its three sides by `margin`, in the same units (the triangle's
+ * corners 1 from its middle): where a sheet of test paper's stain goes, clear of the lines printed round it. A small
+ * triangle's sides are a quarter of that from its own middle, so from there on nothing's left of it.
+ */
+export function sectorInset(atom: ColorAtom, margin: number): (readonly [number, number])[] {
+  const ps = analyzerSector(atom);
+  const cx = (ps[0][0] + ps[1][0] + ps[2][0]) / 3;
+  const cy = (ps[0][1] + ps[1][1] + ps[2][1]) / 3;
+  const k = Math.max(0, 1 - margin / 0.25);
+  return ps.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k] as const);
+}
+
+/**
+ * A sheet of test paper (see SHAPES.testpaper): the wicking strip's blotting paper as a sheet that lies flat on a
+ * counter, with a triangle printed on it in black, cut through the middles of its sides into four smaller ones, one
+ * per color (see analyzerSector). It soaks up what lands on it, as far as it has room (see Blotter), and each small
+ * triangle is stained its atom's color, as strongly as paperReading says, for good:
+ * - w and d: how far across and front to back the sheet is, and thick, how thick, in world units. It lies within
+ *   one grid cell, clear of the base of a stand holding something over its middle (see STAND_BASE in bodies.ts),
+ *   which starts 34 from there;
+ * - cap: how much it soaks up, by volume: as much as a wicking strip's paper holds, a hundredth of a flask;
+ * - triangles: the triangles printed on it, in a row from its left, each for molecules of the sizes (in atoms)
+ *   listed. There's one, for molecules of every size; one for each size would be four entries here;
+ * - edge: how far in from the sheet's edges, and from each other, the triangles keep; line: how thick their lines
+ *   are; margin: how far in from the middles of those lines each small triangle's stain keeps.
+ */
+export const TEST_PAPER: {
+  w: number; d: number; thick: number; cap: number; triangles: readonly { sizes: readonly number[] }[]; edge: number; line: number; margin: number;
+} = {
+  w: 64, d: 64, thick: 1, cap: CAP / 100,
+  triangles: [{ sizes: [1, 2, 3, 4] }],
+  edge: 4, line: 1, margin: 2,
+};
+
+/**
+ * Where a sheet of test paper's triangles are printed (see TEST_PAPER.triangles), in the sheet's own frame, from its
+ * middle, x right and y toward its front: each one's middle, and the distance from there to a corner. They stand
+ * in a row across the sheet, each on its base as seen from the sheet's front, as big as fits its share of the
+ * sheet's width and the sheet's depth, TEST_PAPER.edge clear of the edges and of each other. A triangle on its base
+ * reaches r behind its middle and half that in front, so their middles are a quarter of r in front of the sheet's.
+ */
+export function paperTriangles(): { x: number; y: number; r: number }[] {
+  const { w, d, edge, triangles } = TEST_PAPER;
+  const n = triangles.length;
+  const each = (w - (n + 1) * edge) / n;
+  const r = Math.min(each / Math.sqrt(3), (d - 2 * edge) / 1.5);
+  return triangles.map((_, i) => ({ x: -w / 2 + edge + each / 2 + i * (each + edge), y: r / 4, r }));
+}
+
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater' | 'analyzer'
   | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'dish' | 'column' | 'culture' | 'tank'
-  | 'receptacle' | 'shadowlamp' | 'sheet';
+  | 'receptacle' | 'shadowlamp' | 'sheet' | 'testpaper';
 
 /**
  * Tools there's only ever one of: not on an equipment wheel, and never put away. The receptacle is the whole cryostabilizer
@@ -1060,6 +1110,8 @@ export interface ToolShape {
   fixed?: boolean;
   /** Whether it's built into a wall, with no stand: only the supply station (see STATION). */
   wall?: boolean;
+  /** Whether it lies flat on a counter, with no stand, as deep front to back as its box says: a sheet of test paper. */
+  flat?: boolean;
   /** Whether the tanks are sealed on top, so nothing can be poured or fall into them. */
   sealed?: boolean;
   /** Spout flow with a valve fully open and the tank full, in atoms per sim second, if not MAX_FLOW. */
@@ -1320,6 +1372,16 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: SHEET.top + SHEET.side,
     box: { x0: -SHEET.side / 2 - 1, x1: SHEET.side / 2 + 1, y0: 0, y1: SHEET.top + SHEET.side },
   },
+  testpaper: {
+    // a sheet of paper lying flat (see TEST_PAPER), its top face up, with no tanks, spouts or valves
+    tanks: [],
+    noValve: true,
+    flat: true,
+    spouts: [],
+    valveY: 0,
+    spoutY: TEST_PAPER.thick,
+    box: { x0: -TEST_PAPER.w / 2, x1: TEST_PAPER.w / 2, y0: 0, y1: TEST_PAPER.thick },
+  },
   // the thermometers: a glass rod each (see THERMOMETER_ROD), with no tanks, spouts or valves
   thermometer: THERMOMETER_SHAPE,
   thermometerWide: THERMOMETER_SHAPE,
@@ -1552,6 +1614,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   visualizer: 'Bond visualizer',
   shadowlamp: 'Shadow lamp',
   sheet: 'Shadow paper',
+  testpaper: 'Test paper',
 };
 
 /**
@@ -1598,6 +1661,26 @@ export function separatorShares(): number[][] {
     shareCache = { sharpness: k, shares };
   }
   return shareCache.shares;
+}
+
+/**
+ * What a sheet of test paper soaks up (see TEST_PAPER): blotting paper, which takes up what lands on it only as far
+ * as it has room, however it's poured on, so it's never overfilled and nothing mixes into what it already holds: what's
+ * more runs off it and is lost, as off a bare counter. Once it's soaked (see soaked) it takes up nothing at all. So it
+ * holds the first of what landed on it, for good. It keeps none of its heat, as a wicking strip's paper keeps none.
+ */
+export class Blotter extends Vessel {
+  /** Whether it's soaked: it has room for less than a trace more. */
+  get soaked(): boolean {
+    return this.cap - volume(this) < TRACE;
+  }
+
+  override addFrom(src: Fluid, amount: number): number {
+    if (this.soaked) return 0;
+    const added = super.addFrom(src, amount, false);
+    this.Q = 0;
+    return added;
+  }
 }
 
 /**
@@ -1659,6 +1742,8 @@ export function separatorShares(): number[][] {
  *   switch (see lit). While it's on, the sheet in its holder is owed its light (see shine).
  * - A sheet of **shadow paper** has none: it's a square of paper (see SHEET) that darkens, for good, where the shadow
  *   lamp's light falls on it (see dose and expose).
+ * - A sheet of **test paper** has none either: it lies flat on a counter (see TEST_PAPER), soaks up what lands on it
+ *   until it's wet through (see paper and Blotter), and shows what it holds as stains (see paperReading). It's used once.
  *
  * Tools run on sim time, so a slow drip into a reacting flask gives the same
  * result at any sim speed.
@@ -1706,8 +1791,9 @@ export class Tool {
   rate = 0;
   /**
    * A wicking strip's paper, stretch by stretch from its foot to its top (see STRIP.cells), each holding what's on
-   * that stretch; it doesn't react or cool, having lost its heat as the paper took it up (see scorch). Empty for any
-   * other tool.
+   * that stretch; it doesn't react or cool, having lost its heat as the paper took it up (see scorch). Or a sheet of
+   * test paper's, all of it as one (see Blotter), holding what it's soaked up, which doesn't react or cool either.
+   * Empty for any other tool.
    */
   readonly paper: Vessel[];
   /**
@@ -1816,8 +1902,9 @@ export class Tool {
   ) {
     this.tanks = SHAPES[kind].tanks.map((tk) => new Vessel(tk.cap ?? SHAPES[kind].tankCap ?? TANK_CAP));
     this.tube = Array.from({ length: kind === 'heater' ? HEATER_CELLS : 0 }, () => new Vessel(Infinity));
-    this.paper = Array.from({ length: kind === 'strip' ? STRIP.cells : 0 }, () => new Vessel(Infinity));
-    this.scorch = new Float32Array(this.paper.length);
+    this.paper =
+      kind === 'testpaper' ? [new Blotter(TEST_PAPER.cap)] : Array.from({ length: kind === 'strip' ? STRIP.cells : 0 }, () => new Vessel(Infinity));
+    this.scorch = new Float32Array(kind === 'strip' ? STRIP.cells : 0);
     this.bed = Array.from({ length: kind === 'column' ? COLUMN.cells : 0 }, () => new Vessel(Infinity));
     this.packing = kind === 'strip' ? new Bed(this.paper) : kind === 'column' ? new Bed(this.bed) : null;
     this.dead = kind === 'culture' ? new Uint8Array(cultureCells().length) : null;
@@ -2378,6 +2465,23 @@ export function composition(f: Fluid, cap: number): number[] {
     }
   }
   return out;
+}
+
+/**
+ * What a sheet of test paper shows for the fluid it holds: for each of its triangles (see TEST_PAPER.triangles), for
+ * each color in SECTOR_ATOMS order, how strongly that small triangle is stained, from 0 to 1: the share, by volume
+ * (see VOLUME), of the fluid that molecules of that triangle's sizes with an atom of that color in them make up (see
+ * composition). So it goes by shares, not by how much there is: a drop reads as a soaking does. With one triangle for
+ * every size, R stains R fully, R–G both R and G, and △RGB all three; half R, half G stains each half as strongly.
+ * The solvent stains nothing but takes up room, so half R, half S stains R at half. Nothing, for no fluid.
+ */
+export function paperReading(f: Fluid): number[][] {
+  const n = SECTOR_ATOMS.length;
+  const v = volume(f);
+  const bySize = v > 0 ? composition(f, v) : null;
+  return TEST_PAPER.triangles.map(({ sizes }) =>
+    SECTOR_ATOMS.map((_, c) => (bySize ? Math.min(1, sizes.reduce((t, w) => t + bySize[(w - 1) * n + c], 0)) : 0)),
+  );
 }
 
 /**

@@ -5,6 +5,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { ATOM_RGB } from '../chem/atoms';
 import type { Fluid } from '../chem/reactions';
 import { OUTLINE } from './outline';
 import { glowFalloff } from './appearance';
@@ -26,7 +27,7 @@ import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
   clockText, ANALYZER, LAMP, SHEET, darkness, ringShare, analyzerSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
-  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
+  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, TEST_PAPER, paperReading, paperTriangles, sectorInset, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, Tool,
 } from './tools';
 import { CABINET, CABINET_BUILD, STOCK, type Stock, type Stocked } from './cabinet';
@@ -90,14 +91,15 @@ export interface Frame {
     from: Vec3;
     toY: number;
     look: GuideLook;
-    mouth: Vec3 & { hx: number; hz: number; yaw: number };
+    mouth: Vec3 & { hx: number; hz: number; yaw: number; square?: boolean };
     v: Vessel;
   }[];
   /**
    * Where what's held would come to rest if let go, outlined where it'd stand (its footprint, or its stands' bases):
-   * pale if it can be set down there, red if it can't.
+   * pale if it can be set down there, red if it can't. One as far across as front to back is taken for round (a
+   * flask's), unless it's `square` (a sheet of test paper's, as is its face as a guide's mouth).
    */
-  footprints: readonly (Vec3 & { hx: number; hz: number; yaw: number; ok: boolean })[];
+  footprints: readonly (Vec3 & { hx: number; hz: number; yaw: number; ok: boolean; square?: boolean })[];
   /** Every clamp stand, each with what it holds up, to grab that by it. */
   stands: readonly { s: Stand; of: Pick }[];
   drops: readonly { at: Vec3; v: Vessel; hanging: boolean }[];
@@ -232,8 +234,12 @@ const LAMP_GLOW = 0xb9a6ff;
  * the way, a dark purple-brown; in between, a blend of the two by how dark it is (see darkness). 0 to 255 a channel.
  */
 const SHEET_COLORS = { fresh: [230, 223, 200], dark: [46, 29, 41] } as const;
-/** Blotting paper, for the wicking strip. */
+/** Blotting paper, for the wicking strip and a sheet of test paper. */
 const paperMat = new THREE.MeshStandardMaterial({ color: 0xe6dfc8, roughness: 0.95, metalness: 0 });
+/** Its cream, as drawn on a canvas. */
+const PAPER = '#e6dfc8';
+/** How blotting paper darkens where it's wet: toward `rgb`, `alpha` of the way where it's wet through (see wetness). */
+const WET = { rgb: '96, 92, 78', alpha: 0.28 };
 const hidden = new THREE.MeshBasicMaterial({ visible: false });
 const faintMat = new THREE.MeshBasicMaterial({ color: 0xd6ecf2, transparent: true, opacity: 0.3, depthWrite: false });
 const rodMat = new THREE.MeshStandardMaterial({ color: 0xc8cfcd, metalness: 1, roughness: 0.18 });
@@ -823,7 +829,7 @@ function drawStrip(sc: Screen, t: Tool): void {
   ctx.save();
   paperOutline(ctx, W, L);
   ctx.clip();
-  ctx.fillStyle = '#e6dfc8';
+  ctx.fillStyle = PAPER;
   ctx.fillRect(0, 0, W, L);
   // each stretch's own part of the paper, filled edge to edge, wherever it's to show at all
   const cells = (alpha: (c: number) => number, rgb: string) => {
@@ -840,7 +846,7 @@ function drawStrip(sc: Screen, t: Tool): void {
     ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(${rgb}, ${alpha(c)})`);
     ctx.fillRect(0, 0, W, L);
   };
-  if (wet.some((w) => w > 0)) lay((c) => 0.28 * wet[c], '96, 92, 78');
+  if (wet.some((w) => w > 0)) lay((c) => WET.alpha * wet[c], WET.rgb);
   const here = SPECIES.map((_, s) => s).filter((s) => paper.some((v) => v.n[s] > 0));
   here.sort((a, b) => SPECIES[a].size - SPECIES[b].size);
   for (const s of here) lay((c) => stripInk(s, paper[c].n[s]), SPECIES[s].color.slice(4, -1));
@@ -900,11 +906,11 @@ function drawColumn(sc: Screen, t: Tool): void {
   const [W, L] = [sc.canvas.width / ppu, sc.canvas.height / ppu];
   const at = (c: number) => (c + 0.5) / C;
   ctx.setTransform(ppu, 0, 0, ppu, 0, 0);
-  ctx.fillStyle = '#e6dfc8';
+  ctx.fillStyle = PAPER;
   ctx.fillRect(0, 0, W, L);
   const wet = entryWet(bed.map((v) => wetness(volume(v), COLUMN.cap, C)));
   if (wet.some((w) => w > 0)) {
-    ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(96, 92, 78, ${0.28 * wet[c]})`);
+    ctx.fillStyle = cellGradient(ctx, L, C, at, (c) => `rgba(${WET.rgb}, ${WET.alpha * wet[c]})`);
     ctx.fillRect(0, 0, W, L);
   }
   const here = SPECIES.map((_, s) => s).filter((s) => bed.some((v) => v.n[s] > 0));
@@ -915,6 +921,94 @@ function drawColumn(sc: Screen, t: Tool): void {
     ctx.fillRect(0, 0, W, L);
   }
   drawMarks(ctx, W, L, COLUMN.marks, true);
+  sc.tex.needsUpdate = true;
+}
+
+/**
+ * How a sheet of test paper is printed and stained, in world units: its lines' black; `soft`, how far a stain's edge
+ * fades over (the blur's standard deviation); and `rough`, how far, at most, a stain's edge strays in or out along
+ * its length, and `steps`, into how many stretches each side is cut to stray by.
+ */
+const TEST_PRINT = { ink: 'rgba(22, 20, 18, 0.94)', soft: 0.45, rough: 0.4, steps: 7 };
+
+/** A seeded random in [0, 1) (mulberry32): each sheet of test paper's stains have edges of their own, the same every time. */
+function seeded(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * A sheet of test paper's face, seen from above with its front edge at the bottom: cream, all of it darker by how
+ * soaked it is (see wetness), as a strip's paper is; each small triangle of each of its triangles (see paperTriangles)
+ * stained its atom's color, as opaque as paperReading says, inside a margin that keeps it clear of the lines (see
+ * sectorInset), its edge soft and a little uneven; and over that, printed in black, each triangle's outline and the
+ * three lines that cut it in four. No words: reading it is part of the game.
+ */
+function drawTestPaper(sc: Screen, t: Tool): void {
+  const held = t.paper[0];
+  const reading = paperReading(held);
+  const wet = wetness(volume(held), TEST_PAPER.cap, 1);
+  const key = `${wet.toFixed(3)} ${reading.map((r) => r.map((x) => x.toFixed(3)).join()).join(';')}`;
+  if (key === sc.key) return;
+  sc.key = key;
+  const { ctx, ppu } = sc;
+  const { w, d, line, margin } = TEST_PAPER;
+  const { ink, soft, rough, steps } = TEST_PRINT;
+  // from the sheet's middle, x right and y toward its front
+  ctx.setTransform(ppu, 0, 0, ppu, (w / 2) * ppu, (d / 2) * ppu);
+  ctx.fillStyle = PAPER;
+  ctx.fillRect(-w / 2, -d / 2, w, d);
+  if (wet > 0) {
+    ctx.fillStyle = `rgba(${WET.rgb}, ${WET.alpha * wet})`;
+    ctx.fillRect(-w / 2, -d / 2, w, d);
+  }
+  const rnd = seeded(t.id + 1);
+  // (drawn far off to the left, so that only its shadow, which is the stain, soft-edged, lands on the paper)
+  const OFF = 4 * sc.canvas.width;
+  paperTriangles().forEach(({ x: cx, y: cy, r }, i) => {
+    SECTOR_ATOMS.forEach((atom, c) => {
+      const corners = sectorInset(atom, margin / r).map(([dx, dy]) => [cx + r * dx, cy + r * dy] as const);
+      // each side in stretches, each joint strayed a little in or out (the same for this sheet whatever's on it)
+      const edge: (readonly [number, number])[] = [];
+      corners.forEach((p, k) => {
+        const q = corners[(k + 1) % 3];
+        const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+        const [nx, ny] = [(q[1] - p[1]) / len, -(q[0] - p[0]) / len];
+        for (let j = 0; j < steps; j++) {
+          const off = j ? rough * (2 * rnd() - 1) : 0;
+          edge.push([p[0] + ((q[0] - p[0]) * j) / steps + nx * off, p[1] + ((q[1] - p[1]) * j) / steps + ny * off]);
+        }
+      });
+      const a = reading[i][c];
+      if (a <= 0) return;
+      ctx.save();
+      ctx.shadowColor = `rgba(${ATOM_RGB[atom].join(', ')}, ${a})`;
+      ctx.shadowBlur = 2 * soft * ppu;
+      ctx.shadowOffsetX = OFF;
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      for (const [px, py] of edge) ctx.lineTo(px - OFF / ppu, py);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    });
+    // printed on the paper, so over what's soaked into it: the triangle, and the one upside down in its middle
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = line;
+    ctx.lineJoin = 'miter';
+    for (const ps of [(['G', 'B', 'R'] as const).map((a) => analyzerSector(a)[0]), analyzerSector('K')]) {
+      ctx.beginPath();
+      for (const [dx, dy] of ps) ctx.lineTo(cx + r * dx, cy + r * dy);
+      ctx.closePath();
+      ctx.stroke();
+    }
+  });
   sc.tex.needsUpdate = true;
 }
 
@@ -1520,6 +1614,7 @@ class ToolView {
     else if (t.kind === 'strip') this.buildStrip();
     else if (t.kind === 'shadowlamp') this.buildLamp(pick);
     else if (t.kind === 'sheet') this.buildSheet();
+    else if (t.kind === 'testpaper') this.buildTestPaper();
     else if (t.kind === 'dish') {
       // a little base under the dish, for its stand to clamp
       block(art, darkMat, -12, 12, TH + 0.6, sh.box.y1, -D.body / 2, D.body / 2, 1);
@@ -1943,6 +2038,21 @@ class ToolView {
     paper.castShadow = paper.receiveShadow = true;
     this.art.add(paper);
     this.sheet = { tex, mat, drawn: -1 };
+  }
+
+  /**
+   * A sheet of test paper (see TEST_PAPER): a thin sheet of blotting paper lying flat, with what's printed on it and
+   * what it's soaked up shown on its top face (see drawTestPaper), its front edge the bottom of the picture.
+   */
+  private buildTestPaper(): void {
+    const { w, d, thick } = TEST_PAPER;
+    block(this.art, paperMat, -w / 2, w / 2, 0, thick, -d / 2, d / 2);
+    // its face, laid flat just over its top: up the picture is toward the sheet's back
+    const face = new THREE.Group();
+    face.rotation.x = -Math.PI / 2;
+    this.art.add(face);
+    this.screen = new Screen(face, -w / 2, w / 2, -d / 2, d / 2, 0.06, 8);
+    this.screen.tex.anisotropy = 8;
   }
 
   /** Draw a sheet of shadow paper's image, if the light it's had has changed since it was last drawn: each cell as dark as it is. */
@@ -2565,6 +2675,7 @@ class ToolView {
     }
     if (this.sheet) this.drawSheet();
     if (t.kind === 'strip' && this.screen) drawStrip(this.screen, t);
+    if (t.kind === 'testpaper' && this.screen) drawTestPaper(this.screen, t);
     if (t.kind === 'column' && this.screen) drawColumn(this.screen, t);
     if (t.kind === 'culture') this.drawCulture(clock);
     if (t.kind === 'meter' && this.screen) {
@@ -3986,11 +4097,14 @@ const ICON_VIEW = {
  * The kinds that aren't seen whole and upright. A thermometer is so long and thin that its scale's numbers, all that
  * tells the fine one from the wide one, would be lost: so it lies aslant (`roll`, in radians, anticlockwise), and only
  * its lower end is in the picture (`only`, heights in its flat frame, y down from its top): its bulb and the first two
- * numbers of its scale, the rest running off the corner.
+ * numbers of its scale, the rest running off the corner. A sheet of test paper lies flat, so from an icon's usual
+ * height it would be all but edge on: it's seen from well above instead (`pitch`, and `yaw`, in place of ICON_VIEW's),
+ * so that what's printed on it shows.
  */
-const ICON_POSES: Partial<Record<Stocked, { roll: number; only: { y0: number; y1: number } }>> = {
+const ICON_POSES: Partial<Record<Stocked, { roll?: number; only?: { y0: number; y1: number }; yaw?: number; pitch?: number }>> = {
   thermometer: { roll: -Math.PI / 4, only: { y0: THERMOMETER_ROD.foot - 22, y1: THERMOMETER_ROD.h } },
   thermometerWide: { roll: -Math.PI / 4, only: { y0: THERMOMETER_ROD.foot - 22, y1: THERMOMETER_ROD.h } },
+  testpaper: { yaw: 0.3, pitch: 0.95 },
 };
 
 /** A little picture of each kind of thing the equipment wheels make, each on a canvas of its own (see IconStudio). */
@@ -4054,8 +4168,9 @@ class IconStudio {
 
   /** Point the camera at a kind's thing, from where an icon's is seen (see ICON_VIEW), so that it just fills the picture. */
   private frame(k: Stocked, root: THREE.Object3D): void {
-    const { pitch, margin } = ICON_VIEW;
+    const { margin } = ICON_VIEW;
     const pose = ICON_POSES[k];
+    const pitch = pose?.pitch ?? ICON_VIEW.pitch;
     const cam = this.camera;
     // the boxes round its meshes, each in the mesh's own frame, and the box round them all, in the room
     const all = new THREE.Box3();
@@ -4073,9 +4188,9 @@ class IconStudio {
     // far enough off to be clear of all of it
     const whole = all.getSize(new THREE.Vector3());
     const far = whole.length() + 10;
-    const yaw = whole.x > ICON_VIEW.long ? ICON_VIEW.longYaw : ICON_VIEW.yaw;
+    const yaw = pose?.yaw ?? (whole.x > ICON_VIEW.long ? ICON_VIEW.longYaw : ICON_VIEW.yaw);
     // only part of it: that much of the box round it all, instead (a specimen stands where its flat frame starts)
-    if (pose) {
+    if (pose?.only) {
       all.max.y = Math.min(all.max.y, -pose.only.y0);
       all.min.y = Math.max(all.min.y, -pose.only.y1);
       boxes = [{ box: all, at: new THREE.Matrix4() }];
@@ -4084,7 +4199,7 @@ class IconStudio {
     cam.position.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(far).add(mid);
     cam.up.set(0, 1, 0);
     cam.lookAt(mid);
-    if (pose) cam.rotateZ(pose.roll);
+    if (pose?.roll) cam.rotateZ(pose.roll);
     cam.updateMatrixWorld(true);
     // as seen: every corner of every box, in the camera's frame
     const seen = new THREE.Box3();
@@ -5039,8 +5154,9 @@ export class View {
       mat.opacity = GUIDE_LOOKS[m.look].rim;
       g.position.set(m.x, m.y + 0.6, m.z);
       g.rotation.y = m.yaw;
-      // a square mouth is a round one (a flask's, a funnel's), so it gets a ring; a tank's gets a frame
-      const round = m.hx === m.hz;
+      // a square mouth is a round one (a flask's, a funnel's), so it gets a ring, unless it says it's square (a
+      // sheet of test paper); a tank's gets a frame
+      const round = m.hx === m.hz && !m.square;
       ring.visible = round;
       for (const sd of sides) sd.visible = !round;
       ring.scale.setScalar(m.hx + RIM_W / 2);

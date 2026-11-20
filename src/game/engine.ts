@@ -5,7 +5,7 @@ import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, 
 import { hushAlarms } from './ambience';
 import {
   FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
-  flaskLip, flaskMouth, nozzleBox, tankFluid, docked, inSlot, sheetIn, slotPose, slotted, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
+  flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, inSlot, sheetIn, slotPose, slotted, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
 import { CABINET, endless, isStocked, putIn, stockWith, takeFrom, takeSlot, type Stock, type Stocked } from './cabinet';
@@ -34,7 +34,7 @@ import {
 } from './space';
 import {
   changeoverAt, ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
-  TANK_H, TOOL_NAMES, isDipper, isThermometer, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
+  TANK_H, TOOL_NAMES, isDipper, isThermometer, Blotter, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
   type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
@@ -211,6 +211,13 @@ type Held = (
 const WHEEL_CODES = ['Digit1', 'Digit2'];
 /** Those keys, as they're named for the player. */
 const WHEEL_KEYS = ['1', '2'];
+
+/**
+ * Which way from the eyes (see Held.dir) something that lies flat, a sheet of test paper, is held when it's made in
+ * hand: 25° below straight ahead, so that it's looked down on and its face is seen. Straight ahead, with the eyes
+ * level, it would be edge on: a line.
+ */
+const FLAT_HOLD: Vec3 = { x: 0, y: -Math.sin((25 * Math.PI) / 180), z: Math.cos((25 * Math.PI) / 180) };
 
 /** How tipped a flask held to pour is: past the horizontal, mouth down. */
 const POUR_ANG = Math.PI * 0.61;
@@ -1110,7 +1117,9 @@ export class GameEngine {
       return { kind: 'flask', f, relYaw: 0, dist: 0 };
     }
     if (kind === 'scale') return { kind: 'scale', sc: new Scale(), relYaw: 0, dist: 0 };
-    return { kind: 'tool', t: new Tool(kind, this.nextToolId++, undefined), relYaw: 0, dist: 0 };
+    const t = new Tool(kind, this.nextToolId++, undefined);
+    // what lies flat is held low, so its face is seen, not its edge
+    return { kind: 'tool', t, relYaw: 0, dist: 0, ...(t.shape.flat ? { dir: { ...FLAT_HOLD } } : {}) };
   }
 
   /** Bring something just made (see fresh) into the lab. */
@@ -1963,7 +1972,7 @@ export class GameEngine {
     const h = this.held;
     if (h?.kind === 'flask') {
       // on a flask or tank, the held flask goes over it to pour in
-      const m = this.mouthAimed();
+      const m = this.mouthAimed(true);
       this.pinned = m && this.pourPose(h, m);
       if (this.pinned) {
         this.placeHeld(h, this.pinned);
@@ -1980,10 +1989,17 @@ export class GameEngine {
     this.aimTurning();
   }
 
-  /** The open top of the vessel the crosshair is on, to pour a held flask into: a flask's, or a tool's tank's. */
-  private mouthAimed(): Mouth | null {
+  /**
+   * The open top of the vessel the crosshair is on, to pour a held flask into: a flask's, or a tool's tank's; or, with
+   * `sheets`, the face of a sheet of test paper, which is poured onto but has nothing to dip into.
+   */
+  private mouthAimed(sheets = false): Mouth | null {
     const p = this.target;
-    const v = p?.kind === 'flask' ? p.f : p?.kind === 'tool' && p.part === 'tank' ? p.t.tanks[p.k] : null;
+    const v =
+      p?.kind === 'flask' ? p.f
+      : p?.kind === 'tool' && p.part === 'tank' ? p.t.tanks[p.k]
+      : sheets && p?.kind === 'tool' && p.t.kind === 'testpaper' ? p.t.paper[0]
+      : null;
     return (v && this.open.find((m) => m.v === v)) ?? null;
   }
 
@@ -2011,7 +2027,7 @@ export class GameEngine {
    * be set down there and what it lets out lands in the mouth. Null if there's no such place.
    */
   private nozzleOver(h: Held & { kind: 'hose' }): Pose | null {
-    const m = this.mouthAimed();
+    const m = this.mouthAimed(true);
     if (!m) return null;
     const obstacles = this.obstacles(h);
     const solid = this.obstacles(h, false);
@@ -2160,6 +2176,8 @@ export class GameEngine {
     for (const f of this.flasks) if (f.tilt < 0.05) out.push(flaskMouth(f));
     // (the station's funnel is back in the wall through a changeover)
     for (const t of this.tools) if (!t.away) t.tanks.forEach((_, k) => t.isOpen(k) && out.push(tankMouth(t, k)));
+    // a sheet of test paper's whole face
+    for (const t of this.tools) if (t.kind === 'testpaper') out.push(paperMouth(t));
     return out;
   }
 
@@ -2171,7 +2189,8 @@ export class GameEngine {
 
   /**
    * Pour `amount` of src (by volume) into v, without depleting src, however full v is. Whatever no longer
-   * fits overflows (see overflow).
+   * fits overflows (see overflow). (A sheet of test paper's paper takes up only what it has room for, and the rest is
+   * lost: see Blotter.)
    */
   private fill(v: Vessel, src: Fluid, amount = volume(src)): void {
     v.addFrom(src, amount, true);
@@ -2595,7 +2614,8 @@ export class GameEngine {
       mine.add(h.f);
       outlets.push({ at: flaskLip(h.f, POUR_ANG), lip: true });
     } else if (h.kind === 'tool') {
-      for (const v of h.t.tanks) mine.add(v);
+      // (a sheet of test paper's face is landed on as a tank's open top is)
+      for (const v of h.t.kind === 'testpaper' ? h.t.paper : h.t.tanks) mine.add(v);
       // a spout with its hose out lets out at the hose's nozzle, which stays where it is (see below)
       h.t.shape.spouts.forEach((_, j) => {
         if (!this.hoseOn({ tool: h.t, spout: j })) outlets.push({ at: spoutAt(h.t, j), lip: false });
@@ -2668,7 +2688,7 @@ export class GameEngine {
 
   /**
    * Where what's held, at pose p, would come to rest if let go, or why it can't. Only squarely on a counter: a flask,
-   * a scale or a tool that stands on the bench goes straight up or down until it stands on the counter under it, which
+   * a scale or a tool that lies on the bench (a sheet of test paper) goes straight up or down until it's on the counter under it, which
    * its whole footprint must be over (or a flask over a scale, onto its platform); a tool or hose's nozzle on a stand
    * stays at the height it's held, no higher than its stand reaches and no lower than the top of a counter it's held
    * sunk into, while its stand's base goes down onto the counter, which the whole base must be over (what it holds can
@@ -2783,7 +2803,8 @@ export class GameEngine {
     if (!h) return [];
     const guide = (a: Aim, look: GuideLook): Frame['guides'][number] => {
       const { x, y, z, hx, hz, yaw = 0 } = a.m;
-      return { from: a.from, toY: y, look, mouth: { x, y, z, hx, hz, yaw }, v: a.m.v };
+      // (a sheet of test paper's face is square, not round)
+      return { from: a.from, toY: y, look, mouth: { x, y, z, hx, hz, yaw, ...(a.m.v instanceof Blotter ? { square: true } : {}) }, v: a.m.v };
     };
     const out = this.aims(h, this.open).filter((a) => a.held === 'lip').map((a) => guide(a, 'solid'));
     if (pl && 'rest' in pl) {
@@ -2818,7 +2839,8 @@ export class GameEngine {
     if (stands.length) return [...stands.map(base), ...follow];
     const b = this.boxAt(h, p);
     const y = ok ? b.y - b.hy : groundAt(b.x, b.z);
-    return [{ x: b.x, y, z: b.z, hx: b.hx, hz: b.hz, yaw: b.yaw, ok }, ...follow];
+    const square = h.kind === 'tool' && !!h.t.shape.flat;
+    return [{ x: b.x, y, z: b.z, hx: b.hx, hz: b.hz, yaw: b.yaw, ok, ...(square ? { square } : {}) }, ...follow];
   }
 
   private render(dt: number): void {
@@ -2943,6 +2965,7 @@ export class GameEngine {
           h.kind === 'tool' ? (h.t.kind === 'strip' ? 'tap to dip it, hold to soak it' : 'hold to dip it in')
           : h.kind !== 'flask' ? 'hold to let it flow'
           : this.mouthAimed() ? 'hold to pour into it'
+          : this.mouthAimed(true) ? 'hold to pour onto it'
           : 'hold to pour',
         );
       if (h.kind === 'hose') {
