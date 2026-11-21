@@ -13,7 +13,7 @@ import { tankMouth } from './bodies';
 import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ATOM_PLACE, atomSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
   clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SHEET, darkness, lampLight, type Mouth,
 } from './tools';
 
@@ -1928,7 +1928,7 @@ describe('size sorter', () => {
   });
 });
 
-describe('composition analyzer', () => {
+describe('composition, by size and color', () => {
   const RG = pairOf('R', 'G');
   const B = singleOf('B');
   const at = (size: number, atom: 'R' | 'G' | 'B' | 'K') => (size - 1) * 4 + SECTOR_ATOMS.indexOf(atom);
@@ -1953,7 +1953,7 @@ describe('composition analyzer', () => {
     r.forEach((x, i) => expect(x).toBeCloseTo(want[i], 9));
   });
 
-  it('lights a sample of one species fully in each of its sectors', () => {
+  it('counts a sample of one species fully under each of its colors, at its size', () => {
     expect(read([[R, CUP]])[at(1, 'R')]).toBe(1);
     const rg = read([[RG, CUP]]);
     expect([rg[at(2, 'R')], rg[at(2, 'G')]]).toEqual([1, 1]);
@@ -1964,57 +1964,20 @@ describe('composition analyzer', () => {
     for (const a of ['R', 'G', 'B', 'K'] as const) expect(four[at(4, a)]).toBeCloseTo(1, 6);
   });
 
-  it('has no sector for the solvent, but counts the room it takes', () => {
+  it('has nothing for the solvent, but counts the room it takes', () => {
     const S = SOLVENT_SPECIES;
     expect(read([[S, CUP]]).every((x) => x === 0)).toBe(true);
-    // half R, half S: R's sector half lit, against the whole sample, as for half R, half G
+    // half R, half S: half under R, against the whole sample, as for half R, half G
     const r = read([[R, 0.5 * CUP], [S, 0.5 * CUP]]);
     expect(r[at(1, 'R')]).toBeCloseTo(0.5, 9);
     expect(r.reduce((t, x) => t + x, 0)).toBeCloseTo(0.5, 9);
   });
 
-  it('reads a half share half as bright, and nothing dark', () => {
+  it('counts a half share as half, and nothing as nothing', () => {
     expect(read([[R, CUP]])[at(1, 'R')]).toBe(2 * read([[R, 0.5 * CUP], [G, 0.1 * CUP]])[at(1, 'R')]);
     expect(composition(new Vessel(CUP), CUP).every((x) => x === 0)).toBe(true);
   });
 
-  it('drains its tube straight through, drawing off a share out its waste spout', () => {
-    const a = new Tool('analyzer', 0);
-    expect(a.shape.noValve).toBe(true);
-    expect(a.tanks[0].cap).toBe(TUBE_CAP);
-    filled(a.tanks[0], R, TUBE_CAP, 3);
-    const [main, waste] = a.step(0.01);
-    const out = main!.N + waste!.N;
-    expect(out / (FUNNEL_RATE * 0.01)).toBeCloseTo(1, 6);
-    expect(waste!.N / out).toBeCloseTo(ANALYZER_SAMPLE, 3);
-    expect(temperature(main!)).toBeCloseTo(3, 6);
-    expect(temperature(waste!)).toBeCloseTo(3, 2);
-  });
-
-  it("reads what it drew off lately, as shares of it, fading out smoothly once nothing passes, then dark", () => {
-    const a = new Tool('analyzer', 0);
-    expect(a.reading).toBeNull();
-    const src = new Vessel(Infinity);
-    src.setMolecules(R, CAP);
-    src.setMolecules(RG, CAP);
-    const run = (secs: number, on: boolean) => {
-      for (let i = 0; i < Math.round(secs / 0.02); i++) {
-        if (on) a.tanks[0].addFrom(src, 0.25 * CAP * 0.02);
-        a.step(0.02);
-      }
-    };
-    run(4 * INSTRUMENT_TAU, true);
-    // by volume, half R and half R–G
-    expect(a.reading![at(1, 'R')]).toBeCloseTo(0.5, 1);
-    expect(a.reading![at(2, 'R')]).toBeCloseTo(0.5, 1);
-    expect(a.reading![at(2, 'G')]).toBeCloseTo(0.5, 1);
-    expect(a.reading![at(3, 'R')]).toBe(0);
-    // as it fades it still reads the same mix
-    run(2 * INSTRUMENT_TAU, false);
-    expect(a.reading![at(1, 'R')]).toBeCloseTo(0.5, 1);
-    run(30 * INSTRUMENT_TAU, false);
-    expect(a.reading).toBeNull();
-  });
 });
 
 describe('spectroscope', () => {
@@ -2148,12 +2111,12 @@ describe('bond visualizer', () => {
     expect(d(at('G'), at('B'))).toBeCloseTo(d(at('R'), at('B')), 9);
   });
 
-  it("cuts the analyzer's triangle into four equal ones, each corner's atom at its corner and K upside down in the middle", () => {
+  it("cuts a triangle into four equal ones, each corner's atom at its corner and K upside down in the middle", () => {
     const area = (ps: (readonly [number, number])[]) =>
       Math.abs((ps[1][0] - ps[0][0]) * (ps[2][1] - ps[0][1]) - (ps[2][0] - ps[0][0]) * (ps[1][1] - ps[0][1])) / 2;
     const whole = area((['G', 'B', 'R'] as const).map((a) => ATOM_PLACE[a]));
     for (const a of SECTOR_ATOMS) {
-      const s = analyzerSector(a);
+      const s = atomSector(a);
       expect(s).toHaveLength(3);
       expect(area(s)).toBeCloseTo(whole / 4, 9);
       // each sector is centered on its atom's place, between the corner and the middle for a corner's
@@ -2163,7 +2126,7 @@ describe('bond visualizer', () => {
       expect(mid[1]).toBeCloseTo(want[1], 9);
     }
     // the middle one points down: one corner at the bottom, two level above it
-    const ys = analyzerSector('K').map((p) => p[1]).sort((p, q) => p - q);
+    const ys = atomSector('K').map((p) => p[1]).sort((p, q) => p - q);
     expect(ys[0]).toBeCloseTo(ys[1], 9);
     expect(ys[2]).toBeGreaterThan(ys[1]);
   });

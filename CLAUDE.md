@@ -66,7 +66,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `physics.ts` is the collisions: yawed boxes, the player's cylinder and `walk`. What's held collides with nothing; only
     where it would be set down is checked (the engine's `placement` and `rest`).
   - `space.ts` is the room, poses, and the mapping from the old flat bench to its back wall.
-  - `tools.ts` holds tool shapes (flat outlines, y down) and per-step logic, plus drips and the instruments' readings (the spectroscope's graph is `spectroscopeAt`), and `Bed`, the cell-by-cell carrying that the wicking strip's paper and the column's bed share.
+  - `tools.ts` holds tool shapes (flat outlines, y down) and per-step logic, plus drips and the instruments' readings (the spectroscope's graph is `spectroscopeAt`, a sheet of test paper's stains are `paperReading`), `Bed`, the cell-by-cell carrying that the wicking strip's paper and the column's bed share, and `Blotter`, what a sheet of test paper soaks up.
   - `flask.ts` has `Vessel`, `transfer`, volume and colors.
   - `cooling.ts` is Newtonian cooling to the room; the engine works out each vessel's exposure from its flat outline.
   - `airlock.ts` is the airlock and cryopod where the player wakes: their size, collisions, and the `Wake` states.
@@ -93,7 +93,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     (`CabinetView`), so it's cheap however much it holds.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
-    `volumes.ts`); `rumble.ts` is the composition analyzer, `diverter.ts` the supply station's diverter, `changeover.ts` its changeover, `ambience.ts` the ship, `water.ts` drips and streams, `shatter.ts` a thermometer
+    `volumes.ts`); `diverter.ts` is the supply station's diverter, `changeover.ts` its changeover, `ambience.ts` the ship, `water.ts` drips and streams, `shatter.ts` a thermometer
     shattering.
     New sounds play into a channel's `bus()`, never straight to the destination, so the sliders reach them. A sound
     in the lab goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),
@@ -109,7 +109,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Volume isn't atoms.** Capacities and flows are in `volume()` units: molecules by default, or atoms when the
   "volume counts molecules" toggle is off. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
 - **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
-  chemistry, cooling, the composition analyzer's reading and hum, the supply station's diverter, display and needle, and its changeover (block, door, lamp and alarm), a thermometer's bulb and its crack as it shatters, the shadow lamp's light on the sheet in its holder, and the drip and stream sounds. All of it
+  chemistry, cooling, the instruments' readings, the supply station's diverter, display and needle, and its changeover (block, door, lamp and alarm), a thermometer's bulb and its crack as it shatters, the shadow lamp's light on the sheet in its holder, and the drip and stream sounds. All of it
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The one exception to the
   substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
@@ -129,6 +129,11 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   `engine.fill()`, not `addFrom`. `fill()` mixes everything in, then `overflow()` spills the excess of the mixture
   over the vessel's `Mouth.rim` onto whatever is below, possibly in a cascade.
   - A vessel with no rim spills straight to the sink.
+  - A sheet of test paper's face is a mouth too (`paperMouth`), with no rim, and what lands on it goes through
+    `fill()` like anything else; but its vessel is a `Blotter`, which takes up only what it has room for, mixing
+    nothing more in, so the rest is simply lost and there's never any excess to spill.
+  - What's on paper is out of the chemistry: `Tool.paper` (a strip's stretches, a sheet of test paper's one
+    `Blotter`) and `Tool.bed` aren't among the engine's `vessels()`, so they neither react nor cool.
   - Sealed tools (`shape.sealed`) have no mouth at all.
 - **Coordinates.**
   - Everything is in world units, y up: a flask is 70 tall, the player's eyes are at 620, the room is `ROOM`.
@@ -139,7 +144,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     `space.ts`), which is now the back wall, plus optional `z` and `yaw`, so old saves keep working.
   - Everything turns only about the vertical, except a flask tipped to pour, and nothing falls: whatever the player
     lets go of is set down squarely on a counter, or held over one by its clamp stands (`toolStands`, `nozzleStand`), or
-    stays in hand (see `GameEngine.placement`). Keep it that way, or `physics.ts` won't do.
+    stays in hand (see `GameEngine.placement`). Keep it that way, or `physics.ts` won't do. A sheet of test paper is
+    the one tool that's set down on the counter itself, lying flat (`ToolShape.flat`): its box is thin and as deep
+    as it's wide, its face is up, and it has no stand.
   - **The grid.** Whatever's set down is on the floor's grid of `CELL` (100) squares: facing one of the four ways
     along it, with every mouth and spout over a cell's middle (`onGrid`, `toolAnchor` and `SCALE_ANCHOR` in
     `bodies.ts`; the engine's `gridded` and `toGrid`). So a tool's tanks and spouts must be a whole number of cells
@@ -170,15 +177,15 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     used up. `cabinet.test.ts` checks it fits.
   - If it has state of its own that a save should keep, `Tool.memory` and `Tool.remember`.
   - Tests and the README.
-  - A tool needn't have tanks at all: the thermometers and the wicking strip (the `DIPPERS`), a sheet of shadow paper
-    and the shadow lamp have none, nor spouts nor
+  - A tool needn't have tanks at all: the thermometers and the wicking strip (the `DIPPERS`), a sheet of shadow paper,
+    a sheet of test paper and the shadow lamp have none, nor spouts nor
     valves. Then its grid anchor is its middle (`toolAnchor`), Enter writes its own `note`, and its collision is whatever
     `toolParts` gives it (a thermometer's, only the top of its rod; a strip's, its clip), so code that reaches for
     `tanks[0]` must allow for there being none. Nor need a tool with tanks have spouts (the dish): nothing drains from it.
   - A tank needn't be under its opening: one with a `neck` (the swell bulbs') has its bulb and neck where the flag
     says, and its own `x0` and `x1` are its inlet's, since it's the openings and spouts that go on the grid.
-  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `neck`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
-- **Unique tools** (`UNIQUE_TOOLS`: the composition analyzer, the spectroscope, the bond visualizer, the receptacle and the shadow lamp) aren't on
+  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `neck`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `flat`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
+- **Unique tools** (`UNIQUE_TOOLS`: the spectroscope, the bond visualizer, the receptacle and the shadow lamp) aren't on
   an equipment wheel and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
   whole supply station (`STATION` in `tools.ts`): its tanks are the funnel and the ship's reservoir, in that
   order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved. The
@@ -189,7 +196,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   `t.supply` (its species, goal, start and reservoir's capacity), never by `TARGET` or `GOAL_TARGET`. With enough in
   its reservoir it's changed for the next (`Tool.swap`, `CHANGEOVER`, `changeoverAt`): while its block is `away`,
   it has no mouth and lets nothing out, and through the whole changeover nothing on it can be worked.
-- **Inline instruments** (`INLINE_TOOLS`: the composition analyzer, the spectroscope, the bond visualizer and the flow meter) are a tube draining straight through at a fixed rate past a cabinet
+- **Inline instruments** (`INLINE_TOOLS`: the spectroscope, the bond visualizer and the flow meter) are a tube draining straight through at a fixed rate past a cabinet
   (or the flow meter's little readout, `METER_BODY`) that reads what goes by, as an exponentially weighted average that fades the past smoothly (`INSTRUMENT_TAU`,
   `Tool.smooth`). A hose's nozzle let go of over the tube snaps onto its
   top (`docked` in `bodies.ts`, via the engine's `gridded`).
@@ -198,12 +205,14 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Saves** stay at format v1. New fields are optional and the loaders tolerate their absence. Species are stored by
   name. A tool's own state goes in `Tool.memory` as numbers; a sheet of shadow paper's image, which is thousands of
   cells, goes beside it as a packed string (`Tool.image`, `Tool.develop`).
+  A saved tool of a kind there no longer is (the composition analyzer, which the test paper replaced) is dropped as
+  the save loads, with the hoses on its spouts; so is a stored volume slider for a sound that's gone (`parseVolumes`).
 
 ## Design preferences
 
-- Don't give away the chemistry. The player is meant to work it out. The composition analyzer has no text and no
-  divider lines between its sectors, nor the bond visualizer, whose points are unlabeled, the size sorter's screens look plain, the equipment wheels have no names, and the faucets aren't labeled (they're the five pure
-  atoms, the four colors and the solvent, which the user chose). The spectroscope's axes are labeled E (uB) and f (in S, with an SI prefix to suit the range, as mS), at the user's request: both on log scales with
+- Don't give away the chemistry. The player is meant to work it out. The bond visualizer has no text, and its points are
+  unlabeled, the size sorter's screens look plain, the equipment wheels have no names, and the faucets aren't labeled (they're the five pure
+  atoms, the four colors and the solvent, which the user chose). A sheet of test paper has no text either, but its four sectors are outlined in black, at the user's request. The spectroscope's axes are labeled E (uB) and f (in S, with an SI prefix to suit the range, as mS), at the user's request: both on log scales with
   base-10 log-paper ticks, only the powers of ten numbered, f's ranging itself to the tallest line, and no peak labeled. It plots each bond at the size of its
   energy, a stable one as a peak above the baseline and an uphill one as a dip below it, at the user's request. Ask before adding any visual cue that reveals how a tool or reaction works.
 - The game's text matches the intro's premise. The player is Nadia Hassan, the target species is the cryostabilizer,

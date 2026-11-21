@@ -106,7 +106,7 @@ function hose(e: Engine, on: Hose['on'], into: { x: number; y: number; z: number
 }
 
 const SCENES: Record<string, Scene> = {
-  idle: { about: 'default lab: no flasks out, station (reference full of target), analyzer, spectroscope', preset: base([], 'idle') },
+  idle: { about: 'default lab: no flasks out, station (reference full of target), spectroscope, bond visualizer', preset: base([], 'idle') },
   quiet8: {
     about: '8 flasks 2/3 full, each one pure color at room T',
     preset: base(COLORS.map((c) => ({ contents: [{ species: singleOf(c), molecules: (2 / 3) * CAP }], T: T_ROOM })), 'quiet8'),
@@ -125,7 +125,7 @@ const SCENES: Record<string, Scene> = {
   },
   busy: {
     about:
-      'hot8 + 4 faucets running through hoses into a heater -> separator (looped) -> analyzer/spectroscope/splitter -> exchanger, ' +
+      'hot8 + 4 faucets running through hoses into a heater -> separator (looped) -> bond visualizer/spectroscope/splitter -> exchanger, ' +
       'sorter, meter, dispenser -> pipette, big tank',
     preset: {
       ...base(COLORS.map(() => mixFill(EVEN, 2 / 3, 1, 4)), 'busy'),
@@ -144,14 +144,14 @@ const SCENES: Record<string, Scene> = {
     after(e) {
       const T = (k: string) => e.tools.find((t: Tool) => t.kind === k) as Tool;
       const [heater, sep, split, sorter, exch, disp, pip, , meter] = e.tools as Tool[];
-      const analyzer = T('analyzer');
+      const visual = T('visualizer');
       const spectro = T('spectroscope');
       hose(e, { faucet: 0 }, tankMouth(heater, 0));
       hose(e, { faucet: 1 }, tankMouth(heater, 0), 44);
       hose(e, { tool: heater, spout: 3 }, tankMouth(sep, 0), 64);
       hose(e, { tool: sep, spout: 0 }, tankMouth(sep, 0));
       hose(e, { tool: sep, spout: 1 }, tankMouth(sep, 0), 44);
-      hose(e, { tool: sep, spout: 2 }, tankMouth(analyzer, 0));
+      hose(e, { tool: sep, spout: 2 }, tankMouth(visual, 0));
       hose(e, { tool: sep, spout: 3 }, tankMouth(spectro, 0));
       hose(e, { tool: sep, spout: 4 }, tankMouth(split, 0));
       hose(e, { tool: split, spout: 0 }, tankMouth(exch, 0));
@@ -165,7 +165,7 @@ const SCENES: Record<string, Scene> = {
     about:
       'a steady-state production line into the station, as left running while asleep: faucets R+G -> heater 1 -> holding ' +
       'tank (hot) -> separator looped on itself (wash), faucet B -> heater 2 -> separator; separator 2,3,4 -> sorter; ' +
-      'sorter triples -> exchanger (cooled by faucet K) -> analyzer -> station receptacle; 4 flasks of hot intermediates on the side',
+      'sorter triples -> exchanger (cooled by faucet K) -> spectroscope -> station receptacle; 4 flasks of hot intermediates on the side',
     preset: {
       ...base([...COLORS.slice(0, 4).map(() => mixFill(EVEN, 2 / 3, 1, 3)), null, null, null, null], 'prod'),
       tools: [
@@ -180,7 +180,7 @@ const SCENES: Record<string, Scene> = {
     },
     after(e) {
       const [h1, hold, sep, h2, sorter, exch] = e.tools as Tool[];
-      const analyzer = e.tools.find((t: Tool) => t.kind === 'analyzer') as Tool;
+      const spectro = e.tools.find((t: Tool) => t.kind === 'spectroscope') as Tool;
       const station = e.tools.find((t: Tool) => t.kind === 'receptacle') as Tool;
       hose(e, { faucet: 0 }, tankMouth(h1, 0));
       hose(e, { faucet: 1 }, tankMouth(h1, 0), 44);
@@ -195,8 +195,8 @@ const SCENES: Record<string, Scene> = {
       hose(e, { tool: sep, spout: 4 }, tankMouth(sorter, 0), 64);
       hose(e, { tool: sorter, spout: 2 }, tankMouth(exch, 0));
       hose(e, { faucet: 3 }, tankMouth(exch, 1));
-      hose(e, { tool: exch, spout: 0 }, tankMouth(analyzer, 0));
-      hose(e, { tool: analyzer, spout: 0 }, tankMouth(station, 0));
+      hose(e, { tool: exch, spout: 0 }, tankMouth(spectro, 0));
+      hose(e, { tool: spectro, spout: 0 }, tankMouth(station, 0));
     },
   },
 };

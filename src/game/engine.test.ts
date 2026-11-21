@@ -1,12 +1,16 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
-import { SHEET_SLOT, inSlot, sheetIn, slotPose, toolStands } from './bodies';
+import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
+import { SHEET_SLOT, flaskLip, inSlot, sheetIn, slotPose, toolStands } from './bodies';
 import { STOCK } from './cabinet';
+import { CAP } from './config';
 import type { GameEngine } from './engine';
+import { Vessel, volume, type Flask } from './flask';
 import { DEFAULT_PRESET, LAMP_POSE } from './presets';
 import type { SaveState } from './save';
-import { SHEET, darkness, type Tool } from './tools';
+import { CELL, LIFT, toCell } from './space';
+import { INLINE_TOOLS, SHAPES, SHEET, TEST_PAPER, UNIQUE_TOOLS, darkness, paperReading, type Tool } from './tools';
 
 /*
  * The engine itself, with nothing to draw on and nothing to hear: the view and the sounds are stood in for, as they
@@ -34,9 +38,8 @@ vi.mock('./view', () => ({
     dispose(): void {}
   },
 }));
-const quiet = () => ({ place() {}, level() {}, swing() {}, run() {}, clunk() {}, stop() {} });
+const quiet = () => ({ place() {}, swing() {}, run() {}, clunk() {}, stop() {} });
 vi.mock('./water', () => ({ WaterSounds: class { update(): void {} stop(): void {} } }));
-vi.mock('./rumble', () => ({ rumble: quiet }));
 vi.mock('./diverter', () => ({ diverter: quiet }));
 vi.mock('./changeover', () => ({ changeover: quiet }));
 vi.mock('./chime', () => ({ chime() {} }));
@@ -97,6 +100,317 @@ function lab(): { e: GameEngine; in: Inside } {
 
 /** The least a save can be: as old a lab as there is, with nothing in it. */
 const bare = (): SaveState => ({ v: 1, preset: DEFAULT_PRESET.id, flasks: [], tools: [], scales: [], hoses: [] });
+
+describe('test paper', () => {
+  type Lab = { e: GameEngine; in: Inside };
+  /** More of the engine's own things, which these tests reach into. */
+  interface Hands {
+    held: { kind: string; t?: Tool; f?: Flask; dir?: { x: number; y: number; z: number } } | null;
+    flasks: Flask[];
+    placeHeld(h: unknown, p: Tool['pose']): void;
+  }
+  const hands = (l: Lab) => l.in as unknown as Hands;
+  const R = singleOf('R');
+  const G = singleOf('G');
+  const RG = pairOf('R', 'G');
+  /** The middle of a cell in the front row of the first island. */
+  const SPOT = { x: 150, z: 950 };
+  const paperOf = (t: Tool) => t.paper[0];
+  /** Where something is, to a millionth of a unit. */
+  const where = (p: Tool['pose']) => [p.x, p.y, p.z, p.yaw].map((v) => Math.round(v * 1e6) / 1e6 + 0);
+  const flat = (x: number, z: number, yaw = 0) => [x, LIFT + TEST_PAPER.thick, z, yaw];
+
+  /** Take a sheet out of the cabinet, by the wheel, and lay it down in the cell at (x, z). */
+  function lay(l: Lab, x = SPOT.x, z = SPOT.z): Tool {
+    // looking a little down, the sheet is held low in front, over the cell
+    const there = () => {
+      l.e.debug({ x, z: z + 96, yaw: 0, pitch: (-20 * Math.PI) / 180 });
+      l.in.move(0);
+    };
+    there();
+    expect(l.e.spawn('testpaper')).toBe(true);
+    there();
+    const t = l.in.held!.t!;
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    return t;
+  }
+
+  /** Take one of a kind out of the cabinet and hold it at a pose, standing well out of its way. */
+  function holdAt(l: Lab, kind: 'flask' | 'pipette' | 'testpaper', p: Tool['pose']): void {
+    l.e.debug({ x: p.x, z: p.z + 400, yaw: 0, pitch: 0 });
+    l.in.move(0);
+    expect(l.e.spawn(kind)).toBe(true);
+    hands(l).placeHeld(l.in.held, p);
+  }
+
+  /** A pipette set down on its stand with its spout over the middle of the cell at (x, z), `up` above the counter. */
+  function pipetteOver(l: Lab, x = SPOT.x, z = SPOT.z, up = 60): Tool {
+    holdAt(l, 'pipette', { x, y: LIFT + up + SHAPES.pipette.spoutY, z, yaw: 0 });
+    const t = l.in.held!.t!;
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    return t;
+  }
+
+  /** Run the lab for `s` sim seconds. */
+  const run = (l: Lab, s: number) => {
+    for (let i = 0; i < Math.round(s / 0.05); i++) l.in.simulate(0.05);
+  };
+
+  it('comes out of the cabinet as often as wanted, held low so that its face shows, and is thrown away when put away', () => {
+    const l = lab();
+    for (let i = 0; i < STOCK.testpaper + 3; i++) {
+      expect(l.e.spawn('testpaper')).toBe(true);
+      expect(l.in.held?.t?.kind).toBe('testpaper');
+      expect(hands(l).held!.dir!.y).toBeLessThan(0);
+      l.in.putAway();
+      expect(l.in.held).toBeNull();
+    }
+    expect(l.in.tools.some((t) => t.kind === 'testpaper')).toBe(false);
+    expect(l.in.stock.testpaper.every(Boolean)).toBe(true);
+  });
+
+  it('lies flat on the counter where it is let go of, in the middle of a cell, with no stand', () => {
+    const l = lab();
+    const sheet = lay(l);
+    expect(where(sheet.pose)).toEqual(flat(SPOT.x, SPOT.z));
+    expect(toolStands(sheet)).toEqual([]);
+    expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(false);
+    // off a counter there's nowhere for it to lie
+    holdAt(l, 'testpaper', { x: 150, y: 500, z: 1200, yaw: 0 });
+    expect('why' in l.in.placement(l.in.held)).toBe(true);
+    l.in.putAway();
+    // turned a quarter, it lies a quarter turned
+    holdAt(l, 'testpaper', { x: 350, y: 500, z: 950, yaw: Math.PI / 2 });
+    const turned = l.in.held!.t!;
+    l.in.release();
+    expect(where(turned.pose)).toEqual(flat(350, 950, where({ ...turned.pose, yaw: Math.PI / 2 })[3]));
+  });
+
+  it('lets nothing else be set down on its cell, but a tool on its stand can have its spout over it', () => {
+    const l = lab();
+    const sheet = lay(l);
+    const cell = (p: { x: number; z: number }) => [toCell(p.x), toCell(p.z)];
+    // a flask held over it goes down in the next cell
+    holdAt(l, 'flask', { x: SPOT.x + 10, y: LIFT + 150, z: SPOT.z, yaw: 0 });
+    const fl = l.in.placement(l.in.held);
+    expect('rest' in fl && cell(fl.rest.pose)).not.toEqual(cell(SPOT));
+    expect('rest' in fl && Math.hypot(fl.rest.pose.x - SPOT.x, fl.rest.pose.z - SPOT.z)).toBe(CELL);
+    l.in.putAway();
+    // and so does another sheet
+    holdAt(l, 'testpaper', { x: SPOT.x - 10, y: LIFT + 150, z: SPOT.z, yaw: 0 });
+    const sh = l.in.placement(l.in.held);
+    expect('rest' in sh && cell(sh.rest.pose)).not.toEqual(cell(SPOT));
+    l.in.putAway();
+    // a pipette on its stand goes right over it, its spout over the sheet's middle, its stand's base behind
+    const pip = pipetteOver(l);
+    expect(cell(pip.pose)).toEqual(cell(SPOT));
+    expect(where(pip.pose).slice(0, 3)).toEqual([SPOT.x, LIFT + 60 + SHAPES.pipette.spoutY, SPOT.z]);
+    expect(toolStands(pip)).toHaveLength(1);
+    expect(where(sheet.pose)).toEqual(flat(SPOT.x, SPOT.z));
+    // and a sheet can be laid under a spout that's already there
+    const next = pipetteOver(l, SPOT.x + CELL);
+    const under = lay(l, SPOT.x + CELL);
+    expect(where(under.pose)).toEqual(flat(SPOT.x + CELL, SPOT.z));
+    expect(where(next.pose).slice(0, 3)).toEqual([SPOT.x + CELL, LIFT + 60 + SHAPES.pipette.spoutY, SPOT.z]);
+  });
+
+  it('soaks up what a spout lets out onto it, until it is soaked: then the rest runs off, and what it shows stays', () => {
+    const l = lab();
+    const sheet = lay(l);
+    const pip = pipetteOver(l);
+    const paper = paperOf(sheet);
+    pip.tanks[0].setMolecules(R, 5 * TEST_PAPER.cap);
+    pip.valves[0] = 1;
+    run(l, 0.1);
+    // what's landed so far already shows at full strength, though the sheet's hardly wet
+    expect(volume(paper)).toBeGreaterThan(0);
+    expect(volume(paper)).toBeLessThan(0.5 * TEST_PAPER.cap);
+    expect(paperReading(paper)).toEqual([[1, 0, 0, 0]]);
+    run(l, 30);
+    // far more left the pipette than the sheet holds
+    expect(volume(pip.tanks[0])).toBeLessThan(0.1 * TEST_PAPER.cap);
+    expect(volume(paper) / TEST_PAPER.cap).toBeCloseTo(1, 4);
+    expect(volume(paper)).toBeLessThanOrEqual(TEST_PAPER.cap);
+    const was = [...paper.n];
+    // more, of something else, changes nothing
+    pip.tanks[0].setMolecules(R, 0);
+    pip.tanks[0].setMolecules(G, 5 * TEST_PAPER.cap);
+    run(l, 30);
+    expect(volume(pip.tanks[0])).toBeLessThan(0.1 * TEST_PAPER.cap);
+    expect([...paper.n]).toEqual(was);
+    expect(paperReading(paper)).toEqual([[1, 0, 0, 0]]);
+  });
+
+  it('shows a single drop at full strength', () => {
+    const l = lab();
+    const sheet = lay(l);
+    const pip = pipetteOver(l);
+    const paper = paperOf(sheet);
+    pip.tanks[0].setMolecules(RG, TEST_PAPER.cap);
+    pip.valves[0] = 0.02;
+    // until the first drop has fallen and landed
+    for (let i = 0; i < 2000 && paper.N === 0; i++) l.in.simulate(0.02);
+    expect(paper.N).toBeGreaterThan(0);
+    expect(volume(paper)).toBeLessThan(0.5 * TEST_PAPER.cap);
+    expect(paperReading(paper)).toEqual([[1, 1, 0, 0]]);
+  });
+
+  it('takes a pour from a flask held over it', () => {
+    const l = lab();
+    const sheet = lay(l);
+    holdAt(l, 'flask', { x: SPOT.x, y: LIFT + 160, z: SPOT.z, yaw: 0 });
+    const f = hands(l).held!.f!;
+    f.setMolecules(G, 0.5 * CAP);
+    // tipped all the way, with the right button held, its lip over the sheet
+    const tipped = l.in as unknown as { rightHeld: boolean };
+    const lip = flaskLip(f, Math.PI * 0.61);
+    hands(l).placeHeld(l.in.held, { ...f.pose, x: f.pose.x + SPOT.x - lip.x, y: f.pose.y + 30, z: f.pose.z + SPOT.z - lip.z });
+    f.tilt = Math.PI * 0.61;
+    tipped.rightHeld = true;
+    run(l, 1);
+    expect(volume(paperOf(sheet)) / TEST_PAPER.cap).toBeCloseTo(1, 4);
+    expect(paperReading(paperOf(sheet))).toEqual([[0, 1, 0, 0]]);
+    // the flask lost what it poured, not just what the sheet took up
+    expect(0.5 * CAP - volume(f)).toBeGreaterThan(5 * TEST_PAPER.cap);
+  });
+
+  it('keeps what it holds as it is: it neither reacts nor cools, while a flask of the same does', () => {
+    const l = lab();
+    const sheet = lay(l);
+    const paper = paperOf(sheet);
+    const mix = new Vessel(Infinity);
+    mix.setMolecules(R, CAP);
+    mix.setMolecules(G, CAP);
+    mix.setTemperature(1);
+    paper.addFrom(mix, TEST_PAPER.cap / 2, true);
+    holdAt(l, 'flask', { x: SPOT.x + 2 * CELL, y: LIFT + 150, z: SPOT.z, yaw: 0 });
+    const f = hands(l).held!.f!;
+    l.in.release();
+    f.addFrom(mix, CAP / 2);
+    const was = [...paper.n];
+    l.e.speed = 16;
+    run(l, 5);
+    expect(f.n[RG]).toBeGreaterThan(0);
+    expect(paper.n[RG]).toBe(0);
+    expect([...paper.n]).toEqual(was);
+    expect(paper.Q).toBe(0);
+  });
+
+  it('can be picked up again, wet and stained, and laid down somewhere else, as it was', () => {
+    const l = lab();
+    const sheet = lay(l);
+    const paper = paperOf(sheet);
+    const mix = new Vessel(Infinity);
+    mix.setMolecules(RG, CAP);
+    paper.addFrom(mix, TEST_PAPER.cap, true);
+    const was = [...paper.n];
+    l.e.debug({ x: SPOT.x, z: SPOT.z + 400, yaw: 0, pitch: 0 });
+    l.in.target = { kind: 'tool', t: sheet, part: 'body', k: 0, point: { ...sheet.pose }, distance: 300 };
+    l.in.leftDown(false);
+    expect(l.in.held?.t).toBe(sheet);
+    hands(l).placeHeld(l.in.held, { x: SPOT.x + 3 * CELL, y: LIFT + 100, z: SPOT.z - CELL, yaw: Math.PI });
+    l.in.target = null;
+    l.in.release();
+    expect(where(sheet.pose)).toEqual(flat(SPOT.x + 3 * CELL, SPOT.z - CELL, where({ ...sheet.pose, yaw: Math.PI })[3]));
+    expect([...paper.n]).toEqual(was);
+    // undo takes it back to where it lay
+    l.e.undo();
+    expect(where(sheet.pose)).toEqual(flat(SPOT.x, SPOT.z));
+    expect([...paper.n]).toEqual(was);
+  });
+
+  it('is saved with what it holds, and where it lies', () => {
+    const l = lab();
+    const fresh = lay(l);
+    const stained = lay(l, SPOT.x + CELL);
+    const mix = new Vessel(Infinity);
+    mix.setMolecules(R, 0.2 * CAP);
+    mix.setMolecules(RG, 0.3 * CAP);
+    mix.setMolecules(SOLVENT_SPECIES, 0.5 * CAP);
+    mix.setTemperature(4);
+    paperOf(stained).addFrom(mix, 0.6 * TEST_PAPER.cap, true);
+    stained.note = 'batch 3';
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    const saved = s.tools.filter((t) => t.kind === 'testpaper');
+    expect(saved).toHaveLength(2);
+    // by species name
+    expect(Object.keys(saved[1].paper![0].n).sort()).toEqual(['R', 'R–G', 'S']);
+    expect(saved[0].paper![0].n).toEqual({});
+    l.e.restore(s, DEFAULT_PRESET);
+    const [a, b] = l.in.tools.filter((t) => t.kind === 'testpaper');
+    expect(where(a.pose)).toEqual(where(fresh.pose));
+    expect(where(b.pose)).toEqual(where(stained.pose));
+    expect(paperOf(a).N).toBe(0);
+    expect([...paperOf(b).n]).toEqual([...paperOf(stained).n]);
+    expect(paperReading(paperOf(b))).toEqual(paperReading(paperOf(stained)));
+    expect(paperReading(paperOf(b))[0][0]).toBeCloseTo(0.5, 2);
+    expect(b.note).toBe('batch 3');
+    // a save that says nothing of what it holds (or says too much) loads it blank, or with what fits
+    const odd = JSON.parse(JSON.stringify(s)) as SaveState;
+    const [x, y] = odd.tools.filter((t) => t.kind === 'testpaper');
+    delete x.paper;
+    y.paper = [{ n: { R: 50 * TEST_PAPER.cap }, Q: 0 }];
+    l.e.restore(odd, DEFAULT_PRESET);
+    const [c, d] = l.in.tools.filter((t) => t.kind === 'testpaper');
+    expect(paperOf(c).N).toBe(0);
+    expect(volume(paperOf(d))).toBe(TEST_PAPER.cap);
+  });
+});
+
+describe('the composition analyzer, which is gone', () => {
+  /** A lab's save with an analyzer in it, as every lab had: fed by a hose from a pipette, and with a hose out of each of its spouts. */
+  function withAnalyzer(l: { e: GameEngine; in: Inside }): SaveState {
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    const spectro = s.tools.find((t) => t.kind === 'spectroscope')!;
+    const tube = { n: { R: 1e6, 'R–G': 2e6 }, Q: 12e6 };
+    const analyzer = { ...spectro, kind: 'analyzer', id: 901, fx: 1.15, tanks: [tube], drops: [tube, { n: {}, Q: 0 }], reading: [0.5, 0, 0, 0] };
+    const pipette = { ...spectro, kind: 'pipette', id: 902, fx: 0.55, fy: 0.3, z: 750, valves: [0.5], tanks: [{ n: { G: 5e7 }, Q: 15e7 }], drops: [{ n: {}, Q: 0 }] };
+    s.tools.unshift(analyzer as unknown as SaveState['tools'][number], pipette as SaveState['tools'][number]);
+    s.hoses.push(
+      // into its tube, out of its spout and out of its waste spout
+      { outlet: { x: 1.15, y: 0.46, z: 150, yaw: 0, reach: 50 }, on: { tool: 902, spout: 0 } },
+      { outlet: { x: 0.25, y: 0.6, z: 750, yaw: 0, reach: 50 }, on: { tool: 901, spout: 0 } },
+      { outlet: { x: 0.35, y: 0.6, z: 750, yaw: 0, reach: 50 }, on: { tool: 901, spout: 1 } },
+    );
+    return s;
+  }
+  const kinds = (l: Inside) => l.tools.map((t) => t.kind as string);
+
+  it('is in no new lab, which still has its spectroscope and bond visualizer where they were', () => {
+    const l = lab();
+    expect(kinds(l.in)).not.toContain('analyzer');
+    expect(kinds(l.in).filter((k) => k === 'spectroscope' || k === 'visualizer').sort()).toEqual(['spectroscope', 'visualizer']);
+    expect(UNIQUE_TOOLS).not.toContain('analyzer');
+    expect(INLINE_TOOLS).not.toContain('analyzer');
+    expect(Object.keys(SHAPES)).not.toContain('analyzer');
+    const at = (kind: string) => l.in.tools.find((t) => t.kind === kind)!.pose;
+    expect([at('spectroscope').x, at('visualizer').x]).toEqual([1450, 1750]);
+  });
+
+  it('is lost from an older save as it loads, without error, with the hoses out of its spouts; the rest loads as it was', () => {
+    const l = lab();
+    const before = l.in.tools.map((t) => [t.kind, t.id]);
+    const s = withAnalyzer(l);
+    expect(() => l.e.restore(s, DEFAULT_PRESET)).not.toThrow();
+    expect(kinds(l.in)).not.toContain('analyzer');
+    // everything else is there, the pipette with what it held, and its hose where it was, now over nothing
+    expect(l.in.tools.map((t) => [t.kind, t.id])).toEqual([['pipette', 902], ...before]);
+    const pip = l.in.tools.find((t) => t.kind === 'pipette')!;
+    expect(pip.tanks[0].N).toBe(5e7);
+    const hoses = (l.in as unknown as { hoses: { on: { tool?: Tool } }[] }).hoses;
+    expect(hoses).toHaveLength(1);
+    expect(hoses[0].on.tool).toBe(pip);
+    // and the lab runs: what the hose lets out falls to the counter
+    expect(() => {
+      for (let i = 0; i < 40; i++) l.in.simulate(0.05);
+    }).not.toThrow();
+    expect(pip.tanks[0].N).toBeLessThan(5e7);
+    // saved again, there's no trace of it
+    expect(JSON.stringify(l.e.snapshot())).not.toContain('analyzer');
+  });
+});
 
 const lampOf = (l: Inside) => l.tools.filter((t) => t.kind === 'shadowlamp');
 

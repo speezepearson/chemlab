@@ -4,18 +4,14 @@ import { CHANNELS, CHANNEL_NAMES, DEFAULT_VOLUMES } from '../game/volumes';
 
 const STEPS = 100;
 
-/**
- * A volume slider for each kind of sound, and one for everything, and a button to put them back. Outside god mode
- * there's no analyzer slider, since its name says what the machine does.
- */
-export function SoundPanel({ god }: { god: boolean }) {
+/** A volume slider for each kind of sound, and one for everything, and a button to put them back. */
+export function SoundPanel() {
   const [, rerender] = useReducer((x: number) => x + 1, 0);
-  const shown = CHANNELS.filter((ch) => god || ch !== 'analyzer');
   return (
     <details>
       <summary>Sound</summary>
       <div className="sound">
-        {shown.map((ch) => (
+        {CHANNELS.map((ch) => (
           <label key={ch} className="slider">
             <span>{CHANNEL_NAMES[ch]}</span>
             <input
