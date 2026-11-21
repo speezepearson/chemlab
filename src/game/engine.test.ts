@@ -1231,3 +1231,156 @@ describe('the shadow lamp', () => {
   });
 });
 
+describe('shadow paper', () => {
+  /**
+   * Take a sheet out of the cabinet, by the wheel, standing out in the room in front of the lamp's bench, with the
+   * sheet held up over the end of the lamp's channel: turned to face the lamp, or with its back to it.
+   */
+  function sheetAtSlot(l: { e: GameEngine; in: Inside }, facing = true): Tool {
+    const at = () => look(l, SHEET_SLOT.x, SHEET_SLOT.z - 240, SHEET_SLOT.x, SHEET_SLOT.y - 150, SHEET_SLOT.z);
+    at();
+    expect(l.e.spawn('sheet')).toBe(true);
+    // (whoever holds it is looking across the channel, the lamp on their left)
+    l.in.held!.relYaw = facing ? -Math.PI / 2 : Math.PI / 2;
+    at();
+    return l.in.held!.t!;
+  }
+
+  it('comes out of the cabinet as often as wanted, and is thrown away when put away', () => {
+    const l = lab();
+    for (let i = 0; i < STOCK.sheet + 3; i++) {
+      expect(l.e.spawn('sheet')).toBe(true);
+      expect(l.in.held?.t?.kind).toBe('sheet');
+      l.in.putAway();
+      expect(l.in.held).toBeNull();
+    }
+    expect(l.in.tools.some((t) => t.kind === 'sheet')).toBe(false);
+    expect(l.in.stock.sheet.every(Boolean)).toBe(true);
+  });
+
+  it("goes into the lamp's slot when it's let go of there, with no stand, and out again when it's picked up", () => {
+    const l = lab();
+    const sheet = sheetAtSlot(l);
+    // in hand it has no stand, and where it would go is the slot
+    expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(false);
+    const pl = l.in.placement(l.in.held);
+    expect('rest' in pl && pl.rest.pose).toEqual(SHEET_SLOT);
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    expect(sheet.pose).toEqual(SHEET_SLOT);
+    expect(sheetIn(l.in.tools)).toBe(sheet);
+    expect(toolStands(sheet)).toEqual([]);
+    expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(false);
+    // a second sheet held there has to go somewhere else: on a stand, over the bench
+    const second = sheetAtSlot(l);
+    const pl2 = l.in.placement(l.in.held);
+    if ('rest' in pl2) expect(inSlot(pl2.rest.pose)).toBe(false);
+    l.in.putAway();
+    expect(l.in.tools).not.toContain(second);
+    // picked up with the crosshair on it, and set down on an island, it's on a stand like any tool
+    l.in.target = { kind: 'tool', t: sheet, part: 'body', k: 0, point: { ...SHEET_SLOT }, distance: 200 };
+    l.in.leftDown(false);
+    expect(l.in.held?.t).toBe(sheet);
+    look(l, 100, 1200, 100, 700, 800);
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    expect(sheetIn(l.in.tools)).toBeNull();
+    expect(toolStands(sheet)).toHaveLength(1);
+    expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(true);
+    // undo puts it back in the slot, and Q puts back one picked up from there
+    l.e.undo();
+    expect(sheet.pose).toEqual(SHEET_SLOT);
+    l.in.leftDown(false);
+    look(l, 100, 1200, 100, 700, 800);
+    l.in.putBack();
+    expect(sheet.pose).toEqual(SHEET_SLOT);
+  });
+
+  it('goes in with its back to the lamp, if that is how it is held', () => {
+    const l = lab();
+    const sheet = sheetAtSlot(l, false);
+    l.in.release();
+    expect(sheet.pose).toEqual(slotPose(SHEET_SLOT.yaw + Math.PI));
+    expect(Math.cos(sheet.pose.yaw - SHEET_SLOT.yaw)).toBeCloseTo(-1);
+    expect(sheetIn(l.in.tools)).toBe(sheet);
+  });
+
+  it('keeps its image, and its place in the slot, through a save', () => {
+    const l = lab();
+    const sheet = sheetAtSlot(l);
+    l.in.release();
+    const N = SHEET.cells;
+    sheet.expose(Float32Array.from({ length: N * N }, (_, k) => (k % N < N / 3 ? 0 : 1)), 0.6);
+    const loose = sheetAtSlot(l);
+    look(l, 100, 1200, 100, 700, 800);
+    l.in.release();
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    expect(s.tools.filter((t) => t.kind === 'sheet').map((t) => typeof t.image)).toEqual(['string', 'undefined']);
+    l.e.restore(s, DEFAULT_PRESET);
+    const [a, b] = l.in.tools.filter((t) => t.kind === 'sheet');
+    expect(a.pose).toEqual(SHEET_SLOT);
+    expect(sheetIn(l.in.tools)).toBe(a);
+    expect(darkness(a.dose[N - 1])).toBeCloseTo(darkness(0.6), 2);
+    expect(a.dose[0]).toBe(0);
+    expect(b.pose.x).toBeCloseTo(loose.pose.x);
+    expect(b.pose.z).toBeCloseTo(loose.pose.z);
+    expect(Math.max(...b.dose)).toBe(0);
+  });
+
+  it("is owed the lamp's light while it's in the slot with the lamp lit, on sim time", () => {
+    const l = lab();
+    const [lamp] = lampOf(l.in);
+    lamp.valves[0] = 1;
+    const press = () => {
+      l.in.target = { kind: 'tool', t: lamp, part: 'button', k: 0, point: { x: 0, y: 0, z: 0 }, distance: 100 };
+      l.in.leftDown(false);
+      l.in.target = null;
+    };
+    // lit, with no sheet in, nothing happens
+    press();
+    l.in.simulate(0.1);
+    expect([lamp.lit, lamp.sheet, lamp.owed]).toEqual([true, null, 0]);
+    // a sheet in hand at the slot isn't in it yet; let go of there, it is, and the light's time is the lab's
+    const sheet = sheetAtSlot(l);
+    l.in.simulate(0.1);
+    expect([lamp.sheet, lamp.owed]).toEqual([null, 0]);
+    l.in.release();
+    l.in.simulate(0.1);
+    expect(lamp.sheet).toBe(sheet);
+    expect(lamp.owed).toBeCloseTo(0.1);
+    // paused, none; at 16×, sixteen times as much
+    l.e.speed = 0;
+    l.in.simulate(0.1);
+    expect(lamp.owed).toBeCloseTo(0.1);
+    l.e.speed = 16;
+    l.in.simulate(0.05);
+    expect(lamp.owed).toBeCloseTo(0.9);
+    // put out, no more; and with nothing drawing the lab, what's owed just waits, the sheet as it was
+    press();
+    l.e.speed = 1;
+    l.in.simulate(0.1);
+    expect(lamp.owed).toBeCloseTo(0.9);
+    expect(Math.max(...sheet.dose)).toBe(0);
+    // picked up, it's out of the slot, and owed nothing
+    l.in.target = { kind: 'tool', t: sheet, part: 'body', k: 0, point: { ...SHEET_SLOT }, distance: 200 };
+    l.in.leftDown(false);
+    l.in.simulate(0.1);
+    expect([lamp.sheet, lamp.owed]).toEqual([null, 0]);
+  });
+
+  it('is owed no more than the exposure had left, through the longest sleep', () => {
+    const l = lab();
+    const [lamp] = lampOf(l.in);
+    sheetAtSlot(l);
+    l.in.release();
+    lamp.valves[0] = 0.75;
+    lamp.press();
+    l.in.simulate(0.1, true);
+    expect(lamp.owed).toBeCloseTo(0.1);
+    l.in.sleeper().skip(100000);
+    expect(lamp.owed).toBeCloseTo(lampShot(0.75));
+    expect(lamp.lit).toBe(false);
+    l.in.simulate(0.1, true);
+    expect(lamp.owed).toBeCloseTo(lampShot(0.75));
+  });
+});
