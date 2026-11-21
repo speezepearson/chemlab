@@ -20,7 +20,7 @@ import { Flask, Vessel, roomFor, sustenance, transfer, volume, volumeUnit } from
 import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
-import { DEFAULT_PRESET, LAMP_POSE, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
+import { DEFAULT_PRESET, LAMP_POSE, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
 import { CRYOSTABILIZER, FIRST_SUPPLY, litresOf, type Supply } from './supply';
 import { shatter } from './shatter';
 import { WHEELS, wheelMove, wheelPick, type WheelAim } from './wheel';
@@ -837,7 +837,9 @@ export class GameEngine {
         }
         return t;
       });
-    this.nextToolId = Math.max(-1, ...this.tools.map((t) => t.id)) + 1;
+    // (past every saved tool's id, those of kinds there no longer are included, so that a tool added below doesn't get
+    // a dropped one's id, and with it the hoses that were on its spouts)
+    this.nextToolId = Math.max(-1, ...s.tools.map((st) => st.id).filter(Number.isFinite)) + 1;
     this.uniqueTools();
     this.oldStation(s);
     this.scales = s.scales.map((ss) => {
@@ -906,11 +908,11 @@ export class GameEngine {
   }
 
   /**
-   * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a spectroscope, a bond
-   * visualizer, a station and a shadow lamp: if there's none, one is added where it starts, or as
-   * near there as it has room (see roomy), the station fitted for the cryostabilizer, its reservoir holding what's
-   * left on board (see Tool.stock), as a save from before it was fitted for anything else would have it. The
-   * station is built into the wall, and the shadow lamp stands on its own bench, so they're always where they are.
+   * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a spectroscope, a station and a
+   * shadow lamp: if there's none, one is added where it starts, or as near there as it has room (see roomy), the
+   * station fitted for the cryostabilizer, its reservoir holding what's left on board (see Tool.stock), as a save from
+   * before it was fitted for anything else would have it. The station is built into the wall, and the shadow lamp
+   * stands on its own bench, so they're always where they are.
    */
   private uniqueTools(): void {
     for (const kind of UNIQUE_TOOLS) {
@@ -930,7 +932,6 @@ export class GameEngine {
     add('shadowlamp', LAMP_POSE);
     this.tools.find((t) => t.kind === 'shadowlamp')!.pose = { ...LAMP_POSE };
     add('spectroscope', spotPose(SPECTROSCOPE_AT));
-    add('visualizer', spotPose(VISUALIZER_AT));
   }
 
   /**

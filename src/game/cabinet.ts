@@ -12,7 +12,7 @@ import { Tool, type ToolKind } from './tools';
  */
 
 /** What the cabinet stocks: every kind of thing the equipment wheels make. */
-export type Stocked = 'flask' | 'scale' | Exclude<ToolKind, 'receptacle' | 'spectroscope' | 'visualizer' | 'shadowlamp'>;
+export type Stocked = 'flask' | 'scale' | Exclude<ToolKind, 'receptacle' | 'spectroscope' | 'shadowlamp'>;
 
 /** The consumables: stacked deep in the cabinet, more than anyone could use, so taking one never empties it. */
 export const ENDLESS: readonly Stocked[] = ['thermometer', 'thermometerWide', 'strip', 'culture', 'sheet', 'testpaper', 'bondpaper'];

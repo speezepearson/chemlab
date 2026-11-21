@@ -106,7 +106,7 @@ function hose(e: Engine, on: Hose['on'], into: { x: number; y: number; z: number
 }
 
 const SCENES: Record<string, Scene> = {
-  idle: { about: 'default lab: no flasks out, station (reference full of target), spectroscope, bond visualizer', preset: base([], 'idle') },
+  idle: { about: 'default lab: no flasks out, station (reference full of target), spectroscope', preset: base([], 'idle') },
   quiet8: {
     about: '8 flasks 2/3 full, each one pure color at room T',
     preset: base(COLORS.map((c) => ({ contents: [{ species: singleOf(c), molecules: (2 / 3) * CAP }], T: T_ROOM })), 'quiet8'),
@@ -125,7 +125,7 @@ const SCENES: Record<string, Scene> = {
   },
   busy: {
     about:
-      'hot8 + 4 faucets running through hoses into a heater -> separator (looped) -> bond visualizer/spectroscope/splitter -> exchanger, ' +
+      'hot8 + 4 faucets running through hoses into a heater -> separator (looped) -> spectroscope/splitter -> exchanger, ' +
       'sorter, meter, dispenser -> pipette, big tank',
     preset: {
       ...base(COLORS.map(() => mixFill(EVEN, 2 / 3, 1, 4)), 'busy'),
@@ -144,15 +144,14 @@ const SCENES: Record<string, Scene> = {
     after(e) {
       const T = (k: string) => e.tools.find((t: Tool) => t.kind === k) as Tool;
       const [heater, sep, split, sorter, exch, disp, pip, , meter] = e.tools as Tool[];
-      const visual = T('visualizer');
       const spectro = T('spectroscope');
       hose(e, { faucet: 0 }, tankMouth(heater, 0));
       hose(e, { faucet: 1 }, tankMouth(heater, 0), 44);
       hose(e, { tool: heater, spout: 3 }, tankMouth(sep, 0), 64);
       hose(e, { tool: sep, spout: 0 }, tankMouth(sep, 0));
       hose(e, { tool: sep, spout: 1 }, tankMouth(sep, 0), 44);
-      hose(e, { tool: sep, spout: 2 }, tankMouth(visual, 0));
-      hose(e, { tool: sep, spout: 3 }, tankMouth(spectro, 0));
+      hose(e, { tool: sep, spout: 2 }, tankMouth(spectro, 0));
+      hose(e, { tool: sep, spout: 3 }, tankMouth(spectro, 0), 44);
       hose(e, { tool: sep, spout: 4 }, tankMouth(split, 0));
       hose(e, { tool: split, spout: 0 }, tankMouth(exch, 0));
       hose(e, { tool: split, spout: 1 }, tankMouth(exch, 1));

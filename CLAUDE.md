@@ -194,7 +194,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - A tank needn't be under its opening: one with a `neck` (the swell bulbs') has its bulb and neck where the flag
     says, and its own `x0` and `x1` are its inlet's, since it's the openings and spouts that go on the grid.
   - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `neck`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `flat`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
-- **Unique tools** (`UNIQUE_TOOLS`: the spectroscope, the bond visualizer, the receptacle and the shadow lamp) aren't on
+- **Unique tools** (`UNIQUE_TOOLS`: the spectroscope, the receptacle and the shadow lamp) aren't on
   an equipment wheel and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
   whole supply station (`STATION` in `tools.ts`): its tanks are the funnel and the ship's reservoir, in that
   order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved. The
@@ -205,8 +205,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   `t.supply` (its species, goal, start and reservoir's capacity), never by `TARGET` or `GOAL_TARGET`. With enough in
   its reservoir it's changed for the next (`Tool.swap`, `CHANGEOVER`, `changeoverAt`): while its block is `away`,
   it has no mouth and lets nothing out, and through the whole changeover nothing on it can be worked.
-- **Inline instruments** (`INLINE_TOOLS`: the spectroscope, the bond visualizer and the flow meter) are a tube draining straight through at a fixed rate past a cabinet
-  (or the flow meter's little readout, `METER_BODY`) that reads what goes by, as an exponentially weighted average that fades the past smoothly (`INSTRUMENT_TAU`,
+- **Inline instruments** (`INLINE_TOOLS`: the spectroscope and the flow meter) are a tube draining straight through at a fixed rate past the spectroscope's cabinet
+  (or the flow meter's little readout, `METER_BODY`), which reads what goes by, as an exponentially weighted average that fades the past smoothly (`INSTRUMENT_TAU`,
   `Tool.smooth`). A hose's nozzle let go of over the tube snaps onto its
   top (`docked` in `bodies.ts`, via the engine's `gridded`).
 - **The goal** is enough cryostabilizer in the station's reservoir (`tanks[1]`, against its supply's `goal`, once
@@ -214,14 +214,16 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Saves** stay at format v1. New fields are optional and the loaders tolerate their absence. Species are stored by
   name. A tool's own state goes in `Tool.memory` as numbers; a sheet of shadow paper's image, which is thousands of
   cells, goes beside it as a packed string (`Tool.image`, `Tool.develop`).
-  A saved tool of a kind there no longer is (the composition analyzer, which the test paper replaced) is dropped as
-  the save loads, with the hoses on its spouts; so is a stored volume slider for a sound that's gone (`parseVolumes`).
+  A saved tool of a kind there no longer is (the composition analyzer, which the test paper replaced, and the bond
+  visualizer, which the bond paper replaced) is dropped as
+  the save loads, with the hoses on its spouts (its id isn't given to a tool the load adds, or that tool would get
+  them); so is a stored volume slider for a sound that's gone (`parseVolumes`).
 
 ## Design preferences
 
-- Don't give away the chemistry. The player is meant to work it out. The bond visualizer has no text, and its points are
+- Don't give away the chemistry. The player is meant to work it out. A sheet of bond paper has nothing written on it: its four dots are in the four colors' own colors, at the user's request, and the lines between them are
   unlabeled, the size sorter's screens look plain, nothing is written on the shadow lamp or its paper (and nothing says what dims its light), the equipment wheels have no names, and the faucets aren't labeled (they're the five pure
-  atoms, the four colors and the solvent, which the user chose). A sheet of test paper has no text either, but its four sectors are outlined in black, at the user's request; nor has a sheet of bond paper, whose four dots are in the four colors' own colors, at the user's request, with nothing else on it but the lines between them. The spectroscope's axes are labeled E (uB) and f (in S, with an SI prefix to suit the range, as mS), at the user's request: both on log scales with
+  atoms, the four colors and the solvent, which the user chose). A sheet of test paper has no text either, but its four sectors are outlined in black, at the user's request. The spectroscope's axes are labeled E (uB) and f (in S, with an SI prefix to suit the range, as mS), at the user's request: both on log scales with
   base-10 log-paper ticks, only the powers of ten numbered, f's ranging itself to the tallest line, and no peak labeled. It plots each bond at the size of its
   energy, a stable one as a peak above the baseline and an uphill one as a dip below it, at the user's request. Ask before adding any visual cue that reveals how a tool or reaction works.
 - A smell's simile (`ODORANTS` in `smell.ts`) gives nothing away either: none goes with its species' colors (and

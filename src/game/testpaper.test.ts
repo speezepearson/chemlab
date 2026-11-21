@@ -130,6 +130,26 @@ describe("test paper's print", () => {
     expect(Math.max(...corners.map((p) => Math.abs(p.x)))).toBeCloseTo(w / 2 - edge, 9);
   });
 
+  it("cuts a triangle into four equal ones, each corner's atom at its corner and K upside down in the middle", () => {
+    const area = (ps: (readonly [number, number])[]) =>
+      Math.abs((ps[1][0] - ps[0][0]) * (ps[2][1] - ps[0][1]) - (ps[2][0] - ps[0][0]) * (ps[1][1] - ps[0][1])) / 2;
+    const whole = area((['G', 'B', 'R'] as const).map((a) => ATOM_PLACE[a]));
+    for (const a of SECTOR_ATOMS) {
+      const s = atomSector(a);
+      expect(s).toHaveLength(3);
+      expect(area(s)).toBeCloseTo(whole / 4, 9);
+      // each sector is centered on its atom's place, between the corner and the middle for a corner's
+      const mid = [0, 1].map((k) => (s[0][k] + s[1][k] + s[2][k]) / 3);
+      const want = a === 'K' ? [0, 0] : ATOM_PLACE[a].map((v) => v / 2);
+      expect(mid[0]).toBeCloseTo(want[0], 9);
+      expect(mid[1]).toBeCloseTo(want[1], 9);
+    }
+    // the middle one points down: one corner at the bottom, two level above it
+    const ys = atomSector('K').map((p) => p[1]).sort((p, q) => p - q);
+    expect(ys[0]).toBeCloseTo(ys[1], 9);
+    expect(ys[2]).toBeGreaterThan(ys[1]);
+  });
+
   it("keeps each stain inside its small triangle, a margin in from its lines", () => {
     const side = (ps: (readonly [number, number])[]) => Math.hypot(ps[1][0] - ps[0][0], ps[1][1] - ps[0][1]);
     const mid = (ps: (readonly [number, number])[]) => [0, 1].map((k) => (ps[0][k] + ps[1][k] + ps[2][k]) / 3);

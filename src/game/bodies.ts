@@ -21,7 +21,7 @@ import {
  * as deep as its bench, and a sheet of test paper or bond paper, lying flat, as deep as the sheet.
  */
 const CABINET_DEPTH: Partial<Record<ToolKind, number>> = {
-  spectroscope: 50, visualizer: 50, shadowlamp: LAMP.d, testpaper: TEST_PAPER.d, bondpaper: TEST_PAPER.d,
+  spectroscope: 50, shadowlamp: LAMP.d, testpaper: TEST_PAPER.d, bondpaper: TEST_PAPER.d,
 };
 
 /**

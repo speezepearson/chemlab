@@ -461,7 +461,7 @@ export const DIVERTER_HOLD = 0.4;
  * straight through at FUNNEL_RATE however full it is, down to a spout at its foot, past what reads what goes by: a
  * cabinet beside it (see INSTRUMENT), or the flow meter's little readout (see METER_BODY).
  */
-export const INLINE_TOOLS: readonly ToolKind[] = ['spectroscope', 'visualizer', 'meter'];
+export const INLINE_TOOLS: readonly ToolKind[] = ['spectroscope', 'meter'];
 /** How much an inline instrument's tube holds, by volume: a twentieth of a flask, just a buffer. */
 export const TUBE_CAP = CAP / 20;
 /** How wide an inline instrument's tube is inside, in local units. */
@@ -481,8 +481,8 @@ export const INLINE_DOCK = 150;
  */
 export const INSTRUMENT_TAU = 0.5;
 /**
- * The spectroscope's and bond visualizer's cabinet, right of the tube, with its screen, and how high the pipe from
- * the tube into it runs, in local units. The flow meter has none, just a little readout (see METER_BODY).
+ * The spectroscope's cabinet, right of the tube, with its screen, and how high the pipe from the tube into it runs,
+ * in local units. The flow meter has none, just a little readout (see METER_BODY).
  */
 export const INSTRUMENT = {
   body: { x0: 14, x1: 186, y0: 4, y1: 96 },
@@ -965,14 +965,13 @@ export function meterText(rate: number): string {
 }
 
 /**
- * The order of the sectors of a sheet of test paper's triangle in its reading, and of the bond visualizer's points
- * and a sheet of bond paper's dots: the four colors. There's none for the solvent, which they're all blind to.
+ * The order of the sectors of a sheet of test paper's triangle in its reading, and of a sheet of bond paper's dots:
+ * the four colors. There's none for the solvent, which both are blind to.
  */
 export const SECTOR_ATOMS: readonly ColorAtom[] = ['R', 'G', 'B', 'K'];
 
 /**
- * Where each atom is in a triangle, on a sheet of test paper, a sheet of bond paper and the bond visualizer's screen
- * alike: the triangle
+ * Where each atom is in a triangle, on a sheet of test paper and a sheet of bond paper alike: the triangle
  * stands on its base, G at the top, R at the bottom left, B at the bottom right, and K in the middle. As offsets from
  * the triangle's middle, x right and y down, its corners 1 away.
  */
@@ -1074,7 +1073,7 @@ export function bondDots(): { x: number; y: number }[] {
 
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater'
-  | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'dish' | 'column' | 'culture' | 'tank'
+  | 'spectroscope' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'dish' | 'column' | 'culture' | 'tank'
   | 'receptacle' | 'shadowlamp' | 'sheet' | 'testpaper' | 'bondpaper';
 
 /**
@@ -1090,7 +1089,7 @@ export const isBlotter = (kind: ToolKind) => BLOTTERS.includes(kind);
  * Tools there's only ever one of: not on an equipment wheel, and never put away. The receptacle is the whole cryostabilizer
  * station (see STATION), reservoir included, and the shadow lamp stands on a bench of its own (see LAMP).
  */
-export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectroscope', 'visualizer', 'receptacle', 'shadowlamp'];
+export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectroscope', 'receptacle', 'shadowlamp'];
 
 /**
  * A tool's geometry in local units: multiply by the stage scale and offset by
@@ -1434,18 +1433,6 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: 116,
     box: { x0: -10, x1: INSTRUMENT.body.x1 + 4, y0: -6, y1: 118 },
   },
-  visualizer: {
-    // the spectroscope's tube and cabinet, its screen showing the bonds going by between four points (see BOND_TRIANGLE)
-    tanks: [{ name: 'tube', x0: -TUBE_W / 2, x1: TUBE_W / 2 }],
-    tankH: TUBE_H,
-    tankCap: TUBE_CAP,
-    round: true,
-    noValve: true,
-    spouts: [0],
-    valveY: TUBE_H,
-    spoutY: 116,
-    box: { x0: -10, x1: INSTRUMENT.body.x1 + 4, y0: -6, y1: 118 },
-  },
 };
 
 /** The size sorter's chute, in local units: it slopes down from (x0, y0) to (x1, y1), where it turns down into the last spout. */
@@ -1535,31 +1522,17 @@ export function spectroscopeUnit(top: number): { name: string; exp: number } {
 }
 
 /**
- * The bond visualizer's triangle on its screen, standing on its base: its middle, and the distance from there to a
- * corner, in local units. The four atoms are its corners and its middle, placed as their sectors are in a sheet of
- * test paper's triangle (see ATOM_PLACE), and a line joins two of them for each bond between them going by (see
- * bondShares): one of its sides, or from the middle out to a corner.
- */
-export const BOND_TRIANGLE = { x: 100, y: 58, r: 32 };
-
-/** The bond visualizer's point for SECTOR_ATOMS[i] (see BOND_TRIANGLE), in local units. */
-export function bondPoint(i: number): { x: number; y: number } {
-  const [dx, dy] = ATOM_PLACE[SECTOR_ATOMS[i]];
-  return { x: BOND_TRIANGLE.x + BOND_TRIANGLE.r * dx, y: BOND_TRIANGLE.y + BOND_TRIANGLE.r * dy };
-}
-
-/**
- * For each bond (in BOND_KEYS order), its two atoms' places in SECTOR_ATOMS: the ends of the line it lights on the
- * bond visualizer's screen, and of the one it darkens on a sheet of bond paper.
+ * For each bond (in BOND_KEYS order), its two atoms' places in SECTOR_ATOMS: the ends of the line it darkens on a
+ * sheet of bond paper, between those atoms' dots (see bondDots).
  */
 export const BOND_ENDS: readonly (readonly [number, number])[] = BOND_KEYS.map(
   (k) => [SECTOR_ATOMS.indexOf(k[0] as ColorAtom), SECTOR_ATOMS.indexOf(k[1] as ColorAtom)] as const,
 );
 
 /**
- * What the bond visualizer shows for a fluid, against `cap`: for each bond (in BOND_KEYS order), how much of `cap`
- * molecules with that bond in them make up (by volume, see VOLUME). So against the fluid's own volume, R–G lights its line fully, △RGB all three of its, and half R, half R–G its one line
- * half as bright.
+ * Which bonds a fluid has, against `cap`: for each bond (in BOND_KEYS order), how much of `cap` molecules with that
+ * bond in them make up (by volume, see VOLUME). So against the fluid's own volume, R–G is all R–G's, △RGB all of each
+ * of its three, and half R, half R–G half R–G's. A sheet of bond paper reads this (see bondReading).
  */
 export function bondShares(f: Fluid, cap: number): number[] {
   const out = BOND_KEYS.map(() => 0);
@@ -1626,7 +1599,6 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   tank: 'Tank',
   receptacle: 'Cryostabilizer',
   spectroscope: 'Spectroscope',
-  visualizer: 'Bond visualizer',
   shadowlamp: 'Shadow lamp',
   sheet: 'Shadow paper',
   testpaper: 'Test paper',
@@ -1760,8 +1732,6 @@ export class Blotter extends Vessel {
  *   that's too hot for it.
  * - A **spectroscope** is an inline instrument too, which lets everything through, counting the bonds that pass over
  *   the recent past (see INSTRUMENT_TAU and bondCounts) and showing them by energy as a graph (see spectroscopeAt).
- * - A **bond visualizer** is an inline instrument too, which lets everything through, showing which atoms are bonded
- *   in what passed over the recent past (see INSTRUMENT_TAU and bondShares) as lines between the corners and middle of a triangle (see BOND_TRIANGLE).
  * - A **shadow lamp** has no tanks either: it's a lamp in a housing (see LAMP), fixed on a bench of its own, with a
  *   switch (see lit). While it's on, the sheet in its holder is owed its light (see shine).
  * - A sheet of **shadow paper** has none: it's a square of paper (see SHEET) that darkens, for good, where the shadow
@@ -1799,12 +1769,6 @@ export class Tool {
    * the recent past (see INSTRUMENT_TAU); all 0 once they're down to less than TRACE a sim second in all.
    */
   bonds: number[] = BOND_KEYS.map(() => 0);
-  /**
-   * A bond visualizer's reading (see bondShares), shown on its screen: for each bond, in BOND_KEYS order, the share of
-   * what passed through it in the recent past (see INSTRUMENT_TAU) that has that bond, by volume; null once that's
-   * down to less than TRACE a sim second.
-   */
-  links: number[] | null = null;
   /**
    * A meter's reading: what's flowed out of it, by volume per sim second, in the recent past (see INSTRUMENT_TAU); 0
    * once that's down to less than TRACE a sim second.
@@ -1965,7 +1929,7 @@ export class Tool {
     if (!this.shape.spouts.length) return this.none();
     // with nothing in it and its readings faded to nothing, a step would do nothing; an instrument's smoothing starts
     // again from nothing measured, as it would have to within less than TRACE
-    if (this.tanks.every((tk) => tk.N <= 0) && this.rate === 0 && !this.links && this.bonds.every((b) => b === 0)) {
+    if (this.tanks.every((tk) => tk.N <= 0) && this.rate === 0 && this.bonds.every((b) => b === 0)) {
       this.smoothed = null;
       return this.none();
     }
@@ -2005,10 +1969,6 @@ export class Tool {
     if (this.kind === 'spectroscope') {
       const bonds = this.smooth(h, bondCounts(packets[0]));
       this.bonds = bonds.reduce((a, b) => a + b, 0) >= TRACE ? [...bonds] : bonds.map(() => 0);
-    }
-    if (this.kind === 'visualizer') {
-      const [v, ...shares] = this.smooth(h, [volume(packets[0]), ...bondShares(packets[0], 1)]);
-      this.links = v >= TRACE ? shares.map((x) => x / v) : null;
     }
     return this.out;
   }
