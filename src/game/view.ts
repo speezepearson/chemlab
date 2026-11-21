@@ -27,7 +27,7 @@ import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
   clockText, LAMP, SHEET, darkness, ringShare, atomSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
-  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, TEST_PAPER, paperReading, paperTriangles, sectorInset, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
+  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, TEST_PAPER, paperReading, paperTriangles, sectorInset, BOND_PAPER, bondDots, bondReading, isBlotter, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, Tool,
 } from './tools';
 import { CABINET, CABINET_BUILD, STOCK, type Stock, type Stocked } from './cabinet';
@@ -234,7 +234,7 @@ const LAMP_GLOW = 0xb9a6ff;
  * the way, a dark purple-brown; in between, a blend of the two by how dark it is (see darkness). 0 to 255 a channel.
  */
 const SHEET_COLORS = { fresh: [230, 223, 200], dark: [46, 29, 41] } as const;
-/** Blotting paper, for the wicking strip and a sheet of test paper. */
+/** Blotting paper, for the wicking strip and the sheets of test paper and bond paper. */
 const paperMat = new THREE.MeshStandardMaterial({ color: 0xe6dfc8, roughness: 0.95, metalness: 0 });
 /** Its cream, as drawn on a canvas. */
 const PAPER = '#e6dfc8';
@@ -931,7 +931,10 @@ function drawColumn(sc: Screen, t: Tool): void {
  */
 const TEST_PRINT = { ink: 'rgba(22, 20, 18, 0.94)', soft: 0.45, rough: 0.4, steps: 7 };
 
-/** A seeded random in [0, 1) (mulberry32): each sheet of test paper's stains have edges of their own, the same every time. */
+/**
+ * A seeded random in [0, 1) (mulberry32): each sheet of test paper's stains, and each sheet of bond paper's lines, have
+ * edges of their own, the same every time.
+ */
 function seeded(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
@@ -944,8 +947,25 @@ function seeded(seed: number): () => number {
 }
 
 /**
- * A sheet of test paper's face, seen from above with its front edge at the bottom: cream, all of it darker by how
- * soaked it is (see wetness), as a strip's paper is; each small triangle of each of its triangles (see paperTriangles)
+ * A sheet of blotting paper's bare face (see BLOTTERS), seen from above with its front edge at the bottom: cream, all
+ * of it darker by how soaked it is (`wet`, see wetness), as a strip's paper is. It leaves the canvas drawn on in world
+ * units from the sheet's middle, x right and y toward its front, for what's printed on it and what shows of what it
+ * holds.
+ */
+function blotting(sc: Screen, wet: number): void {
+  const { ctx, ppu } = sc;
+  const { w, d } = TEST_PAPER;
+  ctx.setTransform(ppu, 0, 0, ppu, (w / 2) * ppu, (d / 2) * ppu);
+  ctx.fillStyle = PAPER;
+  ctx.fillRect(-w / 2, -d / 2, w, d);
+  if (wet > 0) {
+    ctx.fillStyle = `rgba(${WET.rgb}, ${WET.alpha * wet})`;
+    ctx.fillRect(-w / 2, -d / 2, w, d);
+  }
+}
+
+/**
+ * A sheet of test paper's face (see blotting): each small triangle of each of its triangles (see paperTriangles)
  * stained its atom's color, as opaque as paperReading says, inside a margin that keeps it clear of the lines (see
  * sectorInset), its edge soft and a little uneven; and over that, printed in black, each triangle's outline and the
  * three lines that cut it in four. No words: reading it is part of the game.
@@ -958,16 +978,9 @@ function drawTestPaper(sc: Screen, t: Tool): void {
   if (key === sc.key) return;
   sc.key = key;
   const { ctx, ppu } = sc;
-  const { w, d, line, margin } = TEST_PAPER;
+  const { line, margin } = TEST_PAPER;
   const { ink, soft, rough, steps } = TEST_PRINT;
-  // from the sheet's middle, x right and y toward its front
-  ctx.setTransform(ppu, 0, 0, ppu, (w / 2) * ppu, (d / 2) * ppu);
-  ctx.fillStyle = PAPER;
-  ctx.fillRect(-w / 2, -d / 2, w, d);
-  if (wet > 0) {
-    ctx.fillStyle = `rgba(${WET.rgb}, ${WET.alpha * wet})`;
-    ctx.fillRect(-w / 2, -d / 2, w, d);
-  }
+  blotting(sc, wet);
   const rnd = seeded(t.id + 1);
   // (drawn far off to the left, so that only its shadow, which is the stain, soft-edged, lands on the paper)
   const OFF = 4 * sc.canvas.width;
@@ -1008,6 +1021,68 @@ function drawTestPaper(sc: Screen, t: Tool): void {
       ctx.closePath();
       ctx.stroke();
     }
+  });
+  sc.tex.needsUpdate = true;
+}
+
+/**
+ * How a sheet of bond paper's lines are inked, in world units: `ink`, their near-black (as opaque as BOND_PAPER's
+ * `faint` and `dark` say); `soft`, how far a line's edge fades over (the blur's standard deviation); and `rough`, how
+ * far, at most, each edge strays in or out along its length, and `steps`, into how many stretches it's cut to stray by.
+ */
+const BOND_PRINT = { ink: '22, 20, 18', soft: 0.3, rough: 0.28, steps: 9 };
+
+/**
+ * A sheet of bond paper's face (see blotting): a line between each two of its four dots (see bondDots and BOND_ENDS),
+ * stopping short of them, as faint as it's printed where the sheet holds nothing with that bond, and darker by the
+ * share of what it holds that has it (see bondReading), its edges soft and a little uneven, in their own way on each
+ * sheet; and over them the dots, each printed in its atom's own color. No words: reading it is part of the game.
+ */
+function drawBondPaper(sc: Screen, t: Tool): void {
+  const held = t.paper[0];
+  const reading = bondReading(held);
+  const wet = wetness(volume(held), TEST_PAPER.cap, 1);
+  const key = `${wet.toFixed(3)} ${reading.map((x) => x.toFixed(3)).join()}`;
+  if (key === sc.key) return;
+  sc.key = key;
+  const { ctx, ppu } = sc;
+  const { dot, line, gap, faint, dark } = BOND_PAPER;
+  const { ink, soft, rough, steps } = BOND_PRINT;
+  blotting(sc, wet);
+  const dots = bondDots();
+  const rnd = seeded(t.id + 1);
+  // (drawn far off to the left, so that only its shadow, which is the line, soft-edged, lands on the paper)
+  const OFF = 4 * sc.canvas.width;
+  BOND_ENDS.forEach(([i, j], b) => {
+    const [p, q] = [dots[i], dots[j]];
+    const len = Math.hypot(q.x - p.x, q.y - p.y);
+    const [ux, uy] = [(q.x - p.x) / len, (q.y - p.y) / len];
+    const [a0, a1] = [dot + gap, len - dot - gap];
+    // out along one edge and back along the other, each in stretches, each joint strayed a little in or out (the
+    // same for this sheet whatever's on it)
+    const outline: [number, number][] = [];
+    for (const side of [1, -1])
+      for (let k = 0; k <= steps; k++) {
+        const along = side > 0 ? a0 + ((a1 - a0) * k) / steps : a1 - ((a1 - a0) * k) / steps;
+        const off = side * (line / 2 + rough * (2 * rnd() - 1));
+        outline.push([p.x + ux * along - uy * off, p.y + uy * along + ux * off]);
+      }
+    ctx.save();
+    ctx.shadowColor = `rgba(${ink}, ${faint + (dark - faint) * reading[b]})`;
+    ctx.shadowBlur = 2 * soft * ppu;
+    ctx.shadowOffsetX = OFF;
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    for (const [px, py] of outline) ctx.lineTo(px - OFF / ppu, py);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  });
+  SECTOR_ATOMS.forEach((atom, i) => {
+    ctx.fillStyle = `rgb(${ATOM_RGB[atom].join(', ')})`;
+    ctx.beginPath();
+    ctx.arc(dots[i].x, dots[i].y, dot, 0, 2 * Math.PI);
+    ctx.fill();
   });
   sc.tex.needsUpdate = true;
 }
@@ -1560,7 +1635,7 @@ class ToolView {
     else if (t.kind === 'strip') this.buildStrip();
     else if (t.kind === 'shadowlamp') this.buildLamp(pick);
     else if (t.kind === 'sheet') this.buildSheet();
-    else if (t.kind === 'testpaper') this.buildTestPaper();
+    else if (isBlotter(t.kind)) this.buildBlotter();
     else if (t.kind === 'dish') {
       // a little base under the dish, for its stand to clamp
       block(art, darkMat, -12, 12, TH + 0.6, sh.box.y1, -D.body / 2, D.body / 2, 1);
@@ -1989,10 +2064,11 @@ class ToolView {
   }
 
   /**
-   * A sheet of test paper (see TEST_PAPER): a thin sheet of blotting paper lying flat, with what's printed on it and
-   * what it's soaked up shown on its top face (see drawTestPaper), its front edge the bottom of the picture.
+   * A sheet of test paper or bond paper (see TEST_PAPER and BLOTTERS): a thin sheet of blotting paper lying flat, with
+   * what's printed on it and what it's soaked up shown on its top face (see drawTestPaper and drawBondPaper), its
+   * front edge the bottom of the picture.
    */
-  private buildTestPaper(): void {
+  private buildBlotter(): void {
     const { w, d, thick } = TEST_PAPER;
     block(this.art, paperMat, -w / 2, w / 2, 0, thick, -d / 2, d / 2);
     // its face, laid flat just over its top: up the picture is toward the sheet's back
@@ -2623,6 +2699,7 @@ class ToolView {
     if (this.sheet) this.drawSheet();
     if (t.kind === 'strip' && this.screen) drawStrip(this.screen, t);
     if (t.kind === 'testpaper' && this.screen) drawTestPaper(this.screen, t);
+    if (t.kind === 'bondpaper' && this.screen) drawBondPaper(this.screen, t);
     if (t.kind === 'column' && this.screen) drawColumn(this.screen, t);
     if (t.kind === 'culture') this.drawCulture(clock);
     if (t.kind === 'meter' && this.screen) {
@@ -4044,7 +4121,7 @@ const ICON_VIEW = {
  * The kinds that aren't seen whole and upright. A thermometer is so long and thin that its scale's numbers, all that
  * tells the fine one from the wide one, would be lost: so it lies aslant (`roll`, in radians, anticlockwise), and only
  * its lower end is in the picture (`only`, heights in its flat frame, y down from its top): its bulb and the first two
- * numbers of its scale, the rest running off the corner. A sheet of test paper lies flat, so from an icon's usual
+ * numbers of its scale, the rest running off the corner. A sheet of test paper or bond paper lies flat, so from an icon's usual
  * height it would be all but edge on: it's seen from well above instead (`pitch`, and `yaw`, in place of ICON_VIEW's),
  * so that what's printed on it shows.
  */
@@ -4052,6 +4129,7 @@ const ICON_POSES: Partial<Record<Stocked, { roll?: number; only?: { y0: number; 
   thermometer: { roll: -Math.PI / 4, only: { y0: THERMOMETER_ROD.foot - 22, y1: THERMOMETER_ROD.h } },
   thermometerWide: { roll: -Math.PI / 4, only: { y0: THERMOMETER_ROD.foot - 22, y1: THERMOMETER_ROD.h } },
   testpaper: { yaw: 0.3, pitch: 0.95 },
+  bondpaper: { yaw: 0.3, pitch: 0.95 },
 };
 
 /** A little picture of each kind of thing the equipment wheels make, each on a canvas of its own (see IconStudio). */

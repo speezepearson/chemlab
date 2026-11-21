@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { BOND_KEYS } from '../chem/atoms';
 import { ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
@@ -10,7 +11,7 @@ import { Vessel, volume, type Flask } from './flask';
 import { DEFAULT_PRESET, LAMP_POSE } from './presets';
 import type { SaveState } from './save';
 import { CELL, LIFT, toCell } from './space';
-import { INLINE_TOOLS, SHAPES, SHEET, TEST_PAPER, UNIQUE_TOOLS, darkness, paperReading, type Tool } from './tools';
+import { INLINE_TOOLS, SHAPES, SHEET, TEST_PAPER, UNIQUE_TOOLS, bondReading, bondShares, darkness, paperReading, type Tool } from './tools';
 
 /*
  * The engine itself, with nothing to draw on and nothing to hear: the view and the sounds are stood in for, as they
@@ -101,62 +102,65 @@ function lab(): { e: GameEngine; in: Inside } {
 /** The least a save can be: as old a lab as there is, with nothing in it. */
 const bare = (): SaveState => ({ v: 1, preset: DEFAULT_PRESET.id, flasks: [], tools: [], scales: [], hoses: [] });
 
+type Lab = { e: GameEngine; in: Inside };
+/** More of the engine's own things, which the tests of the sheets of blotting paper reach into. */
+interface Hands {
+  held: { kind: string; t?: Tool; f?: Flask; dir?: { x: number; y: number; z: number } } | null;
+  flasks: Flask[];
+  placeHeld(h: unknown, p: Tool['pose']): void;
+}
+const hands = (l: Lab) => l.in as unknown as Hands;
+/** A sheet of blotting paper, of either kind. */
+type Sheet = 'testpaper' | 'bondpaper';
+/** The middle of a cell in the front row of the first island. */
+const SPOT = { x: 150, z: 950 };
+const paperOf = (t: Tool) => t.paper[0];
+/** Where something is, to a millionth of a unit. */
+const where = (p: Tool['pose']) => [p.x, p.y, p.z, p.yaw].map((v) => Math.round(v * 1e6) / 1e6 + 0);
+const flat = (x: number, z: number, yaw = 0) => [x, LIFT + TEST_PAPER.thick, z, yaw];
+
+/** Take a sheet out of the cabinet, by the wheel, and lay it down in the cell at (x, z). */
+function lay(l: Lab, x = SPOT.x, z = SPOT.z, kind: Sheet = 'testpaper'): Tool {
+  // looking a little down, the sheet is held low in front, over the cell
+  const there = () => {
+    l.e.debug({ x, z: z + 96, yaw: 0, pitch: (-20 * Math.PI) / 180 });
+    l.in.move(0);
+  };
+  there();
+  expect(l.e.spawn(kind)).toBe(true);
+  there();
+  const t = l.in.held!.t!;
+  l.in.release();
+  expect(l.in.held).toBeNull();
+  return t;
+}
+
+/** Take one of a kind out of the cabinet and hold it at a pose, standing well out of its way. */
+function holdAt(l: Lab, kind: 'flask' | 'pipette' | Sheet, p: Tool['pose']): void {
+  l.e.debug({ x: p.x, z: p.z + 400, yaw: 0, pitch: 0 });
+  l.in.move(0);
+  expect(l.e.spawn(kind)).toBe(true);
+  hands(l).placeHeld(l.in.held, p);
+}
+
+/** A pipette set down on its stand with its spout over the middle of the cell at (x, z), `up` above the counter. */
+function pipetteOver(l: Lab, x = SPOT.x, z = SPOT.z, up = 60): Tool {
+  holdAt(l, 'pipette', { x, y: LIFT + up + SHAPES.pipette.spoutY, z, yaw: 0 });
+  const t = l.in.held!.t!;
+  l.in.release();
+  expect(l.in.held).toBeNull();
+  return t;
+}
+
+/** Run the lab for `s` sim seconds. */
+const run = (l: Lab, s: number) => {
+  for (let i = 0; i < Math.round(s / 0.05); i++) l.in.simulate(0.05);
+};
+
 describe('test paper', () => {
-  type Lab = { e: GameEngine; in: Inside };
-  /** More of the engine's own things, which these tests reach into. */
-  interface Hands {
-    held: { kind: string; t?: Tool; f?: Flask; dir?: { x: number; y: number; z: number } } | null;
-    flasks: Flask[];
-    placeHeld(h: unknown, p: Tool['pose']): void;
-  }
-  const hands = (l: Lab) => l.in as unknown as Hands;
   const R = singleOf('R');
   const G = singleOf('G');
   const RG = pairOf('R', 'G');
-  /** The middle of a cell in the front row of the first island. */
-  const SPOT = { x: 150, z: 950 };
-  const paperOf = (t: Tool) => t.paper[0];
-  /** Where something is, to a millionth of a unit. */
-  const where = (p: Tool['pose']) => [p.x, p.y, p.z, p.yaw].map((v) => Math.round(v * 1e6) / 1e6 + 0);
-  const flat = (x: number, z: number, yaw = 0) => [x, LIFT + TEST_PAPER.thick, z, yaw];
-
-  /** Take a sheet out of the cabinet, by the wheel, and lay it down in the cell at (x, z). */
-  function lay(l: Lab, x = SPOT.x, z = SPOT.z): Tool {
-    // looking a little down, the sheet is held low in front, over the cell
-    const there = () => {
-      l.e.debug({ x, z: z + 96, yaw: 0, pitch: (-20 * Math.PI) / 180 });
-      l.in.move(0);
-    };
-    there();
-    expect(l.e.spawn('testpaper')).toBe(true);
-    there();
-    const t = l.in.held!.t!;
-    l.in.release();
-    expect(l.in.held).toBeNull();
-    return t;
-  }
-
-  /** Take one of a kind out of the cabinet and hold it at a pose, standing well out of its way. */
-  function holdAt(l: Lab, kind: 'flask' | 'pipette' | 'testpaper', p: Tool['pose']): void {
-    l.e.debug({ x: p.x, z: p.z + 400, yaw: 0, pitch: 0 });
-    l.in.move(0);
-    expect(l.e.spawn(kind)).toBe(true);
-    hands(l).placeHeld(l.in.held, p);
-  }
-
-  /** A pipette set down on its stand with its spout over the middle of the cell at (x, z), `up` above the counter. */
-  function pipetteOver(l: Lab, x = SPOT.x, z = SPOT.z, up = 60): Tool {
-    holdAt(l, 'pipette', { x, y: LIFT + up + SHAPES.pipette.spoutY, z, yaw: 0 });
-    const t = l.in.held!.t!;
-    l.in.release();
-    expect(l.in.held).toBeNull();
-    return t;
-  }
-
-  /** Run the lab for `s` sim seconds. */
-  const run = (l: Lab, s: number) => {
-    for (let i = 0; i < Math.round(s / 0.05); i++) l.in.simulate(0.05);
-  };
 
   it('comes out of the cabinet as often as wanted, held low so that its face shows, and is thrown away when put away', () => {
     const l = lab();
@@ -356,6 +360,129 @@ describe('test paper', () => {
     const [c, d] = l.in.tools.filter((t) => t.kind === 'testpaper');
     expect(paperOf(c).N).toBe(0);
     expect(volume(paperOf(d))).toBe(TEST_PAPER.cap);
+  });
+});
+
+describe('bond paper', () => {
+  const R = singleOf('R');
+  const RG = pairOf('R', 'G');
+  const RK = pairOf('R', 'K');
+  const bond = (k: string) => BOND_KEYS.indexOf(k);
+
+  it('comes out of the cabinet as often as wanted, held low so that its face shows, and is thrown away when put away', () => {
+    const l = lab();
+    for (let i = 0; i < STOCK.bondpaper + 3; i++) {
+      expect(l.e.spawn('bondpaper')).toBe(true);
+      expect(l.in.held?.t?.kind).toBe('bondpaper');
+      expect(hands(l).held!.dir!.y).toBeLessThan(0);
+      l.in.putAway();
+      expect(l.in.held).toBeNull();
+    }
+    expect(l.in.tools.some((t) => t.kind === 'bondpaper')).toBe(false);
+    expect(l.in.stock.bondpaper.every(Boolean)).toBe(true);
+  });
+
+  it('lies flat on the counter where it is let go of, in the middle of a cell, with no stand, as a sheet of test paper does', () => {
+    const l = lab();
+    const sheet = lay(l, SPOT.x, SPOT.z, 'bondpaper');
+    expect(sheet.kind).toBe('bondpaper');
+    expect(where(sheet.pose)).toEqual(flat(SPOT.x, SPOT.z));
+    expect(toolStands(sheet)).toEqual([]);
+    expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(false);
+    // nothing else can be set down on its cell, not even a sheet of the other kind
+    holdAt(l, 'testpaper', { x: SPOT.x - 10, y: LIFT + 150, z: SPOT.z, yaw: 0 });
+    const sh = l.in.placement(l.in.held);
+    expect('rest' in sh && [toCell(sh.rest.pose.x), toCell(sh.rest.pose.z)]).not.toEqual([toCell(SPOT.x), toCell(SPOT.z)]);
+    l.in.putAway();
+    // but a pipette on its stand goes right over it
+    const pip = pipetteOver(l);
+    expect(where(pip.pose).slice(0, 3)).toEqual([SPOT.x, LIFT + 60 + SHAPES.pipette.spoutY, SPOT.z]);
+  });
+
+  it('soaks up what a spout lets out onto it, its lines darkening by what it holds, until it is soaked: then they stay', () => {
+    const l = lab();
+    const sheet = lay(l, SPOT.x, SPOT.z, 'bondpaper');
+    const pip = pipetteOver(l);
+    const paper = paperOf(sheet);
+    expect(bondReading(paper)).toEqual([0, 0, 0, 0, 0, 0]);
+    // three parts R–G to one of R
+    pip.tanks[0].setMolecules(RG, 3.75 * TEST_PAPER.cap);
+    pip.tanks[0].setMolecules(R, 1.25 * TEST_PAPER.cap);
+    pip.valves[0] = 1;
+    run(l, 0.1);
+    // what's landed so far already shows at full strength, though the sheet's hardly wet
+    expect(volume(paper)).toBeGreaterThan(0);
+    expect(volume(paper)).toBeLessThan(0.5 * TEST_PAPER.cap);
+    expect(bondReading(paper)[bond('RG')]).toBeCloseTo(0.75, 2);
+    run(l, 30);
+    expect(volume(pip.tanks[0])).toBeLessThan(0.1 * TEST_PAPER.cap);
+    expect(volume(paper) / TEST_PAPER.cap).toBeCloseTo(1, 4);
+    expect(volume(paper)).toBeLessThanOrEqual(TEST_PAPER.cap);
+    // each line is as dark as the share of what the sheet holds that has its bond
+    const was = bondReading(paper);
+    expect(was).toEqual(bondShares(paper, volume(paper)));
+    expect(was[bond('RG')]).toBeCloseTo(0.75, 2);
+    expect(was.filter((x) => x > 0)).toHaveLength(1);
+    // more, of something else, changes nothing
+    const held = [...paper.n];
+    pip.tanks[0].setMolecules(RK, 5 * TEST_PAPER.cap);
+    run(l, 30);
+    expect(volume(pip.tanks[0])).toBeLessThan(0.1 * TEST_PAPER.cap);
+    expect([...paper.n]).toEqual(held);
+    expect(bondReading(paper)).toEqual(was);
+  });
+
+  it('keeps what it holds as it is: it neither reacts nor cools, while a flask of the same does', () => {
+    const l = lab();
+    const sheet = lay(l, SPOT.x, SPOT.z, 'bondpaper');
+    const paper = paperOf(sheet);
+    const mix = new Vessel(Infinity);
+    mix.setMolecules(R, CAP);
+    mix.setMolecules(singleOf('G'), CAP);
+    mix.setTemperature(1);
+    paper.addFrom(mix, TEST_PAPER.cap / 2, true);
+    holdAt(l, 'flask', { x: SPOT.x + 2 * CELL, y: LIFT + 150, z: SPOT.z, yaw: 0 });
+    const f = hands(l).held!.f!;
+    l.in.release();
+    f.addFrom(mix, CAP / 2);
+    l.e.speed = 16;
+    run(l, 5);
+    // in the flask, R and G have bonded; on the paper they never do, so no line darkens
+    expect(f.n[RG]).toBeGreaterThan(0);
+    expect(paper.n[RG]).toBe(0);
+    expect(bondReading(paper)).toEqual([0, 0, 0, 0, 0, 0]);
+    expect(paper.Q).toBe(0);
+  });
+
+  it('is saved with what it holds, and where it lies, beside a sheet of test paper with its own', () => {
+    const l = lab();
+    const bonds = lay(l, SPOT.x, SPOT.z, 'bondpaper');
+    const test = lay(l, SPOT.x + CELL, SPOT.z, 'testpaper');
+    const mix = new Vessel(Infinity);
+    mix.setMolecules(R, 0.2 * CAP);
+    mix.setMolecules(RG, 0.3 * CAP);
+    mix.setMolecules(SOLVENT_SPECIES, 0.5 * CAP);
+    paperOf(bonds).addFrom(mix, 0.6 * TEST_PAPER.cap, true);
+    paperOf(test).addFrom(mix, 0.4 * TEST_PAPER.cap, true);
+    bonds.note = 'batch 4';
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    const saved = s.tools.filter((t) => t.kind === 'bondpaper');
+    expect(saved).toHaveLength(1);
+    expect(Object.keys(saved[0].paper![0].n).sort()).toEqual(['R', 'R–G', 'S']);
+    l.e.restore(s, DEFAULT_PRESET);
+    const b = l.in.tools.find((t) => t.kind === 'bondpaper')!;
+    const t = l.in.tools.find((t) => t.kind === 'testpaper')!;
+    expect(where(b.pose)).toEqual(where(bonds.pose));
+    expect([...paperOf(b).n]).toEqual([...paperOf(bonds).n]);
+    expect([...paperOf(t).n]).toEqual([...paperOf(test).n]);
+    expect(bondReading(paperOf(b))).toEqual(bondReading(paperOf(bonds)));
+    expect(bondReading(paperOf(b))[bond('RG')]).toBeCloseTo(0.3, 2);
+    expect(b.note).toBe('batch 4');
+    // a save that says too much of what it holds loads it with what fits
+    const odd = JSON.parse(JSON.stringify(s)) as SaveState;
+    odd.tools.find((x) => x.kind === 'bondpaper')!.paper = [{ n: { 'R–G': 50 * TEST_PAPER.cap }, Q: 0 }];
+    l.e.restore(odd, DEFAULT_PRESET);
+    expect(volume(paperOf(l.in.tools.find((x) => x.kind === 'bondpaper')!))).toBe(TEST_PAPER.cap);
   });
 });
 

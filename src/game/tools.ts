@@ -965,13 +965,14 @@ export function meterText(rate: number): string {
 }
 
 /**
- * The order of the sectors of a sheet of test paper's triangle in its reading, and of the bond visualizer's points:
- * the four colors. There's none for the solvent, which both are blind to.
+ * The order of the sectors of a sheet of test paper's triangle in its reading, and of the bond visualizer's points
+ * and a sheet of bond paper's dots: the four colors. There's none for the solvent, which they're all blind to.
  */
 export const SECTOR_ATOMS: readonly ColorAtom[] = ['R', 'G', 'B', 'K'];
 
 /**
- * Where each atom is in a triangle, on a sheet of test paper and on the bond visualizer's screen alike: the triangle
+ * Where each atom is in a triangle, on a sheet of test paper, a sheet of bond paper and the bond visualizer's screen
+ * alike: the triangle
  * stands on its base, G at the top, R at the bottom left, B at the bottom right, and K in the middle. As offsets from
  * the triangle's middle, x right and y down, its corners 1 away.
  */
@@ -1045,10 +1046,45 @@ export function paperTriangles(): { x: number; y: number; r: number }[] {
   return triangles.map((_, i) => ({ x: -w / 2 + edge + each / 2 + i * (each + edge), y: r / 4, r }));
 }
 
+/**
+ * A sheet of bond paper (see SHAPES.bondpaper): a sheet of test paper's blotting paper, the same size, lying flat the
+ * same way and soaking up as much (see TEST_PAPER and Blotter), but printed differently: with four dots, one per
+ * color, each in its atom's own color, placed as the colors' sectors are in a sheet of test paper's triangle (see
+ * ATOM_PLACE): at the corners of a triangle standing on its base, and in its middle. Between each two of them runs a
+ * line in an ink that's all but invisible dry, and that darkens, for good, by what the sheet soaks up: by the share
+ * of it that has a bond between those two atoms (see bondReading):
+ * - edge: how far in from the sheet's edges the dots keep, in world units; dot: a dot's radius;
+ * - line: how thick the lines between them are, and gap: how far short of each dot's rim a line stops;
+ * - faint: how opaque a line's ink is dry, or wet with nothing that has its bond, and dark: how opaque it is when
+ *   everything the sheet holds has it. In between, it goes evenly with the share.
+ */
+export const BOND_PAPER = { edge: 5, dot: 3.5, line: 2.2, gap: 1.6, faint: 0.05, dark: 0.96 };
+
+/**
+ * Where a sheet of bond paper's dots are printed, in the sheet's own frame, from its middle, x right and y toward its
+ * front, in SECTOR_ATOMS order: the corners and the middle of a triangle on its base as seen from the sheet's front
+ * (see ATOM_PLACE), as big as leaves every dot BOND_PAPER.edge clear of the sheet's edges, and midway between its
+ * front and back (see paperTriangles).
+ */
+export function bondDots(): { x: number; y: number }[] {
+  const { edge, dot } = BOND_PAPER;
+  const r = Math.min((TEST_PAPER.w / 2 - edge - dot) / (Math.sqrt(3) / 2), (TEST_PAPER.d - 2 * (edge + dot)) / 1.5);
+  return SECTOR_ATOMS.map((a) => ({ x: r * ATOM_PLACE[a][0], y: r / 4 + r * ATOM_PLACE[a][1] }));
+}
+
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater'
   | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'dish' | 'column' | 'culture' | 'tank'
-  | 'receptacle' | 'shadowlamp' | 'sheet' | 'testpaper';
+  | 'receptacle' | 'shadowlamp' | 'sheet' | 'testpaper' | 'bondpaper';
+
+/**
+ * The sheets of blotting paper that lie flat on a counter and soak up what lands on them, once (see Blotter): test
+ * paper and bond paper, which differ only in what's printed on them and so in what they show of what they hold.
+ */
+export const BLOTTERS: readonly ToolKind[] = ['testpaper', 'bondpaper'];
+
+/** Whether a tool of this kind is a sheet of blotting paper (see BLOTTERS). */
+export const isBlotter = (kind: ToolKind) => BLOTTERS.includes(kind);
 
 /**
  * Tools there's only ever one of: not on an equipment wheel, and never put away. The receptacle is the whole cryostabilizer
@@ -1131,6 +1167,17 @@ const THERMOMETER_SHAPE: ToolShape = {
   valveY: 0,
   spoutY: THERMOMETER_ROD.h,
   box: { x0: -THERMOMETER_ROD.r - 0.5, x1: THERMOMETER_ROD.r + 0.5, y0: -0.5, y1: THERMOMETER_ROD.h + 0.5 },
+};
+
+/** A sheet of blotting paper lying flat (see TEST_PAPER and BLOTTERS), its top face up, with no tanks, spouts or valves. */
+const BLOTTER_SHAPE: ToolShape = {
+  tanks: [],
+  noValve: true,
+  flat: true,
+  spouts: [],
+  valveY: 0,
+  spoutY: TEST_PAPER.thick,
+  box: { x0: -TEST_PAPER.w / 2, x1: TEST_PAPER.w / 2, y0: 0, y1: TEST_PAPER.thick },
 };
 
 export const SHAPES: Record<ToolKind, ToolShape> = {
@@ -1369,16 +1416,9 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: SHEET.top + SHEET.side,
     box: { x0: -SHEET.side / 2 - 1, x1: SHEET.side / 2 + 1, y0: 0, y1: SHEET.top + SHEET.side },
   },
-  testpaper: {
-    // a sheet of paper lying flat (see TEST_PAPER), its top face up, with no tanks, spouts or valves
-    tanks: [],
-    noValve: true,
-    flat: true,
-    spouts: [],
-    valveY: 0,
-    spoutY: TEST_PAPER.thick,
-    box: { x0: -TEST_PAPER.w / 2, x1: TEST_PAPER.w / 2, y0: 0, y1: TEST_PAPER.thick },
-  },
+  // the sheets of blotting paper (see BLOTTERS): the same sheet, printed differently
+  testpaper: BLOTTER_SHAPE,
+  bondpaper: BLOTTER_SHAPE,
   // the thermometers: a glass rod each (see THERMOMETER_ROD), with no tanks, spouts or valves
   thermometer: THERMOMETER_SHAPE,
   thermometerWide: THERMOMETER_SHAPE,
@@ -1508,7 +1548,10 @@ export function bondPoint(i: number): { x: number; y: number } {
   return { x: BOND_TRIANGLE.x + BOND_TRIANGLE.r * dx, y: BOND_TRIANGLE.y + BOND_TRIANGLE.r * dy };
 }
 
-/** For each bond (in BOND_KEYS order), its two atoms' places in SECTOR_ATOMS, the ends of the line it lights. */
+/**
+ * For each bond (in BOND_KEYS order), its two atoms' places in SECTOR_ATOMS: the ends of the line it lights on the
+ * bond visualizer's screen, and of the one it darkens on a sheet of bond paper.
+ */
 export const BOND_ENDS: readonly (readonly [number, number])[] = BOND_KEYS.map(
   (k) => [SECTOR_ATOMS.indexOf(k[0] as ColorAtom), SECTOR_ATOMS.indexOf(k[1] as ColorAtom)] as const,
 );
@@ -1587,6 +1630,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   shadowlamp: 'Shadow lamp',
   sheet: 'Shadow paper',
   testpaper: 'Test paper',
+  bondpaper: 'Bond paper',
 };
 
 /**
@@ -1636,7 +1680,7 @@ export function separatorShares(): number[][] {
 }
 
 /**
- * What a sheet of test paper soaks up (see TEST_PAPER): blotting paper, which takes up what lands on it only as far
+ * What a sheet of test paper or of bond paper soaks up (see TEST_PAPER and BLOTTERS): blotting paper, which takes up what lands on it only as far
  * as it has room, however it's poured on, so it's never overfilled and nothing mixes into what it already holds: what's
  * more runs off it and is lost, as off a bare counter. Once it's soaked (see soaked) it takes up nothing at all. So it
  * holds the first of what landed on it, for good. It keeps none of its heat, as a wicking strip's paper keeps none.
@@ -1649,9 +1693,19 @@ export class Blotter extends Vessel {
 
   override addFrom(src: Fluid, amount: number): number {
     if (this.soaked) return 0;
-    const added = super.addFrom(src, amount, false);
+    const was = this.N;
+    super.addFrom(src, amount, false);
+    this.trim();
     this.Q = 0;
-    return added;
+    return this.N - was;
+  }
+
+  /**
+   * A share of a mixture is rounded species by species, so what was taken up can come to a molecule or two more than
+   * there was room for: those run off again with the rest, so that the paper is never overfilled.
+   */
+  private trim(): void {
+    while (volume(this) > this.cap) transfer(this, null, volume(this) - this.cap);
   }
 }
 
@@ -1714,6 +1768,8 @@ export class Blotter extends Vessel {
  *   lamp's light falls on it (see dose and expose).
  * - A sheet of **test paper** has none either: it lies flat on a counter (see TEST_PAPER), soaks up what lands on it
  *   until it's wet through (see paper and Blotter), and shows what it holds as stains (see paperReading). It's used once.
+ * - A sheet of **bond paper** is the same sheet printed differently (see BOND_PAPER): it shows what it holds as the
+ *   lines between its dots, darkened (see bondReading).
  *
  * Tools run on sim time, so a slow drip into a reacting flask gives the same
  * result at any sim speed.
@@ -1757,8 +1813,8 @@ export class Tool {
   /**
    * A wicking strip's paper, stretch by stretch from its foot to its top (see STRIP.cells), each holding what's on
    * that stretch; it doesn't react or cool, having lost its heat as the paper took it up (see scorch). Or a sheet of
-   * test paper's, all of it as one (see Blotter), holding what it's soaked up, which doesn't react or cool either.
-   * Empty for any other tool.
+   * test paper's or bond paper's (see BLOTTERS), all of it as one (see Blotter), holding what it's soaked up, which
+   * doesn't react or cool either. Empty for any other tool.
    */
   readonly paper: Vessel[];
   /**
@@ -1868,7 +1924,7 @@ export class Tool {
     this.tanks = SHAPES[kind].tanks.map((tk) => new Vessel(tk.cap ?? SHAPES[kind].tankCap ?? TANK_CAP));
     this.tube = Array.from({ length: kind === 'heater' ? HEATER_CELLS : 0 }, () => new Vessel(Infinity));
     this.paper =
-      kind === 'testpaper' ? [new Blotter(TEST_PAPER.cap)] : Array.from({ length: kind === 'strip' ? STRIP.cells : 0 }, () => new Vessel(Infinity));
+      isBlotter(kind) ? [new Blotter(TEST_PAPER.cap)] : Array.from({ length: kind === 'strip' ? STRIP.cells : 0 }, () => new Vessel(Infinity));
     this.scorch = new Float32Array(kind === 'strip' ? STRIP.cells : 0);
     this.bed = Array.from({ length: kind === 'column' ? COLUMN.cells : 0 }, () => new Vessel(Infinity));
     this.packing = kind === 'strip' ? new Bed(this.paper) : kind === 'column' ? new Bed(this.bed) : null;
@@ -2452,6 +2508,19 @@ export function paperReading(f: Fluid): number[][] {
   return TEST_PAPER.triangles.map(({ sizes }) =>
     SECTOR_ATOMS.map((_, c) => (bySize ? Math.min(1, sizes.reduce((t, w) => t + bySize[(w - 1) * n + c], 0)) : 0)),
   );
+}
+
+/**
+ * What a sheet of bond paper shows for the fluid it holds: for each bond (in BOND_KEYS order, its line's ends as
+ * BOND_ENDS says), how far its line has darkened, from 0 (as faint as it's printed) to 1: the share, by volume (see
+ * VOLUME), of the fluid that molecules with that bond in them make up (see bondShares). So it goes by shares, not by
+ * how much there is: a drop reads as a soaking does. R–G darkens its one line fully, and △RGB all three of its; half
+ * R, half R–G darkens R–G's half as far. Single atoms, the solvent's among them, darken nothing, but take up room.
+ * Nothing, for no fluid.
+ */
+export function bondReading(f: Fluid): number[] {
+  const v = volume(f);
+  return v > 0 ? bondShares(f, v).map((x) => Math.min(1, x)) : BOND_KEYS.map(() => 0);
 }
 
 /**

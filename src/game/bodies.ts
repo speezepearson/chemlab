@@ -18,10 +18,10 @@ import {
 
 /**
  * How deep a tool's cabinet is front to back, for the tools that have one deeper than their tanks; the shadow lamp is
- * as deep as its bench, and a sheet of test paper, lying flat, as deep as the sheet.
+ * as deep as its bench, and a sheet of test paper or bond paper, lying flat, as deep as the sheet.
  */
 const CABINET_DEPTH: Partial<Record<ToolKind, number>> = {
-  spectroscope: 50, visualizer: 50, shadowlamp: LAMP.d, testpaper: TEST_PAPER.d,
+  spectroscope: 50, visualizer: 50, shadowlamp: LAMP.d, testpaper: TEST_PAPER.d, bondpaper: TEST_PAPER.d,
 };
 
 /**
@@ -134,7 +134,7 @@ export function tankNoteY(t: Tool, k: number): number {
  * flow meter's readout round the pipe; the tube's top is flush with its opening, for a nozzle to snap onto (see
  * INLINE_DOCK). A dipper's (see DIPPERS) is only its top, where its stand's clamp holds it: a thermometer's rod's, or
  * a wicking strip's clip; the rest of it bumps into nothing, so it can stand down in a flask or a tank. A sheet of
- * shadow paper's is all of it, and so is a sheet of test paper's, lying flat. The shadow
+ * shadow paper's is all of it, and so is a sheet of test paper's or bond paper's, lying flat. The shadow
  * lamp's are its housing and the console beside it, and its holder's two posts and the rail between them (see LAMP):
  * the bench between housing and holder, and either side of them, is clear, for things to stand in its light.
  */
@@ -175,7 +175,7 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
   }
   // all of a sheet, as thick as the bar clipped along its top
   if (t.kind === 'sheet') return [{ x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, hz: SHEET.clip.d / 2 }];
-  // all of a sheet of test paper, lying flat
+  // all of a sheet of test paper or bond paper, lying flat
   if (sh.flat) return [{ x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, hz: TEST_PAPER.d / 2 }];
   const D = TOOL_DEPTH[t.kind];
   const bottom = (sh.tankH ?? TANK_H) + (sh.sump?.h ?? 0);
@@ -290,8 +290,8 @@ function inTank(t: Tool, k: number, p: Vec3): number | null {
 }
 
 /**
- * A sheet of test paper's face, in the room: what falls on it, anywhere on it, it soaks up (see Blotter). It has no
- * rim: what it can't take up runs off it and is lost.
+ * The face of a sheet of test paper or bond paper (see BLOTTERS), in the room: what falls on it, anywhere on it, it
+ * soaks up (see Blotter). It has no rim: what it can't take up runs off it and is lost.
  */
 export function paperMouth(t: Tool): Mouth {
   return { v: t.paper[0], ...onTool(t, 0, 0), hx: TEST_PAPER.w / 2, hz: TEST_PAPER.d / 2, yaw: t.pose.yaw };
@@ -584,7 +584,7 @@ const rodBack = (body: number) => Math.max(body / 2, FLASK_R) + STAND_CLEAR + ST
 
 /**
  * The stands holding up a tool, unless it's fixed where it is (built into a wall, or on its own bench), or it lies
- * flat on the counter (a sheet of test paper), or it's a sheet in the shadow lamp's holder (see inSlot): clamped near
+ * flat on the counter (a sheet of test paper or bond paper), or it's a sheet in the shadow lamp's holder (see inSlot): clamped near
  * its top, behind it.
  */
 export function toolStands(t: Tool, pose = t.pose): Stand[] {

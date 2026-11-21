@@ -34,7 +34,7 @@ import {
 } from './space';
 import {
   changeoverAt, BOND_KEYS, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
-  TANK_H, TOOL_NAMES, isDipper, isThermometer, Blotter, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
+  TANK_H, TOOL_NAMES, isBlotter, isDipper, isThermometer, Blotter, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
   type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
@@ -218,7 +218,7 @@ const WHEEL_CODES = ['Digit1', 'Digit2'];
 const WHEEL_KEYS = ['1', '2'];
 
 /**
- * Which way from the eyes (see Held.dir) something that lies flat, a sheet of test paper, is held when it's made in
+ * Which way from the eyes (see Held.dir) something that lies flat, a sheet of test paper or bond paper, is held when it's made in
  * hand: 25° below straight ahead, so that it's looked down on and its face is seen. Straight ahead, with the eyes
  * level, it would be edge on: a line.
  */
@@ -2035,14 +2035,14 @@ export class GameEngine {
 
   /**
    * The open top of the vessel the crosshair is on, to pour a held flask into: a flask's, or a tool's tank's; or, with
-   * `sheets`, the face of a sheet of test paper, which is poured onto but has nothing to dip into.
+   * `sheets`, the face of a sheet of blotting paper (see BLOTTERS), which is poured onto but has nothing to dip into.
    */
   private mouthAimed(sheets = false): Mouth | null {
     const p = this.target;
     const v =
       p?.kind === 'flask' ? p.f
       : p?.kind === 'tool' && p.part === 'tank' ? p.t.tanks[p.k]
-      : sheets && p?.kind === 'tool' && p.t.kind === 'testpaper' ? p.t.paper[0]
+      : sheets && p?.kind === 'tool' && isBlotter(p.t.kind) ? p.t.paper[0]
       : null;
     return (v && this.open.find((m) => m.v === v)) ?? null;
   }
@@ -2216,8 +2216,8 @@ export class GameEngine {
     for (const f of this.flasks) if (f.tilt < 0.05) out.push(flaskMouth(f));
     // (the station's funnel is back in the wall through a changeover)
     for (const t of this.tools) if (!t.away) t.tanks.forEach((_, k) => t.isOpen(k) && out.push(tankMouth(t, k)));
-    // a sheet of test paper's whole face
-    for (const t of this.tools) if (t.kind === 'testpaper') out.push(paperMouth(t));
+    // a sheet of blotting paper's whole face
+    for (const t of this.tools) if (isBlotter(t.kind)) out.push(paperMouth(t));
     return out;
   }
 
@@ -2229,7 +2229,7 @@ export class GameEngine {
 
   /**
    * Pour `amount` of src (by volume) into v, without depleting src, however full v is. Whatever no longer
-   * fits overflows (see overflow). (A sheet of test paper's paper takes up only what it has room for, and the rest is
+   * fits overflows (see overflow). (A sheet of blotting paper takes up only what it has room for, and the rest is
    * lost: see Blotter.)
    */
   private fill(v: Vessel, src: Fluid, amount = volume(src)): void {
@@ -2640,8 +2640,8 @@ export class GameEngine {
       mine.add(h.f);
       outlets.push({ at: flaskLip(h.f, POUR_ANG), lip: true });
     } else if (h.kind === 'tool') {
-      // (a sheet of test paper's face is landed on as a tank's open top is)
-      for (const v of h.t.kind === 'testpaper' ? h.t.paper : h.t.tanks) mine.add(v);
+      // (a sheet of blotting paper's face is landed on as a tank's open top is)
+      for (const v of isBlotter(h.t.kind) ? h.t.paper : h.t.tanks) mine.add(v);
       // a spout with its hose out lets out at the hose's nozzle, which stays where it is (see below)
       h.t.shape.spouts.forEach((_, j) => {
         if (!this.hoseOn({ tool: h.t, spout: j })) outlets.push({ at: spoutAt(h.t, j), lip: false });
@@ -2714,7 +2714,7 @@ export class GameEngine {
 
   /**
    * Where what's held, at pose p, would come to rest if let go, or why it can't. Only squarely on a counter: a flask,
-   * a scale or a tool that lies on the bench (a sheet of test paper) goes straight up or down until it's on the counter under it, which
+   * a scale or a tool that lies on the bench (a sheet of test paper or bond paper) goes straight up or down until it's on the counter under it, which
    * its whole footprint must be over (or a flask over a scale, onto its platform); a tool or hose's nozzle on a stand
    * stays at the height it's held, no higher than its stand reaches and no lower than the top of a counter it's held
    * sunk into, while its stand's base goes down onto the counter, which the whole base must be over (what it holds can
@@ -2829,7 +2829,7 @@ export class GameEngine {
     if (!h) return [];
     const guide = (a: Aim, look: GuideLook): Frame['guides'][number] => {
       const { x, y, z, hx, hz, yaw = 0 } = a.m;
-      // (a sheet of test paper's face is square, not round)
+      // (a sheet of blotting paper's face is square, not round)
       return { from: a.from, toY: y, look, mouth: { x, y, z, hx, hz, yaw, ...(a.m.v instanceof Blotter ? { square: true } : {}) }, v: a.m.v };
     };
     const out = this.aims(h, this.open).filter((a) => a.held === 'lip').map((a) => guide(a, 'solid'));
