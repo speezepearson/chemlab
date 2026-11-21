@@ -1376,11 +1376,16 @@ const FLASK_PROFILE = FLASK_OUTLINE.filter((p) => p.x >= 0 && !(p.x === 11 && p.
 const flaskGlassGeom = new THREE.LatheGeometry([new THREE.Vector2(0, -FLASK_H), ...FLASK_PROFILE, new THREE.Vector2(11, 0), new THREE.Vector2(12.5, 0.5)], 48);
 /**
  * The flask's fluid's solid: a hair inside the glass, so the two don't fight over the same pixels, standing `floor`
- * off the glass's floor, and so clear of what it stands on (a sink counter's drain grate is 0.5 over the counter);
+ * off the glass's floor, and so clear of what it stands on (a sink counter's drain grate is GRATE_LIFT over the counter);
  * and how thin a film of it is drawn at least, over that floor, so a trace in a flask shows, however little, rather
  * than being cut off below the solid.
  */
 const FLASK_FLUID = { floor: 0.6, film: 0.15 };
+/**
+ * How far over a sink counter's top its drain grate is drawn: clear of the top, so the two don't fight over the same
+ * pixels, but under a sheet of test paper or bond paper lying on the counter (TEST_PAPER.thick), which it would hide.
+ */
+const GRATE_LIFT = 0.2;
 const flaskFluidGeom = new THREE.LatheGeometry(
   [
     new THREE.Vector2(0, -FLASK_H + FLASK_FLUID.floor),
@@ -3244,7 +3249,7 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
     if (dark) continue;
     const g = new THREE.Mesh(planeUV(new THREE.PlaneGeometry(w - 16, d - 16), 'grate', 0, 0), drain);
     g.rotation.x = -Math.PI / 2;
-    g.position.set(x, LIFT + 0.5, z);
+    g.position.set(x, LIFT + GRATE_LIFT, z);
     g.receiveShadow = true;
     scene.add(g);
   }
