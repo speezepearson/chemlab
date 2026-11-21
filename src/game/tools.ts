@@ -1726,6 +1726,12 @@ export class Tool {
    * half by default; and a shadow lamp's is its dial (see lampShot), halfway by default.
    */
   readonly valves: number[];
+  /**
+   * Per valve, which way its lever was turned from shut, for a plain valve, which turns a quarter either way (see
+   * valveSweep in bodies.ts): 1 the way it always went, up, counterclockwise as it faces; −1 the other way, down.
+   * How far open it is is its valve's setting either way. 1 for any other valve.
+   */
+  readonly sides: number[];
   /** Per spout, what left it on the last step, for drawing the stream; null if nothing did. */
   out: (Vessel | null)[];
   /** Per spout, the drop hanging there, gathering a flow too slow to stream (see drip). */
@@ -1880,6 +1886,7 @@ export class Tool {
     this.dose = new Float32Array(kind === 'sheet' ? SHEET.cells ** 2 : 0);
     const nValves = SHAPES[kind].valves?.length ?? this.tanks.length;
     this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' || kind === 'shadowlamp' ? 0.5 : 0));
+    this.sides = this.valves.map(() => 1);
     this.out = this.shape.spouts.map(() => null);
     this.flow = this.shape.spouts.map(() => 0);
     this.drops = this.shape.spouts.map(() => new Vessel(Infinity));

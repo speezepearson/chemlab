@@ -1,4 +1,4 @@
-import { TOOL_DEPTH, openingOf, tankInside, tankNoteY, tankRect, valveLocal } from './bodies';
+import { TOOL_DEPTH, openingOf, tankInside, tankNoteY, tankRect, leverAt, valveLocal } from './bodies';
 import { DELIVERY, TRACE } from './config';
 import { Vessel, fluidColor, fluidRGB, volume, type Flask } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel, flaskRadius } from './flaskShape';
@@ -135,7 +135,8 @@ export function drawTool(sk: Sketch, t: Tool, art: ToolArt, clock: number, energ
     t.valves.forEach((v, k) => {
       const vc = valveLocal(t, k);
       if (k === sh.dial) return dial(sk, vc, v, pk('valve', k));
-      valve(sk, vc, t.kind === 'splitter' || t.kind === 'multiplexer' ? -Math.PI * (1 - v) : (-v * Math.PI) / 2, pk('valve', k));
+      // a plain valve's lever on the side it was turned to (see leverAt)
+      valve(sk, vc, t.kind === 'splitter' || t.kind === 'multiplexer' ? -Math.PI * (1 - v) : (-leverAt(t, k) * Math.PI) / 2, pk('valve', k));
     });
   // lids, while nothing may get in; the player's labels, and the tanks' names on their fronts; and the note over it all
   t.tanks.forEach((v, k) => {
@@ -801,7 +802,7 @@ function stationBlock(sk: Sketch, t: Tool, art: ToolArt, clock: number, fx: numb
   // the spigot's valve, with no handle (only the diverter works it), and the faucet's lever
   sk.fill(circle(sh.spouts[0], sh.valveY, 4.5), INK.panel, pk('spout', 0));
   sk.stroke(circle(sh.spouts[0], sh.valveY, 4.5), INK.panelEdge, sk.px(1));
-  t.valves.forEach((v, k) => valve(sk, valveLocal(t, k), (-v * Math.PI) / 2, pk('valve', k)));
+  t.valves.forEach((_, k) => valve(sk, valveLocal(t, k), (-leverAt(t, k) * Math.PI) / 2, pk('valve', k)));
 }
 
 /* ---------------- flasks and scales ---------------- */

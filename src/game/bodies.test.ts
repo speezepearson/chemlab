@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   FAUCET_NECK, FAUCET_Y, FLASK_R, NOZZLE_R, SCALE_SLOTS, TOOL_DEPTH, bathAt, dippedIn, docked, faucetBox, faucetPipes, flaskArm, flaskBox,
   flaskFluid, flaskLip, flaskMouth, footAt, insideVessel, isDocked, nozzleArm, nozzleBox, onScale, scaleArm, scaleBox, scaleSpot, spoutAt, spoutNear,
-  tankFluid, tankMouth, toolArms, toolBox, turnValve, newTurn, valveLocal, valveNear, SHEET_SLOT, SLOT_REACH, inSlot, sheetIn, slotted,
+  tankFluid, tankMouth, toolArms, toolBox, turnValve, newTurn, leverAt, setLever, valveLocal, valveNear, SHEET_SLOT, SLOT_REACH, inSlot, sheetIn, slotted,
 } from './bodies';
 import { LAMP_POSE, STATION_POSE } from './presets';
 import { singleOf } from '../chem/species';
@@ -138,10 +138,60 @@ describe('turnValve', () => {
     expect(round(t, 0, [90])[0]).toBeCloseTo(0);
     expect(round(t, 0, [45])[0]).toBeCloseTo(0.5);
     const turn = newTurn();
-    // from half open, a full turn clockwise closes it, and a quarter back opens it all the way
-    const shut = round(t, 0, sweep(45, 405), 20, turn);
-    expect(shut[shut.length - 1]).toBe(0);
-    expect(round(t, 0, sweep(405, 315), 20, turn).pop()).toBeCloseTo(1);
+    // from half open, a full turn counterclockwise opens it all the way, and a quarter back closes it
+    const open = round(t, 0, sweep(45, -315), 20, turn);
+    expect(open[open.length - 1]).toBe(1);
+    expect(round(t, 0, sweep(-315, -225), 20, turn).pop()).toBeCloseTo(0);
+  });
+
+  it('opens a valve the other way too, pointed down, by how far its lever is from shut either way', () => {
+    const t = new Tool('dispenser', 0);
+    expect(round(t, 0, [180])[0]).toBeCloseTo(1);
+    expect(t.sides[0]).toBe(-1);
+    expect(round(t, 0, [135])[0]).toBeCloseTo(0.5);
+    expect(t.sides[0]).toBe(-1);
+    expect(leverAt(t, 0)).toBeCloseTo(-0.5);
+    expect(round(t, 0, [45])[0]).toBeCloseTo(0.5);
+    expect(t.sides[0]).toBe(1);
+    // pointed left, outside the sweep, it stays where it was
+    expect(round(t, 0, [270])[0]).toBeCloseTo(0.5);
+    expect(t.sides[0]).toBe(1);
+  });
+
+  it('turns smoothly through shut from one side to the other, clamped a quarter turn either way', () => {
+    const t = new Tool('dispenser', 0);
+    const turn = newTurn();
+    // from open up, clockwise: shut at straight right, then opening down, all the way at straight down, and no further
+    const down = sweep(0, 300).map((d) => (round(t, 0, [d], 20, turn), leverAt(t, 0)));
+    expect(down[0]).toBeCloseTo(1);
+    expect(down[90]).toBeCloseTo(0);
+    expect(down[180]).toBeCloseTo(-1);
+    expect(Math.max(...down.slice(180))).toBeCloseTo(-1);
+    for (let i = 1; i < down.length; i++) {
+      expect(down[i]).toBeLessThanOrEqual(down[i - 1]);
+      // no jumps
+      expect(down[i - 1] - down[i]).toBeLessThan(1 / 90 + 1e-9);
+    }
+    expect([t.valves[0], t.sides[0]]).toEqual([1, -1]);
+    // and back off the end as soon as it turns back, through shut and up again
+    const up = sweep(300, 90).map((d) => (round(t, 0, [d], 20, turn), leverAt(t, 0)));
+    expect(up[30]).toBeCloseTo(-1 + 30 / 90);
+    expect(up[90]).toBeCloseTo(0);
+    expect(up[180]).toBeCloseTo(1);
+    expect(up[210]).toBe(1);
+    expect([t.valves[0], t.sides[0]]).toEqual([1, 1]);
+  });
+
+  it("sets a plain valve's lever either side of shut, the usual way at shut", () => {
+    const t = new Tool('dispenser', 0);
+    setLever(t, 0, -0.25);
+    expect([t.valves[0], t.sides[0]]).toEqual([0.25, -1]);
+    setLever(t, 0, -3);
+    expect([t.valves[0], t.sides[0]]).toEqual([1, -1]);
+    setLever(t, 0, 0);
+    expect([t.valves[0], t.sides[0]]).toEqual([0, 1]);
+    setLever(t, 0, 2);
+    expect([t.valves[0], t.sides[0]]).toEqual([1, 1]);
   });
 
   it('keeps a valve where it is in its core, and picks the pointer up again where it comes out', () => {

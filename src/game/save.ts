@@ -87,6 +87,11 @@ export interface SavedTool extends SavedDepth {
   fx: number;
   fy: number;
   valves: number[];
+  /**
+   * Per valve, which way a plain valve's lever was turned from shut (see Tool.sides): left out if every one was the
+   * way they always went, as in saves from before they turned either way.
+   */
+  sides?: number[];
   tanks: SavedVessel[];
   /** Per spout, the drop hanging there, if any. */
   drops?: SavedVessel[];

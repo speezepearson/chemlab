@@ -370,6 +370,25 @@ describe('what main took out', () => {
   }
 });
 
+describe('a plain valve turned the other way', () => {
+  it('is saved on the side it was turned to, and a save without sides loads every lever the usual way', () => {
+    const l = lab(bare());
+    const t = put(l, 'dispenser', { x: 4000, y: 700, z: PLANE_Z, yaw: 0 }) as Tool;
+    t.valves[0] = 0.4;
+    t.sides[0] = -1;
+    const saved = l.e.snapshot();
+    const again = lab(saved).in.tools.find((x) => x.kind === 'dispenser')!;
+    expect([again.valves[0], again.sides[0]]).toEqual([0.4, -1]);
+    // as in an older save
+    for (const st of saved.tools) delete st.sides;
+    const old = lab(saved).in.tools.find((x) => x.kind === 'dispenser')!;
+    expect([old.valves[0], old.sides[0]]).toEqual([0.4, 1]);
+    // and a save with every lever the usual way says nothing about it
+    t.sides[0] = 1;
+    expect(l.e.snapshot().tools.every((st) => st.sides === undefined)).toBe(true);
+  });
+});
+
 describe('a save from before the station moved to the left end', () => {
   // a flask on the counter under where the first faucet was, one under where the station's waste spigot was, and a
   // dispenser far off with its hose's nozzle over where the station's funnel was

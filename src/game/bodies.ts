@@ -618,18 +618,38 @@ export function valveNear(t: Tool, x: number, y: number): number | null {
 /**
  * How valve k turns, as an angle about it: `at` is the pointer's angle about the valve, in radians, measured the way
  * the setting rises, for (x, y) in the tool's flat frame as it stands (y down); the setting is 0 at angle `a0` and 1
- * at `a0 + span`. A valve's lever is closed pointing straight right and fully open pointing straight up. A splitter's
- * sweeps the upper half: straight left sends everything left, straight right everything right (a multiplexer's the
- * same, taking everything from the left or the right). A dial turns clockwise from down-left (0) to down-right (1).
+ * at `a0 + span`. A plain valve (`both`) is closed with its lever pointing straight right, and turns a quarter either
+ * way from there: fully open pointing straight up, as it always did, or straight down, the other way (see
+ * Tool.sides), its setting going by how far it's turned from shut, either way; `at` measures counterclockwise from
+ * straight right, so the other way is the negative angles. A splitter's sweeps the upper half: straight left sends
+ * everything left, straight right everything right (a multiplexer's the same, taking everything from the left or the
+ * right). A dial turns clockwise from down-left (0) to down-right (1).
  */
-export function valveSweep(t: Tool, k: number): { at: (x: number, y: number) => number; a0: number; span: number } {
+export function valveSweep(t: Tool, k: number): { at: (x: number, y: number) => number; a0: number; span: number; both: boolean } {
   const vc = valveLocal(t, k);
   // clockwise from straight up
-  if (k === t.shape.dial) return { at: (x, y) => Math.atan2(x - vc.x, vc.y - y), a0: -0.75 * Math.PI, span: 1.5 * Math.PI };
+  if (k === t.shape.dial) return { at: (x, y) => Math.atan2(x - vc.x, vc.y - y), a0: -0.75 * Math.PI, span: 1.5 * Math.PI, both: false };
   // clockwise from straight left
-  if (t.kind === 'splitter' || t.kind === 'multiplexer') return { at: (x, y) => Math.atan2(vc.y - y, vc.x - x), a0: 0, span: Math.PI };
+  if (t.kind === 'splitter' || t.kind === 'multiplexer') return { at: (x, y) => Math.atan2(vc.y - y, vc.x - x), a0: 0, span: Math.PI, both: false };
   // counterclockwise from straight right
-  return { at: (x, y) => Math.atan2(vc.y - y, x - vc.x), a0: 0, span: Math.PI / 2 };
+  return { at: (x, y) => Math.atan2(vc.y - y, x - vc.x), a0: 0, span: Math.PI / 2, both: true };
+}
+
+/**
+ * Where a plain valve's lever is, as a share of a quarter turn counterclockwise from shut, from −1 (open all the way
+ * down) to 1 (open all the way up): its setting, on the side it was turned to (see Tool.sides).
+ */
+export const leverAt = (t: Tool, k: number): number => t.valves[k] * (t.sides[k] < 0 ? -1 : 1);
+
+/**
+ * Put a plain valve's lever at `u`, a share of a quarter turn counterclockwise from shut (see leverAt), clamped to a
+ * quarter turn either way: its setting is how far that is from shut, and its side, which way (the usual way, 1, right
+ * at shut, where it makes no difference).
+ */
+export function setLever(t: Tool, k: number, u: number): void {
+  const c = Math.max(-1, Math.min(1, u));
+  t.valves[k] = Math.abs(c);
+  t.sides[k] = c < 0 ? -1 : 1;
 }
 
 /**
@@ -647,10 +667,11 @@ export const newTurn = (): Turn => ({ a: null, begun: false });
 /**
  * Turn valve k as the pointer, at (x, y) in the tool's flat frame as it stands (y down), goes round it (see
  * valveSweep). The first time the pointer's seen outside the valve's core, the valve's set to where it points, if it
- * points within the valve's sweep, as a lever or a dial pointed at it would be; and from then on it goes by how the
+ * points within the valve's sweep (a plain valve's, a quarter turn either way from shut), as a lever or a dial pointed at it would be; and from then on it goes by how the
  * pointer moves round it, not where it points: each move round it turns the valve the same way by as much, the
  * short way round, until it's at an end, where it stays however much further the pointer goes, and it comes back off
- * the end as soon as the pointer comes back. So going on round past an end, or across the gap at the bottom of a
+ * the end as soon as the pointer comes back. A plain valve turned on past shut opens again the other way, smoothly, as
+ * its lever goes on round (see setLever). So going on round past an end, or across the gap at the bottom of a
  * dial, never jumps it to the other end. Within VALVE_DEADZONE of the valve, the angle is too jumpy to mean anything,
  * so the valve stays put, and the pointer's picked up again where it comes out.
  */
@@ -660,16 +681,18 @@ export function turnValve(t: Tool, k: number, x: number, y: number, turn: Turn):
     turn.a = null;
     return;
   }
-  const { at, a0, span } = valveSweep(t, k);
+  const { at, a0, span, both } = valveSweep(t, k);
   const a = at(x, y);
   if (!turn.begun) {
     const v = (a - a0) / span;
-    if (v >= 0 && v <= 1) t.valves[k] = v;
+    if (both && v >= -1 && v <= 1) setLever(t, k, v);
+    else if (v >= 0 && v <= 1) t.valves[k] = v;
     turn.begun = true;
   } else if (turn.a !== null) {
     let d = a - turn.a;
     d -= 2 * Math.PI * Math.round(d / (2 * Math.PI));
-    t.valves[k] = Math.max(0, Math.min(1, t.valves[k] + d / span));
+    if (both) setLever(t, k, leverAt(t, k) + d / span);
+    else t.valves[k] = Math.max(0, Math.min(1, t.valves[k] + d / span));
   }
   turn.a = a;
 }

@@ -738,6 +738,7 @@ export class GameEngine {
       flasks: this.flasks.map((f) => ({ ...saveVessel(f), x: f.pose.x / HOME_W, up: f.pose.y - LIFT, glass: f.glass })),
       tools: this.tools.map((t) => ({
         kind: t.kind, id: t.id, ...this.frac(t.pose), valves: [...t.valves], tanks: t.tanks.map(saveVessel),
+        ...(t.sides.some((s) => s < 0) ? { sides: [...t.sides] } : {}),
         drops: t.drops.map(saveVessel),
         ...(t.tube.length ? { tube: t.tube.map(saveVessel) } : {}),
         ...(t.note ? { note: t.note } : {}),
@@ -796,6 +797,7 @@ export class GameEngine {
         const t = new Tool(st.kind, st.id, pose(fromFrac({ x: st.fx, y: st.fy })), st.valves ?? []);
         t.tanks.forEach((v, k) => st.tanks?.[k] && loadVessel(v, st.tanks[k]));
         t.drops.forEach((v, k) => st.drops?.[k] && loadVessel(v, st.drops[k]));
+        t.sides.forEach((_, k) => (t.sides[k] = Array.isArray(st.sides) && st.sides[k] === -1 ? -1 : 1));
         t.tube.forEach((v, k) => st.tube?.[k] && loadVessel(v, st.tube[k]));
         if (typeof st.note === 'string') t.note = st.note;
         t.remember(st.memory);
