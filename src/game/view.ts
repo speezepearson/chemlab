@@ -26,7 +26,7 @@ import { litresOf, type Supply } from './supply';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
-  clockText, LAMP, SHEET, darkness, ringShare, atomSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
+  clockText, LAMP, SHEET, sheetLit, darkness, ringShare, atomSector, BOND_ENDS, bondPoint, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, TEST_PAPER, paperReading, paperTriangles, sectorInset, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, Tool,
 } from './tools';
@@ -1482,8 +1482,11 @@ class ToolView {
   private spirit?: { column: THREE.Mesh; whole: THREE.Group; stump: THREE.Group };
   /** The shadow lamp's pane, which glows while it's on, and its switch's lever (see buildLamp). */
   private lamp?: { pane: THREE.MeshStandardMaterial; lever: THREE.Group };
-  /** A sheet of shadow paper's image (see buildSheet), and the dose it was last drawn from (see Tool.dosed). */
-  private sheet?: { tex: THREE.DataTexture; mat: THREE.MeshStandardMaterial; drawn: number };
+  /**
+   * A sheet of shadow paper's picture (see buildSheet), how many of its pixels wide the margin round the image is,
+   * and the dose it was last drawn from (see Tool.dosed).
+   */
+  private sheet?: { tex: THREE.DataTexture; mat: THREE.MeshStandardMaterial; edge: number; drawn: number };
   /** The supply station's gauge's segments, bottom up. */
   private segments: THREE.MeshStandardMaterial[] = [];
   /**
@@ -1879,8 +1882,8 @@ class ToolView {
   }
 
   /**
-   * The shadow lamp (see LAMP): one long, low trough. At one end its enclosure, a closed box whose face onto the
-   * channel is a square pane, which its light leaves by, with a toggle switch on a dark plate on its front; from it
+   * The shadow lamp (see LAMP): one long, low trough. At one end its enclosure, a closed box with a square pane in a
+   * dark bezel in its face onto the channel, which its light leaves by, and a toggle switch on a dark plate on its front; from it
    * the channel's two side walls; and the end wall across their far ends, which a sheet stands against. The pane
    * glows lavender while it's on, and that's all the light it gives: it lights nothing in the room.
    */
@@ -1898,9 +1901,13 @@ class ToolView {
     block(art, panelMat, ch.x0, ch.x1 + wall, 0, h, ch.z, out);
     block(art, panelMat, ch.x0, ch.x1 + wall, 0, h, -out, -ch.z);
     block(art, panelMat, ch.x1, ch.x1 + wall, 0, h, -ch.z, ch.z);
-    // the pane in the enclosure's face: dark glass, glowing with the lamp's light while it's on
+    // the pane in the enclosure's face: dark glass, glowing with the lamp's light while it's on, in a dark bezel
     const glass = new THREE.MeshStandardMaterial({ color: 0x6f6a86, roughness: 0.25, metalness: 0, emissive: LAMP_GLOW, emissiveIntensity: 0 });
-    block(art, glass, ch.x0, ch.x0 + 0.8, win.y - win.r, win.y + win.r, -win.r, win.r).castShadow = false;
+    const [y0, y1] = [win.y - win.r, win.y + win.r];
+    block(art, glass, ch.x0, ch.x0 + 0.8, y0, y1, -win.r, win.r).castShadow = false;
+    const lip = 3;
+    for (const [py0, py1, z0, z1] of [[y0 - lip, y0, -win.r - lip, win.r + lip], [y0, y1, -win.r - lip, -win.r], [y0, y1, win.r, win.r + lip]])
+      block(art, darkMat, ch.x0, ch.x0 + 1.5, py0, py1, z0, z1).castShadow = false;
     // the switch on the enclosure's front: a plate, and a toggle's lever
     const sw = LAMP.switch;
     pick(block(art, darkMat, sw.x - 11, sw.x + 11, sw.y - 17, sw.y + 17, out, out + 1.5, 0.6), 'switch');
@@ -1925,12 +1932,17 @@ class ToolView {
 
   /**
    * A sheet of shadow paper (see SHEET): a square of paper with no thickness, hanging from a dark bar clipped along
-   * its top edge, with its image on it (see drawSheet), seen from both sides, from behind as through the paper.
+   * its top edge, with its image on it (see drawSheet), seen from both sides, from behind as through the paper. The
+   * picture is of the whole paper, at the size of the image's cells: the image in the middle, and the margin round it.
    */
   private buildSheet(): void {
     const { side, top, clip, cells } = SHEET;
     block(this.art, darkMat, -side / 2 - 1, side / 2 + 1, 0, clip.h, -clip.d / 2, clip.d / 2, 0.8);
-    const tex = new THREE.DataTexture(new Uint8Array(4 * cells * cells), cells, cells, THREE.RGBAFormat);
+    const edge = Math.round((SHEET.margin * cells) / sheetLit());
+    const n = cells + 2 * edge;
+    const px = new Uint8Array(4 * n * n);
+    for (let i = 0; i < n * n; i++) px.set([...SHEET_COLORS.fresh, 255], 4 * i);
+    const tex = new THREE.DataTexture(px, n, n, THREE.RGBAFormat);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.magFilter = THREE.LinearFilter;
     tex.minFilter = THREE.LinearMipmapLinearFilter;
@@ -1943,7 +1955,7 @@ class ToolView {
     const paper = new THREE.Mesh(new THREE.PlaneGeometry(side, side).translate(0, -(top + side / 2), 0), mat);
     paper.castShadow = paper.receiveShadow = true;
     this.art.add(paper);
-    this.sheet = { tex, mat, drawn: -1 };
+    this.sheet = { tex, mat, edge, drawn: -1 };
   }
 
   /**
@@ -1961,7 +1973,10 @@ class ToolView {
     this.screen.tex.anisotropy = 8;
   }
 
-  /** Draw a sheet of shadow paper's image, if the light it's had has changed since it was last drawn: each cell as dark as it is. */
+  /**
+   * Draw a sheet of shadow paper's image, if the light it's had has changed since it was last drawn: each cell as dark
+   * as it is, in the middle of its picture; the margin round it stays as new.
+   */
   private drawSheet(): void {
     const sh = this.sheet!;
     const { dose, dosed } = this.t;
@@ -1969,10 +1984,12 @@ class ToolView {
     sh.drawn = dosed;
     const { fresh, dark } = SHEET_COLORS;
     const px = sh.tex.image.data as Uint8Array;
+    const n = SHEET.cells;
+    const across = n + 2 * sh.edge;
     for (let i = 0; i < dose.length; i++) {
       const d = darkness(dose[i]);
-      for (let c = 0; c < 3; c++) px[4 * i + c] = Math.round(fresh[c] + (dark[c] - fresh[c]) * d);
-      px[4 * i + 3] = 255;
+      const at = 4 * ((Math.floor(i / n) + sh.edge) * across + (i % n) + sh.edge);
+      for (let c = 0; c < 3; c++) px[at + c] = Math.round(fresh[c] + (dark[c] - fresh[c]) * d);
     }
     sh.tex.needsUpdate = true;
   }

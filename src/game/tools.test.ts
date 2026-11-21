@@ -14,7 +14,7 @@ import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ATOM_PLACE, atomSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SHEET, darkness, lampLight, type Mouth,
+  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SHEET, sheetLit, darkness, lampLight, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -2504,12 +2504,15 @@ describe('the shadow lamp', () => {
     expect([b.x0, b.x1, b.y0, b.y1]).toEqual([box.x0, ch.x1 + wall, 0, h]);
   });
 
-  it('sends its light out as a beam the size of the square of the sheet it lights, straying little', () => {
+  it('sends its light out as a beam the size of the square in the middle of the sheet, straying little', () => {
     const { h, channel: ch, window: win, spread } = LAMP;
-    // a sheet in the slot has its paper from the top of the walls down: the window is square on to its square
-    expect(win.r).toBe(SHEET.side / 2);
+    // a sheet in the slot has its paper from the top of the walls down: the window is square on to the middle of it,
+    // and as big as the square the light falls on, so the margin round that is never lit
+    expect(win.r).toBe(sheetLit() / 2);
     expect(win.y).toBe(h - SHEET.side / 2);
-    expect(win.r).toBeLessThanOrEqual(ch.z);
+    expect(sheetLit()).toBe(SHEET.side - 2 * SHEET.margin);
+    // nor are the channel's walls, even by the rays that stray most
+    expect(win.r + spread * (ch.x1 - ch.x0)).toBeLessThan(ch.z);
     // a shadow's edge from the far end of the channel is a few units wide: soft, but no wider than a flask's neck
     const edge = 2 * spread * (ch.x1 - ch.x0);
     expect(edge).toBeGreaterThan(2);
@@ -2536,6 +2539,12 @@ describe('shadow paper', () => {
     expect(b.x1 - b.x0).toBeLessThan(SHEET.side + 2 * LAMP.wall);
     expect(SHEET.top).toBe(SHEET.clip.h);
     expect(b.y1 - b.y0).toBe(SHEET.clip.h + SHEET.side);
+    // the light falls on the square in its middle, a margin of about a tenth of its side left all round; its image
+    // is of that square only, in cells a whole number of which make the margin's width
+    expect(SHEET.margin / SHEET.side).toBeGreaterThan(0.08);
+    expect(SHEET.margin / SHEET.side).toBeLessThan(0.15);
+    const edge = (SHEET.margin * N) / sheetLit();
+    expect(edge).toBe(Math.round(edge));
     expect(t.dose).toHaveLength(N * N);
     expect(new Tool('strip', 1).dose).toHaveLength(0);
   });

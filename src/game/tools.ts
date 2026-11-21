@@ -887,13 +887,19 @@ export function cultureLevel(share: number): number {
  *   to wall; top: how far down from the sheet's top its square starts, under the bar;
  * - clip: the bar clipped along its top edge, `h` tall and `d` front to back, which a stand's clamp holds, a little
  *   wider than the paper;
- * - cells: how many cells a side the light it's had is kept in (see Tool.dose);
+ * - margin: how far in from each edge of the paper the lamp's light stops: it falls on the square in the middle (see
+ *   sheetLit), and the margin round that stays as new however long the lamp shines;
+ * - cells: how many cells a side the light that square has had is kept in (see Tool.dose), a whole number of them to
+ *   the margin's width;
  * - tau: how many sim seconds of the lamp's light, unshadowed, darken it all but 1/e of the way (see darkness): so
  *   it's most of the way dark in a second, and all but dark in two;
  * - full: the most light a cell takes, in sim seconds of it unshadowed: as dark as it gets, to within what a save
  *   keeps of it (see Tool.image).
  */
-export const SHEET = { side: CELL, top: 14, clip: { h: 14, d: 5 }, cells: 64, tau: 0.5, full: 3.2 };
+export const SHEET = { side: CELL, top: 14, clip: { h: 14, d: 5 }, margin: CELL / 10, cells: 64, tau: 0.5, full: 3.2 };
+
+/** How far across and tall the square in the middle of a sheet of shadow paper that the lamp's light falls on is (see SHEET.margin). */
+export const sheetLit = (): number => SHEET.side - 2 * SHEET.margin;
 
 /**
  * The shadow lamp (see SHAPES.shadowlamp): one long, low trough on a bench of its own. At one end is a closed box, the
@@ -908,7 +914,8 @@ export const SHEET = { side: CELL, top: 14, clip: { h: 14, d: 5 }, cells: 64, ta
  * - channel: the channel, from the enclosure's face at `x0` to the end wall's at `x1`, three grid cells, and reaching
  *   `z` either side of its middle line, one cell from wall to wall: what's set down in it is on the grid like anything;
  * - window: the square pane in the enclosure's face that its light leaves by, reaching `r` either side of the
- *   channel's middle line and of a height `y` down from the top: exactly the square of the sheet it lights;
+ *   channel's middle line and of a height `y` down from the top: exactly the square of the sheet it lights (see
+ *   sheetLit), so the sheet's margin, the channel's walls and whatever's outside the trough are never in its light;
  * - spread: how far its light strays from straight along the channel, as a slope. The enclosure sends its light out
  *   as a beam with the window's cross-section all the way to the sheet, not spreading from a point, so a shadow is the
  *   size of what casts it wherever along the channel that stands; but the lamp inside isn't a point, so the beam's
@@ -925,7 +932,7 @@ export const LAMP = {
   h: SHEET.side, wall: 6, dim: 0.2, spread: 0.016,
   box: { x0: -2.5 * CELL, x1: -1.5 * CELL },
   channel: { x0: -1.5 * CELL, x1: 1.5 * CELL, z: CELL / 2 },
-  window: { r: SHEET.side / 2, y: SHEET.side / 2 },
+  window: { r: sheetLit() / 2, y: SHEET.side / 2 },
   switch: { x: -2 * CELL, y: 40 },
 };
 
@@ -1814,8 +1821,9 @@ export class Tool {
   owed = 0;
   /**
    * How much of the shadow lamp's light each cell of a sheet of shadow paper has had, in sim seconds of it unshadowed,
-   * up to SHEET.full: SHEET.cells a side, row by row from its bottom edge up, each row from its left edge as it faces
-   * (see darkness for how dark that leaves it). It only ever grows (see expose). Empty for any other tool.
+   * up to SHEET.full: the cells of the square in its middle that the light falls on (see sheetLit; its margin has
+   * none), SHEET.cells a side, row by row from the square's bottom edge up, each row from its left edge as the sheet
+   * faces (see darkness for how dark that leaves it). It only ever grows (see expose). Empty for any other tool.
    */
   readonly dose: Float32Array;
   /** How many times a sheet's dose has changed (see expose and develop), for whoever draws it to know to draw it again. */
@@ -2188,8 +2196,8 @@ export class Tool {
   }
 
   /**
-   * Whether a sheet of shadow paper is as dark as it gets all over (see SHEET.full), so that no more light can show on
-   * it; never, for any other tool.
+   * Whether a sheet of shadow paper is as dark as it gets all over the square the light falls on (see SHEET.full), so
+   * that no more light can show on it; never, for any other tool.
    */
   get spent(): boolean {
     // (a cell holds its fill only to a float's precision)
