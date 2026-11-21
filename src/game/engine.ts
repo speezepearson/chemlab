@@ -3239,8 +3239,12 @@ export class GameEngine {
         this.clock += dt;
         this.spin = (this.spin + SPIN * dt) % (2 * Math.PI);
         this.station().steady += dt;
-        // (and the shadow lamp, if it's on, shines on through it)
-        for (const t of this.tools) if (t.kind === 'shadowlamp') t.shine(dt);
+        // (and the shadow lamp, if it's on, shines on through it; and a sheet of blotting paper that was still
+        // developing goes on developing)
+        for (const t of this.tools) {
+          if (t.kind === 'shadowlamp') t.shine(dt);
+          if (isBlotter(t.kind)) t.step(dt);
+        }
         this.nose.step(dt);
       },
     };

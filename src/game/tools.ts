@@ -1077,6 +1077,16 @@ export type ToolKind =
   | 'receptacle' | 'shadowlamp' | 'sheet' | 'testpaper' | 'bondpaper';
 
 /**
+ * How quickly what a sheet of blotting paper shows comes up, in sim seconds: each thing it shows (how wet it looks, and
+ * each stain or each line's darkening) closes 1 − e^(−t / PAPER_TAU) of the gap to what the sheet holds calls for in
+ * t seconds. So it starts at once, at its fastest, with no easing in, and eases out: 63% of the way in half a second,
+ * 86% in one, 98% in two.
+ */
+export const PAPER_TAU = 0.5;
+/** How near what a sheet shows comes to what it's to show before it's just that, and the sheet is done developing. */
+const PAPER_DONE = 1e-4;
+
+/**
  * The sheets of blotting paper that lie flat on a counter and soak up what lands on them, once (see Blotter): test
  * paper and bond paper, which differ only in what's printed on them and so in what they show of what they hold.
  */
@@ -1754,7 +1764,8 @@ export class Blotter extends Vessel {
  * - A sheet of **test paper** has none either: it lies flat on a counter (see TEST_PAPER), soaks up what lands on it
  *   until it's wet through (see paper and Blotter), and shows what it holds as stains (see paperReading). It's used once.
  * - A sheet of **bond paper** is the same sheet printed differently (see BOND_PAPER): it shows what it holds as the
- *   lines between its dots, darkened (see bondReading).
+ *   lines between its dots, darkened (see bondReading). What either sheet shows comes up over a couple of sim seconds
+ *   (see showing and PAPER_TAU).
  *
  * Tools run on sim time, so a slow drip into a reacting flask gives the same
  * result at any sim speed.
@@ -1796,6 +1807,13 @@ export class Tool {
    * doesn't react or cool either. Empty for any other tool.
    */
   readonly paper: Vessel[];
+  /**
+   * What a sheet of blotting paper shows so far (see showing), or null if that's just what it holds calls for and
+   * hasn't been worked out yet: a sheet from a save that kept no account of it. Null for any other tool.
+   */
+  private shows: number[] | null;
+  /** How many atoms a sheet of blotting paper held when what it shows last caught up with it (see emerge); −1 if it hasn't. */
+  private shownFor = -1;
   /**
    * A column's bed, stretch by stretch from its top to its foot (see COLUMN.cells), each holding what's on that
    * stretch; it doesn't react or cool. Empty for any other tool.
@@ -1904,6 +1922,8 @@ export class Tool {
     this.tube = Array.from({ length: kind === 'heater' ? HEATER_CELLS : 0 }, () => new Vessel(Infinity));
     this.paper =
       isBlotter(kind) ? [new Blotter(TEST_PAPER.cap)] : Array.from({ length: kind === 'strip' ? STRIP.cells : 0 }, () => new Vessel(Infinity));
+    // a new sheet shows nothing yet
+    this.shows = isBlotter(kind) ? this.calledFor().map(() => 0) : null;
     this.scorch = new Float32Array(kind === 'strip' ? STRIP.cells : 0);
     this.bed = Array.from({ length: kind === 'column' ? COLUMN.cells : 0 }, () => new Vessel(Infinity));
     this.packing = kind === 'strip' ? new Bed(this.paper) : kind === 'column' ? new Bed(this.bed) : null;
@@ -1938,6 +1958,10 @@ export class Tool {
       return this.none();
     }
     if (this.kind === 'column') return this.elute(h);
+    if (isBlotter(this.kind)) {
+      this.emerge(h);
+      return this.none();
+    }
     // a culture's cells sicken in what's in the plate, which then drains like any tank
     if (this.kind === 'culture') this.sicken(h);
     // nothing drains from a tool with no spouts (a dish)
@@ -2154,7 +2178,8 @@ export class Tool {
    * was used to be, when strips dried, and how scorched each stretch is (what's on its paper is saved as vessels, see paper); how much a column's bed has drunk (what's on it is
    * saved as vessels, see bed); which of a sleeper culture's cells are dead (see dead); which supply a receptacle is
    * fitted for (its place in SUPPLIES), and how far into its changeover it is, or −1 if none is under way; 1 if a
-   * shadow lamp is switched on, or 0 if not.
+   * shadow lamp is switched on, or 0 if not; and what a sheet of blotting paper shows so far (see showing), while
+   * that's still coming up: none once it shows all it's going to, as none means when it's put back (see remember).
    */
   get memory(): number[] | undefined {
     if (this.kind === 'shadowlamp') return [+this.lit];
@@ -2162,6 +2187,8 @@ export class Tool {
     if (this.kind === 'column') return [this.soaked];
     if (this.kind === 'culture') return Array.from(this.dead!);
     if (this.kind === 'receptacle') return [SUPPLIES.indexOf(this.supply), this.swap ?? -1];
+    // (a sheet that shows all it's going to keeps nothing: that's how it loads)
+    if (isBlotter(this.kind)) return this.developed ? undefined : [...this.showing];
     return isThermometer(this.kind) ? [this.temp, +this.broken] : undefined;
   }
 
@@ -2170,6 +2197,15 @@ export class Tool {
    * strip kept one number for how scorched it was, all over: that goes for as much of it as it had soaked.
    */
   remember(m: unknown): void {
+    if (isBlotter(this.kind)) {
+      // what a sheet showed, if the save kept it (it was still developing); or else all it's ever going to, for
+      // what it turns out to hold
+      const n = this.calledFor().length;
+      const kept = Array.isArray(m) && m.length === n && m.every((x) => typeof x === 'number' && Number.isFinite(x));
+      this.shows = kept ? (m as number[]).map((x) => Math.max(0, Math.min(1, x))) : null;
+      this.shownFor = -1;
+      return;
+    }
     const want = this.memory?.length;
     const old = this.kind === 'strip' && Array.isArray(m) && m.length === 3;
     if (!Array.isArray(m) || (m.length !== want && !old) || !m.every((x) => typeof x === 'number' && Number.isFinite(x))) return;
@@ -2316,6 +2352,52 @@ export class Tool {
     p.N = 0;
     p.Q = 0;
     return p;
+  }
+
+  /**
+   * What a sheet of blotting paper is to show, for what it holds: how wet it looks, from 0 to 1 (see wetness), then
+   * its reading's values: a sheet of test paper's stains, triangle by triangle (see paperReading), or a sheet of bond
+   * paper's lines (see bondReading).
+   */
+  private calledFor(): number[] {
+    const held = this.paper[0];
+    return [wetness(volume(held), held.cap, 1), ...(this.kind === 'testpaper' ? paperReading(held).flat() : bondReading(held))];
+  }
+
+  /**
+   * What a sheet of blotting paper shows, laid out as calledFor says: how wet it looks and what its print shows of
+   * what it holds, each as far as it's come up. It follows what the sheet holds, not all at once but over a couple
+   * of sim seconds (see emerge), and stays once it's there, since a soaked sheet takes up nothing more.
+   */
+  get showing(): readonly number[] {
+    return (this.shows ??= this.calledFor());
+  }
+
+  /** Whether a sheet of blotting paper shows all that what it holds calls for (see showing). */
+  get developed(): boolean {
+    const want = this.calledFor();
+    return this.showing.every((x, i) => Math.abs(want[i] - x) < PAPER_DONE);
+  }
+
+  /**
+   * A sheet of blotting paper's step of h sim seconds: each thing it shows closes 1 − e^(−h / PAPER_TAU) of the gap
+   * to what the sheet now holds calls for (see calledFor), so it sets off at once and eases out. More landing on it
+   * meanwhile only moves what it's making for. Once it's there, nothing's left to do until the sheet holds more.
+   */
+  private emerge(h: number): void {
+    const atoms = this.paper[0].N;
+    if (this.shownFor === atoms) return;
+    const want = this.calledFor();
+    const shows = (this.shows ??= [...want]);
+    const k = 1 - Math.exp(-h / PAPER_TAU);
+    let off = 0;
+    for (let i = 0; i < shows.length; i++) {
+      shows[i] += (want[i] - shows[i]) * k;
+      off = Math.max(off, Math.abs(want[i] - shows[i]));
+    }
+    if (off >= PAPER_DONE) return;
+    this.shows = want;
+    this.shownFor = atoms;
   }
 
   /** A step that lets nothing out. */

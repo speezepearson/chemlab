@@ -11,7 +11,7 @@ import { Vessel, volume, type Flask } from './flask';
 import { DEFAULT_PRESET, LAMP_POSE } from './presets';
 import type { SaveState } from './save';
 import { CELL, LIFT, toCell } from './space';
-import { DRIP, INLINE_TOOLS, SHAPES, SHEET, TEST_PAPER, UNIQUE_TOOLS, bondReading, bondShares, darkness, paperReading, type Blotter, type Tool } from './tools';
+import { DRIP, INLINE_TOOLS, PAPER_TAU, SHAPES, SHEET, TEST_PAPER, UNIQUE_TOOLS, bondReading, bondShares, darkness, paperReading, type Blotter, type Tool } from './tools';
 
 /*
  * The engine itself, with nothing to draw on and nothing to hear: the view and the sounds are stood in for, as they
@@ -667,6 +667,94 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
     expect(kind === 'testpaper' ? paperReading(paper)[0].slice(0, 2) : bondReading(paper).filter((x) => x > 0)).toEqual(
       kind === 'testpaper' ? [1, 1] : [1],
     );
+  });
+});
+
+describe.each(['testpaper', 'bondpaper'] as const)('what a sheet of %s shows, in the lab', (kind) => {
+  const cap = TEST_PAPER.cap;
+  /** A mixture that shows on either sheet. */
+  const mix = () => {
+    const v = new Vessel(Infinity);
+    v.setMolecules(pairOf('R', 'G'), CAP);
+    v.setMolecules(singleOf('R'), CAP);
+    return v;
+  };
+  /** How wet a sheet looks so far, of how wet it's to look. */
+  const come = (t: Tool) => t.showing[0] / (volume(paperOf(t)) / cap);
+  const sheets = (l: Lab) => l.in.tools.filter((t) => t.kind === kind);
+
+  it('comes up on sim time: not at all while paused, sixteen times as fast at 16×, and in hand as on a counter', () => {
+    const l = lab();
+    const laid = lay(l, SPOT.x, SPOT.z, kind);
+    holdAt(l, kind, { x: SPOT.x + 2 * CELL, y: LIFT + 150, z: SPOT.z, yaw: 0 });
+    const held = l.in.held!.t!;
+    for (const t of [laid, held]) paperOf(t).addFrom(mix(), cap / 2, true);
+    l.e.speed = 0;
+    run(l, 5);
+    for (const t of [laid, held]) expect(t.showing.every((x) => x === 0)).toBe(true);
+    l.e.speed = 1;
+    run(l, 0.5);
+    for (const t of [laid, held]) expect(come(t)).toBeCloseTo(1 - Math.exp(-0.5 / PAPER_TAU), 6);
+    expect(laid.showing.filter((x) => x > 0).length).toBeGreaterThan(1);
+    // a twentieth of a second at 16× is eight tenths of a second in the lab
+    l.e.speed = 16;
+    l.in.simulate(0.05);
+    for (const t of [laid, held]) expect(come(t)).toBeCloseTo(1 - Math.exp(-1.3 / PAPER_TAU), 6);
+    run(l, 1);
+    for (const t of [laid, held]) expect(t.developed).toBe(true);
+  });
+
+  it('comes up as a stream wets it, not all at once', () => {
+    const l = lab();
+    const sheet = lay(l, SPOT.x, SPOT.z, kind);
+    const pip = pipetteOver(l);
+    pip.tanks[0].setMolecules(pairOf('R', 'G'), 5 * cap);
+    pip.valves[0] = 1;
+    run(l, 0.25);
+    // it's already holding some, and showing less than that calls for
+    expect(volume(paperOf(sheet))).toBeGreaterThan(0);
+    expect(sheet.showing[0]).toBeGreaterThan(0);
+    expect(come(sheet)).toBeLessThan(0.6);
+    expect(sheet.developed).toBe(false);
+    run(l, 30);
+    expect(sheet.developed).toBe(true);
+    expect(sheet.showing[0]).toBeCloseTo(volume(paperOf(sheet)) / cap, 9);
+  });
+
+  it('goes on coming up through a sleep that skips ahead', () => {
+    const l = lab();
+    const sheet = lay(l, SPOT.x, SPOT.z, kind);
+    paperOf(sheet).addFrom(mix(), cap / 2, true);
+    run(l, 0.2);
+    expect(sheet.developed).toBe(false);
+    l.in.sleeper().skip(30);
+    expect(sheet.developed).toBe(true);
+  });
+
+  it('is saved half come up, and loads so; a save from before sheets took time loads all there', () => {
+    const l = lab();
+    const sheet = lay(l, SPOT.x, SPOT.z, kind);
+    paperOf(sheet).addFrom(mix(), cap / 2, true);
+    run(l, 0.4);
+    const was = [...sheet.showing];
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    const saved = s.tools.find((t) => t.kind === kind)!;
+    expect(saved.memory).toEqual(was);
+    l.e.restore(s, DEFAULT_PRESET);
+    const [back] = sheets(l);
+    expect(back).not.toBe(sheet);
+    expect([...back.showing]).toEqual(was);
+    run(l, 0.4);
+    expect(come(back)).toBeCloseTo(1 - Math.exp(-0.8 / PAPER_TAU), 6);
+    // an older save says nothing of what its sheets showed: all of it
+    delete saved.memory;
+    l.e.restore(s, DEFAULT_PRESET);
+    const [old] = sheets(l);
+    expect(old.developed).toBe(true);
+    expect(come(old)).toBe(1);
+    expect(old.showing.filter((x) => x > 0).length).toBeGreaterThan(1);
+    // and once it's all there, a save keeps nothing more of it
+    expect(l.e.snapshot().tools.find((t) => t.kind === kind)!.memory).toBeUndefined();
   });
 });
 

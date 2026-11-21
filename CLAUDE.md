@@ -117,7 +117,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Volume isn't atoms.** Capacities and flows are in `volume()` units: molecules by default, or atoms when the
   "volume counts molecules" toggle is off. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
 - **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
-  chemistry, cooling, the instruments' readings, the supply station's diverter, display and needle, and its changeover (block, door, lamp and alarm), a thermometer's bulb and its crack as it shatters, the shadow lamp's light on the sheet in its holder, and the drip and stream sounds. All of it
+  chemistry, cooling, the instruments' readings, the supply station's diverter, display and needle, and its changeover (block, door, lamp and alarm), a thermometer's bulb and its crack as it shatters, the shadow lamp's light on the sheet in its holder, what a sheet of test paper or bond paper shows coming up (`Tool.showing`, over about 2 sim s, `PAPER_TAU`), and the drip and stream sounds. All of it
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The one exception to the
   substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
@@ -217,7 +217,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **The goal** is enough cryostabilizer in the station's reservoir (`tanks[1]`, against its supply's `goal`, once
   it's fitted for the last of `SUPPLIES`), not what's lying around in vessels.
 - **Saves** stay at format v1. New fields are optional and the loaders tolerate their absence. Species are stored by
-  name. A tool's own state goes in `Tool.memory` as numbers; a sheet of shadow paper's image, which is thousands of
+  name. A tool's own state goes in `Tool.memory` as numbers (a sheet of blotting paper keeps what it shows there
+  only while that's still coming up; with none, it loads showing all it holds); a sheet of shadow paper's image, which is thousands of
   cells, goes beside it as a packed string (`Tool.image`, `Tool.develop`).
   A saved tool of a kind there no longer is (the composition analyzer, which the test paper replaced, and the bond
   visualizer, which the bond paper replaced) is dropped as

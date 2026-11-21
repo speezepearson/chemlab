@@ -27,7 +27,7 @@ import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
   clockText, LAMP, SHEET, darkness, ringShare, atomSector, BOND_ENDS, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
-  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, TEST_PAPER, paperReading, paperTriangles, sectorInset, BOND_PAPER, bondDots, bondReading, isBlotter, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
+  DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, TEST_PAPER, paperTriangles, sectorInset, BOND_PAPER, bondDots, isBlotter, cultureCells, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, Tool,
 } from './tools';
 import { CABINET, CABINET_BUILD, STOCK, type Stock, type Stocked } from './cabinet';
@@ -965,16 +965,16 @@ function blotting(sc: Screen, wet: number): void {
 }
 
 /**
- * A sheet of test paper's face (see blotting): each small triangle of each of its triangles (see paperTriangles)
- * stained its atom's color, as opaque as paperReading says, inside a margin that keeps it clear of the lines (see
- * sectorInset), its edge soft and a little uneven; and over that, printed in black, each triangle's outline and the
- * three lines that cut it in four. No words: reading it is part of the game.
+ * A sheet of test paper's face (see blotting), as far as it's come up (see Tool.showing): each small triangle of each
+ * of its triangles (see paperTriangles) stained its atom's color, as opaque as its stain is so far, inside a margin
+ * that keeps it clear of the lines (see sectorInset), its edge soft and a little uneven; and over that, printed in
+ * black, each triangle's outline and the three lines that cut it in four. No words: reading it is part of the game.
  */
 function drawTestPaper(sc: Screen, t: Tool): void {
-  const held = t.paper[0];
-  const reading = paperReading(held);
-  const wet = wetness(volume(held), TEST_PAPER.cap, 1);
-  const key = `${wet.toFixed(3)} ${reading.map((r) => r.map((x) => x.toFixed(3)).join()).join(';')}`;
+  const [wet, ...stains] = t.showing;
+  const n = SECTOR_ATOMS.length;
+  const reading = TEST_PAPER.triangles.map((_, i) => stains.slice(i * n, (i + 1) * n));
+  const key = t.showing.map((x) => x.toFixed(3)).join();
   if (key === sc.key) return;
   sc.key = key;
   const { ctx, ppu } = sc;
@@ -1034,15 +1034,13 @@ const BOND_PRINT = { ink: '22, 20, 18', soft: 0.3, rough: 0.28, steps: 9 };
 
 /**
  * A sheet of bond paper's face (see blotting): a line between each two of its four dots (see bondDots and BOND_ENDS),
- * stopping short of them, as faint as it's printed where the sheet holds nothing with that bond, and darker by the
- * share of what it holds that has it (see bondReading), its edges soft and a little uneven, in their own way on each
+ * stopping short of them, as faint as it's printed where the sheet holds nothing with that bond, and darker by how far
+ * it's darkened so far (see Tool.showing and bondReading), its edges soft and a little uneven, in their own way on each
  * sheet; and over them the dots, each printed in its atom's own color. No words: reading it is part of the game.
  */
 function drawBondPaper(sc: Screen, t: Tool): void {
-  const held = t.paper[0];
-  const reading = bondReading(held);
-  const wet = wetness(volume(held), TEST_PAPER.cap, 1);
-  const key = `${wet.toFixed(3)} ${reading.map((x) => x.toFixed(3)).join()}`;
+  const [wet, ...reading] = t.showing;
+  const key = t.showing.map((x) => x.toFixed(3)).join();
   if (key === sc.key) return;
   sc.key = key;
   const { ctx, ppu } = sc;
