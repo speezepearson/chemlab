@@ -93,7 +93,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     it over the finished frame, from a mask of the meshes registered as that thing's parts.
   - `smell.ts` is what a sniff (F) makes of a fluid, pure and DOM-free: the ten odorants and Nadia's similes for them
     (`ODORANTS`), how strong each is for a composition and temperature, masking, and what she says of it all
-    (`script`): pieces of text, each with the real seconds it waits before coming up, and whether it starts a new line.
+    (`script`): pieces of text, each with the real seconds it waits before coming up, and whether it starts a new line,
+    put together from a phrasing for each smell's band (`LEADS`, `FOLLOWS`) and one of its odorant's similes, both
+    picked by the random source it's handed (`Math.random` in the engine, a dealt or seeded one in tests).
     It goes by the fluid alone: there's no state, so the same fluid always smells the same. The engine's
     `sniff` leans the view in to the vessel's rim and back (`sniffing`, `rimGaze`, `stepSniff`), in real time, and
     `Smell` in `Hud.tsx` brings the pieces up as their times come (they're on the display, not in the world). Only the
@@ -231,6 +233,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - A smell's simile (`ODORANTS` in `smell.ts`) gives nothing away either: none goes with its species' colors (and
   black's is nothing burnt), a pair's shares nothing with its two atoms', and none is a real chemical's. The one
   kinship, which the user asked for, is that the three pairs with a blue atom are sweet. Ask before adding another.
+  An odorant's similes are all ways of saying its one thing, and none could be taken for another odorant's. A band's
+  phrasings (`LEADS`, `FOLLOWS`) tell it from every other band by their words for how strong, so any two from
+  different bands can be put in order: a new phrasing uses its own band's words and no other's (`smell.test.ts` holds
+  both to it), and the README lists every one.
 - The game's text matches the intro's premise. The player is Nadia Hassan, the target species is the cryostabilizer,
   and the ship belongs to Celestia Starlines.
 - Commits are small, one behavior per commit, with a message explaining why. The README changes in the same commit.
