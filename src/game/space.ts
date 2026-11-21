@@ -2,10 +2,11 @@ import { HOME_H, HOME_W } from './config';
 import type { Point } from './flask';
 
 /**
- * The lab, in world units (a flask is 70 tall), with y up. It's drawn in three dimensions, but worked in two: all the
- * equipment hangs or stands in one upright plane a little way out from the back wall (see PLANE_Z), facing out from
- * it, and is moved only across the wall and up and down it. x runs along the wall, y is height above the floor, and z
- * comes out of the wall into the room.
+ * The lab, in world units (a flask is 70 tall), with y up. It's drawn flat, square on to the back wall, and worked
+ * in two dimensions: all the equipment hangs or stands in one upright plane a little way out from the back wall (see
+ * PLANE_Z), facing out from it, and is moved only across the wall and up and down it. x runs along the wall, y is
+ * height above the floor, and z comes out of the wall into the room, as it did when the lab was a room to walk round
+ * (see flatten.ts).
  */
 export interface Vec3 {
   x: number;
@@ -26,15 +27,9 @@ export const ORIGIN: Pose = { x: 0, y: 0, z: 0, yaw: 0 };
 
 /**
  * The room's walls, floor and ceiling: a long gallery. The back wall, at z = 0, is the one the lab is on; the wall
- * behind the player, at z1, has the airlock, the porthole and the alarms' button.
+ * opposite, behind the player, is at z1.
  */
 export const ROOM = { x0: -700, x1: 8300, z0: 0, z1: 3000, y1: 1300 };
-/**
- * How fast the ship turns, in radians per sim second: the lab is on the rim of a ring 10 km in radius, spun for 1 g,
- * √(g / r), about one turn every 200 s. It turns about an axis square to the wall the porthole is in (z), so the
- * stars wheel round the porthole's middle.
- */
-export const SPIN = Math.sqrt(9.81 / 10_000);
 /**
  * How far apart a tool's mouths and spouts are along it, or a whole number of times this: so a row of flasks, or of
  * tanks, this far apart can stand under a row of spouts.
@@ -42,9 +37,8 @@ export const SPIN = Math.sqrt(9.81 / 10_000);
 export const CELL = 100;
 
 /**
- * The panels the walls are lined with (see the walls' texture in surfaces.ts): this wide, and a third of the room high,
- * their seams at whole multiples of each along every wall from its left end as it faces into the room, and up from
- * the floor.
+ * The panels the back wall is lined with (see drawWall in flatRoom.ts): this wide, and a third of the room high, their
+ * seams at whole multiples of each along it from its left end, and up from the floor.
  */
 export const WALL_PANEL = { w: 220, h: ROOM.y1 / 3 };
 
@@ -110,14 +104,6 @@ export function toLocal(pose: Pose, p: Vec3): Vec3 {
   const dx = p.x - pose.x;
   const dz = p.z - pose.z;
   return { x: dx * c - dz * s, y: p.y - pose.y, z: dx * s + dz * c };
-}
-
-/** An angle wrapped into (−π, π]. */
-export function wrapAngle(a: number): number {
-  a %= 2 * Math.PI;
-  if (a <= -Math.PI) a += 2 * Math.PI;
-  if (a > Math.PI) a -= 2 * Math.PI;
-  return a;
 }
 
 export const dist3 = (a: Vec3, b: Vec3) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);

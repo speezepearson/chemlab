@@ -12,13 +12,13 @@ import { STATION, Tool } from './tools';
 import type { FaucetSpot, Frame, GuideLook, Pick } from './view';
 
 /**
- * How the flat view draws the room and what isn't a tool, flask or scale (see view2d.ts), in the wall's frame (x
+ * How the view draws the room and what isn't a tool, flask or scale (see view.ts), in the wall's frame (x
  * along the wall, y down from the floor: the room's height negated): the back wall's panels, the counter along its
  * foot, the equipment cabinet and what's in it, the faucets and their supply line, the alarms' silence button, the
  * arms out of the wall, hoses, streams, drops and the guides.
  */
 
-/** Height of the dark kick strip along the foot of the walls, the counter and the cabinet, as the wall view's. */
+/** Height of the dark kick strip along the foot of the walls, the counter and the cabinet. */
 const KICK = 48;
 /** How thick the counter's steel top is. */
 const COUNTER_TOP = 30;
@@ -27,9 +27,9 @@ const STREAM_WIDTH = 4.5;
 /** Drawn radius of a DROP_R_ATOMS drop; it goes as the cube root of the drop's size. */
 const DROP_R = 3;
 const DROP_R_ATOMS = 1.5e6;
-/** How far the supply line the faucets are fed from runs, its radius, and how close faucets share a manifold, as the wall view's. */
+/** How high the supply line the faucets are fed from runs, its radius, how close faucets share a manifold, and how far apart its brackets are. */
 const SUPPLY = { y: 1240, r: 6, gap: 150, bracket: 600 };
-/** How the guides are drawn: each look's stream and rim, their width, and their dashes, as the wall view's. */
+/** How the guides are drawn: each look's stream and rim, their width, and their dashes. */
 const GUIDE_LOOKS: Record<GuideLook, { stream: string; rim: string }> = {
   solid: { stream: 'rgba(180, 188, 184, 0.75)', rim: 'rgba(223, 230, 226, 0.95)' },
   snap: { stream: 'rgba(127, 212, 173, 0.9)', rim: 'rgba(127, 212, 173, 0.95)' },
@@ -41,8 +41,8 @@ const RIM_W = 1.6;
 const ARM = { plate: { w: 22, h: 26 }, jaw: { w: 14, h: 10 } };
 
 /**
- * The alarms' silence button: there's no wall behind the bench in this view, so it's on the back wall, above the
- * supply station's warning lamp, `scale` of the wall view's size.
+ * The alarms' silence button: on the back wall, 160 above the supply station's warning lamp, its plate drawn at
+ * `scale` of its own size (see drawAlarm).
  */
 export function alarmAt(station: Pose = STATION_POSE): { x: number; y: number; scale: number } {
   return { x: station.x + STATION.lamp.x, y: station.y - STATION.lamp.y + 160, scale: 0.7 };
@@ -146,7 +146,7 @@ export function drawSpecimen(sk: Sketch, k: Stocked, sp: Specimens): void {
  * The equipment cabinet (see cabinet.ts): open steel shelving on a dark plinth, with a dark back, and what stands
  * on its shelves, drawn as it would be in the lab. Its slots stand one behind another, so where several are, only
  * the front-most filled one shows. Its open front, which isn't drawn, is hit while something's held, to put it in
- * (see FlatView.pick).
+ * (see View.pick).
  */
 export function drawCabinet(sk: Sketch, stock: Stock, sp: Specimens): void {
   const C = CABINET;
@@ -181,7 +181,7 @@ export function drawCabinet(sk: Sketch, stock: Stock, sp: Specimens): void {
 }
 
 /**
- * The faucets on the back wall and what feeds them (as the wall view's buildFaucets): the supply line along the wall
+ * The faucets on the back wall and what feeds them: the supply line along the wall
  * high up, from the right end wall, with a riser down to each faucet, or to a short manifold along the wall that a row
  * of them come out of, held by brackets; and each faucet, seen from in front: a glossy knob in its fluid's color (the
  * solvent's clear) where its pipe comes out from the wall, its neck down to its spout's chrome tip, and its note.
@@ -302,7 +302,7 @@ export function drawArms(sk: Sketch, arms: Frame['arms']): void {
 
 /**
  * Each hose: a translucent tube drooping from its spout or faucet down to its nozzle, showing what's running through
- * it. Drawn behind everything in the plane, as the wall view bows them back toward the wall; their nozzles are drawn
+ * it. Drawn behind everything in the plane, as if bowed back toward the wall; their nozzles are drawn
  * apart (see drawNozzles).
  */
 export function drawHoses(sk: Sketch, hoses: Frame['hoses']): void {

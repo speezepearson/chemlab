@@ -6,7 +6,6 @@ import path from 'node:path';
 const here = path.dirname(new URL(import.meta.url).pathname);
 const STUBS: Record<string, string> = {
   view: 'stubs/view.ts',
-  view2d: 'stubs/view.ts',
   water: 'stubs/audio.ts',
   rumble: 'stubs/audio.ts',
   diverter: 'stubs/audio.ts',
@@ -23,7 +22,7 @@ export default defineConfig({
       enforce: 'pre',
       resolveId(id, importer) {
         if (!importer || !importer.includes('/src/game/')) return null;
-        const m = /^\.\/(view|view2d|water|rumble|diverter|changeover|chime|shatter|ambience)$/.exec(id);
+        const m = /^\.\/(view|water|rumble|diverter|changeover|chime|shatter|ambience)$/.exec(id);
         return m ? path.join(here, STUBS[m[1]]) : null;
       },
       // let the bench try other substep lengths (--substep=); the game's own is 0.02

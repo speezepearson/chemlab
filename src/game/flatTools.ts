@@ -18,12 +18,11 @@ import {
 import type { Pick } from './view';
 
 /**
- * How the flat view draws each tool, flask and scale (see view2d.ts): from its flat outline, as it's defined (see
- * SHAPES in tools.ts), in its own frame, x right and y down from its origin, showing what the wall view shows of it
- * from in front, square on, with nothing else.
+ * How the view draws each tool, flask and scale (see view.ts): from its flat outline, as it's defined (see SHAPES in
+ * tools.ts), in its own frame, x right and y down from its origin, seen from in front, square on.
  */
 
-/** The separator's manifold, below its valve, in its frame, as the wall view's (see view.ts). */
+/** The separator's manifold, below its valve, in its frame. */
 const SEP_BODY = { x0: -210, x1: 210, y0: 100, y1: 112 };
 /** How far above a flask's mouth or a scale's platform its note sits, to the note's middle. */
 const NOTE_Y = 13;
@@ -33,7 +32,7 @@ const LEVER = { len: 13, back: 1, w: 3, core: 5 };
 const DIAL = { ticks: 11.75, knob: 8, from: 1.5, to: 7 };
 
 /**
- * What the flat view keeps of a tool between frames: the boards its screens and printed parts are drawn on (see
+ * What the view keeps of a tool between frames: the boards its screens and printed parts are drawn on (see
  * screens.ts), made as it needs them, and a culture's cells as they've been seen to die.
  */
 export interface ToolArt {
@@ -73,7 +72,7 @@ export function drawTool(sk: Sketch, t: Tool, art: ToolArt, clock: number, energ
     const r = tankRect(t, 0);
     sk.box(r.x0 - 2.5, r.x1 + 2.5, r.y0, r.y1 + 2.5, INK.dark, body, 0.6);
   }
-  // the pipes, from the tanks down to the spouts, as the wall view runs them
+  // the pipes, from the tanks down to the spouts
   if (t.kind === 'exchanger')
     sh.tanks.forEach((tk, k) => {
       sk.pipe([[tankX(tk), floor], [tankX(tk), HELIX.y - HELIX.r]], 2, body);

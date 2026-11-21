@@ -1,45 +1,15 @@
-import { ROOM, WALL_PANEL } from './space';
+/*
+ * The airlock: a small chamber behind the wall opposite the bench, just big enough for a standing cryopod, where the
+ * player wakes the first time (see GameEngine.enterPod). Neither is drawn: in the pod, the bench is seen darkened as
+ * far as the pod shuts it out, with the pod's message over it.
+ */
 
 /**
- * The airlock: a small chamber behind the front wall (the one opposite the bench, behind the player as they work),
- * just big enough for a standing cryopod, where the player wakes the first time (see GameEngine.enterPod). All in
- * world units.
- * - x: the middle of its doorway, along the front wall, opposite where the bench's faucets, supply station and
- *   instruments are: the doorway is two of the wall's panels across and two high, lined up with them, as the supply
- *   station is (the front wall's panels run from its end at ROOM.x1).
- * - w, d, h: the chamber inside, across, front to back and high.
- * - wall: how thick the wall with the doorway is, which the doors slide into.
- * - door: the doorway, across and high.
+ * Sim seconds the message in the pod takes to flicker out, its front to slide up or down, and the screen to fade to
+ * black as the player falls asleep, or at the end to white: they run on sim time, like everything else, so pausing
+ * stops them (but for the end, which goes on in real time; see Wake's arriving).
  */
-export const AIRLOCK = {
-  x: ROOM.x1 - 27 * WALL_PANEL.w,
-  w: 2 * WALL_PANEL.w,
-  d: 320,
-  h: 1100,
-  wall: 30,
-  door: { w: 2 * WALL_PANEL.w, h: 2 * WALL_PANEL.h },
-};
-
-/**
- * The cryopod: where it stands (its axis), its shell's radius, and how high its body and dome go. Its door is `arc` of
- * its body's round, facing the lab, hinged on its edge toward +x (so on the right as the player stands in it), and
- * swings out by `swing`; the dome is whole, over all of it.
- */
-export const POD = {
-  x: AIRLOCK.x,
-  z: ROOM.z1 + AIRLOCK.wall + AIRLOCK.d - 102,
-  r: 87,
-  base: 14,
-  top: 701,
-  arc: (80 * Math.PI) / 180,
-  swing: (105 * Math.PI) / 180,
-};
-
-/**
- * Sim seconds the message in the pod takes to flicker out, its front to slide up, and the doors to slide shut or open:
- * they run on sim time, like everything else, so pausing stops them.
- */
-export const WAKE_S = { flicker: 0.7, open: 1.6, close: 1.2, fade: 1.5, arrive: 5 };
+export const WAKE_S = { flicker: 0.7, open: 1.6, fade: 1.5, arrive: 5 };
 /** Real seconds, once the pod's open at Mu Ceti, before the screen starts fading to white (see Wake's arriving). */
 export const BLINDED_S = 1;
 /** Real seconds the screen takes to fade in from black as the player wakes from a sleep. */

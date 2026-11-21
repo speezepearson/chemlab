@@ -4,7 +4,7 @@ import { fluidAlpha, fluidColor, fluidRGB } from './flask';
 import type { Pick } from './view';
 
 /**
- * The flat view's drawing kit (see view2d.ts): a 2D canvas context, drawn on in the lab's flat frames, that remembers
+ * The view's drawing kit (see view.ts): a 2D canvas context, drawn on in the lab's flat frames, that remembers
  * everything it draws that can be hit as the shape it was drawn (see Region), so that what the pointer is on is
  * worked out from just what's drawn, topmost first, and empty space inside something's bounds isn't it.
  *
@@ -57,7 +57,7 @@ export function boxThrough(m: DOMMatrix, [x0, y0, x1, y1]: Box, pad = 0): Box {
   return [Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) + pad, Math.max(...ys) + pad];
 }
 
-/** The view's colors: the wall view's materials' (see view.ts), flat, and the glass and fluid's look. */
+/** The view's colors: its materials', flat, and the glass and fluid's look. */
 export const INK = {
   glass: 'rgba(222, 240, 246, 0.16)',
   glassEdge: 'rgba(244, 251, 253, 0.95)',
@@ -87,7 +87,7 @@ export const INK = {
 /** How the green flash over a vessel a guide ends at pulses (see Frame.guides): FLASH.hz times a real second, between lo and hi opacity. */
 export const FLASH = { hz: 1.5, lo: 0.05, hi: 0.22 };
 
-/** Height of each line of a label or note, in world units, as the wall view's. */
+/** Height of each line of a label or note, in world units. */
 export const LABEL_H = 10;
 
 export class Sketch {
@@ -206,7 +206,7 @@ export class Sketch {
     const clear = 1 - fluidAlpha(f);
     const rgb = fluidRGB(f);
     if (clear > 0.02 && rgb) {
-      // as the wall view's: thicker toward its edges, where it's seen through more of itself, and a bright line along
+      // thicker toward its edges, where it's seen through more of itself, and a bright line along
       // its surface, in its own color washed toward white
       ctx.beginPath();
       ctx.rect(x0, top, x1 - x0, bottom - top);

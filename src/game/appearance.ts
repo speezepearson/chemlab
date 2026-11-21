@@ -80,18 +80,6 @@ export function whiteHeat(T: number): number {
   return Math.min(1, LOOK.fluidWhite * whiteCurve(T));
 }
 
-/**
- * Glow opacity at fraction x of the way out from the center, relative to the
- * center: a Gaussian bump times a (1 − x²)² window. It is smooth everywhere
- * and reaches 0 at x = 1 with zero slope, so neither the interior nor the
- * rim shows an edge. Larger `sharpness` concentrates the light at the center.
- */
-export function glowFalloff(x: number, sharpness: number): number {
-  if (x >= 1) return 0;
-  const w = 1 - x * x;
-  return Math.exp(-sharpness * x * x) * w * w;
-}
-
 export type RGB = [number, number, number];
 
 /**

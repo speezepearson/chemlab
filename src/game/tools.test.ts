@@ -11,7 +11,6 @@ import { CRYOSTABILIZER, FIRST_SUPPLY, SUPPLIES, nextSupply } from './supply';
 import { CELL, PLANE_Z, ROOM, WALL_PANEL } from './space';
 import { tankMouth } from './bodies';
 import { loadVessel, saveVessel } from './save';
-import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
   clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
@@ -459,8 +458,6 @@ describe('supply station', () => {
     expect(pose.z).toBe(PLANE_Z);
     expect(STATION.out).toBe(pose.z - ROOM.z0);
     for (const y of [top - block.y0, top - block.y1]) expect(y / WALL_PANEL.h).toBeCloseTo(Math.round(y / WALL_PANEL.h), 9);
-    expect(TILES.walls.u / 2).toBe(WALL_PANEL.w);
-    expect(TILES.walls.v / 3).toBeCloseTo(WALL_PANEL.h, 9);
     expect(pose.y).toBe(top);
     // everything on it is inside it
     const r = new Tool('receptacle', 0);

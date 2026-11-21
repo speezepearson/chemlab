@@ -1,7 +1,7 @@
 import { equilibrate } from '../chem/equilibrium';
 import { Lag, temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
-import { AIRLOCK, BLINDED_S, RISE_S, WAKE_S, ease, inPod, type Wake } from './airlock';
+import { BLINDED_S, RISE_S, WAKE_S, ease, inPod, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
   FLASK_CENTER, NOZZLE_H, SCALE_SLOTS, aimValve, dippedIn, docked, faucetBox, faucetPipes, flaskArm, flaskBox, flaskLip, flaskMouth, footAt, insideVessel, isDocked,
@@ -27,17 +27,15 @@ import { shatter } from './shatter';
 import { WHEEL, WHEELS, wheelMove, wheelPick, type WheelAim } from './wheel';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
-import { onPlaneZ, sightAt } from './sight';
 import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
-import { BENCH, CELL, LIFT, PLANE_Z, ROOM, SPIN, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, type Pose, type Vec3 } from './space';
+import { BENCH, CELL, LIFT, PLANE_Z, ROOM, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, type Pose, type Vec3 } from './space';
 import {
   changeoverAt, ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
   TANK_H, TOOL_NAMES, dipUnder, isDipper, isThermometer, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
   type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
-import type { AirlockLook, Camera, FaucetSpot, Frame, GuideLook, Icons, LabView, Pick } from './view';
-import { FlatView } from './view2d';
+import { View, type AirlockLook, type Camera, type FaucetSpot, type Frame, type GuideLook, type Icons, type LabView, type Pick } from './view';
 import { catches, stillness, type Stillness } from './still';
 import { WaterSounds } from './water';
 
@@ -228,15 +226,10 @@ const GRAVITY = 2000;
  */
 const FOV = 45;
 /**
- * How far back along its line of sight, from the middle of the stretch of wall it sees, the view is from: it has no
- * perspective, so it makes no odds to what it sees, so long as everything on the wall is in front of it.
+ * Where the view starts at the bench: square on to the faucets, the supply station and the instruments, far enough
+ * back to take them all in.
  */
-const ORTHO_BACK = 2000;
-/**
- * Where the view starts at the bench: straight out of the airlock, square on to the faucets, the supply station and
- * the instruments, far enough back to take them all in.
- */
-const START_VIEW = { x: AIRLOCK.x, y: 700, z: 1560 };
+const START_VIEW = { x: 2360, y: 700, z: 1560 };
 /**
  * How near the view can come to the bench's plane (see GameEngine.at), and how much nearer than the room's far wall
  * it stays; and how near the ends of the room, the floor and the ceiling its middle can go.
@@ -378,12 +371,10 @@ export class GameEngine {
   private cursorNow = '';
   /** A brief note on the display, like there being no room for something (see say). */
   private flash: { text: string; until: number; tip?: boolean } | null = null;
-  /** Whether the alarms are silenced, by the button under the beacon (see hushAlarms). Saved, and kept through Reset. */
+  /** Whether the alarms are silenced, by their button (see hushAlarms). Saved, and kept through Reset. */
   private alarmsOff = false;
   /** Where the player is in waking up in the airlock (see Wake), and how many sim seconds it's been there. */
   private wake: Wake = 'closed';
-  /** How far the ship has turned, in radians (see SPIN), for the stars. */
-  private spin = 0;
   /** Sim seconds the lab has run, for what blinks on sim time. */
   private clock = 0;
   private wakeT = Infinity;
@@ -451,7 +442,7 @@ export class GameEngine {
     // the colors' in a row along the wall, then the solvent's, along the bench (see FAUCET_X)
     const pipes = faucetPipes();
     this.faucets = FAUCETS.map((start, i) => ({ start, output: faucetOutput(start, chem), note: '', ...pipes[i] }));
-    this.view = new FlatView(canvas);
+    this.view = new View(canvas);
     this.aim();
     this.resizeObserver = new ResizeObserver(() => this.layout());
     this.resizeObserver.observe(stage);
@@ -937,7 +928,7 @@ export class GameEngine {
     return true;
   }
 
-  /** A little picture of each kind of thing the equipment wheels make, as it's drawn in the lab (see the view's IconStudio). */
+  /** A little picture of each kind of thing the equipment wheels make, as it's drawn in the lab (see View.icons). */
   icons(): Readonly<Icons> {
     return this.view.icons();
   }
@@ -1120,13 +1111,11 @@ export class GameEngine {
   }
 
   /**
-   * The camera for a view at `at` (see GameEngine.at): square on to the bench, with no perspective, seeing as much of
-   * the wall, top to bottom, as a camera with a field of view of FOV would from there, from ORTHO_BACK straight out
-   * from the middle of it.
+   * The camera for a view at `at` (see GameEngine.at): square on to the bench, seeing as much of the wall, top to
+   * bottom, as a camera with a field of view of FOV would from there.
    */
   private camOf(at: Vec3): Camera {
-    const ortho = Math.abs(at.z - PLANE_Z) * Math.tan((FOV * Math.PI) / 360);
-    return { x: at.x, y: at.y, z: PLANE_Z + ORTHO_BACK, yaw: 0, pitch: 0, fov: FOV, ortho };
+    return { x: at.x, y: at.y, half: Math.abs(at.z - PLANE_Z) * Math.tan((FOV * Math.PI) / 360) };
   }
 
   /** Put the camera where the view is (see GameEngine.at), but in the pod, where it stays as it was. */
@@ -1148,12 +1137,14 @@ export class GameEngine {
   }
 
   /**
-   * The point of the upright plane `z` out from the back wall that (x, y) on the view is on; null if it's on none of
-   * it. It's worked out from where the view is now (see sightAt), not from the frame last drawn, so that it's right
-   * however many times the view moves between frames.
+   * The point of the upright plane `z` out from the back wall that (x, y) on the view is on. It's worked out from
+   * where the view is now (see camOf), not from the frame last drawn, so that it's right however many times the view
+   * moves between frames.
    */
-  private planeAt(x: number, y: number, z = PLANE_Z): Vec3 | null {
-    return onPlaneZ(sightAt(this.cam, ...this.ndc(x, y), this.viewW / Math.max(1, this.viewH)), z);
+  private planeAt(x: number, y: number, z = PLANE_Z): Vec3 {
+    const [nx, ny] = this.ndc(x, y);
+    const { x: cx, y: cy, half } = this.cam;
+    return { x: cx + nx * half * (this.viewW / Math.max(1, this.viewH)), y: cy + ny * half, z };
   }
 
   /**
@@ -1200,11 +1191,10 @@ export class GameEngine {
     if (this.facing === 'pod' || this.wheel || this.dozing()) return;
     const at = this.pointer ?? { x: this.viewW / 2, y: this.viewH / 2 };
     const p = this.planeAt(at.x, at.y);
-    if (!p) return;
     this.at = this.inView({ ...this.at, z: PLANE_Z + (this.at.z - PLANE_Z) * Math.exp(px * ZOOM_RATE) });
     this.aim();
     const q = this.planeAt(at.x, at.y);
-    if (q) this.slide(p.x - q.x, p.y - q.y);
+    this.slide(p.x - q.x, p.y - q.y);
   }
 
   /* ---------------- input ---------------- */
@@ -1485,7 +1475,7 @@ export class GameEngine {
     // the wall under the fingers' middle stays under it, and as they spread, comes nearer
     const grabbed = this.planeAt(was.x, was.y);
     const under = this.planeAt(now.x, now.y);
-    if (grabbed && under) this.slide(grabbed.x - under.x, grabbed.y - under.y);
+    this.slide(grabbed.x - under.x, grabbed.y - under.y);
     if (was.d > 0 && now.d > 0) this.zoom(Math.log(was.d / now.d) / ZOOM_RATE);
     this.pinch = now;
   }
@@ -1514,7 +1504,6 @@ export class GameEngine {
     if (!tr || !at) return;
     const { t, k } = tr;
     const p = this.planeAt(at.x, at.y, onTool(t, 0, 0, valveZ(t)).z);
-    if (!p) return;
     const l = toLocal(t.pose, p);
     aimValve(t, k, l.x, -l.y);
   }
@@ -1556,7 +1545,7 @@ export class GameEngine {
       this.takeOut(p.item, p.slot);
       return;
     }
-    if (p.kind === 'faucet' || p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake' || p.kind === 'cabinet' || p.kind === 'airlock') return;
+    if (p.kind === 'faucet' || p.kind === 'alarm' || p.kind === 'wake' || p.kind === 'cabinet') return;
     if (p.kind === 'tool' && p.t.shape.fixed) {
       this.say('That stays where it is');
       return;
@@ -2222,7 +2211,6 @@ export class GameEngine {
     // the lab waits for the player to press OK in the pod, as it did through the rest of the intro
     // and once there's enough cryostabilizer, the lab stands still as it was then, through the end
     const simDt = quiet ? dt : this.wake === 'pod' || this.arrival ? 0 : dt * this.speed;
-    this.spin = (this.spin + SPIN * simDt) % (2 * Math.PI);
     this.clock += simDt;
     const mouths = this.reopen();
     const catching = this.catch;
@@ -2650,7 +2638,7 @@ export class GameEngine {
       flasks: this.flasks, tools: this.tools, scales: this.scales, hoses, faucets: this.faucets, stock: this.stock,
       streams, drops,
       tarePress: this.tarePress, hot: this.hot(), bad: !!h && !pl?.rest && !this.intoCabinet(), dt, clock: this.clock,
-      energies: BOND_KEYS.map((k) => this.chem.params.bonds[k].E), alarmsOff: this.alarmsOff, blindsShut: false, spin: this.spin,
+      energies: BOND_KEYS.map((k) => this.chem.params.bonds[k].E), alarmsOff: this.alarmsOff,
       airlock: this.airlockLook(),
       guides: this.guides(pl), arms: this.arms(),
     });
@@ -2658,8 +2646,7 @@ export class GameEngine {
 
   /**
    * What's outlined: what's held, or with empty hands, what the pointer is on; but the whole equipment cabinet while
-   * what's held would go into it, nothing for the cabinet itself otherwise, and the airlock's doorway only while its
-   * doors stand open.
+   * what's held would go into it, and nothing for the cabinet itself otherwise.
    */
   private hot(): Pick | null {
     const h = this.held;
@@ -2671,7 +2658,7 @@ export class GameEngine {
       return { kind: 'hose', h: h.h };
     }
     const p = this.target;
-    if (p?.kind === 'cabinet' || (p?.kind === 'airlock' && this.wake !== 'open')) return null;
+    if (p?.kind === 'cabinet') return null;
     return p;
   }
 
@@ -2777,7 +2764,7 @@ export class GameEngine {
     const p = this.target;
     return (
       (p?.kind === 'scale' && p.part === 'tare') ||
-      p?.kind === 'alarm' || p?.kind === 'blinds' || p?.kind === 'wake' || (p?.kind === 'airlock' && this.wake === 'open')
+      p?.kind === 'alarm' || p?.kind === 'wake'
     );
   }
 
@@ -2789,7 +2776,7 @@ export class GameEngine {
   /** Whether `p` can be picked up: anything but what's fixed in place. */
   private grabbable(p: Pick): boolean {
     return (
-      p.kind !== 'faucet' && p.kind !== 'alarm' && p.kind !== 'blinds' && p.kind !== 'wake' && p.kind !== 'cabinet' && p.kind !== 'airlock' &&
+      p.kind !== 'faucet' && p.kind !== 'alarm' && p.kind !== 'wake' && p.kind !== 'cabinet' &&
       !(p.kind === 'tool' && p.t.shape.fixed)
     );
   }
@@ -2940,7 +2927,6 @@ export class GameEngine {
       advance: (dt) => this.simulate(dt, true),
       skip: (dt) => {
         this.clock += dt;
-        this.spin = (this.spin + SPIN * dt) % (2 * Math.PI);
         this.station().steady += dt;
       },
     };
@@ -3060,7 +3046,7 @@ export class GameEngine {
   private airlockLook(): AirlockLook {
     const w = this.wake;
     const t = this.wakeT;
-    // how far up the pod's front is: sliding up as they wake, down as they settle in, and otherwise up but while
+    // how far up the pod's front is: sliding up as they wake, down as they get in, and otherwise up but while
     // they're shut in it
     const up =
       w === 'opening' || w === 'arriving' ? ease(t / WAKE_S.open)
@@ -3070,15 +3056,11 @@ export class GameEngine {
     // the message flickers, on less and less of the time, until it's gone
     const flick = w === 'flicker' && Math.sin(t * 90) + Math.sin(t * 37) > 2.6 * (t / WAKE_S.flicker) - 0.6;
     return {
-      door: w === 'closed' ? 1 - ease(t / WAKE_S.close) : w === 'open' ? ease(t / WAKE_S.close) : 1,
-      front: up,
       // the room's light floods in as the front slides up, and is shut out as it slides down
       dark: 1 - up,
       message: w === 'pod' || flick,
       notice: this.arrival ? { arrival: true } : { arrival: false, ...this.podNotice },
       okHot: w === 'pod' && this.target?.kind === 'wake',
-      // flashing while the doors stand open to sleep, a second on and half a second off, on sim time
-      lamp: w === 'open' && this.clock % 1.5 < 1,
       arrival: this.arrival && (w === 'arriving' || w === 'arrived'),
     };
   }
@@ -3174,7 +3156,7 @@ export class GameEngine {
       tip: !!this.flash?.tip,
       actions: this.actions(),
       black: this.black(),
-      // blinded a while by the white void once the pod's open, then all white
+      // blinded a while by the white once the pod's open, then all white
       white:
         this.wake === 'arriving' ? ease((this.wakeT - WAKE_S.open - BLINDED_S) / (WAKE_S.arrive - WAKE_S.open - BLINDED_S))
         : this.wake === 'arrived' ? 1

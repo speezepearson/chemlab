@@ -32,8 +32,8 @@ export interface SaveState {
   delivered?: number;
   /** Whether the alarms are silenced (see GameEngine); not if left out. */
   alarmsOff?: boolean;
-  /** Whether the porthole's blinds are shut (see GameEngine); not if left out. */
-  blindsShut?: boolean;
+  /** Whether a porthole's blinds were shut, in saves from when there was one to see; no longer written, and ignored. */
+  blindsShut?: unknown;
   /** Whether the player has been told they can nap (see GameEngine.nap); not if left out. */
   nap?: boolean;
   /** The sticky notes of saves from when there was a pencil to write them with; no longer written, and ignored. */
@@ -44,12 +44,10 @@ export interface SaveState {
    */
   cabinet?: Record<string, number[]>;
   /**
-   * Where the player stands and looks in the walk mode (see ViewMode): across the room and out from the back wall,
-   * and their yaw and pitch (see GameEngine's Player); just outside the airlock if left out, or if it's somewhere they
-   * couldn't stand. A save from when the lab was a room to walk round (one without `wall`) has where they stood in
-   * that, which is ignored.
+   * Where the player stood and looked, in saves from when the lab could be walked round in; no longer written, and
+   * ignored.
    */
-  player?: { x: number; z: number; yaw: number; pitch: number };
+  player?: unknown;
   /** Where the view is (see GameEngine): across the wall, up it, and out from it; where it starts if left out. */
   view?: { x: number; y: number; z: number };
 }

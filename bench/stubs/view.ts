@@ -1,9 +1,6 @@
-// Headless stand-in for src/game/view.ts: no Three.js, no WebGL. Only what GameEngine calls, with the same signatures.
+// Headless stand-in for src/game/view.ts: no canvas. Only what GameEngine calls, with the same signatures.
 
 type Vec3 = { x: number; y: number; z: number };
-
-/** The end's look; the engine reads only how far open the pod is in god mode's preview of it. */
-export const ARRIVAL = { open: 1 };
 
 export class View {
   constructor(..._args: unknown[]) {}
@@ -24,6 +21,3 @@ export class View {
   render(_fr: unknown): void {}
   dispose(): void {}
 }
-
-/** The flat view (src/game/view2d.ts) is stood in for the same way. */
-export { View as FlatView };

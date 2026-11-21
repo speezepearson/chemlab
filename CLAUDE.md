@@ -17,7 +17,7 @@ same commit as any behavior change. This file holds what README doesn't: how to 
 
 ## Checking things in a browser
 
-The view is Three.js code with no unit tests, so verify drawing and interaction with Playwright screenshots.
+The view is 2D canvas drawing with no unit tests, so verify drawing and interaction with Playwright screenshots.
 
 - Playwright is installed globally. Load it with
   `require(require('child_process').execSync('npm root -g').toString().trim() + '/playwright')`.
@@ -27,16 +27,14 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   `SaveState` in `src/game/save.ts`; tool positions are fractions of the old bench's home area (see `fromFrac`).
 - Set `localStorage['slurry-lab.introSeen'] = '1'` to skip the intro. A start button still covers the page (it's
   the click that lets sound play), and the lab stays paused under it, so click `.intro-start` first.
-- WebGL needs a software renderer. Launch with
-  `args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']`.
 - There's no pointer capture, so Playwright's own mouse and keyboard work as a player's do (`page.mouse.move`,
   `down`, `up`, `wheel`; keys go to the window). In dev builds the engine is `window.lab`: `lab.debug({ x, y, z })`
   puts the view at the bench (x along the wall, y up, z out from the back wall), and
   `lab.view.project(p, lab.viewW, lab.viewH)` turns a point in the room into CSS pixels on the canvas, to point the
   mouse at something. Its private fields (`held`, `target`, `tools`, `turning`, `cam`, ...) are reachable from
   `page.evaluate`.
-- Software rendering is slow, a few frames a second, so wait longer than you'd think, and remember that a screenshot
-  takes real time during which the sim runs on.
+- Headless Chromium draws in software, so frames come slower than on a real machine: wait longer than you'd think,
+  and remember that a screenshot takes real time during which the sim runs on.
 - Pass `ignoreHTTPSErrors: true` to `browser.newContext`, or the Google font (Schibsted Grotesk) fails to load through
   the sandbox's proxy and pages render in a fallback font, hiding font-specific bugs.
 - Tools drain fast at 16×. Use slow valves, or screenshot early, to catch something mid-flow.
@@ -58,19 +56,17 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `engine.ts` owns the lab: what's in it, the view (`steer`, `zoom`), input, carrying and placing (`carry`,
     `placement`), getting into the pod (`board`), and the sim loop. It keeps where the view is on the wall as a
     square-on view with perspective would have it (`at`), so that saves' views mean what they always have, and works
-    the camera out from that (`camOf`). `sight.ts` is the camera (`Camera`) and its lines of sight (`sightAt`,
-    `onPlaneZ`), by which the engine tells where the pointer is on the wall without asking the view.
-  - `view.ts` draws it all with Three.js, from wherever the engine puts the camera (`Camera`), and raycasts for what
-    the pointer is on (`pick`); `project` goes the other way. `LabView` is what the engine asks of whatever draws
-    the lab.
-  - `view2d.ts` is the other thing that draws it: `FlatView`, for the flat mode, on a plain 2D canvas, with no
-    three.js at all (`view2d.test.ts` checks nothing it loads imports it). `flatTools.ts` draws every tool kind, flasks
-    and scales from their flat outlines, `flatRoom.ts` the wall, counter, cabinet, faucets, hoses, streams and guides,
-    and `sketch.ts` is the drawing kit, which keeps each shape drawn with what it's part of, for picking. `screens.ts`
-    is the canvas drawing both views share (the instruments' screens, inks, scales, readouts, the pod's message, the
-    alarms' plate), and `thing.ts` says what a pick is part of, for outlining. It draws the arms out of the wall (`ArmView`), the
-    faucets' supply line, and hoses bowed back toward the wall. It also draws the equipment wheels' icons
-    (`IconStudio`): a new one of each kind, drawn as in the lab, so there are no icons to keep up to date.
+    the camera (`Camera`, the stretch of the wall in view) out from that (`camOf`), and where the pointer is on the
+    wall from that (`planeAt`), without asking the view.
+  - `view.ts` draws it all (`View`), flat, on a plain 2D canvas, square on to the wall from wherever the engine puts
+    the camera, and says what the pointer is on (`pick`) from what it drew; `project` goes the other way. `LabView`
+    is what the engine asks of it, and `Frame` and `Pick` are what passes between them. `flatTools.ts` draws every
+    tool kind, flasks and scales from their flat outlines, `flatRoom.ts` the wall, counter, cabinet, faucets and their
+    supply line, the alarms' button, the arms out of the wall, hoses, streams and guides, and `sketch.ts` is the
+    drawing kit, which keeps each shape drawn with what it's part of, for picking. `screens.ts` draws what goes on
+    canvases of its own (the instruments' screens, inks, scales, readouts, the pod's message, the alarms' plate), and
+    `thing.ts` says what a pick is part of, for outlining. The view also draws the equipment wheels' icons
+    (`drawIcons`): a new one of each kind, drawn as in the lab, so there are no icons to keep up to date.
   - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room; what fluid a
     dipper's foot (a thermometer's bulb, a wicking strip's tip) is in (`dippedIn`, `bathAt`) and what vessel it's
     inside at all (`insideVessel`), from which the engine works out what each one is in every frame (`dipping` and
@@ -88,16 +84,12 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `tools.ts` holds tool shapes (flat outlines, y down) and per-step logic, plus drips and the instruments' readings (the spectroscope's graph is `spectroscopeAt`), and `Bed`, the cell-by-cell carrying that the wicking strip's paper and the column's bed share.
   - `flask.ts` has `Vessel`, `transfer`, volume and colors.
   - `cooling.ts` is Newtonian cooling to the room; the engine works out each vessel's exposure from its flat outline.
-  - `airlock.ts` is the airlock and cryopod where the player wakes, in the wall behind the bench: their size and
-    place, and the `Wake` states.
+  - `airlock.ts` is the airlock and cryopod where the player wakes (neither drawn: in the pod, the bench is darkened
+    with the pod's message over it), and the `Wake` states.
     `sleep.ts` is sleeping in the pod, or napping (N): the lab run in windows, measured, and jumped ahead
     while it's steady.
     `src/intro/notice.ts` is the messages projected inside the pod: the notice she wakes to (its litres as of then),
     and the welcome to Mu Ceti at the end.
-  - `porthole.ts` is the porthole's shape, for how much of its stretch of the wall behind the bench it takes up.
-  - `surfaces.ts` paints the room's textures (walls, deck, ceiling, counters, cabinets) from noise, pure and DOM-free;
-    `surfaceWorker.ts` runs it off the main thread, and `textures.ts` turns the results into materials, plain until
-    their maps arrive, and gives geometry texture coordinates in world units (`boxUV`, `planeUV`).
   - `history.ts` is undo and redo of the lab's arrangement (never fluids). An action that changes the arrangement calls
     the engine's `mark()` as it starts and `commit()` as it ends (or `change()` around it, if it's instant); a carry is
     marked at pick-up and committed when it's left.
@@ -105,21 +97,21 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     with the mouse (`wheelMove`) and which sector it picks while the wheel's key (1 or 2) is held. The engine holds
     the open one's state (`wheel`, `openWheel`, `closeWheel`): it opens round the mouse's pointer. `Wheel` in
     `Hud.tsx` draws it.
-  - `outline.ts` is the player's settings for the outline round what the pointer is on, or what's held; the view's
-    `Outliner` draws it over the finished frame, from a mask of the meshes registered as that thing's parts (in red
+  - `outline.ts` is the player's settings for the outline round what the pointer is on, or what's held; the view
+    draws it over the finished frame (`View.outline`), round a mask of every shape drawn as that thing's parts (in red
     round something held where it can't be left).
   - `supply.ts` is what the ship is short of, in the order the station is fitted for them (`SUPPLIES`): the
     antinucleant (R–B), then the cryostabilizer.
   - `cabinet.ts` is the equipment cabinet: its layout (each kind's slots on its shelves) and its stock, which the
-    equipment wheels take from and putting away puts back into. The view draws what's in it as instanced meshes
-    (`CabinetView`), so it's cheap however much it holds.
+    equipment wheels take from and putting away puts back into. The view draws only the front-most filled slot of
+    each place (`drawCabinet` in `flatRoom.ts`), so it's cheap however much it holds.
   - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
     `volumes.ts`); `rumble.ts` is the composition analyzer, `diverter.ts` the supply station's diverter, `changeover.ts` its changeover, `ambience.ts` the ship, `water.ts` drips and streams, `shatter.ts` a thermometer
     shattering.
     New sounds play into a channel's `bus()`, never straight to the destination, so the sliders reach them. A sound
     in the lab goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),
-    so it fades and pans with where it is relative to the view's camera.
+    so it fades and pans with where it is relative to the view (`View.toHead`).
 - `src/intro/log.ts`: the intro's console script, deterministic from a seed. `src/components/Intro.tsx` plays it.
 - `src/components/`: the React UI around the canvas: the equipment wheels, the corner list of actions and the touch
   screens' buttons (`Hud.tsx`), the Chemistry and Appearance panels, the editor.
@@ -143,7 +135,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   And once the reservoir holds the goal, the lab stands still as it was then through the end (the welcome to Mu Ceti,
   the pod opening onto white), so that goes in real time, as do the screen's fades in from black on waking.
   Everything in the world is on sim time, lights included, like
-  the emergency beacon; going with the ambience (as the beacon goes with the alarms) doesn't make something an
+  the station's warning lamp; going with the ambience (as the lamp goes with the alarms) doesn't make something an
   exception. Waking in the airlock (the pod's message flickering out, its front opening, the doors closing) is sim
   time too.
   - Anything drawn per outlet must use totals over the whole frame. A single substep's output can be empty, for
@@ -155,7 +147,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - Sealed tools (`shape.sealed`) have no mouth at all.
 - **Coordinates.**
   - Everything is in world units, y up: a flask is 70 tall, the room is `ROOM`, and the view is a camera the engine
-    moves (`Camera`); the player's eyes, in the pod, are at 620.
+    moves across the wall (`Camera`).
   - **One plane.** Everything in the lab is in one upright plane `PLANE_Z` out from the back wall, facing out, and is
     placed freely by x (along the wall) and y (up it), within `BENCH`. Each thing has a `Pose` (x, y, z and a yaw; see
     `toWorld`), but in the lab z is always `PLANE_Z` and the yaw always 0; only `flatten.ts` reads other yaws, from old
@@ -166,7 +158,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     `space.ts`), which is now the back wall.
   - Nothing turns, except a flask tipped to pour, and nothing falls: whatever the player lets go of stands on the
     counter or a scale, or is snapped onto an instrument's tube, or else is held up by arms out of the back wall
-    (`toolArms` and friends in `bodies.ts`, `ArmView` in `view.ts`), or stays in hand. Keep it that way, or
+    (`toolArms` and friends in `bodies.ts`, `drawArms` in `flatRoom.ts`), or stays in hand. Keep it that way, or
     `physics.ts` won't do.
   - **Placing** has no grid: what's held goes where the pointer is, kept on the bench, settled onto the counter or a
     scale within `SETTLE`, and slid up to `MAGNET` across to line a spout up with a mouth (the engine's `placement`,
@@ -175,24 +167,22 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Hoses** aren't a tool: every spout and faucet has one, pulled out with the left button (`Hose.on` says which). A
   spout's fluid leaves at its hose's nozzle if it's out, so wherever fluid leaves a spout or faucet, use the engine's
   `outletAt` and `faucetOutlet`, not `spoutAt` or `fa.spout`.
-- **What's drawn is what's hit.** Every mesh a `ToolView` builds is registered as part of the tool for the pointer's
-  raycast, so empty space around it isn't, and so is every mesh of an arm, as part of what it holds up. Register a
-  mesh yourself only to make it a specific part (a tank, valve or button); sprites (labels) aren't hit. The one exception is each `FluidMesh`'s bent copy of what's behind a clear
-  fluid (`bentMat` in `view.ts`), on a layer of its own (`REFRACT_LAYER`) drawn only in the frame's main render. It's
-  the only thing using three.js's `transmission`, whose extra pass runs whenever anything transmissive is in view, so
-  don't give other materials `transmission` lightly.
+- **What's drawn is what's hit.** Every shape the view draws with a `Pick` is kept, as it was drawn, as part of that
+  thing for the pointer (`Sketch`'s regions), so empty space inside something's bounds isn't it, and an arm's shapes
+  are part of what it holds up. Give a shape a pick of its own only to make it a specific part (a tank, valve or
+  button); labels and notes aren't hit.
 - **Adding a tool kind** touches all of these:
   - `ToolKind`, `SHAPES` and `TOOL_NAMES` in `tools.ts`, plus `Tool.step` if it moves fluid differently.
-  - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in `ToolView` (`view.ts`) if it's drawn specially, and
-    the same in the flat view's `drawTool` (`flatTools.ts`), which draws every kind too. Anything either draws on a
-    canvas (a screen, a scale, an ink) goes in `screens.ts`, for both. Its
+  - Its depth in `TOOL_DEPTH` (`bodies.ts`), and a branch in the view's `drawTool` (`flatTools.ts`) if it's drawn
+    specially. Anything drawn on a canvas of its own (a screen, a scale, an ink) goes in `screens.ts`. Its
     mouths and spouts a whole number of `CELL` apart along it, so a row of flasks or tanks that far apart can stand
     under them (`bodies.test.ts` checks every shape).
   - A place on one of the equipment wheels (`WHEELS` in `wheel.ts`: 1's is for experimenting and learning, 2's for
     mass production; ask the user which, if it isn't plain), unless the tool is unique. `wheel.test.ts` checks
     everything stocked is on one. There are no keys for particular tools: the wheels are the only way to make one
-    away from the cabinet. Its icon there draws itself, from its `ToolView` (see `IconStudio` in `view.ts`); look at
-    it, and if it's too long and thin to make out whole, give it a pose in `ICON_POSES`.
+    away from the cabinet. Its icon there draws itself, as it's drawn in the lab (see `drawIcons` in `view.ts`); look at
+    it, and if it's too long and thin to make out whole, give it a frame of its own in `iconFrame`, as the
+    thermometers have.
   - Its place in the equipment cabinet: `STOCK` and a compartment in `BAYS` (`cabinet.ts`), and `ENDLESS` if it's
     used up. `cabinet.test.ts` checks it fits.
   - If it has state of its own that a save should keep, `Tool.memory` and `Tool.remember`.

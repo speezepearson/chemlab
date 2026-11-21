@@ -1,30 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { AIRLOCK, POD, ease, inPod, type Wake } from './airlock';
-import { ROOM, WALL_PANEL } from './space';
-
-const whole = (v: number) => expect(v).toBeCloseTo(Math.round(v), 9);
+import { ease, inPod, type Wake } from './airlock';
 
 describe('airlock', () => {
-  it("has its doorway in the front wall, lined up with the wall's panels", () => {
-    const [x0, x1] = [AIRLOCK.x - AIRLOCK.door.w / 2, AIRLOCK.x + AIRLOCK.door.w / 2];
-    // the front wall's panels run along it from its end at ROOM.x1, and up from the floor
-    for (const x of [x0, x1]) whole((ROOM.x1 - x) / WALL_PANEL.w);
-    whole(AIRLOCK.door.h / WALL_PANEL.h);
-    expect(x0).toBeGreaterThan(ROOM.x0);
-    expect(x1).toBeLessThan(ROOM.x1);
-    expect(AIRLOCK.door.h).toBeLessThan(ROOM.y1);
-    // and the chamber behind it is no narrower than it, nor lower
-    expect(AIRLOCK.door.w).toBeLessThanOrEqual(AIRLOCK.w);
-    expect(AIRLOCK.door.h).toBeLessThanOrEqual(AIRLOCK.h);
-  });
-
-  it('has the pod standing inside the chamber, behind the wall', () => {
-    expect(Math.abs(POD.x - AIRLOCK.x) + POD.r).toBeLessThanOrEqual(AIRLOCK.w / 2);
-    expect(POD.z - POD.r).toBeGreaterThan(ROOM.z1 + AIRLOCK.wall);
-    expect(POD.z + POD.r).toBeLessThanOrEqual(ROOM.z1 + AIRLOCK.wall + AIRLOCK.d);
-    expect(POD.top).toBeLessThan(AIRLOCK.h);
-  });
-
   it('tells when the player is shut in the pod', () => {
     const shut: Wake[] = ['pod', 'flicker', 'opening', 'boarding', 'asleep', 'arriving', 'arrived'];
     const free: Wake[] = ['out', 'closed', 'open'];

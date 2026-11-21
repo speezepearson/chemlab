@@ -13,8 +13,7 @@ import {
  * What's drawn on the lab's screens and printed surfaces, onto plain 2D canvases, with nothing three-dimensional about
  * it: the instruments' screens, the strip's and the column's inks, a thermometer's scale, a sleeper culture's cells,
  * the seven-segment readouts, the station's needle, diverter and readouts, the pod's message, and the plates and
- * tape round the lab. The wall view (view.ts) lays these canvases on its meshes as textures; the flat view (view2d.ts)
- * draws them straight onto its own canvas. So there's one copy of how each of them looks.
+ * tape round the lab, which the view (view.ts) draws onto its own canvas, each where it goes.
  */
 
 /**
@@ -653,7 +652,8 @@ export function wrapText(ctx: CanvasRenderingContext2D, text: string, w: number)
 
 /**
  * The notice (see intro/notice.ts) as light projected on the inside of the pod's front: pale blue text on a faint
- * glow, with room at the bottom right for the OK button, which is its own mesh. Returns the canvas, laid out to fit.
+ * glow, with room at the bottom right for the OK button, which is drawn over it (see okCanvas). Returns the canvas,
+ * laid out to fit.
  */
 export function messageCanvas(blocks: readonly Block[]): HTMLCanvasElement {
   const c = document.createElement('canvas');
