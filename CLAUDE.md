@@ -25,8 +25,6 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - Set up a scene by writing a save before the page loads:
   `page.addInitScript(s => localStorage.setItem('slurry-lab.save', s), JSON.stringify(save))`. The format is
   `SaveState` in `src/game/save.ts`; tool positions are fractions of the old bench's home area (see `fromFrac`).
-- Set `localStorage['slurry-lab.view']` to a `ViewMode` (`wall`, `walk`, `ortho`, `flat`) to load in that way of seeing
-  the lab. The flat one needs no WebGL, so it's fast, and good for checking anything that isn't about the 3D drawing.
 - Set `localStorage['slurry-lab.introSeen'] = '1'` to skip the intro. A start button still covers the page (it's
   the click that lets sound play), and the lab stays paused under it, so click `.intro-start` first.
 - WebGL needs a software renderer. Launch with
@@ -37,10 +35,6 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   `lab.view.project(p, lab.viewW, lab.viewH)` turns a point in the room into CSS pixels on the canvas, to point the
   mouse at something. Its private fields (`held`, `target`, `tools`, `turning`, `cam`, ...) are reachable from
   `page.evaluate`.
-- The walk mode captures the mouse, which headless Chromium can't do properly (a captured mouse reports no movement
-  there): `lab.debug({ locked: true, x, z, yaw, pitch })` acts as if it were captured and stands the player
-  somewhere (yaw 0 faces the back wall; pitch is up, in radians), after which the mouse's buttons and the keys work
-  at the crosshair.
 - Software rendering is slow, a few frames a second, so wait longer than you'd think, and remember that a screenshot
   takes real time during which the sim runs on.
 - Pass `ignoreHTTPSErrors: true` to `browser.newContext`, or the Google font (Schibsted Grotesk) fails to load through
@@ -61,16 +55,11 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `equilibrium.ts` is the exact full-equilibrium solver, for the editor's Equilibrate button and the bench's settled mixes. Faucets
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
 - `src/game/`: everything else in the game.
-  - `engine.ts` owns the lab: what's in it, the view (`steer`, `zoom`, `turnRound`, and its glides out of the pod and
-    back, `emerge` and `board`), input, carrying and placing (`carry`, `placement`), and the sim loop. It keeps where
-    the view is on the wall as a square-on view with perspective would have it (`at`), and works each mode's camera
-    out from that (`camOf`).
-  - `mode.ts` is the ways of seeing and working the lab that the header's menu switches between (`ViewMode`), kept in
-    local storage; the engine is made anew for each, on a canvas of its own. In the walk mode the camera is the
-    player's eyes (`player`, `eyes`, `look`, `stroll`), the pointer is always the crosshair in the middle of the view
-    (`crosshair`), and `walk.ts` says where they can stand. `sight.ts` is the camera (`Camera`, with
-    perspective or without) and its lines of sight (`sightAt`, `onPlaneZ`), by which the engine tells where the
-    pointer is on the wall without asking the renderer.
+  - `engine.ts` owns the lab: what's in it, the view (`steer`, `zoom`), input, carrying and placing (`carry`,
+    `placement`), getting into the pod (`board`), and the sim loop. It keeps where the view is on the wall as a
+    square-on view with perspective would have it (`at`), so that saves' views mean what they always have, and works
+    the camera out from that (`camOf`). `sight.ts` is the camera (`Camera`) and its lines of sight (`sightAt`,
+    `onPlaneZ`), by which the engine tells where the pointer is on the wall without asking the view.
   - `view.ts` draws it all with Three.js, from wherever the engine puts the camera (`Camera`), and raycasts for what
     the pointer is on (`pick`); `project` goes the other way. `LabView` is what the engine asks of whatever draws
     the lab.
@@ -100,7 +89,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `flask.ts` has `Vessel`, `transfer`, volume and colors.
   - `cooling.ts` is Newtonian cooling to the room; the engine works out each vessel's exposure from its flat outline.
   - `airlock.ts` is the airlock and cryopod where the player wakes, in the wall behind the bench: their size and
-    place, the `Wake` states, and how long the view takes to glide out of the pod and back (`EMERGE_S`, `SETTLE_S`).
+    place, and the `Wake` states.
     `sleep.ts` is sleeping in the pod, or napping (N): the lab run in windows, measured, and jumped ahead
     while it's steady.
     `src/intro/notice.ts` is the messages projected inside the pod: the notice she wakes to (its litres as of then),
@@ -147,8 +136,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
-  notice; the player themselves (moving the view, turning it round, its glides out of the pod and back into it,
-  walking and looking about in the walk mode, carrying, how long what's carried has been held still (`CATCH_REST_S`), tipping a flask, their eyes closing for a nap), which is
+  notice; the player themselves (moving the view, carrying, how long what's carried has been held still (`CATCH_REST_S`), tipping a flask, their eyes closing for a nap), which is
   input, not the sim; and what
   isn't in the world (the HUD, the guides' flashing). While the player sleeps in the cryopod, or naps, the lab is run as ever in
   windows and jumped ahead between them (`sleep.ts`): still sim time, just not substep by substep through the jumps.

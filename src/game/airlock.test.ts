@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AIRLOCK, POD, ease, inPod, outOfAirlock, type Wake } from './airlock';
+import { AIRLOCK, POD, ease, inPod, type Wake } from './airlock';
 import { ROOM, WALL_PANEL } from './space';
 
 const whole = (v: number) => expect(v).toBeCloseTo(Math.round(v), 9);
@@ -26,16 +26,10 @@ describe('airlock', () => {
   });
 
   it('tells when the player is shut in the pod', () => {
-    const shut: Wake[] = ['pod', 'flicker', 'opening', 'settling', 'boarding', 'asleep', 'arriving', 'arrived'];
+    const shut: Wake[] = ['pod', 'flicker', 'opening', 'boarding', 'asleep', 'arriving', 'arrived'];
     const free: Wake[] = ['out', 'closed', 'open'];
     for (const w of shut) expect(inPod(w), w).toBe(true);
     for (const w of free) expect(inPod(w), w).toBe(false);
-  });
-
-  it("tells when the player's eyes are out of the doorway, into the lab", () => {
-    expect(outOfAirlock(POD.z)).toBe(false);
-    expect(outOfAirlock(ROOM.z1)).toBe(false);
-    expect(outOfAirlock(ROOM.z1 - 200)).toBe(true);
   });
 });
 

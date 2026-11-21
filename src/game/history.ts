@@ -32,11 +32,10 @@ export interface Arrangement {
   faucets: string[];
   stock: Stock;
   alarmsOff: boolean;
-  blindsShut: boolean;
 }
 
 /** The room's switches, which the engine keeps itself. */
-export type Switches = Pick<Arrangement, 'alarmsOff' | 'blindsShut'>;
+export type Switches = Pick<Arrangement, 'alarmsOff'>;
 
 /** How the lab is arranged just now. */
 export function arrangement(l: Things, sw: Switches): Arrangement {
@@ -50,7 +49,6 @@ export function arrangement(l: Things, sw: Switches): Arrangement {
     faucets: l.faucets.map((fa) => fa.note),
     stock: copyStock(l.stock),
     alarmsOff: sw.alarmsOff,
-    blindsShut: sw.blindsShut,
   };
 }
 

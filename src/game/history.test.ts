@@ -5,7 +5,7 @@ import { History, UNDO_DEPTH, arrange, arrangement, sameArrangement, type Things
 import { Scale } from './scale';
 import { Hose, Tool } from './tools';
 
-const sw = { alarmsOff: false, blindsShut: false };
+const sw = { alarmsOff: false };
 
 function lab(): Things {
   const f = new Flask(100);
@@ -83,7 +83,7 @@ describe('arrangement', () => {
     l.tools[0].valves[0] = 0.5;
     expect(sameArrangement(a, arrangement(l, sw))).toBe(false);
     l.tools[0].valves[0] = 0;
-    expect(sameArrangement(a, arrangement(l, { ...sw, blindsShut: true }))).toBe(false);
+    expect(sameArrangement(a, arrangement(l, { ...sw, alarmsOff: true }))).toBe(false);
     l.flasks.push(new Flask(100));
     expect(sameArrangement(a, arrangement(l, sw))).toBe(false);
   });

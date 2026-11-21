@@ -1,9 +1,8 @@
 import { equilibrate } from '../chem/equilibrium';
 import { Lag, temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
-import { AIRLOCK, BLINDED_S, EMERGE_S, POD, RISE_S, SETTLE_S, WAKE_S, ease, inPod, outOfAirlock, type Wake } from './airlock';
+import { AIRLOCK, BLINDED_S, RISE_S, WAKE_S, ease, inPod, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
-import type { ViewMode } from './mode';
 import {
   FLASK_CENTER, NOZZLE_H, SCALE_SLOTS, aimValve, dippedIn, docked, faucetBox, faucetPipes, flaskArm, flaskBox, flaskLip, flaskMouth, footAt, insideVessel, isDocked,
   nozzleArm, nozzleBox, onScale, onTool, scaleArm, scaleBox, scaleCenter, scaleSpot, spoutAt, spoutNear, tankMouth, tankNoteY, toolArms, toolBox, toolCenter, valveNear, valveZ,
@@ -21,7 +20,6 @@ import { Flask, Vessel, roomFor, sustenance, transfer, volume, volumeUnit } from
 import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
-import { PORT_WALL } from './porthole';
 import { ANALYZER_AT, DEFAULT_PRESET, PRESET_FLASKS_X, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
 import { rumble, type Rumble } from './rumble';
 import { CRYOSTABILIZER, FIRST_SUPPLY, litresOf, type Supply } from './supply';
@@ -29,19 +27,18 @@ import { shatter } from './shatter';
 import { WHEEL, WHEELS, wheelMove, wheelPick, type WheelAim } from './wheel';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { SCALE_SHAPE, Scale, glassGrams } from './scale';
-import { axes, onPlaneZ, sightAt } from './sight';
+import { onPlaneZ, sightAt } from './sight';
 import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
-import { BENCH, CELL, LIFT, PLANE_Z, ROOM, SPIN, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, wrapAngle, type Pose, type Vec3 } from './space';
+import { BENCH, CELL, LIFT, PLANE_Z, ROOM, SPIN, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, type Pose, type Vec3 } from './space';
 import {
   changeoverAt, ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
   TANK_H, TOOL_NAMES, dipUnder, isDipper, isThermometer, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
   type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
-import { ARRIVAL, View, type AirlockLook, type Camera, type FaucetSpot, type Frame, type GuideLook, type Icons, type LabView, type Pick } from './view';
+import type { AirlockLook, Camera, FaucetSpot, Frame, GuideLook, Icons, LabView, Pick } from './view';
 import { FlatView } from './view2d';
 import { catches, stillness, type Stillness } from './still';
-import { canStand, walk, type Stand } from './walk';
 import { WaterSounds } from './water';
 
 /** What the info panel shows for one vessel: all of it in god mode, otherwise just its color. */
@@ -90,8 +87,6 @@ export interface Hud {
   white: number;
   /** Whether the game's over, won: the player has arrived at Mu Ceti (see Wake's arrived). */
   ended: boolean;
-  /** Whether god mode's preview of the end's white void is up (see GameEngine.previewArrival). */
-  preview: boolean;
   /**
    * While an equipment wheel is held open (see wheel.ts): where its middle is on the view, in CSS pixels, what's on
    * it, in order, where its pointer is from its middle, which of them it picks, if any, and which of them there are
@@ -111,20 +106,8 @@ export interface Hud {
   napping: boolean;
   /** Whether N would start a nap just now. */
   nap: boolean;
-  /** Whether the view is turned round to the wall behind the bench (see GameEngine.turnRound). */
-  away: boolean;
   /** Whether the airlock stands open, and the player could get into the cryopod (see GameEngine.board). */
   pod: boolean;
-  /**
-   * Whether to draw the crosshair in the middle of the view: in the walk mode, while the mouse is captured, out of the
-   * pod, with no equipment wheel open (whose own pointer stands in for it).
-   */
-  cross: boolean;
-  /**
-   * Whether a click on the view would capture the mouse, to look around: in the walk mode, while it's free, out of
-   * the pod and the preview of the end.
-   */
-  capture: boolean;
 }
 
 /**
@@ -239,29 +222,14 @@ const POUR_RISE = 300;
 const DIP_SOAK = 0.35;
 /** How fast a falling drop speeds up, in world units per sim second squared: a 500-unit fall takes 0.7 s. */
 const GRAVITY = 2000;
-/** How high the player's eyes are, standing in the cryopod. */
-const EYE = 620;
-/** The view's field of view, top to bottom, in degrees: at the bench, and in the cryopod, whose message is close up. */
-const FOV = 45;
-const POD_FOV = 90;
-/** The view from in the pod: out at the lab, eyes a little down. */
-const POD_VIEW: Camera = { x: POD.x, y: EYE, z: POD.z, yaw: 0, pitch: -0.12, fov: POD_FOV };
-/** In the walk mode (see ViewMode), the field of view, top to bottom, in degrees: wide, as it was when the lab was walked round. */
-const WALK_FOV = 90;
-/** How fast the player walks, in world units per real second (it's their own movement). */
-const WALK = 840;
-/** Radians the view turns per pixel the captured mouse moves, in the walk mode. */
-const LOOK_SENS = 0.0022;
-/** How far up or down the player can look, in radians from level. */
-const PITCH_MAX = 1.45;
 /**
- * Where the player stands in the walk mode as they come out of the airlock (see emerge), and in a lab saved without
- * them: just outside its doorway, a few hundred units into the room, facing the bench, level.
+ * How much of the wall the view takes in: as much, top to bottom, as a camera with this field of view, in degrees,
+ * would from where the view is (see GameEngine.at).
  */
-const WALK_START: Player = { x: AIRLOCK.x, z: ROOM.z1 - 400, yaw: 0, pitch: 0 };
+const FOV = 45;
 /**
- * How far back along its line of sight, from the middle of the stretch of wall it sees, a view with no perspective
- * is from: it makes no odds to what it sees, so long as everything on the wall is in front of it.
+ * How far back along its line of sight, from the middle of the stretch of wall it sees, the view is from: it has no
+ * perspective, so it makes no odds to what it sees, so long as everything on the wall is in front of it.
  */
 const ORTHO_BACK = 2000;
 /**
@@ -270,8 +238,8 @@ const ORTHO_BACK = 2000;
  */
 const START_VIEW = { x: AIRLOCK.x, y: 700, z: 1560 };
 /**
- * How near the view can come to the bench's plane, and to the wall behind; and how near the ends of the room, the
- * floor and the ceiling its middle can go.
+ * How near the view can come to the bench's plane (see GameEngine.at), and how much nearer than the room's far wall
+ * it stays; and how near the ends of the room, the floor and the ceiling its middle can go.
  */
 const VIEW_NEAR = 170;
 const VIEW_BOUNDS = { x: 250, y0: 200, y1: 150 };
@@ -282,13 +250,6 @@ const VIEW_BOUNDS = { x: 250, y0: 200, y1: 150 };
 const PAN_RATE = 1.1;
 /** How much the view's distance from the wall changes per pixel the mouse's wheel is turned: by e to this. */
 const ZOOM_RATE = 0.0012;
-/** Real seconds the view takes to turn round to the wall behind the bench, or back. */
-const TURN_S = 0.9;
-/**
- * Where the view goes when it's turned round to the wall behind: back by the bench, far enough from that wall to take
- * in the airlock, the alarms' button and the porthole at once.
- */
-const BEHIND_VIEW = { x: (AIRLOCK.x + PORT_WALL.x) / 2 + 150, y: 650, z: 560 };
 /** How far, in CSS pixels, the pointer has to move with the left button down before it's a drag and not a click. */
 const DRAG_PX = 5;
 /** With something in hand, the pointer this near the view's edge, in CSS pixels, moves the view that way. */
@@ -331,39 +292,8 @@ const FUNNEL_STEM = 6;
 /** Where a tool hangs on the wall, from a preset's spot for it. */
 const spotPose = (s: Spot): Pose => ({ ...fromFrac({ x: s.at[0], y: s.at[1] }), yaw: 0 });
 
-/**
- * In the walk mode (see ViewMode), where the player stands (see walk.ts), and which way they look: a yaw of 0 is
- * square at the back wall, and pitch is up, in radians. Their eyes are EYE above the floor.
- */
-interface Player extends Stand {
-  yaw: number;
-  pitch: number;
-}
-
 /** A pose on the bench's plane (see PLANE_Z), at (x, y). */
 const onPlane = (x: number, y: number): Pose => ({ x, y, z: PLANE_Z, yaw: 0 });
-
-/** Between a and b, t of the way. */
-const mix = (a: number, b: number, t: number) => a + (b - a) * t;
-
-/**
- * Where a view gliding from one place to another is, `u` of the way there in time (0 to 1): easing out and in. If
- * it's by way of the airlock's `door`, between the pod and the lab, it goes straight in or out along the doorway's
- * middle for the stretch nearest the pod, and only crosses the room over the rest.
- */
-function glideAt(from: Camera, to: Camera, u: number, door: boolean): Camera {
-  const t = ease(u);
-  const turn: { yaw: number; pitch: number; fov: number; ortho?: number } = { yaw: mix(from.yaw, to.yaw, t), pitch: mix(from.pitch, to.pitch, t), fov: mix(from.fov, to.fov, t) };
-  // (one with no perspective at either end has none on the way)
-  if (from.ortho !== undefined && to.ortho !== undefined) turn.ortho = mix(from.ortho, to.ortho, t);
-  if (!door) return { x: mix(from.x, to.x, t), y: mix(from.y, to.y, t), z: mix(from.z, to.z, t), ...turn };
-  // s of the way from the pod's end of it to the lab's
-  const out = from.z > to.z;
-  const [pod, lab] = out ? [from, to] : [to, from];
-  const s = out ? t : 1 - t;
-  const across = ease((s - 0.25) / 0.75);
-  return { x: mix(pod.x, lab.x, across), y: mix(pod.y, lab.y, across), z: mix(pod.z, lab.z, s), ...turn };
-}
 
 /** Owns the lab: what's in it, the view of it, input, the simulation loop, and the View that draws it. */
 export class GameEngine {
@@ -379,41 +309,22 @@ export class GameEngine {
   /** What's in the equipment cabinet (see cabinet.ts): what the equipment wheels make comes out of it, and goes back in. */
   private stock: Stock = stockWith({});
   /**
-   * Where the view is on the wall it's on (see facing), as a view square on to that wall with perspective would have
-   * it: across, up, and out from the back wall. Whatever the mode (see ViewMode), the camera is worked out from this
-   * (see camOf), so that the view keeps to the same bounds, and a save's view means the same, in all of them; but
-   * the walk mode, whose camera is the player's eyes (see player).
+   * Where the view is on the wall: across, up, and how far out from the back wall a camera square on to it, with a
+   * field of view of FOV, would be to see as much of it as the view does (see camOf). It's kept this way so that a
+   * save's view means what it always has.
    */
   private at = { ...START_VIEW };
-  /** In the walk mode, where the player stands and looks: out of the pod, the camera is their eyes (see aim). */
-  private player: Player = { ...WALK_START };
-  /**
-   * In the walk mode, whether the mouse is captured (pointer lock): only then does the lab respond to it, or to the
-   * keys, the pointer being always the crosshair in the middle of the view (see crosshair), and moving the mouse
-   * turning the view (see look). A click on the view captures it, and Esc lets it go, as browsers do.
-   */
-  private locked = false;
-  /** Where the view is from, and which way it looks (see Camera): worked out from `at`, but while it glides or is in the pod. */
-  private cam: Camera = { ...START_VIEW, yaw: 0, pitch: 0, fov: FOV };
-  /**
-   * What the view is on: the bench, where the lab is worked; the wall behind it, turned round (see turnRound); or
-   * what's seen from in the cryopod, which can't be moved.
-   */
-  private facing: 'bench' | 'away' | 'pod' = 'bench';
-  /** Where the view was at the bench, last it was there: where it goes back to from the wall behind, or from the pod. */
+  /** Where the view is from (see Camera): worked out from `at`. */
+  private cam: Camera = this.camOf(START_VIEW);
+  /** What the view is on: the bench, where the lab is worked; or the cryopod, where the player is shut in, and it can't be moved. */
+  private facing: 'bench' | 'pod' = 'bench';
+  /** Where the view was at the bench, last it was there: where it goes back to from the pod. */
   private bench = { ...START_VIEW };
-  /**
-   * The view moving on its own, from one place to another over `s` real seconds, `t` of them gone: turning round,
-   * or gliding between the pod and the bench, when it keeps to the middle of the airlock's doorway on its way
-   * through it (`door`). Nothing can be done until it's there.
-   */
-  private glide: { from: Camera; to: Camera; t: number; s: number; door: boolean } | null = null;
   private keys = new Set<string>();
   /** Where the pointer is on the view, in CSS pixels from its top left; null while it's off it. */
   private pointer: { x: number; y: number } | null = null;
   /**
-   * The left button, while it's down: where it went down (in the walk mode, where that spot of the view has gone as
-   * the view turned since, so that looking away from it is a drag), whether the pointer has moved far enough since for it to
+   * The left button, while it's down: where it went down, whether the pointer has moved far enough since for it to
    * be a drag, the valve it went down on, if any (a drag turns it; a click picks its tool up), and whether it picked
    * something up, which a drag then leaves where the button's let go.
    */
@@ -469,8 +380,6 @@ export class GameEngine {
   private flash: { text: string; until: number; tip?: boolean } | null = null;
   /** Whether the alarms are silenced, by the button under the beacon (see hushAlarms). Saved, and kept through Reset. */
   private alarmsOff = false;
-  /** Whether the porthole's blinds are shut, by the button beside it. Saved, and kept through Reset. */
-  private blindsShut = false;
   /** Where the player is in waking up in the airlock (see Wake), and how many sim seconds it's been there. */
   private wake: Wake = 'closed';
   /** How far the ship has turned, in radians (see SPIN), for the stars. */
@@ -502,11 +411,6 @@ export class GameEngine {
    * end, once. From then on N naps. It's saved with the lab.
    */
   private napKnown = false;
-  /**
-   * While previewing the end's white void (see previewArrival), where the view was before, to put it back; null
-   * otherwise.
-   */
-  private previewing: { cam: Camera; facing: GameEngine['facing'] } | null = null;
   /** Runs the sleeping lab a slice at a time (see pump), independent of frames. */
   private pumper = new MessageChannel();
   /** The supply station's diverter's sounds, while it's swinging or letting into the reservoir. */
@@ -543,13 +447,11 @@ export class GameEngine {
     private chem: ReactionNetwork,
     private cb: EngineCallbacks,
     private preset: Preset = DEFAULT_PRESET,
-    /** How the lab is seen and worked (see ViewMode). */
-    readonly mode: ViewMode = 'wall',
   ) {
     // the colors' in a row along the wall, then the solvent's, along the bench (see FAUCET_X)
     const pipes = faucetPipes();
     this.faucets = FAUCETS.map((start, i) => ({ start, output: faucetOutput(start, chem), note: '', ...pipes[i] }));
-    this.view = mode === 'flat' ? new FlatView(canvas, this.faucets, EYE) : new View(canvas, this.faucets, EYE);
+    this.view = new FlatView(canvas);
     this.aim();
     this.resizeObserver = new ResizeObserver(() => this.layout());
     this.resizeObserver.observe(stage);
@@ -568,7 +470,6 @@ export class GameEngine {
     for (const r of this.rumbles.values()) r.stop();
     this.water.stop();
     this.view.dispose();
-    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
 
   /**
@@ -704,7 +605,7 @@ export class GameEngine {
   private afterLoad(): void {
     // a lab loads with the airlock shut, until its station has been delivering steadily again, and anyone in it or
     // asleep in the pod wakes in the lab, at the bench
-    if (this.wake === 'open' || this.wake === 'settling' || this.wake === 'boarding' || this.wake === 'asleep' || this.arrival) {
+    if (this.wake === 'open' || this.wake === 'boarding' || this.wake === 'asleep' || this.arrival) {
       this.arrival = false;
       this.riseT = null;
       this.wake = 'closed';
@@ -730,8 +631,8 @@ export class GameEngine {
 
   /** How the lab is arranged just now (see history.ts). */
   private arranged(): Arrangement {
-    const { flasks, tools, scales, hoses, faucets, stock, alarmsOff, blindsShut } = this;
-    return arrangement({ flasks, tools, scales, hoses, faucets, stock }, { alarmsOff, blindsShut });
+    const { flasks, tools, scales, hoses, faucets, stock, alarmsOff } = this;
+    return arrangement({ flasks, tools, scales, hoses, faucets, stock }, { alarmsOff });
   }
 
   /** An action that changes the arrangement is starting (see History.mark). */
@@ -767,7 +668,6 @@ export class GameEngine {
     const { flasks, tools, scales, hoses, faucets, stock } = this;
     arrange({ flasks, tools, scales, hoses, faucets, stock }, a);
     this.setAlarmsOff(a.alarmsOff);
-    this.blindsShut = a.blindsShut;
     this.turning = null;
     this.reopen();
   }
@@ -781,7 +681,7 @@ export class GameEngine {
 
   /** Everything in the lab, plus the chemistry parameters, for saving. */
   snapshot(): SaveState {
-    const view = this.facing === 'bench' && !this.glide ? this.at : this.bench;
+    const view = this.facing === 'bench' ? this.at : this.bench;
     return {
       v: 1,
       wall: true,
@@ -811,11 +711,8 @@ export class GameEngine {
         (Object.keys(this.stock) as Stocked[]).filter((k) => !endless(k)).map((k) => [k, this.stock[k].flatMap((on, i) => (on ? [i] : []))]),
       ),
       ...(this.alarmsOff ? { alarmsOff: true } : {}),
-      ...(this.blindsShut ? { blindsShut: true } : {}),
       ...(this.napKnown ? { nap: true } : {}),
       view: { x: view.x, y: view.y, z: view.z },
-      // (kept whatever the mode, so that switching from the walk mode and back keeps it)
-      player: { ...this.player },
       chem: saveChem(this.chem.params),
     };
   }
@@ -899,16 +796,9 @@ export class GameEngine {
       if (j !== null && typeof f?.note === 'string') this.faucets[j].note = f.note;
     });
     this.setAlarmsOff(!!s.alarmsOff);
-    this.blindsShut = !!s.blindsShut;
     this.napKnown = !!s.nap;
     const v = s.view;
     this.bench = v && [v.x, v.y, v.z].every(Number.isFinite) ? this.inView({ x: v.x, y: v.y, z: v.z }) : { ...START_VIEW };
-    // where the player stood in the walk mode; not where they stood in the room a save from before the wall had
-    const pl = saved.wall ? s.player : undefined;
-    this.player =
-      pl && [pl.x, pl.z, pl.yaw, pl.pitch].every(Number.isFinite) && canStand(pl)
-        ? { x: pl.x, z: pl.z, yaw: wrapAngle(pl.yaw), pitch: Math.max(-PITCH_MAX, Math.min(PITCH_MAX, pl.pitch)) }
-        : { ...WALK_START };
     if (this.facing !== 'pod') this.toBench();
     // the cabinet as saved; or for a save from before it, full but for what's out
     if (s.cabinet) {
@@ -1029,7 +919,7 @@ export class GameEngine {
    * Returns whether it did.
    */
   spawn(kind: Stocked): boolean {
-    if (inPod(this.wake) || this.dozing() || this.glide || this.facing !== 'bench') return false;
+    if (inPod(this.wake) || this.dozing() || this.facing !== 'bench') return false;
     if (this.held) {
       this.say('Hands full');
       return false;
@@ -1058,7 +948,7 @@ export class GameEngine {
    * moving the view. With the other wheel open, it takes its place, where it is.
    */
   private openWheel(which: number): void {
-    if (this.turning || this.panning || this.glide || this.facing !== 'bench') return;
+    if (this.turning || this.panning || this.facing !== 'bench') return;
     if (this.held) {
       this.say('Hands full');
       return;
@@ -1218,7 +1108,7 @@ export class GameEngine {
 
   /* ---------------- the view ---------------- */
 
-  /** A place for the view kept where it can be: clear of the room's ends, floor and ceiling, the bench and the wall behind. */
+  /** A place for the view kept where it can be: clear of the room's ends, floor and ceiling, not too near the bench nor too far from it (see VIEW_NEAR). */
   private inView<P extends Vec3>(p: P): P {
     const b = VIEW_BOUNDS;
     return {
@@ -1229,113 +1119,27 @@ export class GameEngine {
     };
   }
 
-  /** Whether the view has no perspective (see ViewMode): the wall seen square on without it, or drawn flat. */
-  private ortho(): boolean {
-    return this.mode === 'ortho' || this.mode === 'flat';
-  }
-
   /**
-   * The camera for a view at `at` (see GameEngine.at), on the bench, or on the wall behind if `away`: square on to
-   * the wall. With perspective, it's just there. Without, it sees as much of the wall, top to bottom, as that would,
-   * from ORTHO_BACK straight out from the middle of it.
+   * The camera for a view at `at` (see GameEngine.at): square on to the bench, with no perspective, seeing as much of
+   * the wall, top to bottom, as a camera with a field of view of FOV would from there, from ORTHO_BACK straight out
+   * from the middle of it.
    */
-  private camOf(at: Vec3, away = false): Camera {
-    const turn = away ? Math.PI : 0;
-    if (!this.ortho()) return { x: at.x, y: at.y, z: at.z, yaw: turn, pitch: 0, fov: FOV };
-    const wall = away ? ROOM.z1 : PLANE_Z;
-    const ortho = Math.abs(at.z - wall) * Math.tan((FOV * Math.PI) / 360);
-    return { x: at.x, y: at.y, z: away ? wall - ORTHO_BACK : wall + ORTHO_BACK, yaw: turn, pitch: 0, fov: FOV, ortho };
+  private camOf(at: Vec3): Camera {
+    const ortho = Math.abs(at.z - PLANE_Z) * Math.tan((FOV * Math.PI) / 360);
+    return { x: at.x, y: at.y, z: PLANE_Z + ORTHO_BACK, yaw: 0, pitch: 0, fov: FOV, ortho };
   }
 
-  /**
-   * A camera with perspective that sees, as near as one can, what `cam` sees without: the same way, the same stretch
-   * of the wall. The view glides to and from the pod with perspective, whatever the mode.
-   */
-  private standIn(cam: Camera): Camera {
-    if (cam.ortho === undefined) return cam;
-    const { ahead } = axes(cam);
-    const on = ORTHO_BACK - cam.ortho / Math.tan((FOV * Math.PI) / 360);
-    return { x: cam.x + ahead.x * on, y: cam.y + ahead.y * on, z: cam.z + ahead.z * on, yaw: cam.yaw, pitch: cam.pitch, fov: FOV };
-  }
-
-  /** Put the camera where the view is (see GameEngine.at), on the wall it's on; in the walk mode, at the player's eyes. */
+  /** Put the camera where the view is (see GameEngine.at), but in the pod, where it stays as it was. */
   private aim(): void {
     if (this.facing === 'pod') return;
-    this.cam = this.mode === 'walk' ? this.eyes() : this.camOf(this.at, this.facing === 'away');
-  }
-
-  /** The camera at the player's eyes, in the walk mode (see player). */
-  private eyes(): Camera {
-    const { x, z, yaw, pitch } = this.player;
-    return { x, y: EYE, z, yaw, pitch, fov: WALK_FOV };
-  }
-
-  /**
-   * The captured mouse moved (dx, dy) pixels, in the walk mode: an equipment wheel's pointer moves, if one's open
-   * (see wheelMove); or else the view turns, which, with the left button down, may make a drag of it (see moved).
-   */
-  private look(dx: number, dy: number): void {
-    const w = this.wheel;
-    if (w) {
-      this.wheel = { ...w, ...wheelMove(w, dx, dy) };
-      return;
-    }
-    if (this.glide || this.facing === 'pod' || this.dozing() || this.previewing) return;
-    const p = this.player;
-    p.yaw = wrapAngle(p.yaw - dx * LOOK_SENS);
-    p.pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, p.pitch - dy * LOOK_SENS));
-    this.aim();
-    // what was under the crosshair as the button went down goes the other way across the view
-    const pr = this.press;
-    if (pr) {
-      pr.x -= dx;
-      pr.y -= dy;
-    }
-    this.moved();
-  }
-
-  /**
-   * In the walk mode, the pointer is the crosshair, in the middle of the view, while the mouse is captured, and off
-   * it while it isn't; but in the pod, where the free pointer can press OK, it's wherever that is.
-   */
-  private crosshair(): void {
-    if (this.mode !== 'walk') return;
-    if (this.locked) this.pointer = { x: this.viewW / 2, y: this.viewH / 2 };
-    else if (!inPod(this.wake)) this.pointer = null;
-  }
-
-  /** In the walk mode, let go of the mouse, if it's captured: to type a note, or in the pod, to press OK with it. */
-  private unlock(): void {
-    if (!this.locked) return;
-    this.locked = false;
-    this.uncaptured();
-    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
-  }
-
-  /**
-   * The mouse has been let go of, in the walk mode: no key or button is held any longer, as far as the lab knows,
-   * so a press under way ends as if its button came up, and an equipment wheel open closes making nothing. The
-   * pointer is off the view until the free mouse moves over it.
-   */
-  private uncaptured(): void {
-    this.keys.clear();
-    this.wheel = null;
-    this.rightUp();
-    this.leftUp(false);
-    this.pointer = null;
+    this.cam = this.camOf(this.at);
   }
 
   /** Put the view at the bench, where it last was there, at once. */
   private toBench(): void {
     this.at = { ...this.bench };
     this.facing = 'bench';
-    this.glide = null;
     this.aim();
-  }
-
-  /** The upright plane the view is on: the bench's, or the wall's behind it. */
-  private wallZ(): number {
-    return this.facing === 'away' ? ROOM.z1 : PLANE_Z;
   }
 
   /** The pointer at (x, y) on the view, in CSS pixels, as the view's own coordinates: −1 to 1 across and up. */
@@ -1348,58 +1152,16 @@ export class GameEngine {
    * it. It's worked out from where the view is now (see sightAt), not from the frame last drawn, so that it's right
    * however many times the view moves between frames.
    */
-  private planeAt(x: number, y: number, z = this.wallZ()): Vec3 | null {
+  private planeAt(x: number, y: number, z = PLANE_Z): Vec3 | null {
     return onPlaneZ(sightAt(this.cam, ...this.ndc(x, y), this.viewW / Math.max(1, this.viewH)), z);
   }
 
   /**
-   * Space: turn the view round to the wall behind the bench, where the airlock, the porthole and the alarms' button
-   * are, from far enough back to see them all (see BEHIND_VIEW); or back to the bench, where it was. With something
-   * in hand it stays put. The flat view has no wall behind, and in the walk mode the player just looks behind them.
-   */
-  turnRound(): void {
-    if (this.mode === 'flat' || this.mode === 'walk') return;
-    if (this.glide || inPod(this.wake) || this.dozing() || this.previewing || this.wheel || this.turning) return;
-    if (this.held) {
-      this.say('Hands full');
-      return;
-    }
-    const from = { ...this.cam };
-    if (this.facing === 'bench') {
-      this.bench = { ...this.at };
-      this.at = { ...BEHIND_VIEW };
-      this.facing = 'away';
-    } else if (this.facing === 'away') {
-      this.at = { ...this.bench };
-      this.facing = 'bench';
-    } else return;
-    this.glide = { from, to: this.camOf(this.at, this.facing === 'away'), t: 0, s: TURN_S, door: false };
-    this.press = this.panning = null;
-  }
-
-  /**
-   * Move the view for a frame of dt real seconds (it's the player's own doing, like carrying): on along a glide, if
-   * it's on one; or else across the wall with the keys, with a drag of the wall itself, or, with something in hand,
-   * with the pointer at the view's edge. In the walk mode, the keys walk the player instead (see stroll).
+   * Move the view for a frame of dt real seconds (it's the player's own doing, like carrying): across the wall with
+   * the keys, with a drag of the wall itself, or, with something in hand, with the pointer at the view's edge.
    */
   private steer(dt: number): void {
-    const g = this.glide;
-    if (g) {
-      g.t = Math.min(g.s, g.t + dt);
-      this.cam = glideAt(g.from, g.to, g.t / g.s, g.door);
-      if (g.t >= g.s) {
-        this.glide = null;
-        this.aim();
-        // settled into the pod, its door shuts
-        if (this.wake === 'settling') {
-          this.wake = 'boarding';
-          this.wakeT = 0;
-        }
-      }
-      return;
-    }
     if (this.facing === 'pod' || this.wheel) return;
-    if (this.mode === 'walk') return this.stroll(dt);
     const k = this.keys;
     let across = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
     let up = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
@@ -1409,29 +1171,10 @@ export class GameEngine {
       across += Math.max(-1, Math.min(1, edge(at.x, this.viewW)));
       up -= Math.max(-1, Math.min(1, edge(at.y, this.viewH)));
     }
-    // screen right is +x facing the bench, and −x facing the wall behind
-    const side = this.facing === 'away' ? -1 : 1;
-    const step = PAN_RATE * Math.abs(this.at.z - this.wallZ()) * dt;
-    this.at = this.inView({ ...this.at, x: this.at.x + side * across * step, y: this.at.y + up * step });
+    const step = PAN_RATE * Math.abs(this.at.z - PLANE_Z) * dt;
+    this.at = this.inView({ ...this.at, x: this.at.x + across * step, y: this.at.y + up * step });
     this.aim();
     this.dragView();
-  }
-
-  /**
-   * In the walk mode, walk for dt real seconds (it's the player's own movement) as the keys say, at WALK, whichever
-   * way: W and S (or up and down) ahead and back, A and D (or left and right) to the sides, as they look, as far as
-   * they can go (see walk.ts).
-   */
-  private stroll(dt: number): void {
-    const k = this.keys;
-    const ahead = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
-    const side = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
-    if (!this.locked || (!ahead && !side)) return;
-    const p = this.player;
-    const step = (WALK * dt) / Math.hypot(ahead, side);
-    const [sin, cos] = [Math.sin(p.yaw), Math.cos(p.yaw)];
-    Object.assign(p, walk(p, (-sin * ahead + cos * side) * step, (-cos * ahead - sin * side) * step));
-    this.aim();
   }
 
   /** While the wall is being dragged (see panning), move the view so that the point of it taken hold of is under the pointer. */
@@ -1442,7 +1185,7 @@ export class GameEngine {
     if (drag && now) this.slide(drag.x - now.x, drag.y - now.y);
   }
 
-  /** Move the view (dx, dy) across the wall it's on, as far as it can go. */
+  /** Move the view (dx, dy) across the wall, as far as it can go. */
   private slide(dx: number, dy: number): void {
     this.at = this.inView({ ...this.at, x: this.at.x + dx, y: this.at.y + dy });
     this.aim();
@@ -1450,17 +1193,15 @@ export class GameEngine {
 
   /**
    * The wheel turned by `px` pixels (down is positive), or two fingers pinched: move the view in toward the point of
-   * the wall the pointer is on, or back out from it, so that point stays under the pointer. (Without perspective,
-   * nearer is only seeing less of the wall, bigger.)
+   * the wall the pointer is on, or back out from it, so that point stays under the pointer: nearer is only seeing
+   * less of the wall, bigger.
    */
   private zoom(px: number): void {
-    // (in the walk mode, the player walks nearer)
-    if (this.mode === 'walk' || this.glide || this.facing === 'pod' || this.wheel || this.dozing()) return;
+    if (this.facing === 'pod' || this.wheel || this.dozing()) return;
     const at = this.pointer ?? { x: this.viewW / 2, y: this.viewH / 2 };
     const p = this.planeAt(at.x, at.y);
     if (!p) return;
-    const wall = this.wallZ();
-    this.at = this.inView({ ...this.at, z: wall + (this.at.z - wall) * Math.exp(px * ZOOM_RATE) });
+    this.at = this.inView({ ...this.at, z: PLANE_Z + (this.at.z - PLANE_Z) * Math.exp(px * ZOOM_RATE) });
     this.aim();
     const q = this.planeAt(at.x, at.y);
     if (q) this.slide(p.x - q.x, p.y - q.y);
@@ -1503,37 +1244,8 @@ export class GameEngine {
       const r = c.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
-    // in the walk mode, the mouse is captured to look around, and the pointer is always the crosshair (see locked)
-    const walking = this.mode === 'walk';
-    if (walking) {
-      const onLock = () => {
-        const now = document.pointerLockElement === c;
-        if (now === this.locked) return;
-        this.locked = now;
-        if (now) this.crosshair();
-        else this.uncaptured();
-      };
-      document.addEventListener('pointerlockchange', onLock);
-      this.cleanups.push(() => document.removeEventListener('pointerlockchange', onLock));
-    }
     on(c, 'pointerdown', (e) => {
       e.preventDefault();
-      if (walking && !this.locked) {
-        // the mouse is free: in the pod, it can press OK where it points; out of it, a click captures it
-        if (inPod(this.wake)) {
-          this.pointer = at(e);
-          this.retarget();
-          if (e.button === 0 && this.target?.kind === 'wake') this.pressOk();
-        } else if (e.button === 0) c.requestPointerLock?.()?.catch?.(() => {});
-        return;
-      }
-      if (walking) {
-        this.crosshair();
-        this.retarget();
-        if (e.button === 0) this.leftDown(e.shiftKey);
-        if (e.button === 2) this.rightDown();
-        return;
-      }
       c.setPointerCapture?.(e.pointerId);
       this.pointer = at(e);
       if (e.pointerType === 'touch') {
@@ -1547,11 +1259,6 @@ export class GameEngine {
       if (e.button === 2) this.rightDown();
     });
     on(c, 'pointermove', (e) => {
-      if (walking) {
-        if (this.locked) this.look(e.movementX, e.movementY);
-        else if (inPod(this.wake)) this.pointer = at(e);
-        return;
-      }
       if (e.pointerType === 'touch') {
         if (this.fingers.has(e.pointerId)) this.fingerMove(e.pointerId, at(e));
         return;
@@ -1560,11 +1267,6 @@ export class GameEngine {
       this.moved();
     });
     const up = (e: PointerEvent) => {
-      if (walking) {
-        if (e.button === 0) this.leftUp(false);
-        if (e.button === 2) this.rightUp();
-        return;
-      }
       if (e.pointerType === 'touch') {
         this.fingerUp(e.pointerId);
         return;
@@ -1577,12 +1279,11 @@ export class GameEngine {
     on(c, 'pointercancel', up);
     on(c, 'pointerleave', (e) => {
       // off the view, it's on nothing; a button held keeps the pointer, wherever it goes
-      if (walking ? !this.locked : e.pointerType !== 'touch' && !e.buttons) this.pointer = null;
+      if (e.pointerType !== 'touch' && !e.buttons) this.pointer = null;
     });
     on(c, 'contextmenu', (e) => e.preventDefault());
     on(c, 'wheel', (e) => {
       e.preventDefault();
-      // (the walk mode has no zooming: see zoom)
       this.zoom(e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1));
     });
     on(window, 'keydown', (e) => {
@@ -1601,17 +1302,9 @@ export class GameEngine {
         if (e.code === 'KeyN' && !e.repeat) this.wakeNap();
         return;
       }
-      // in god mode, = shows the end's white void, or puts the lab back
-      if (e.code === 'Equal' && (this.god || this.previewing)) {
-        if (!e.repeat) this.previewArrival(!this.previewing);
-        return;
-      }
-      // in the walk mode, with the mouse free, the lab doesn't respond to the keys
-      if (walking && !this.locked) return;
       this.keys.add(e.code);
       if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
-      if (e.repeat || inPod(this.wake) || this.previewing || this.glide) return;
-      if (e.code === 'Space') this.turnRound();
+      if (e.repeat || inPod(this.wake)) return;
       if (e.code === 'KeyP') this.board();
       if (e.code === 'KeyN') this.nap();
       if (this.facing !== 'bench') return;
@@ -1621,8 +1314,7 @@ export class GameEngine {
         this.leftDown(e.shiftKey);
         this.leftUp(false);
       }
-      // (in the walk mode, Esc lets go of the mouse instead)
-      if (e.code === 'KeyQ' || (e.code === 'Escape' && this.mode !== 'walk')) this.putBack();
+      if (e.code === 'KeyQ' || e.code === 'Escape') this.putBack();
       if (e.code === 'Enter') {
         // the note's text box opens at once, and this Enter mustn't be taken as finishing it
         e.preventDefault();
@@ -1651,19 +1343,16 @@ export class GameEngine {
     });
   }
 
-  /**
-   * Whether the view can be moved by hand just now: at the bench or the wall behind, and not on its way anywhere. In
-   * the walk mode it never can, but by walking and looking.
-   */
+  /** Whether the view can be moved by hand just now: at the bench, awake, with no equipment wheel open. */
   private canSteer(): boolean {
-    return this.mode !== 'walk' && !this.glide && this.facing !== 'pod' && !this.dozing() && !this.wheel;
+    return this.facing !== 'pod' && !this.dozing() && !this.wheel;
   }
 
   /** What the pointer is on, as of now (see View.pick); what a valve being turned is on stays as it was. */
   private retarget(): void {
     if (this.turning) return;
     const at = this.pointer;
-    this.target = !at || this.previewing || this.wheel ? null : this.view.pick(...this.ndc(at.x, at.y), this.heldObject());
+    this.target = !at || this.wheel ? null : this.view.pick(...this.ndc(at.x, at.y), this.heldObject());
   }
 
   /** The pointer moved: a press that's gone far enough is a drag, which turns the valve it went down on, if any. */
@@ -1698,19 +1387,10 @@ export class GameEngine {
       this.pressOk();
       return;
     }
-    if (inPod(this.wake) || this.glide || this.previewing || this.wheel) return;
+    if (inPod(this.wake) || this.wheel) return;
     this.press = { ...this.pointer, moved: false, valve: null, took: false, shift };
     if (p?.kind === 'alarm') {
       this.change(() => this.setAlarmsOff(!this.alarmsOff));
-      return;
-    }
-    if (p?.kind === 'blinds') {
-      this.change(() => (this.blindsShut = !this.blindsShut));
-      return;
-    }
-    if (p?.kind === 'airlock') {
-      if (this.wake === 'open') this.board();
-      else this.say('The airlock is shut');
       return;
     }
     if (p?.kind === 'scale' && p.part === 'tare') {
@@ -2167,8 +1847,6 @@ export class GameEngine {
     this.retarget();
     const id = this.targetNote();
     if (!id || inPod(this.wake)) return;
-    // in the walk mode, the mouse is let go of, to type it
-    this.unlock();
     if (this.god && /^(f\d+|t\d+\.\d+)$/.test(id)) this.cb.onEdit(id);
     else this.cb.onLabel(id);
   }
@@ -2198,7 +1876,7 @@ export class GameEngine {
    * pointer is on.
    */
   private rightDown(): void {
-    if (this.dozing() || inPod(this.wake) || this.glide || this.previewing || !this.pointer) return;
+    if (this.dozing() || inPod(this.wake) || !this.pointer) return;
     if (this.facing === 'bench') {
       this.rightHeld = true;
       if (this.held || this.turning) return;
@@ -2248,21 +1926,14 @@ export class GameEngine {
   }
 
   /**
-   * For checks in a browser: put the view somewhere (see Camera), at the bench. The mouse works as ever, so there's
-   * nothing else to stand in for. In the walk mode, stand the player somewhere instead, looking some way (see Player;
-   * `y` is ignored), and with `locked`, act as if the mouse were captured, or let go of, since a browser without a
-   * screen can't capture it.
+   * For checks in a browser: put the view somewhere at the bench (see GameEngine.at). The mouse works as ever, so
+   * there's nothing else to stand in for.
    */
-  debug(p: Partial<{ x: number; y: number; z: number; yaw: number; pitch: number; locked: boolean }>): void {
+  debug(p: Partial<{ x: number; y: number; z: number }>): void {
     // (only what's given)
     const given = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>;
-    const { x, y, z, yaw, pitch, locked } = p;
-    if (this.mode === 'walk') {
-      Object.assign(this.player, given({ x, z, yaw, pitch }));
-      if (locked === false) this.unlock();
-      else if (locked) this.locked = true;
-      this.crosshair();
-    } else this.bench = this.inView({ ...this.bench, ...given({ x, y, z }) });
+    const { x, y, z } = p;
+    this.bench = this.inView({ ...this.bench, ...given({ x, y, z }) });
     this.toBench();
     this.view.look(this.cam);
   }
@@ -2436,9 +2107,6 @@ export class GameEngine {
   private frame = (now: number): void => {
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
-    // in the walk mode, the mouse is let go of in the pod, to press OK with it, or carry on from the end
-    if (inPod(this.wake)) this.unlock();
-    this.crosshair();
     // a nap: their eyes close, or open again, in their own time
     const nap = this.napping;
     // (the alarm of the station's changeover wakes them, even as they nod off)
@@ -2982,7 +2650,7 @@ export class GameEngine {
       flasks: this.flasks, tools: this.tools, scales: this.scales, hoses, faucets: this.faucets, stock: this.stock,
       streams, drops,
       tarePress: this.tarePress, hot: this.hot(), bad: !!h && !pl?.rest && !this.intoCabinet(), dt, clock: this.clock,
-      energies: BOND_KEYS.map((k) => this.chem.params.bonds[k].E), alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
+      energies: BOND_KEYS.map((k) => this.chem.params.bonds[k].E), alarmsOff: this.alarmsOff, blindsShut: false, spin: this.spin,
       airlock: this.airlockLook(),
       guides: this.guides(pl), arms: this.arms(),
     });
@@ -3003,7 +2671,7 @@ export class GameEngine {
       return { kind: 'hose', h: h.h };
     }
     const p = this.target;
-    if (this.glide || p?.kind === 'cabinet' || (p?.kind === 'airlock' && this.wake !== 'open')) return null;
+    if (p?.kind === 'cabinet' || (p?.kind === 'airlock' && this.wake !== 'open')) return null;
     return p;
   }
 
@@ -3060,33 +2728,8 @@ export class GameEngine {
     }
     const p = this.target;
     const h = this.held;
-    if (inPod(this.wake) || this.previewing) {
+    if (inPod(this.wake)) {
       if (this.wake === 'pod') add(['LMB'], 'OK', p?.kind !== 'wake');
-      add(['/'], 'hide this list');
-      return out;
-    }
-    const walking = this.mode === 'walk';
-    // in the walk mode, nothing's done with the mouse free, but capturing it
-    if (walking && !this.locked) {
-      add(['LMB'], 'look around');
-      add(['/'], 'hide this list');
-      return out;
-    }
-    const view = () => {
-      if (walking) {
-        add(['WASD'], 'walk');
-        add(['Esc'], 'let go of the mouse');
-        return;
-      }
-      add(['WASD'], 'move the view');
-      add(['Wheel'], 'move nearer or further');
-    };
-    if (this.facing === 'away') {
-      if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
-      if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
-      if (this.wake === 'open') add(p?.kind === 'airlock' ? ['LMB'] : ['P'], 'get into the cryopod');
-      add(['Space'], 'turn back to the bench');
-      view();
       add(['/'], 'hide this list');
       return out;
     }
@@ -3101,11 +2744,7 @@ export class GameEngine {
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it back in the cabinet');
       add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it back in the cabinet') : 'put it back');
     } else {
-      if (this.valveGrabbed()) {
-        // (a captured mouse doesn't drag: the button's held as the player looks round)
-        if (walking) add(['LMB', 'Mouse'], 'hold and look to turn the valve');
-        else add(['Drag'], 'turn the valve');
-      }
+      if (this.valveGrabbed()) add(['Drag'], 'turn the valve');
       add([WHEEL_KEYS.join(', ')], 'hold to grab equipment');
     }
     if (this.pressable()) add(['LMB'], 'press it');
@@ -3122,8 +2761,8 @@ export class GameEngine {
     if (this.wake === 'open' && !h) add(['P'], 'get into the cryopod');
     if (!h && this.history.canUndo) add([MOD, 'Z'], 'undo');
     if (!h && this.history.canRedo) add([MOD, 'Shift', 'Z'], 'redo');
-    view();
-    if (!h && this.mode !== 'flat' && !walking) add(['Space'], 'look behind you');
+    add(['WASD'], 'move the view');
+    add(['Wheel'], 'move nearer or further');
     add(['/'], 'hide this list');
     return out;
   }
@@ -3162,7 +2801,7 @@ export class GameEngine {
    */
   private cursor(): void {
     const p = this.target;
-    const busy = !!this.glide || this.dozing() || !!this.previewing;
+    const busy = this.dozing();
     const want =
       busy ? 'default'
       // the wheel has a pointer of its own
@@ -3180,8 +2819,8 @@ export class GameEngine {
   /* ---------------- waking in the airlock ---------------- */
 
   /**
-   * Put the player in the cryopod in the airlock, facing the lab through its open doors, with the message on the
-   * inside of its door: the intro's last part, the first time and on a replay. Nothing can be done until they press
+   * Put the player in the cryopod in the airlock, with the message on the inside of its door, shown over the bench
+   * darkened as the pod shuts it out: the intro's last part, the first time and on a replay. Nothing can be done until they press
    * OK (see pressOk). Whatever they held is left where it is if it can be, or else put away.
    */
   enterPod(): void {
@@ -3205,19 +2844,19 @@ export class GameEngine {
     return st.supply === CRYOSTABILIZER ? { litres: held, first: null } : { litres: CRYOSTABILIZER.startL, first: held };
   }
 
-  /** Put the view in the pod, facing the lab, empty-handed (see emptyHanded); it goes back to where it was at the bench. */
+  /**
+   * Put the player in the pod, empty-handed (see emptyHanded): the view stays where it is, and goes back to where it
+   * was at the bench.
+   */
   private intoPod(): void {
     this.emptyHanded();
     this.leaveBench();
-    // (the flat view has no pod to see out of: it shows the pod's message over the bench)
-    if (this.mode !== 'flat') this.cam = { ...POD_VIEW };
     this.facing = 'pod';
-    this.glide = null;
   }
 
   /** The view is leaving the bench for the pod: remember where it was there, to go back to. */
   private leaveBench(): void {
-    if (this.facing === 'bench' && !this.glide) this.bench = { ...this.at };
+    if (this.facing === 'bench') this.bench = { ...this.at };
   }
 
   /** Leave the player empty-handed: whatever they held is left where it is if it can be, or else put away. */
@@ -3231,35 +2870,16 @@ export class GameEngine {
   }
 
   /**
-   * P, or a click on the airlock's doorway: get into the cryopod, while the airlock stands open. The view glides back
-   * across the lab and into the pod, turning to face out if it was turned round, over SETTLE_S real seconds (it's the
-   * player's own movement); then the pod closes on them, and they fall asleep (see Wake).
+   * P: get into the cryopod, while the airlock stands open. The pod closes on them at once, and they fall asleep
+   * (see Wake).
    */
   board(): void {
-    if (this.wake !== 'open' || this.glide || this.dozing() || this.previewing) return;
+    if (this.wake !== 'open' || this.dozing()) return;
     this.emptyHanded();
     this.leaveBench();
-    this.wake = 'settling';
+    this.wake = 'boarding';
     this.wakeT = 0;
-    // the flat view has no pod to glide into: its door shuts at once
-    if (this.mode === 'flat') this.wake = 'boarding';
-    else this.glide = { from: this.standIn(this.cam), to: { ...POD_VIEW }, t: 0, s: SETTLE_S, door: true };
     this.facing = 'pod';
-  }
-
-  /**
-   * The pod's door has swung open: the view glides out of it and across the lab to the bench, where it was last; in
-   * the walk mode, to where the player first stands (see WALK_START).
-   */
-  private emerge(): void {
-    const from = { ...this.cam };
-    // in the walk mode, to just outside the airlock's doorway, from where they walk
-    if (this.mode === 'walk') this.player = { ...WALK_START };
-    this.toBench();
-    if (this.mode === 'flat') return;
-    this.glide = { from, to: this.standIn(this.cam), t: 0, s: EMERGE_S, door: true };
-    // (it's still in the pod until the glide moves it)
-    this.cam = from;
   }
 
   /**
@@ -3343,7 +2963,7 @@ export class GameEngine {
    */
   private canNap(): boolean {
     return (
-      this.napKnown && !this.napping && !inPod(this.wake) && !this.previewing && !this.held && !this.turning && !this.glide &&
+      this.napKnown && !this.napping && !inPod(this.wake) && !this.held && !this.turning &&
       this.station().swap === null
     );
   }
@@ -3408,7 +3028,7 @@ export class GameEngine {
     this.toBench();
   }
 
-  /** OK, on the message inside the pod: it flickers out, the pod's door swings open, and the view glides out to the bench. */
+  /** OK, on the message inside the pod: it flickers out, the pod's door swings open, and the player is out at the bench. */
   private pressOk(): void {
     if (this.wake !== 'pod') return;
     this.wake = 'flicker';
@@ -3426,11 +3046,11 @@ export class GameEngine {
     if (this.wake === 'flicker' && t >= WAKE_S.flicker) next(this.arrival ? 'arriving' : 'opening');
     else if (this.wake === 'opening' && t >= WAKE_S.open) {
       next('out');
-      this.emerge();
+      this.toBench();
     }
     else if (this.wake === 'arriving' && t >= WAKE_S.arrive) next('arrived');
     else if (this.wake === 'boarding' && t >= WAKE_S.open + WAKE_S.fade) next('asleep');
-    else if (this.wake === 'out' && outOfAirlock(this.cam.z)) next('closed');
+    else if (this.wake === 'out') next('closed');
     // steady delivery of cryostabilizer opens the doors again, and once it stops they close
     else if (this.wake === 'closed' && this.station().supply.airlock && this.station().steady >= DELIVERY.streak) next('open');
     else if (this.wake === 'open' && this.station().steady === 0) next('closed');
@@ -3440,11 +3060,6 @@ export class GameEngine {
   private airlockLook(): AirlockLook {
     const w = this.wake;
     const t = this.wakeT;
-    if (this.previewing) {
-      const up = ARRIVAL.open;
-      const notice = { arrival: true } as const;
-      return { door: 1, front: up, dark: 1 - up, message: false, notice, okHot: false, lamp: false, arrival: true };
-    }
     // how far up the pod's front is: sliding up as they wake, down as they settle in, and otherwise up but while
     // they're shut in it
     const up =
@@ -3466,25 +3081,6 @@ export class GameEngine {
       lamp: w === 'open' && this.clock % 1.5 < 1,
       arrival: this.arrival && (w === 'arriving' || w === 'arrived'),
     };
-  }
-
-  /**
-   * Show the end's white void (see ARRIVAL) in place of the lab, or put the lab back: for god mode, to see how it
-   * looks. The view is from in the pod, facing out; the pod's door stands as far open as ARRIVAL.open says. The lab
-   * runs on as ever, unseen.
-   */
-  previewArrival(on: boolean): void {
-    // (the flat view has no pod to see it from)
-    if (on === !!this.previewing || (on && (inPod(this.wake) || this.glide || this.mode === 'flat'))) return;
-    if (on) {
-      this.emptyHanded();
-      this.previewing = { cam: { ...this.cam }, facing: this.facing };
-      this.cam = { ...POD_VIEW };
-      this.facing = 'pod';
-    } else if (this.previewing) {
-      ({ cam: this.cam, facing: this.facing } = this.previewing);
-      this.previewing = null;
-    }
   }
 
   /** Whether the right button would do something now (see Hud.right). */
@@ -3583,7 +3179,6 @@ export class GameEngine {
         this.wake === 'arriving' ? ease((this.wakeT - WAKE_S.open - BLINDED_S) / (WAKE_S.arrive - WAKE_S.open - BLINDED_S))
         : this.wake === 'arrived' ? 1
         : 0,
-      preview: !!this.previewing,
       wheel: this.wheel && {
         x: this.wheel.x,
         y: this.wheel.y,
@@ -3599,10 +3194,7 @@ export class GameEngine {
       lids: this.napping ? ease(this.napping.lids) : 0,
       napping: this.dozing(),
       nap: this.canNap(),
-      away: this.facing === 'away',
       pod: this.wake === 'open',
-      cross: this.mode === 'walk' && this.locked && !inPod(this.wake) && !this.previewing && !this.wheel,
-      capture: this.mode === 'walk' && !this.locked && !inPod(this.wake) && !this.previewing,
     };
     const key = JSON.stringify(hud);
     if (key === this.lastHud) return;

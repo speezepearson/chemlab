@@ -45,12 +45,12 @@ function TouchButton({
 /**
  * On a touch screen, buttons for what a tap or drag on the view can't do, in a column at the bottom right, each only
  * while it applies: Note (Enter) when there's something to write a note about, Nap (N) when a nap can be had, Put
- * away (Backspace) and the right button, named for what it'll do, while something's held, Sleep when the cryopod
- * could be got into, and always one to turn round to the wall behind the bench, or back to the bench.
+ * away (Backspace) and the right button, named for what it'll do, while something's held, and Sleep when the cryopod
+ * could be got into.
  */
 export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudState }) {
   // (there's nothing to do with them shut in the pod, or once the game's over)
-  if (!TOUCH || hud.inPod || hud.ended || hud.preview) return null;
+  if (!TOUCH || hud.inPod || hud.ended) return null;
   return (
     <div className="touch-buttons">
       {hud.label && <TouchButton label="Note" className="small" down={() => engine.touchNote()} />}
@@ -60,7 +60,6 @@ export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudSta
       {hud.holding && (
         <TouchButton label={hud.hand} lit={hud.right} down={() => engine.hand(true)} up={() => engine.hand(false)} />
       )}
-      <TouchButton label={hud.away ? 'Bench' : 'Behind'} down={() => engine.turnRound()} />
     </div>
   );
 }
@@ -182,22 +181,15 @@ function Wheel({ wheel, engine }: { wheel: NonNullable<HudState['wheel']>; engin
 }
 
 /**
- * Over the view: in the walk mode, the crosshair while the mouse is captured; an equipment wheel while it's held open,
- * a brief note when there is one, and, on a screen with a mouse and keys, everything that can be done just now, in a
+ * Over the view: an equipment wheel while it's held open, a brief note when there is one, and, on a screen with a mouse and keys, everything that can be done just now, in a
  * corner, unless `/` has hidden it. None of it takes the pointer: that all goes to the view.
  */
 export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; help: boolean }) {
   return (
     <>
-      {hud.cross && <div className="crosshair" />}
       {hud.wheel && <Wheel wheel={hud.wheel} engine={engine} />}
       {hud.note && <div className={hud.tip ? 'note tip' : 'note'}>{hud.note}</div>}
       {!TOUCH && help && <Actions actions={hud.actions} />}
     </>
   );
-}
-
-/** In the walk mode, while the mouse is free, what a click on the view does: capture it, to look around. */
-export function StartHint() {
-  return <div className="start-hint">Click to look around</div>;
 }

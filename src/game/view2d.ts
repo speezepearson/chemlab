@@ -12,7 +12,7 @@ import { boxThrough, FLASH, hits, Sketch, type Region } from './sketch';
 import { PLANE_Z, type Vec3 } from './space';
 import { thingOf } from './thing';
 import { SHAPES, THERMOMETER_ROD, type Tool } from './tools';
-import type { Camera, FaucetSpot, Frame, Icons, LabView, Pick } from './view';
+import type { Camera, Frame, Icons, LabView, Pick } from './view';
 import { WHEEL, WHEELS } from './wheel';
 
 /** The outline's color round something held where it can't be let go of (see Frame.bad): a clear red, as the wall view's. */
@@ -58,15 +58,7 @@ export class FlatView implements LabView {
   private okFaces = [okCanvas(false), okCanvas(true)];
   private drawnIcons: Icons | null = null;
 
-  /**
-   * Made as View is, with the faucets (which this view draws from each frame's) and how high the player's eyes are
-   * standing (which only the wall view's pod needs).
-   */
-  constructor(
-    private canvas: HTMLCanvasElement,
-    _faucets: readonly FaucetSpot[],
-    _eye: number,
-  ) {
+  constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
   }
 

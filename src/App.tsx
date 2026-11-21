@@ -2,10 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { defaultChemParams, restoreDefaultChem } from './chem/params';
 import { ReactionNetwork } from './chem/reactions';
 import { AppearancePanel } from './components/AppearancePanel';
-import { ArrivalPanel } from './components/ArrivalPanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
 import { FlaskEditor } from './components/FlaskEditor';
-import { Hud, StartHint, TouchControls } from './components/Hud';
+import { Hud, TouchControls } from './components/Hud';
 import { LabelEditor } from './components/LabelEditor';
 import { Ending, SleepScreen } from './components/Sleep';
 import { SoundPanel } from './components/SoundPanel';
@@ -14,7 +13,6 @@ import { InfoPanel } from './components/InfoPanel';
 import { SpeedControl } from './components/SpeedControl';
 import { ambience } from './game/ambience';
 import { GameEngine, type Hud as HudState, type Inspection } from './game/engine';
-import { VIEW_MODES, storeMode, storedMode, type ViewMode } from './game/mode';
 import { DEFAULT_PRESET, PRESETS } from './game/presets';
 import { typingIn } from './game/typing';
 import { decodeSave, encodeSave, storeGod, storeSave, storedGod, storedSave, type SaveState } from './game/save';
@@ -63,9 +61,6 @@ export function App() {
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [hud, setHud] = useState<HudState | null>(null);
   const [saved] = useState(storedSave);
-  /** How the lab is seen and worked (see ViewMode): switching it makes the engine anew, with the lab as it is. */
-  const [mode, setMode] = useState<ViewMode>(storedMode);
-  useEffect(() => storeMode(mode), [mode]);
   /** The lab as it last was, to carry it from one engine to the next: the stored save to begin with. */
   const latest = useRef<SaveState | null>(saved);
   const [preset, setPreset] = useState(() => presetOf(saved));
@@ -117,7 +112,7 @@ export function App() {
       onLabel: setLabeling,
       onHud: setHud,
       onAwake: markIntroSeen,
-    }, presetRef.current, mode);
+    }, presetRef.current);
     if (latest.current) e.restore(latest.current, presetRef.current);
     setEngine(e);
     // for checks in a browser (see CLAUDE.md)
@@ -131,7 +126,7 @@ export function App() {
       window.removeEventListener('pagehide', save);
       e.destroy();
     };
-  }, [network, mode]);
+  }, [network]);
 
   // the bench waits, paused, while the intro plays
   useEffect(() => {
@@ -209,14 +204,6 @@ export function App() {
               ))}
             </select>
           )}
-          {/* how the lab is seen and worked: each a way of its own, to try against the others */}
-          <select aria-label="view" title="How the lab is seen and worked" value={mode} onChange={(e) => setMode(e.target.value as ViewMode)}>
-            {VIEW_MODES.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
           <button onClick={reset}>Reset</button>
           <button onClick={exportSave} title="Copy a string holding this whole setup">
             {copied ? 'Copied!' : 'Export'}
@@ -242,19 +229,15 @@ export function App() {
       </header>
       <div className="main">
         <div id="stage" ref={stageRef}>
-          {/* a canvas of its own for each way of seeing the lab: one can't be drawn on in 3D and then flat, or the other way */}
-          <canvas key={mode} ref={canvasRef} />
+          <canvas ref={canvasRef} />
           {engine && hud && <Hud engine={engine} hud={hud} help={help} />}
           {engine && hud && <TouchControls engine={engine} hud={hud} />}
-          {/* in the walk mode, with the mouse free, a click captures it (but not while a note's being typed) */}
-          {hud?.capture && !intro && editing === null && labeling === null && <StartHint />}
           {inspection && <InfoPanel info={inspection} />}
           {engine && editing !== null && <FlaskEditor engine={engine} id={editing} onClose={() => setEditing(null)} />}
           {engine && labeling !== null && (
             <LabelEditor key={labeling} engine={engine} id={labeling} onClose={() => setLabeling(null)} />
           )}
           {hud && <SleepScreen hud={hud} onWake={() => engine?.touchNap()} />}
-          {hud?.preview && <ArrivalPanel />}
           {engine && hud && (
             <Ending
               hud={hud}

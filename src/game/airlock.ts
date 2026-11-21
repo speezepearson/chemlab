@@ -47,18 +47,16 @@ export const RISE_S = 1.5;
 
 /**
  * Where the player is in waking up, the first time (and on a replay of the intro), and how the airlock stands after:
- * - pod: in the cryopod, with the message projected on the inside of its front; they can look around, but not move,
- *   and the lab waits.
+ * - pod: in the cryopod, with the message projected on the inside of its front; they can't move, and the lab waits.
  * - flicker: OK was pressed, and the message is flickering out.
  * - opening: the pod's door is swinging open.
- * - out: the view glides out of the pod and across the lab to the bench (see GameEngine.glide), and the doors stand
- *   open until it's out in the lab.
+ * - out: they're out at the bench, where the view last was there, and the doors stand open behind them until the
+ *   next sim substep.
  * - closed: the doors have closed behind them. This is how every lab starts but the first.
  * - open: the station has been delivering steadily (see DELIVERY), and the doors have slid open again, back to the
  *   pod; they close again once it stops, when the player's out in the lab.
- * - settling: the player got into the pod while the airlock was open, and the view is easing back into place in it,
- *   facing out: it's their own movement, so it goes in real time (see SETTLE_S).
- * - boarding: settled in, the pod's front slides down in front of them, and then all fades to black.
+ * - boarding: the player got into the pod while the airlock was open: its front slides down in front of them, and
+ *   then all fades to black.
  * - asleep: in the pod, asleep, while the lab runs on (see sleep.ts) until the goal's reached, or the station stops
  *   delivering. Then they wake in the pod as at first, the screen fading in from black: back to pod, with the same
  *   message (its numbers brought up to date), or, if there's enough cryostabilizer, a welcome to Mu Ceti.
@@ -68,21 +66,11 @@ export const RISE_S = 1.5;
  * - arrived: all white, and the game's won; the player can carry on in the lab from there, or start again.
  */
 export type Wake =
-  | 'pod' | 'flicker' | 'opening' | 'out' | 'closed' | 'open' | 'settling' | 'boarding' | 'asleep' | 'arriving' | 'arrived';
-
-/** Real seconds the view takes to ease back into place in the pod as the player gets in (see Wake's settling). */
-export const SETTLE_S = 2;
-/** Real seconds the view takes to glide from the pod to the bench as the player wakes (see Wake's out). */
-export const EMERGE_S = 2.6;
+  | 'pod' | 'flicker' | 'opening' | 'out' | 'closed' | 'open' | 'boarding' | 'asleep' | 'arriving' | 'arrived';
 
 /** Whether the player is still shut in the pod. */
 export function inPod(w: Wake): boolean {
   return w !== 'out' && w !== 'closed' && w !== 'open';
-}
-
-/** Whether the player's eyes, at z, are all the way out of the doorway, into the lab. */
-export function outOfAirlock(z: number): boolean {
-  return z < ROOM.z1 - 55;
 }
 
 /** Smoothly from 0 to 1 as t goes from 0 to 1, easing in and out. */
