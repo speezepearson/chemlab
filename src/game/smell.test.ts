@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NS, SOLVENT_SPECIES, SPECIES } from '../chem/species';
 import {
-  FATIGUE, MASK, NAMED, Nose, ODORANTS, STEP, VOLATILITY, WORDS, levelOf, mask, sentence, smell, strengths, waft, type Odorant,
+  MASK, NAMED, ODORANTS, STEP, VOLATILITY, WORDS, levelOf, mask, sentence, smell, strengths, waft, type Odorant,
 } from './smell';
 
 const named = (species: string): Odorant => ODORANTS.find((o) => o.species === species)!;
@@ -224,95 +224,16 @@ describe('mask', () => {
   });
 });
 
-describe('Nose', () => {
-  const say = (nose: Nose, n: Float64Array, T?: number) => {
-    const { smelled, stale } = nose.sniff(n, T);
-    return sentence(smelled, stale);
-  };
-  const k = named('K').simile;
-  const rk = named('R–K').simile;
-
-  it('tires of what it’s just smelled: the same again is nothing new', () => {
-    const nose = new Nose();
-    const n = mix({ K: 2.5 });
-    expect(say(nose, n)).toBe(`Smells of ${k}.`);
-    expect(say(nose, n)).toBe('Nothing new.');
-    expect(say(nose, n)).toBe('Nothing new.');
-    // nor is a little more of it, but a lot more is, by what it's past what the nose is dulled to
-    expect(say(nose, mix({ K: 2.5 + FATIGUE.over - 0.1 }))).toBe('Nothing new.');
-    expect(say(new Nose(), mix({ K: 4.9 }))).toBe(`Reeks of ${k}.`);
-    expect(say(nose, mix({ K: 4.9 }))).toBe(`A whiff of ${k}.`);
-  });
-
-  it('tells nothing new from nothing', () => {
-    const nose = new Nose();
-    expect(say(nose, fluid({}))).toBe('Nothing.');
-    expect(say(nose, new Float64Array(NS))).toBe('Nothing.');
-    nose.sniff(mix({ K: 2.5 }));
-    expect(say(nose, mix({ K: 1.5 }))).toBe('Nothing new.');
-  });
-
-  it('after a reference, reports what a sample has that the reference hasn’t', () => {
-    const nose = new Nose();
-    expect(say(nose, mix({ 'R–K': 2.2 }))).toBe(`Smells of ${rk}.`);
-    expect(say(nose, mix({ 'R–K': 2.1, K: 1.4 }))).toBe(`A whiff of ${k}.`);
-    // which a fresh nose would have had second
-    expect(say(new Nose(), mix({ 'R–K': 2.1, K: 1.4 }))).toBe(`Smells of ${rk}, with a whiff of ${k}.`);
-  });
-
-  it('is masked after it’s tired, so tired of a reek, it finds the trace under it', () => {
-    const sample = mix({ 'B–K': 4.3, 'R–K': 0.5 });
-    expect(say(new Nose(), sample)).toBe(`Reeks of ${named('B–K').simile}.`);
-    const nose = new Nose();
-    nose.sniff(mix({ 'B–K': 4.4 }));
-    expect(say(nose, sample)).toBe(`A trace of ${rk}.`);
-  });
-
-  it('tires of what’s masked too, so a second sniff of the same thing doesn’t get under the reek', () => {
-    const nose = new Nose();
-    const sample = mix({ 'B–K': 4.3, 'R–K': 0.5 });
-    expect(say(nose, sample)).toBe(`Reeks of ${named('B–K').simile}.`);
-    expect(say(nose, sample)).toBe('Nothing new.');
-  });
-
-  it('recovers with time', () => {
-    const nose = new Nose();
-    const n = mix({ K: 2.5 });
-    nose.sniff(n);
-    // dulled to 2.5 + over, fading to 1/e each tau
-    nose.step(FATIGUE.tau);
-    const left = 2.5 - (2.5 + FATIGUE.over) / Math.E;
-    const again = new Nose();
-    again.sniff(n);
-    for (let i = 0; i < 100; i++) again.step(FATIGUE.tau / 100);
-    for (const one of [nose, again]) {
-      const { smelled } = one.sniff(n);
-      expect(species(smelled)).toEqual(['K']);
-      expect(smelled[0].level).toBeCloseTo(left, 6);
-    }
-    // sniffing again dulled it afresh; long after, it's as new
-    expect(say(nose, n)).toBe('Nothing new.');
-    nose.step(20 * FATIGUE.tau);
-    expect(say(nose, n)).toBe(`Smells of ${k}.`);
-    // and with no time passing, it never recovers
-    nose.step(0);
-    expect(say(nose, n)).toBe('Nothing new.');
-  });
-
-  it('is cleared at once by a sniff of something with no smell', () => {
-    for (const odorless of [fluid({}), new Float64Array(NS), fluid({ '△RGB': 1 }), mix({ K: -0.5 })]) {
-      const nose = new Nose();
-      const n = mix({ K: 2.5, 'G–K': 1.5 });
-      const first = say(nose, n);
-      expect(say(nose, n)).toBe('Nothing new.');
-      expect(say(nose, odorless)).toBe('Nothing.');
-      expect(say(nose, n)).toBe(first);
-    }
-    // but not by one of something it's only too tired to smell
-    const nose = new Nose();
-    nose.sniff(mix({ K: 2.5 }));
-    expect(say(nose, mix({ K: 1 }))).toBe('Nothing new.');
-    expect(say(nose, mix({ K: 2.5 }))).toBe('Nothing new.');
+describe('a second sniff', () => {
+  it('of the same fluid smells the same, whatever was sniffed in between', () => {
+    const n = mix({ K: 2.5, 'G–K': 1.5 });
+    const first = smell(n);
+    expect(species(first)).toEqual(['K', 'G–K']);
+    for (let i = 0; i < 3; i++) expect(smell(n)).toEqual(first);
+    smell(mix({ 'B–K': 4.4 }));
+    smell(fluid({}));
+    expect(smell(n)).toEqual(first);
+    expect(sentence(smell(n))).toBe(sentence(first));
   });
 });
 
@@ -349,9 +270,8 @@ describe('sentence', () => {
     expect(sentence([at('R', 1.8), at('G', 1.5), at('K', 0.2)])).toBe(`A whiff of ${a} and ${b}, and a trace of ${c}.`);
   });
 
-  it('says so when there’s nothing, and when there’s nothing the nose isn’t tired of', () => {
+  it('says so when there’s nothing', () => {
     expect(sentence([])).toBe('Nothing.');
-    expect(sentence([], true)).toBe('Nothing new.');
   });
 
   it('has no numbers, pronouns, colors or species’ names in it', () => {

@@ -92,8 +92,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `outline.ts` is the player's settings for the outline round what the crosshair is on; the view's `Outliner` draws
     it over the finished frame, from a mask of the meshes registered as that thing's parts.
   - `smell.ts` is what a sniff (F) makes of a fluid, pure and DOM-free: the ten odorants and Nadia's similes for them
-    (`ODORANTS`), how strong each is for a composition and temperature, masking, her nose's fatigue (`Nose`, which the
-    engine owns one of and steps on sim time inside `simulate()`), and the line it's all put into (`sentence`).
+    (`ODORANTS`), how strong each is for a composition and temperature, masking, and the line it's all put into
+    (`sentence`). It goes by the fluid alone: there's no state, so the same fluid always smells the same.
   - `supply.ts` is what the ship is short of, in the order the station is fitted for them (`SUPPLIES`): the
     antinucleant (R–B), then the cryostabilizer.
   - `cabinet.ts` is the equipment cabinet: its layout (each kind's slots on its shelves) and its stock, which the

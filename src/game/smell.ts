@@ -104,8 +104,7 @@ export interface Smelled {
 /**
  * A strong smell wipes out much fainter ones: of what's smelled, only what's within MASK steps of the strongest is
  * made out, and never more than NAMED of them. Thinning a fluid weakens all its smells alike, so it never brings out
- * what's masked: a trace of one thing under a reek of another has to be found by taking the fluid apart, or by tiring
- * the nose of the reek first (see Nose).
+ * what's masked: a trace of one thing under a reek of another has to be found by taking the fluid apart.
  */
 export const MASK = 2;
 export const NAMED = 3;
@@ -117,61 +116,16 @@ export function mask(smelled: readonly Smelled[]): Smelled[] {
 }
 
 /**
- * How a nose tires (see Nose):
- * - tau: how long a tiredness takes to fade to 1/e of itself, in sim seconds;
- * - over: how far past what it's just smelled it's dulled, in steps of STEP, so that the same thing again, or a
- *   little more of it, is nothing new.
+ * What Nadia makes out of a fluid, by its molecule counts and temperature: every odorant at or over its threshold,
+ * masked (see mask), strongest first. It goes by the fluid alone: the same fluid always smells the same.
  */
-export const FATIGUE = { tau: 45, over: 0.5 };
-
-/** What a sniff made out, strongest first; and, if that's nothing, whether only because the nose was tired of it all. */
-export interface Sniff {
-  smelled: Smelled[];
-  stale: boolean;
-}
-
-/**
- * Nadia's nose, which tires of what it has just smelled. Every odorant that reaches it over its threshold, made out
- * or masked, leaves it dulled to that odorant, by its level and FATIGUE.over more; that's taken off the odorant's
- * level at later sniffs, and fades with sim time (see step). So a sniff of one flask and then another tells what the
- * second has that the first hasn't, or has far more of. Masking comes after: tired of a reek, the nose makes out the
- * trace under it. A sniff of something with no smell at all (the solvent, an empty flask) clears it at once.
- */
-export class Nose {
-  /** How dulled it is to each of ODORANTS, in steps of STEP. */
-  private tired = new Float64Array(ODORANTS.length);
-
-  /** dt sim seconds pass: its tiredness fades. */
-  step(dt: number): void {
-    const keep = Math.exp(-dt / FATIGUE.tau);
-    for (let i = 0; i < this.tired.length; i++) this.tired[i] *= keep;
-  }
-
-  /** As it was before it smelled anything. */
-  clear(): void {
-    this.tired.fill(0);
-  }
-
-  /** Sniff a fluid, by its molecule counts and temperature: what's made out of it, tired as the nose is, which tires it more. */
-  sniff(n: ArrayLike<number>, T = T_ROOM): Sniff {
-    const levels = strengths(n, T).map(levelOf);
-    if (!levels.some((l) => l >= 0)) {
-      this.clear();
-      return { smelled: [], stale: false };
-    }
-    const smelled: Smelled[] = [];
-    levels.forEach((l, i) => {
-      if (l < 0) return;
-      if (l >= this.tired[i]) smelled.push({ odorant: ODORANTS[i], level: l - this.tired[i] });
-      this.tired[i] = Math.max(this.tired[i], l + FATIGUE.over);
-    });
-    return { smelled: mask(smelled), stale: !smelled.length };
-  }
-}
-
-/** What a fresh nose makes out of a fluid (see Nose.sniff), strongest first. */
 export function smell(n: ArrayLike<number>, T = T_ROOM): Smelled[] {
-  return new Nose().sniff(n, T).smelled;
+  const smelled: Smelled[] = [];
+  strengths(n, T).forEach((s, i) => {
+    const level = levelOf(s);
+    if (level >= 0) smelled.push({ odorant: ODORANTS[i], level });
+  });
+  return mask(smelled);
 }
 
 /** "a", "a and b", "a, b and c"; with a comma before the "and" if something before it has an "and" of its own. */
@@ -185,11 +139,10 @@ function list(xs: readonly string[]): string {
  * What Nadia makes of a sniff, in a line: what was made out, strongest first, each by its simile and a word for its
  * strength (see WORDS), as "Smells strongly of floor wax, with a whiff of struck match." Odorants as strong as each
  * other share the word, as "A whiff of wet coats and floor wax." It's terse: no pronouns, no numbers, and nothing of
- * what the fluid is or looks like. Nothing smelled is "Nothing.", or, if that's only because her nose was tired of all
- * there was (`stale`), "Nothing new."
+ * what the fluid is or looks like. Nothing smelled is "Nothing."
  */
-export function sentence(smelled: readonly Smelled[], stale = false): string {
-  if (!smelled.length) return stale ? 'Nothing new.' : 'Nothing.';
+export function sentence(smelled: readonly Smelled[]): string {
+  if (!smelled.length) return 'Nothing.';
   const groups: { word: number; similes: string[] }[] = [];
   for (const { odorant, level } of smelled) {
     const word = wordFor(level);
