@@ -2040,8 +2040,9 @@ export class GameEngine {
 
   /**
    * What F would sniff: the flask or tank the crosshair is on, if it's open on top (see mouths), or 'sealed' if it
-   * isn't, since nothing can be smelled through glass; or, with the crosshair on neither, the flask in hand, even
-   * tipped. Null if there's nothing to sniff, as when the station's block is back in the wall.
+   * isn't, since nothing can be smelled through glass; or, with the crosshair on neither, the flask in hand (though F
+   * does nothing while it's pouring: see handBusy). Null if there's nothing to sniff, as when the station's block is
+   * back in the wall.
    */
   private sniffAim(): Vessel | 'sealed' | null {
     const p = this.target;
