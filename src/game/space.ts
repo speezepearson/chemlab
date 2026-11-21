@@ -64,18 +64,29 @@ const ISLAND = { w: 10 * CELL, d: 4 * CELL, x0: -4 * CELL, z0: 6 * CELL, dx: 13 
  * runs on from its end.
  */
 export const CABINET_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 18 * CELL, z0: ROOM.z0, z1: ROOM.z0 + 3 * CELL };
-/** A counter: its x and z extents, and whether it's an island out in the room rather than a sink counter on a wall. */
+/**
+ * Where the shadow lamp stands (see LAMP in tools.ts): on a bench of its own in the room's front left corner, five
+ * grid cells along the front wall and three out from it, as high as the counters. Nothing could be set down there
+ * before it was, so no save has anything standing in its way. It's long enough for the longest tools (a heater, a
+ * sorter, a separator) to stand across it on their two stands, and stops short of the airlock's doorway.
+ */
+export const LAMP_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 5 * CELL, z0: ROOM.z1 - 3 * CELL, z1: ROOM.z1 };
+/**
+ * A counter: its x and z extents, and whether it's an island out in the room rather than a sink counter on a wall, or
+ * the shadow lamp's own bench.
+ */
 export interface Counter {
   x0: number;
   x1: number;
   z0: number;
   z1: number;
   island?: boolean;
+  lamp?: boolean;
 }
 /**
  * The counters, all LIFT high, as x and z extents: one along the back wall under the old bench, from the equipment
- * cabinet on, one along the right wall under the faucets, and a grid of islands out in the room, like an
- * undergraduate lab's benches.
+ * cabinet on, one along the right wall under the faucets, a grid of islands out in the room, like an
+ * undergraduate lab's benches, and last the shadow lamp's bench in the front left corner.
  */
 export const COUNTERS: readonly Counter[] = [
   { x0: CABINET_AREA.x1, x1: ROOM.x1 - SINK_D, z0: ROOM.z0, z1: ROOM.z0 + COUNTER_D },
@@ -85,6 +96,7 @@ export const COUNTERS: readonly Counter[] = [
     const z0 = ISLAND.z0 + Math.floor(i / ISLAND.cols) * ISLAND.dz;
     return { x0, x1: x0 + ISLAND.w, z0, z1: z0 + ISLAND.d, island: true };
   }),
+  { ...LAMP_AREA, lamp: true },
 ];
 
 /** How high the floor or counter is under (x, z): where whatever falls there goes down the sink. */

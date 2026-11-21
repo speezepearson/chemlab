@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DEGREES, END_WEIGHT, LOOSE_ENDS } from './shape';
-import { SPECIES, TARGET, bondMask, pairOf, singleOf, speciesIndex } from './species';
+import { DEGREES, END_WEIGHT, LOOSE_ENDS, RINGED } from './shape';
+import { SOLVENT_SPECIES, SPECIES, TARGET, bondMask, pairOf, singleOf, speciesIndex } from './species';
 
 describe('molecular shape', () => {
   const chain = speciesIndex(['R', 'G', 'B'], bondMask(['R', 'G'], ['G', 'B']));
@@ -31,5 +31,15 @@ describe('molecular shape', () => {
     expect(LOOSE_ENDS[star]).toEqual(['G', 'B', 'K']);
     expect(END_WEIGHT[TARGET]).toBe(0);
     expect(END_WEIGHT[chain]).toBe(SPECIES[singleOf('R')].weight + SPECIES[singleOf('B')].weight);
+  });
+
+  it('finds the rings: a triangle, alone or with a tail, and every four-atom molecule with four bonds or more', () => {
+    const tailed = speciesIndex(['R', 'G', 'B', 'K'], bondMask(['R', 'G'], ['R', 'B'], ['G', 'B'], ['B', 'K']));
+    const square = speciesIndex(['R', 'G', 'B', 'K'], bondMask(['R', 'G'], ['G', 'B'], ['B', 'K'], ['R', 'K']));
+    const chain4 = speciesIndex(['R', 'G', 'B', 'K'], bondMask(['R', 'G'], ['G', 'B'], ['B', 'K']));
+    for (const s of [TARGET, tailed, square, all]) expect(RINGED[s], SPECIES[s].name).toBe(true);
+    for (const s of [singleOf('R'), SOLVENT_SPECIES, pairOf('R', 'G'), chain, star, chain4]) expect(RINGED[s], SPECIES[s].name).toBe(false);
+    // the four triangles, one to each three colors, and 22 of the 38 four-atom shapes: all but the 16 trees
+    expect(RINGED.filter(Boolean)).toHaveLength(4 + 22);
   });
 });

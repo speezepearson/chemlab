@@ -3,9 +3,9 @@ import { T_ROOM } from '../chem/params';
 import { SPECIES, TARGET, singleOf } from '../chem/species';
 import { CAP } from './config';
 import type { Vessel } from './flask';
-import { CELL, ROOM, type Pose } from './space';
+import { CELL, LAMP_AREA, LIFT, ROOM, type Pose } from './space';
 import { CRYOSTABILIZER } from './supply';
-import { STATION, type ToolKind } from './tools';
+import { LAMP, STATION, type ToolKind } from './tools';
 
 /** Starting contents of one shelf slot. */
 export interface FlaskFill {
@@ -26,12 +26,9 @@ export interface Spot {
 }
 
 /**
- * Where the one and only composition analyzer starts, unless a preset places it itself: there's always exactly one. It
- * stands over the back counter, its spouts high enough for a flask under them.
+ * Where the one and only spectroscope starts, unless a preset places it itself: there's always exactly one. It stands
+ * over the back counter, its spout high enough for a flask under it.
  */
-export const ANALYZER_AT: Spot = { at: [1.15, 0.5] };
-
-/** Where the one and only spectroscope starts, the same way: past the composition analyzer. */
 export const SPECTROSCOPE_AT: Spot = { at: [1.45, 0.5] };
 
 /** Where the one and only bond visualizer starts, the same way: past the spectroscope. */
@@ -43,6 +40,13 @@ export const VISUALIZER_AT: Spot = { at: [1.75, 0.5] };
  * spouts high enough for a flask under them. Every lab has it, always here.
  */
 export const STATION_POSE: Pose = { x: ROOM.x1 - CELL / 2, y: STATION.top, z: 11.5 * CELL, yaw: -Math.PI / 2 };
+
+/**
+ * Where the shadow lamp is (see LAMP in tools.ts): in the middle of its own bench in the front left corner, its top
+ * LAMP.h above the bench, its housing against the front wall and facing into the room, so it shines out from the wall.
+ * Every lab has it, always here.
+ */
+export const LAMP_POSE: Pose = { x: (LAMP_AREA.x0 + LAMP_AREA.x1) / 2, y: LIFT + LAMP.h, z: (LAMP_AREA.z0 + LAMP_AREA.z1) / 2, yaw: Math.PI };
 
 /**
  * What the cryostabilizer's reservoir starts with: the hundred flasks of the target left on board (see VOYAGE). It's

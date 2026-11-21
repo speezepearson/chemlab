@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_VOLUMES, MIDDLE, defaultVolumes, gainOf, parseVolumes } from './volumes';
+import { CHANNELS, DEFAULT_VOLUMES, MIDDLE, defaultVolumes, gainOf, parseVolumes } from './volumes';
 
 describe('volumes', () => {
   it('maps the middle of a slider to the sound as synthesized, the top to four times it, the bottom to silence', () => {
@@ -23,5 +23,15 @@ describe('volumes', () => {
     expect(parseVolumes('[1, 2]')).toEqual(defaultVolumes());
     const v = parseVolumes(JSON.stringify({ hum: 0.2, klaxon: 'loud', alarm: 3, drips: 0, bogus: 1 }));
     expect(v).toEqual({ ...defaultVolumes(), hum: 0.2, drips: 0 });
+  });
+
+  it('leaves out what was stored for a slider there no longer is', () => {
+    // as stored when the composition analyzer hummed, and had a slider of its own
+    const stored = { master: 0.4, hum: 0.5, klaxon: 0.23, alarm: 0.26, drips: 0.5, trickle: 0.7, analyzer: 0.9, receptacle: 0.5, glass: 0.5 };
+    const v = parseVolumes(JSON.stringify(stored));
+    expect(v).toEqual({ ...defaultVolumes(), master: 0.4, trickle: 0.7 });
+    expect(Object.keys(v)).not.toContain('analyzer');
+    expect(CHANNELS).not.toContain('analyzer');
+    expect(Object.keys(v).sort()).toEqual([...CHANNELS].sort());
   });
 });

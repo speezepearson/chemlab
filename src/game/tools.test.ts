@@ -13,8 +13,8 @@ import { tankMouth } from './bodies';
 import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ANALYZER_SAMPLE, ATOM_PLACE, analyzerSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, type Mouth,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ATOM_PLACE, atomSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
+  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SHEET, darkness, lampLight, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -1928,7 +1928,7 @@ describe('size sorter', () => {
   });
 });
 
-describe('composition analyzer', () => {
+describe('composition, by size and color', () => {
   const RG = pairOf('R', 'G');
   const B = singleOf('B');
   const at = (size: number, atom: 'R' | 'G' | 'B' | 'K') => (size - 1) * 4 + SECTOR_ATOMS.indexOf(atom);
@@ -1953,7 +1953,7 @@ describe('composition analyzer', () => {
     r.forEach((x, i) => expect(x).toBeCloseTo(want[i], 9));
   });
 
-  it('lights a sample of one species fully in each of its sectors', () => {
+  it('counts a sample of one species fully under each of its colors, at its size', () => {
     expect(read([[R, CUP]])[at(1, 'R')]).toBe(1);
     const rg = read([[RG, CUP]]);
     expect([rg[at(2, 'R')], rg[at(2, 'G')]]).toEqual([1, 1]);
@@ -1964,57 +1964,20 @@ describe('composition analyzer', () => {
     for (const a of ['R', 'G', 'B', 'K'] as const) expect(four[at(4, a)]).toBeCloseTo(1, 6);
   });
 
-  it('has no sector for the solvent, but counts the room it takes', () => {
+  it('has nothing for the solvent, but counts the room it takes', () => {
     const S = SOLVENT_SPECIES;
     expect(read([[S, CUP]]).every((x) => x === 0)).toBe(true);
-    // half R, half S: R's sector half lit, against the whole sample, as for half R, half G
+    // half R, half S: half under R, against the whole sample, as for half R, half G
     const r = read([[R, 0.5 * CUP], [S, 0.5 * CUP]]);
     expect(r[at(1, 'R')]).toBeCloseTo(0.5, 9);
     expect(r.reduce((t, x) => t + x, 0)).toBeCloseTo(0.5, 9);
   });
 
-  it('reads a half share half as bright, and nothing dark', () => {
+  it('counts a half share as half, and nothing as nothing', () => {
     expect(read([[R, CUP]])[at(1, 'R')]).toBe(2 * read([[R, 0.5 * CUP], [G, 0.1 * CUP]])[at(1, 'R')]);
     expect(composition(new Vessel(CUP), CUP).every((x) => x === 0)).toBe(true);
   });
 
-  it('drains its tube straight through, drawing off a share out its waste spout', () => {
-    const a = new Tool('analyzer', 0);
-    expect(a.shape.noValve).toBe(true);
-    expect(a.tanks[0].cap).toBe(TUBE_CAP);
-    filled(a.tanks[0], R, TUBE_CAP, 3);
-    const [main, waste] = a.step(0.01);
-    const out = main!.N + waste!.N;
-    expect(out / (FUNNEL_RATE * 0.01)).toBeCloseTo(1, 6);
-    expect(waste!.N / out).toBeCloseTo(ANALYZER_SAMPLE, 3);
-    expect(temperature(main!)).toBeCloseTo(3, 6);
-    expect(temperature(waste!)).toBeCloseTo(3, 2);
-  });
-
-  it("reads what it drew off lately, as shares of it, fading out smoothly once nothing passes, then dark", () => {
-    const a = new Tool('analyzer', 0);
-    expect(a.reading).toBeNull();
-    const src = new Vessel(Infinity);
-    src.setMolecules(R, CAP);
-    src.setMolecules(RG, CAP);
-    const run = (secs: number, on: boolean) => {
-      for (let i = 0; i < Math.round(secs / 0.02); i++) {
-        if (on) a.tanks[0].addFrom(src, 0.25 * CAP * 0.02);
-        a.step(0.02);
-      }
-    };
-    run(4 * INSTRUMENT_TAU, true);
-    // by volume, half R and half R–G
-    expect(a.reading![at(1, 'R')]).toBeCloseTo(0.5, 1);
-    expect(a.reading![at(2, 'R')]).toBeCloseTo(0.5, 1);
-    expect(a.reading![at(2, 'G')]).toBeCloseTo(0.5, 1);
-    expect(a.reading![at(3, 'R')]).toBe(0);
-    // as it fades it still reads the same mix
-    run(2 * INSTRUMENT_TAU, false);
-    expect(a.reading![at(1, 'R')]).toBeCloseTo(0.5, 1);
-    run(30 * INSTRUMENT_TAU, false);
-    expect(a.reading).toBeNull();
-  });
 });
 
 describe('spectroscope', () => {
@@ -2148,12 +2111,12 @@ describe('bond visualizer', () => {
     expect(d(at('G'), at('B'))).toBeCloseTo(d(at('R'), at('B')), 9);
   });
 
-  it("cuts the analyzer's triangle into four equal ones, each corner's atom at its corner and K upside down in the middle", () => {
+  it("cuts a triangle into four equal ones, each corner's atom at its corner and K upside down in the middle", () => {
     const area = (ps: (readonly [number, number])[]) =>
       Math.abs((ps[1][0] - ps[0][0]) * (ps[2][1] - ps[0][1]) - (ps[2][0] - ps[0][0]) * (ps[1][1] - ps[0][1])) / 2;
     const whole = area((['G', 'B', 'R'] as const).map((a) => ATOM_PLACE[a]));
     for (const a of SECTOR_ATOMS) {
-      const s = analyzerSector(a);
+      const s = atomSector(a);
       expect(s).toHaveLength(3);
       expect(area(s)).toBeCloseTo(whole / 4, 9);
       // each sector is centered on its atom's place, between the corner and the middle for a corner's
@@ -2163,7 +2126,7 @@ describe('bond visualizer', () => {
       expect(mid[1]).toBeCloseTo(want[1], 9);
     }
     // the middle one points down: one corner at the bottom, two level above it
-    const ys = analyzerSector('K').map((p) => p[1]).sort((p, q) => p - q);
+    const ys = atomSector('K').map((p) => p[1]).sort((p, q) => p - q);
     expect(ys[0]).toBeCloseTo(ys[1], 9);
     expect(ys[2]).toBeGreaterThan(ys[1]);
   });
@@ -2464,6 +2427,283 @@ describe('dripping', () => {
       // no long tail of drops that hang on and on
       expect(biggest).toBeLessThan(2.6e6);
     }
+  });
+});
+
+describe('the shadow lamp', () => {
+  it('is one of a kind, fixed where it is, with no tanks, spouts or valves', () => {
+    const t = new Tool('shadowlamp', 0);
+    expect(UNIQUE_TOOLS).toContain('shadowlamp');
+    expect(t.shape.fixed).toBe(true);
+    expect(t.shape.wall).toBeUndefined();
+    expect([t.tanks.length, t.shape.spouts.length, t.valves.length]).toEqual([0, 0, 0]);
+    expect(t.step(0.02)).toEqual([]);
+  });
+
+  it('starts off, and a save keeps whether it is on', () => {
+    const t = new Tool('shadowlamp', 0);
+    expect(t.lit).toBe(false);
+    expect(t.memory).toEqual([0]);
+    t.lit = true;
+    const u = new Tool('shadowlamp', 1);
+    u.remember(JSON.parse(JSON.stringify(t.memory)));
+    expect(u.lit).toBe(true);
+    u.remember([0]);
+    expect(u.lit).toBe(false);
+    // anything else is ignored
+    u.lit = true;
+    for (const bad of [undefined, 'on', [], [1, 2], [NaN]]) u.remember(bad);
+    expect(u.lit).toBe(true);
+  });
+
+  it('owes the sheet in its holder its light, sim second for sim second, while it is on', () => {
+    const t = new Tool('shadowlamp', 0);
+    const sheet = new Tool('sheet', 1);
+    // on, with nothing in its holder, it shines on nothing
+    t.lit = true;
+    for (let i = 0; i < 50; i++) t.step(0.02);
+    expect(t.owed).toBe(0);
+    t.sheet = sheet;
+    for (let i = 0; i < 25; i++) t.step(0.02);
+    expect(t.owed).toBeCloseTo(0.5);
+    // in bigger steps it comes to the same
+    t.step(0.25);
+    expect(t.owed).toBeCloseTo(0.75);
+    // switched off, the sheet is still owed what fell on it, and no more
+    t.lit = false;
+    t.step(1);
+    expect(t.owed).toBeCloseTo(0.75);
+    // the lamp never darkens the sheet itself: that's for whoever knows what's in the way
+    expect(Math.max(...sheet.dose)).toBe(0);
+    // taken out, the sheet is owed nothing
+    t.sheet = null;
+    t.step(0.02);
+    expect(t.owed).toBe(0);
+  });
+
+  it('never owes more light than darkens a sheet all the way, however long it is left on', () => {
+    const t = new Tool('shadowlamp', 0);
+    t.lit = true;
+    t.sheet = new Tool('sheet', 1);
+    t.shine(3600);
+    expect(t.owed).toBe(SHEET.full);
+    t.step(0.02);
+    expect(t.owed).toBe(SHEET.full);
+  });
+
+  it("has its bulb deep in a recess that's just big enough for its light to reach all of a sheet in the holder", () => {
+    const { housing, bulb, mouth, holder, h } = LAMP;
+    expect(bulb.z - bulb.r).toBeGreaterThan(housing.z0);
+    expect(bulb.z + bulb.r).toBeLessThan(housing.z1);
+    // where the light to each edge of the sheet's square crosses the opening, from anywhere on the bulb
+    const share = (housing.z1 - bulb.z) / (holder.z - bulb.z);
+    const across = (SHEET.side / 2) * share + bulb.r * (1 - share);
+    const foot = h - holder.rail;
+    const up = bulb.y - bulb.r + (foot - SHEET.side - (bulb.y - bulb.r)) * share;
+    const down = bulb.y + bulb.r + (foot - (bulb.y + bulb.r)) * share;
+    expect(mouth.x).toBeGreaterThan(across);
+    expect(mouth.x).toBeLessThan(across + 2 * bulb.r);
+    expect(mouth.y0).toBeLessThan(up);
+    expect(mouth.y0).toBeGreaterThan(up - 2 * bulb.r);
+    expect(mouth.y1).toBeGreaterThan(down);
+    expect(mouth.y1).toBeLessThanOrEqual(h);
+  });
+
+  it('has its bulb just above the bench, level with the foot of a sheet in the holder, so shadows stand on its bottom edge', () => {
+    const { bulb, holder, h } = LAMP;
+    // all of the bulb is above the bench, and none of it more than its own width above the rail's top
+    expect(bulb.y + bulb.r).toBeLessThan(h);
+    expect(h - holder.rail - (bulb.y - bulb.r)).toBeLessThanOrEqual(3 * bulb.r);
+    expect(h - holder.rail - (bulb.y - bulb.r)).toBeGreaterThan(0);
+  });
+});
+
+describe('shadow paper', () => {
+  const N = SHEET.cells;
+  /** Light on every cell: `at(i, j)` of the lamp's, i across and j up. */
+  const light = (at: (i: number, j: number) => number) => Float32Array.from({ length: N * N }, (_, k) => at(k % N, Math.floor(k / N)));
+  const all = light(() => 1);
+
+  it('is a square of paper with no tanks, spouts or valves, which fits between the posts of the lamp\'s holder', () => {
+    const t = new Tool('sheet', 0);
+    expect([t.tanks.length, t.shape.spouts.length, t.valves.length]).toEqual([0, 0, 0]);
+    expect(t.step(0.02)).toEqual([]);
+    expect(UNIQUE_TOOLS).not.toContain('sheet');
+    const b = t.shape.box;
+    expect(b.x1 - b.x0).toBeLessThan(2 * (LAMP.holder.x - LAMP.holder.post));
+    // standing on the rail, it's no taller than the posts
+    expect(b.y1 - b.y0).toBeLessThanOrEqual(LAMP.h - LAMP.holder.rail);
+    expect(t.dose).toHaveLength(N * N);
+    expect(new Tool('strip', 1).dose).toHaveLength(0);
+  });
+
+  it('darkens quickly at first and ever more slowly: most of the way in a second, all but all in two', () => {
+    expect(darkness(0)).toBe(0);
+    expect(darkness(SHEET.tau)).toBeCloseTo(1 - 1 / Math.E);
+    expect(darkness(1)).toBeGreaterThan(0.8);
+    expect(darkness(2)).toBeGreaterThan(0.97);
+    expect(darkness(2)).toBeLessThan(1);
+    expect(darkness(-1)).toBe(0);
+    // as dark as it gets is as dark as a save's byte can say
+    expect(Math.round(255 * darkness(SHEET.full))).toBe(255);
+    expect(Math.round(255 * darkness(SHEET.full / 2))).toBeLessThan(255);
+  });
+
+  it('takes light cell by cell, by how much of it reaches each', () => {
+    const t = new Tool('sheet', 0);
+    // the right half in half shadow
+    t.expose(light((i) => (i < N / 2 ? 1 : 0.5)), 0.4);
+    expect(t.dose[0]).toBeCloseTo(0.4);
+    expect(t.dose[N - 1]).toBeCloseTo(0.2);
+    expect(t.dosed).toBe(1);
+    // no time, or light for some other sheet, is nothing
+    t.expose(all, 0);
+    t.expose(new Float32Array(10).fill(1), 1);
+    expect(t.dosed).toBe(1);
+    expect(t.dose[0]).toBeCloseTo(0.4);
+  });
+
+  it('only ever darkens, so lit twice it shows both, and no cell takes more than its fill', () => {
+    const t = new Tool('sheet', 0);
+    t.expose(light((i) => (i < N / 2 ? 1 : 0)), 0.5);
+    t.expose(light((_, j) => (j < N / 2 ? 1 : 0)), 0.5);
+    const at = (i: number, j: number) => t.dose[j * N + i];
+    expect([at(0, 0), at(N - 1, 0), at(0, N - 1), at(N - 1, N - 1)].map((d) => +d.toFixed(3))).toEqual([1, 0.5, 0.5, 0]);
+    // it's spent only once every cell has had its fill
+    expect(t.spent).toBe(false);
+    for (let k = 0; k < 20; k++) t.expose(all, 1);
+    expect(Math.max(...t.dose)).toBeCloseTo(SHEET.full);
+    expect(t.spent).toBe(true);
+    // and it's still spent out of a save
+    const saved = new Tool('sheet', 2);
+    saved.develop(t.image);
+    expect(saved.spent).toBe(true);
+    expect(new Tool('sheet', 3).spent).toBe(false);
+    expect(new Tool('strip', 4).spent).toBe(false);
+    // light is never more than all of the lamp's, nor less than none
+    const u = new Tool('sheet', 1);
+    u.expose(light((i) => (i % 2 ? 7 : -7)), 1);
+    expect([u.dose[0], u.dose[1]]).toEqual([0, 1]);
+  });
+
+  it('keeps its image through a save, to within a byte a cell of how dark it is', () => {
+    const t = new Tool('sheet', 0);
+    expect(t.image).toBeUndefined();
+    expect(t.memory).toBeUndefined();
+    // a soft-edged shadow across the middle, and a corner lit until it's as dark as it gets
+    t.expose(light((i) => Math.max(0, Math.min(1, Math.abs(i - N / 2) / 10 - 0.5))), 0.7);
+    t.expose(light((i, j) => (i < 10 && j < 10 ? 1 : 0)), 50);
+    const u = new Tool('sheet', 1);
+    u.develop(JSON.parse(JSON.stringify(t.image)));
+    expect(u.dosed).toBe(1);
+    t.dose.forEach((d, k) => expect(Math.abs(darkness(u.dose[k]) - darkness(d))).toBeLessThanOrEqual(0.5 / 255 + 1e-6));
+    expect(u.dose[0]).toBe(t.dose[0]);
+    // and saved again it's just the same
+    expect(u.image).toBe(t.image);
+  });
+
+  it('saves compactly: a small fraction of a byte a cell for a picture of flat shades, and never much more than one', () => {
+    const flat = new Tool('sheet', 0);
+    flat.expose(light((i, j) => (Math.hypot(i - 48, j - 30) < 20 ? 0 : 1)), 1);
+    expect(flat.image!.length).toBeLessThan(N * N / 8);
+    // one with no two cells alike in a row, which runs can't shorten, is kept byte for byte
+    const noisy = new Tool('sheet', 1);
+    noisy.expose(light((i, j) => ((i * 7 + j * 13) % 32) / 32), 0.5);
+    expect(noisy.image!.length).toBeLessThan((N * N * 4) / 3 + 8);
+    const back = new Tool('sheet', 2);
+    back.develop(noisy.image);
+    noisy.dose.forEach((d, k) => expect(Math.abs(darkness(back.dose[k]) - darkness(d))).toBeLessThanOrEqual(0.5 / 255 + 1e-6));
+  });
+
+  it("leaves a sheet as it is when a save's image isn't one, or is some other size", () => {
+    const t = new Tool('sheet', 0);
+    t.expose(all, 0.3);
+    const was = Array.from(t.dose);
+    const short = new Tool('sheet', 1);
+    short.expose(all, 1);
+    for (const bad of [undefined, 7, '', '!!!', btoa('\x01\x05\x09'), btoa('\x00abc'), btoa('\x02' + 'a'.repeat(N * N)), short.image!.slice(0, 4)]) t.develop(bad);
+    expect(Array.from(t.dose)).toEqual(was);
+    expect(t.dosed).toBe(1);
+    // and other tools have no image at all
+    const strip = new Tool('strip', 2);
+    strip.develop(short.image);
+    expect(strip.image).toBeUndefined();
+  });
+});
+
+describe('ringShare', () => {
+  const tailed = speciesIndex(['R', 'G', 'B', 'K'], bondMask(['R', 'G'], ['R', 'B'], ['G', 'B'], ['B', 'K']));
+  const chain = speciesIndex(['R', 'G', 'B'], bondMask(['R', 'G'], ['G', 'B']));
+
+  it('is the share of the molecules that have a ring in them, whatever their size', () => {
+    const v = new Vessel(CAP);
+    expect(ringShare(v)).toBe(0);
+    v.setMolecules(TARGET, 1000);
+    expect(ringShare(v)).toBe(1);
+    v.setMolecules(tailed, 1000);
+    expect(ringShare(v)).toBe(1);
+    // chains, pairs and lone atoms have none, however many atoms they're made of
+    v.setMolecules(chain, 1000);
+    v.setMolecules(pairOf('R', 'G'), 500);
+    v.setMolecules(R, 500);
+    expect(ringShare(v)).toBeCloseTo(0.5);
+  });
+
+  it('is lowered by the solvent, whose atoms are molecules too', () => {
+    const v = new Vessel(CAP);
+    v.setMolecules(TARGET, 300);
+    v.setMolecules(SOLVENT_SPECIES, 700);
+    expect(ringShare(v)).toBeCloseTo(0.3);
+  });
+});
+
+describe("the shadow lamp's light through fluid", () => {
+  // a flask's inside is about 50 across at its base (see flaskRadius)
+  const across = 2 * 0.95 * flaskRadius(60);
+
+  it('is dimmed by the share of its molecules with a ring, and by how far through it the light goes', () => {
+    expect(lampLight(0, 1000)).toBe(1);
+    expect(lampLight(1, 0)).toBe(1);
+    expect(lampLight(0.5, 30)).toBeCloseTo(Math.exp(-LAMP.dim * 0.5 * 30));
+    // twice the rings in half the length dim it just as much
+    expect(lampLight(0.2, 40)).toBeCloseTo(lampLight(0.4, 20));
+    // each stretch takes its share of what's left, so two fluids one after another multiply
+    expect(lampLight(0.3, 25) * lampLight(0.3, 35)).toBeCloseTo(lampLight(0.3, 60));
+    expect(lampLight(-1, 10)).toBe(1);
+    expect(lampLight(1, -10)).toBe(1);
+  });
+
+  it('is stopped by a flask of nothing but rings, and faintly but visibly shadowed by one with a few in a hundred', () => {
+    expect(across).toBeGreaterThan(40);
+    expect(across).toBeLessThan(60);
+    const full = new Vessel(CAP);
+    full.setMolecules(TARGET, CAP / 3);
+    // under a hundredth of it gets through the flask's middle, and still under a twentieth through a fifth as much
+    expect(lampLight(ringShare(full), across)).toBeLessThan(0.01);
+    expect(lampLight(ringShare(full), across / 5)).toBeLessThan(0.2);
+    // 3 rings in a hundred molecules, the rest solvent: most of the light gets through
+    const thin = new Vessel(CAP);
+    thin.setMolecules(TARGET, 3e7);
+    thin.setMolecules(SOLVENT_SPECIES, 9.7e8);
+    const light = lampLight(ringShare(thin), across);
+    expect(light).toBeGreaterThan(0.6);
+    expect(light).toBeLessThan(0.85);
+    // which still shows on the sheet: lit for a second, it's a good twenty shades lighter there, of the 255 from new
+    // to as dark as it gets; and fainter the longer the lamp's left on, as the sheet round it has less left to darken
+    const paler = (s: number) => Math.round(255 * (darkness(s) - darkness(s * light)));
+    expect(paler(1)).toBeGreaterThanOrEqual(20);
+    expect(paler(SHEET.tau)).toBeGreaterThanOrEqual(paler(1));
+    expect(paler(2)).toBeLessThan(paler(1) / 2);
+    // ten in a hundred is plainly paler through the flask's middle than through a third as much of it, toward its edge
+    const tenth = new Vessel(CAP);
+    tenth.setMolecules(TARGET, 1e8);
+    tenth.setMolecules(SOLVENT_SPECIES, 9e8);
+    const [mid, edge] = [across, across / 3].map((L) => darkness(lampLight(ringShare(tenth), L)));
+    expect(Math.round(255 * (edge - mid))).toBeGreaterThanOrEqual(40);
+    // and a flask of chains of the same atoms, or of anything else with no ring, casts none at all
+    const chains = new Vessel(CAP);
+    chains.setMolecules(speciesIndex(['R', 'G', 'B'], bondMask(['R', 'G'], ['G', 'B'])), CAP / 3);
+    expect(lampLight(ringShare(chains), across)).toBe(1);
   });
 });
 

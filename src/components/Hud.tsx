@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { TOUCH, type Action, type GameEngine, type Hud as HudState } from '../game/engine';
+import { SMELL_MS, TOUCH, type Action, type GameEngine, type Hud as HudState } from '../game/engine';
 import { WHEEL, wheelSpan } from '../game/wheel';
 
 /** How far a stick's knob can go from its middle, in CSS pixels. */
@@ -225,7 +225,8 @@ function Wheel({ wheel, engine }: { wheel: NonNullable<HudState['wheel']>; engin
 }
 
 /**
- * The crosshair, with hints by it for what the mouse buttons would do, or an equipment wheel while it's held open; the aim while a valve turns; and, on a
+ * The crosshair, with hints by it for what the mouse buttons would do, or an equipment wheel while it's held open; the aim while a valve turns; under
+ * the crosshair, what the last sniff smelled of, fading out; and, on a
  * screen with a mouse and keys, everything else that can be done just now, in a corner, unless `/` has hidden it.
  */
 export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; help: boolean }) {
@@ -255,6 +256,12 @@ export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; 
       )}
       {hud.aim && <div className="aim" style={{ left: hud.aim.x, top: hud.aim.y }} />}
       {hud.note && <div className={hud.tip ? 'note tip' : 'note'}>{hud.note}</div>}
+      {/* what the last sniff smelled of: a new one comes up afresh, even if it reads the same */}
+      {hud.smell && (
+        <div key={hud.smell.n} className="smell" style={{ animationDuration: `${SMELL_MS}ms` }}>
+          {hud.smell.text}
+        </div>
+      )}
       {!TOUCH && help && <Actions actions={hud.actions} />}
     </>
   );

@@ -33,6 +33,17 @@ describe('arrangement', () => {
     expect(f.N).toBe(5);
   });
 
+  it("puts the shadow lamp's switch back as it was", () => {
+    const l = lab();
+    const lamp = new Tool('shadowlamp', 1);
+    l.tools.push(lamp);
+    const off = arrangement(l, sw);
+    lamp.lit = true;
+    expect(sameArrangement(off, arrangement(l, sw))).toBe(false);
+    arrange(l, off);
+    expect(lamp.lit).toBe(false);
+  });
+
   it('brings back the same thing that was taken away, and takes away one that was made', () => {
     const l = lab();
     const [f] = l.flasks;

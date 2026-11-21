@@ -6,7 +6,7 @@ import type { Hose, Tool } from './tools';
 
 /**
  * Undo and redo, of the lab's arrangement only: what's in it, where everything is and which way it faces, tools'
- * valves, hoses, scales' tares, the player's notes and the room's switches. Never what's in the vessels:
+ * valves, hoses, scales' tares, the player's notes, the room's switches and the shadow lamp's. Never what's in the vessels:
  * the lab reacts and flows on between the player's actions, so an undo puts things back where they were, holding
  * whatever they hold now. Things are kept by reference, so one taken away and brought back by an undo or a redo is
  * the very same, with whatever it held when it went.
@@ -26,7 +26,7 @@ export interface Things {
 /** The lab's arrangement at some moment (see arrangement). */
 export interface Arrangement {
   flasks: { f: Flask; pose: Pose; label: string }[];
-  tools: { t: Tool; pose: Pose; valves: number[]; note: string; labels: string[] }[];
+  tools: { t: Tool; pose: Pose; valves: number[]; note: string; labels: string[]; lit: boolean }[];
   scales: { sc: Scale; pose: Pose; load: { f: Flask; dx: number }[]; tare: number; note: string }[];
   hoses: { h: Hose; outlet: Vec3; turn: number; reach: number }[];
   faucets: string[];
@@ -43,7 +43,7 @@ export function arrangement(l: Things, sw: Switches): Arrangement {
   return {
     flasks: l.flasks.map((f) => ({ f, pose: { ...f.pose }, label: f.label })),
     tools: l.tools.map((t) => ({
-      t, pose: { ...t.pose }, valves: [...t.valves], note: t.note, labels: t.tanks.map((v) => v.label),
+      t, pose: { ...t.pose }, valves: [...t.valves], note: t.note, labels: t.tanks.map((v) => v.label), lit: t.lit,
     })),
     scales: l.scales.map((sc) => ({ sc, pose: { ...sc.pose }, load: sc.load.map((x) => ({ ...x })), tare: sc.tare, note: sc.note })),
     hoses: l.hoses.map((h) => ({ h, outlet: { ...h.outlet }, turn: h.turn, reach: h.reach })),
@@ -60,8 +60,8 @@ export function arrange(l: Things, a: Arrangement): void {
   l.tools.splice(
     0,
     Infinity,
-    ...a.tools.map(({ t, pose, valves, note, labels }) => {
-      Object.assign(t, { pose: { ...pose }, note });
+    ...a.tools.map(({ t, pose, valves, note, labels, lit }) => {
+      Object.assign(t, { pose: { ...pose }, note, lit });
       t.valves.splice(0, Infinity, ...valves);
       t.tanks.forEach((v, k) => (v.label = labels[k] ?? ''));
       return t;
