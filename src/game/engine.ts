@@ -5,7 +5,7 @@ import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, 
 import { hushAlarms } from './ambience';
 import {
   FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
-  FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, inSlot, sheetIn, slotPose, slotted, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
+  FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, SHEET_SLOT, inSlot, sheetIn, slotPose, slotted, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
 import { CABINET, endless, isStocked, putIn, stockWith, takeFrom, takeSlot, type Stock, type Stocked } from './cabinet';
@@ -945,7 +945,8 @@ export class GameEngine {
    * shadow lamp: if there's none, one is added where it starts, or as near there as it has room (see roomy), the
    * station fitted for the cryostabilizer, its reservoir holding what's left on board (see Tool.stock), as a save from
    * before it was fitted for anything else would have it. The station is built into the wall, and the shadow lamp
-   * stands on its own bench, so they're always where they are.
+   * stands on its own bench, so they're always where they are. A shadow lamp that's added has a new sheet of shadow
+   * paper in its slot, facing it, unless one's there already: so a new lab's has, and a save's from before there was a lamp.
    */
   private uniqueTools(): void {
     for (const kind of UNIQUE_TOOLS) {
@@ -958,6 +959,8 @@ export class GameEngine {
       if (kind === 'receptacle') t.stock(CRYOSTABILIZER);
       else if (!t.shape.fixed) t.pose = this.roomy(t);
       this.tools.push(t);
+      // a new shadow lamp comes with a sheet of shadow paper in its slot, which shows what goes there
+      if (kind === 'shadowlamp' && !sheetIn(this.tools)) this.tools.push(new Tool('sheet', this.nextToolId++, slotPose(SHEET_SLOT.yaw)));
     };
     // the station and the shadow lamp first, since they're always where they are, for the others to keep clear of
     add('receptacle', STATION_POSE);

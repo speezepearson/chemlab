@@ -1057,7 +1057,7 @@ describe('the bond visualizer, which is gone', () => {
     s.tools.push({ kind: 'visualizer', id: 0, fx: 1.75, fy: 0.5, z: 150, valves: [], tanks: [none], drops: [none] } as unknown as SaveState['tools'][number]);
     s.hoses.push({ outlet: { x: 0.25, y: 0.6, z: 750, yaw: 0, reach: 50 }, on: { tool: 0, spout: 0 } });
     l.e.restore(s, DEFAULT_PRESET);
-    expect(kinds(l.in).sort()).toEqual(['receptacle', 'shadowlamp', 'spectroscope']);
+    expect(kinds(l.in).sort()).toEqual(['receptacle', 'shadowlamp', 'sheet', 'spectroscope']);
     expect((l.in as unknown as { hoses: unknown[] }).hoses).toEqual([]);
     expect(l.in.tools.every((t) => t.id > 0)).toBe(true);
   });
@@ -1232,6 +1232,31 @@ describe('the shadow lamp', () => {
 });
 
 describe('shadow paper', () => {
+  /** A lab with the sheet its lamp starts with gone from the slot, as if taken out and put away. */
+  function emptied(): { e: GameEngine; in: Inside } {
+    const l = lab();
+    (l.in as unknown as { tools: Tool[] }).tools = l.in.tools.filter((t) => t.kind !== 'sheet');
+    return l;
+  }
+
+  it("starts in the slot of a lamp that's new: a new lab's, and an older save's that had no lamp, but not one whose sheet was taken out", () => {
+    const l = lab();
+    const sheets = () => l.in.tools.filter((t) => t.kind === 'sheet');
+    expect(sheets()).toHaveLength(1);
+    expect(sheets()[0].pose).toEqual(slotPose(SHEET_SLOT.yaw));
+    expect(inSlot(sheets()[0].pose)).toBe(true);
+    expect(sheets()[0].dose.every((d) => d === 0)).toBe(true);
+    // a save from before there was a lamp gets one, with its sheet
+    l.e.restore(bare(), DEFAULT_PRESET);
+    expect(sheets()).toHaveLength(1);
+    expect(inSlot(sheets()[0].pose)).toBe(true);
+    // one that has a lamp, and nothing in its slot, is left that way
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    s.tools = s.tools.filter((t) => t.kind !== 'sheet');
+    l.e.restore(s, DEFAULT_PRESET);
+    expect(sheets()).toHaveLength(0);
+  });
+
   /**
    * Take a sheet out of the cabinet, by the wheel, standing out in the room in front of the lamp's bench, with the
    * sheet held up over the end of the lamp's channel: turned to face the lamp, or with its back to it.
@@ -1247,7 +1272,7 @@ describe('shadow paper', () => {
   }
 
   it('comes out of the cabinet as often as wanted, and is thrown away when put away', () => {
-    const l = lab();
+    const l = emptied();
     for (let i = 0; i < STOCK.sheet + 3; i++) {
       expect(l.e.spawn('sheet')).toBe(true);
       expect(l.in.held?.t?.kind).toBe('sheet');
@@ -1259,7 +1284,7 @@ describe('shadow paper', () => {
   });
 
   it("goes into the lamp's slot when it's let go of there, with no stand, and out again when it's picked up", () => {
-    const l = lab();
+    const l = emptied();
     const sheet = sheetAtSlot(l);
     // in hand it has no stand, and where it would go is the slot
     expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(false);
@@ -1297,7 +1322,7 @@ describe('shadow paper', () => {
   });
 
   it('goes in with its back to the lamp, if that is how it is held', () => {
-    const l = lab();
+    const l = emptied();
     const sheet = sheetAtSlot(l, false);
     l.in.release();
     expect(sheet.pose).toEqual(slotPose(SHEET_SLOT.yaw + Math.PI));
@@ -1306,7 +1331,7 @@ describe('shadow paper', () => {
   });
 
   it('keeps its image, and its place in the slot, through a save', () => {
-    const l = lab();
+    const l = emptied();
     const sheet = sheetAtSlot(l);
     l.in.release();
     const N = SHEET.cells;
@@ -1328,7 +1353,7 @@ describe('shadow paper', () => {
   });
 
   it("is owed the lamp's light while it's in the slot with the lamp lit, on sim time", () => {
-    const l = lab();
+    const l = emptied();
     const [lamp] = lampOf(l.in);
     lamp.valves[0] = 1;
     const press = () => {
@@ -1369,7 +1394,7 @@ describe('shadow paper', () => {
   });
 
   it('is owed no more than the exposure had left, through the longest sleep', () => {
-    const l = lab();
+    const l = emptied();
     const [lamp] = lampOf(l.in);
     sheetAtSlot(l);
     l.in.release();
