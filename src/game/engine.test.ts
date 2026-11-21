@@ -1205,5 +1205,29 @@ describe('the shadow lamp', () => {
     expect(counterUnder(standBase(st, 0))).toBe(LAMP_FLOOR.y);
     expect(st.x).toBeGreaterThan(d.pose.x);
   });
+
+  it('lets a sheet of test paper be laid on the floor of its channel, and a flask be stood on that', () => {
+    const l = lab();
+    const mid = toWorld(LAMP_POSE, { x: 0, y: 0, z: 0 });
+    const hold = (y: number) => {
+      l.in.held!.dist = Math.hypot(160, y - 620);
+      look(l, mid.x, mid.z - 160, mid.x, y, mid.z);
+    };
+    look(l, mid.x, mid.z - 160, mid.x, 560, mid.z);
+    expect(l.e.spawn('testpaper')).toBe(true);
+    const p = l.in.held!.t!;
+    hold(LAMP_FLOOR.y + 20);
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    expect([p.pose.x, p.pose.z].map((v) => +v.toFixed(6))).toEqual([mid.x, mid.z].map((v) => +v.toFixed(6)));
+    expect(p.pose.y - p.shape.box.y1).toBeCloseTo(LAMP_FLOOR.y);
+    expect(l.e.spawn('flask')).toBe(true);
+    const f = l.in.held!.f!;
+    hold(560);
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    expect([f.pose.x, f.pose.z].map((v) => +v.toFixed(6))).toEqual([mid.x, mid.z].map((v) => +v.toFixed(6)));
+    expect(f.pose.y).toBeCloseTo(LAMP_FLOOR.y + FLASK_H);
+  });
 });
 
