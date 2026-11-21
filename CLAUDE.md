@@ -42,6 +42,12 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   image is `tool.dose` (`SHEET.cells` a side, from its bottom row up, in sim seconds of light): print that as text to
   see a shadow's shape and depth, which a screenshot of a dark sheet shows poorly. It only darkens while frames are
   drawn, so in software rendering a sim second of light takes many real ones.
+- A sniff (F) goes in real time, and what she says of it comes up by the clock, so in software rendering, at a frame
+  every few seconds, it's all been said and she's straightened up again within a frame or two. To look at it, hold
+  her at the rim (set `lab.sniffing.until = Infinity` once it's a number, which is when her nose gets there), keep
+  what's said from fading (`lab.smelled.until = Infinity`), and bring its pieces up by hand (`lab.said = () => k`
+  shows the first k). `lab.gaze()` is where the view is; `lab.player` doesn't move. Replace `Math.random` with a
+  seeded one before the sniff to get the same words every run.
 - Shell gotcha: `pkill -f "port 5199"` exits 144 because the pattern matches its own shell. That's harmless; append
   `; true`.
 
