@@ -616,27 +616,60 @@ export function valveNear(t: Tool, x: number, y: number): number | null {
 }
 
 /**
- * Point valve k's lever at (x, y) in the tool's flat frame as it stands (y down): straight up from the valve is fully
- * open, straight right is closed, and in between is partly open. Below the valve it closes, and left
- * of it (past the down-left diagonal) it opens, so a wild swing lands at the nearer end. A splitter's lever instead
- * sweeps the upper half: straight left sends everything left, straight right everything right, and below the valve
- * it goes to the nearer side; a multiplexer's the same, taking everything from the left or the right. A dial points at (x, y), turning clockwise from down-left (0) to down-right (1), and
- * straight below it goes to the nearer end. Within VALVE_DEADZONE of the valve the angle is too jumpy to mean
- * anything, so the lever stays put.
+ * How valve k turns, as an angle about it: `at` is the pointer's angle about the valve, in radians, measured the way
+ * the setting rises, for (x, y) in the tool's flat frame as it stands (y down); the setting is 0 at angle `a0` and 1
+ * at `a0 + span`. A valve's lever is closed pointing straight right and fully open pointing straight up. A splitter's
+ * sweeps the upper half: straight left sends everything left, straight right everything right (a multiplexer's the
+ * same, taking everything from the left or the right). A dial turns clockwise from down-left (0) to down-right (1).
  */
-export function aimValve(t: Tool, k: number, x: number, y: number): void {
+export function valveSweep(t: Tool, k: number): { at: (x: number, y: number) => number; a0: number; span: number } {
   const vc = valveLocal(t, k);
-  if (Math.hypot(x - vc.x, y - vc.y) < VALVE_DEADZONE) return;
-  if (k === t.shape.dial) {
-    const cw = Math.atan2(x - vc.x, vc.y - y); // clockwise from straight up
-    t.valves[k] = Math.max(0, Math.min(1, (cw + 0.75 * Math.PI) / (1.5 * Math.PI)));
+  // clockwise from straight up
+  if (k === t.shape.dial) return { at: (x, y) => Math.atan2(x - vc.x, vc.y - y), a0: -0.75 * Math.PI, span: 1.5 * Math.PI };
+  // clockwise from straight left
+  if (t.kind === 'splitter' || t.kind === 'multiplexer') return { at: (x, y) => Math.atan2(vc.y - y, vc.x - x), a0: 0, span: Math.PI };
+  // counterclockwise from straight right
+  return { at: (x, y) => Math.atan2(vc.y - y, x - vc.x), a0: 0, span: Math.PI / 2 };
+}
+
+/**
+ * Valve k being turned by pointing (see turnValve): the pointer's angle about it when it was last seen outside its
+ * core, if it has been since the core was last entered, and whether it's been seen outside its core at all yet.
+ */
+export interface Turn {
+  a: number | null;
+  begun: boolean;
+}
+
+/** A valve that's just been taken hold of, to turn (see turnValve). */
+export const newTurn = (): Turn => ({ a: null, begun: false });
+
+/**
+ * Turn valve k as the pointer, at (x, y) in the tool's flat frame as it stands (y down), goes round it (see
+ * valveSweep). The first time the pointer's seen outside the valve's core, the valve's set to where it points, if it
+ * points within the valve's sweep, as a lever or a dial pointed at it would be; and from then on it goes by how the
+ * pointer moves round it, not where it points: each move round it turns the valve the same way by as much, the
+ * short way round, until it's at an end, where it stays however much further the pointer goes, and it comes back off
+ * the end as soon as the pointer comes back. So going on round past an end, or across the gap at the bottom of a
+ * dial, never jumps it to the other end. Within VALVE_DEADZONE of the valve, the angle is too jumpy to mean anything,
+ * so the valve stays put, and the pointer's picked up again where it comes out.
+ */
+export function turnValve(t: Tool, k: number, x: number, y: number, turn: Turn): void {
+  const vc = valveLocal(t, k);
+  if (Math.hypot(x - vc.x, y - vc.y) < VALVE_DEADZONE) {
+    turn.a = null;
     return;
   }
-  const a = Math.atan2(vc.y - y, x - vc.x); // counterclockwise from right
-  if (t.kind === 'splitter' || t.kind === 'multiplexer') {
-    t.valves[k] = a >= 0 ? 1 - a / Math.PI : a > -Math.PI / 2 ? 1 : 0;
-    return;
+  const { at, a0, span } = valveSweep(t, k);
+  const a = at(x, y);
+  if (!turn.begun) {
+    const v = (a - a0) / span;
+    if (v >= 0 && v <= 1) t.valves[k] = v;
+    turn.begun = true;
+  } else if (turn.a !== null) {
+    let d = a - turn.a;
+    d -= 2 * Math.PI * Math.round(d / (2 * Math.PI));
+    t.valves[k] = Math.max(0, Math.min(1, t.valves[k] + d / span));
   }
-  const open = a < -0.75 * Math.PI ? 1 : a / (Math.PI / 2);
-  t.valves[k] = Math.max(0, Math.min(1, open));
+  turn.a = a;
 }

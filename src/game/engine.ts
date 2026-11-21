@@ -4,7 +4,7 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { BLINDED_S, RISE_S, WAKE_S, ease, inPod, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
-  FLASK_CENTER, NOZZLE_H, SCALE_SLOTS, SHEET_SLOT, aimValve, dippedIn, docked, inSlot, paperFace, sheetIn, slotted, faucetBox, faucetPipes, flaskArm, flaskBox, flaskLip, flaskMouth, footAt, insideVessel, isDocked,
+  FLASK_CENTER, NOZZLE_H, SCALE_SLOTS, SHEET_SLOT, newTurn, turnValve, type Turn, dippedIn, docked, inSlot, paperFace, sheetIn, slotted, faucetBox, faucetPipes, flaskArm, flaskBox, flaskLip, flaskMouth, footAt, insideVessel, isDocked,
   nozzleArm, nozzleBox, onScale, onTool, scaleArm, scaleBox, scaleCenter, scaleSpot, spoutAt, spoutNear, tankMouth, tankNoteY, toolArms, toolBox, toolCenter, valveNear, valveZ,
 } from './bodies';
 import { CABINET, endless, isStocked, putIn, stockWith, takeFrom, takeSlot, type Stock, type Stocked } from './cabinet';
@@ -360,7 +360,7 @@ export class GameEngine {
   /** Whether the right button is held: a held flask tips and pours, and a held hose lets fluid out, only while it is. */
   private rightHeld = false;
   /** A valve being turned: its lever points at the pointer for as long as the button that took hold of it is down. */
-  private turning: { t: Tool; k: number } | null = null;
+  private turning: { t: Tool; k: number; turn: Turn } | null = null;
   /**
    * While an equipment wheel is held open, which of WHEELS it is, where its middle is on the view, in CSS pixels,
    * where its pointer is from there, and where the mouse's pointer last was: the wheel's pointer moves as the mouse
@@ -1449,7 +1449,7 @@ export class GameEngine {
       pr.moved = true;
       if (pr.valve && !this.turning) {
         this.mark();
-        this.turning = pr.valve;
+        this.turning = { ...pr.valve, turn: newTurn() };
       }
     }
     if (this.turning) this.aimTurning();
@@ -1594,15 +1594,18 @@ export class GameEngine {
     return a && b ? { d: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } : null;
   }
 
-  /** Point the lever of the valve being turned at where the pointer is, on the tool's front face. */
+  /**
+   * Turn the valve being turned as the pointer goes round it, on the tool's front face (see turnValve): it's set to
+   * where the pointer first points, and from then on follows how the pointer moves round it.
+   */
   private aimTurning(): void {
     const tr = this.turning;
     const at = this.pointer;
     if (!tr || !at) return;
-    const { t, k } = tr;
+    const { t, k, turn } = tr;
     const p = this.planeAt(at.x, at.y, onTool(t, 0, 0, valveZ(t)).z);
     const l = toLocal(t.pose, p);
-    aimValve(t, k, l.x, -l.y);
+    turnValve(t, k, l.x, -l.y, turn);
   }
 
   /**
@@ -1970,7 +1973,7 @@ export class GameEngine {
       const k = this.valveAimed();
       if (k) {
         this.mark();
-        this.turning = k;
+        this.turning = { ...k, turn: newTurn() };
         this.aimTurning();
         return;
       }
@@ -2836,7 +2839,7 @@ export class GameEngine {
     const add = (keys: string[], does: string, off = false) => out.push(off ? { keys, does, off } : { keys, does });
     // turning a valve goes on until the button's let go
     if (this.turning) {
-      add(['Mouse'], 'point the lever');
+      add(['Mouse'], 'turn it round');
       add(['LMB'], 'let go when it’s set');
       return out;
     }

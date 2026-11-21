@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FAUCET_NECK, FAUCET_Y, FLASK_R, NOZZLE_R, SCALE_SLOTS, TOOL_DEPTH, aimValve, bathAt, dippedIn, docked, faucetBox, faucetPipes, flaskArm, flaskBox,
+  FAUCET_NECK, FAUCET_Y, FLASK_R, NOZZLE_R, SCALE_SLOTS, TOOL_DEPTH, bathAt, dippedIn, docked, faucetBox, faucetPipes, flaskArm, flaskBox,
   flaskFluid, flaskLip, flaskMouth, footAt, insideVessel, isDocked, nozzleArm, nozzleBox, onScale, scaleArm, scaleBox, scaleSpot, spoutAt, spoutNear,
-  tankFluid, tankMouth, toolArms, toolBox, valveLocal, valveNear, SHEET_SLOT, SLOT_REACH, inSlot, sheetIn, slotted,
+  tankFluid, tankMouth, toolArms, toolBox, turnValve, newTurn, valveLocal, valveNear, SHEET_SLOT, SLOT_REACH, inSlot, sheetIn, slotted,
 } from './bodies';
 import { LAMP_POSE, STATION_POSE } from './presets';
 import { singleOf } from '../chem/species';
@@ -91,55 +91,80 @@ describe('valveNear', () => {
   });
 });
 
-describe('aimValve', () => {
-  it("turns a dial clockwise from down-left, off, to down-right, full", () => {
+describe('turnValve', () => {
+  /** Turn valve k from scratch with the pointer at each of these points round it, at radius r, by angle clockwise from straight up. */
+  const round = (t: Tool, k: number, degrees: number[], r = 20, turn = newTurn()): number[] => {
+    const v = valveLocal(t, k);
+    return degrees.map((d) => {
+      const a = (d * Math.PI) / 180;
+      turnValve(t, k, v.x + r * Math.sin(a), v.y - r * Math.cos(a), turn);
+      return t.valves[k];
+    });
+  };
+  /** Every whole degree from `a` to `b`, the way it goes. */
+  const sweep = (a: number, b: number): number[] => Array.from({ length: Math.abs(b - a) + 1 }, (_, i) => a + Math.sign(b - a) * i);
+
+  it("sets a dial to where it's first pointed, clockwise from down-left, off, to down-right, full", () => {
     const ht = new Tool('heater', 0);
     const k = ht.shape.dial!;
-    const v = valveLocal(ht, k);
-    aimValve(ht, k, v.x - 20, v.y + 20);
-    expect(ht.valves[k]).toBeCloseTo(0);
-    aimValve(ht, k, v.x, v.y - 20);
-    expect(ht.valves[k]).toBeCloseTo(0.5);
-    aimValve(ht, k, v.x + 20, v.y + 20);
-    expect(ht.valves[k]).toBeCloseTo(1);
+    expect(round(ht, k, [-135])[0]).toBeCloseTo(0);
+    expect(round(ht, k, [0])[0]).toBeCloseTo(0.5);
+    expect(round(ht, k, [135])[0]).toBeCloseTo(1);
+    // first pointed into the gap at the bottom, it stays where it was
+    ht.valves[k] = 0.3;
+    expect(round(ht, k, [180])[0]).toBe(0.3);
   });
 
-
-  it("points a splitter's or multiplexer's lever left for 0, up for even, and right for 1", () => {
-    for (const kind of ['splitter', 'multiplexer'] as const) {
-      const t = new Tool(kind, 0);
-      const v = valveLocal(t, 0);
-      aimValve(t, 0, v.x - 30, v.y);
-      expect(t.valves[0], kind).toBeCloseTo(0);
-      aimValve(t, 0, v.x, v.y - 30);
-      expect(t.valves[0], kind).toBeCloseTo(0.5);
-      aimValve(t, 0, v.x + 30, v.y);
-      expect(t.valves[0], kind).toBeCloseTo(1);
-    }
+  it('then follows the pointer round, staying at the end it reaches however far round it goes, and coming back as it does', () => {
+    const ht = new Tool('heater', 0);
+    const k = ht.shape.dial!;
+    const turn = newTurn();
+    // from straight up, clockwise round twice: up to full at down-right, and full from there on, across the gap too
+    const there = round(ht, k, sweep(0, 720), 20, turn);
+    expect(there[135]).toBeCloseTo(1);
+    expect(Math.min(...there.slice(135))).toBeCloseTo(1);
+    for (let i = 1; i < there.length; i++) expect(there[i]).toBeGreaterThanOrEqual(there[i - 1]);
+    // and back the other way, down as soon as it turns back, to off, and off from there on
+    const back = round(ht, k, sweep(720, -90), 20, turn);
+    expect(back[45]).toBeCloseTo(1 - 45 / 270);
+    expect(back[270]).toBeCloseTo(0);
+    expect(Math.max(...back.slice(270))).toBeCloseTo(0);
+    for (let i = 1; i < back.length; i++) expect(back[i]).toBeLessThanOrEqual(back[i - 1]);
   });
 
-  it('opens pointing up, closes pointing right, and ignores the core', () => {
+  it('opens a valve pointed up, closes it pointed right, and follows from there, clamped', () => {
+    const t = new Tool('dispenser', 0);
+    expect(round(t, 0, [0])[0]).toBeCloseTo(1);
+    expect(round(t, 0, [90])[0]).toBeCloseTo(0);
+    expect(round(t, 0, [45])[0]).toBeCloseTo(0.5);
+    const turn = newTurn();
+    // from half open, a full turn clockwise closes it, and a quarter back opens it all the way
+    const shut = round(t, 0, sweep(45, 405), 20, turn);
+    expect(shut[shut.length - 1]).toBe(0);
+    expect(round(t, 0, sweep(405, 315), 20, turn).pop()).toBeCloseTo(1);
+  });
+
+  it('keeps a valve where it is in its core, and picks the pointer up again where it comes out', () => {
     const t = new Tool('dispenser', 0);
     const v = valveLocal(t, 0);
-    aimValve(t, 0, v.x, v.y - 30);
-    expect(t.valves[0]).toBeCloseTo(1);
-    aimValve(t, 0, v.x + 30, v.y);
-    expect(t.valves[0]).toBeCloseTo(0);
-    aimValve(t, 0, v.x + 20, v.y - 20);
+    const turn = newTurn();
+    round(t, 0, [45], 20, turn);
+    turnValve(t, 0, v.x + 2, v.y - 2, turn);
     expect(t.valves[0]).toBeCloseTo(0.5);
-    aimValve(t, 0, v.x + 2, v.y - 2);
-    expect(t.valves[0]).toBeCloseTo(0.5);
+    // out the other side of the core, it's where it was, and goes on from there
+    expect(round(t, 0, [225, 215], 20, turn)).toEqual([expect.closeTo(0.5), expect.closeTo(0.5 + 10 / 90)]);
   });
 
-  it("sweeps a splitter's from all left to all right", () => {
-    const t = new Tool('splitter', 0);
-    const v = valveLocal(t, 0);
-    aimValve(t, 0, v.x - 30, v.y);
-    expect(t.valves[0]).toBeCloseTo(0);
-    aimValve(t, 0, v.x + 30, v.y);
-    expect(t.valves[0]).toBeCloseTo(1);
-    aimValve(t, 0, v.x, v.y - 30);
-    expect(t.valves[0]).toBeCloseTo(0.5);
+  it("sweeps a splitter's or multiplexer's lever from all left to all right over the top", () => {
+    for (const kind of ['splitter', 'multiplexer'] as const) {
+      const t = new Tool(kind, 0);
+      expect(round(t, 0, [-90])[0], kind).toBeCloseTo(0);
+      expect(round(t, 0, [0])[0], kind).toBeCloseTo(0.5);
+      expect(round(t, 0, [90])[0], kind).toBeCloseTo(1);
+      // past all right, round underneath, it stays all right
+      const turn = newTurn();
+      expect(round(t, 0, sweep(0, 260), 20, turn).pop(), kind).toBe(1);
+    }
   });
 });
 
