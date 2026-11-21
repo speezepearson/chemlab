@@ -989,8 +989,10 @@ export class GameEngine {
   }
 
   /**
-   * Set everything that stands on the bench (flasks and scales) down on the counter under it, if there is one, and stand each flask on a scale where the scale now is. Presets and older saves leave
-   * things in the air, where arms from the ceiling used to hold them.
+   * Set everything that stands or lies on the bench (flasks, scales and sheets of blotting paper) down on the counter
+   * under it, if there is one, and stand each flask on a scale where the scale now is. Presets and older saves leave
+   * things in the air, where arms from the ceiling used to hold them; and a sheet from when sheets were thicker lies
+   * that much above the counter.
    */
   private restAll(): void {
     this.toGrid();
@@ -1002,6 +1004,7 @@ export class GameEngine {
     };
     for (const f of this.flasks) if (!riders.has(f)) down(flaskBox(f), (dy) => (f.pose = { ...f.pose, y: f.pose.y - dy }));
     for (const sc of this.scales) down(scaleBox(sc), (dy) => (sc.pose = { ...sc.pose, y: sc.pose.y - dy }));
+    for (const t of this.tools) if (t.shape.flat) down(toolBox(t), (dy) => (t.pose = { ...t.pose, y: t.pose.y - dy }));
     this.settle();
   }
 
@@ -1247,15 +1250,24 @@ export class GameEngine {
    * the stands holding up everything else (unless `bases` is false). A held tool's own hoses' nozzles don't get in its
    * way, since one left at its spout (see keepPouring) is rolled back up if it's set down there again (see setDown),
    * nor do the hoses following it (see gather). Nor are the tool `away`, about to be picked up, and the hoses `skip`.
+   *
+   * A sheet of blotting paper lying on a counter (see ToolShape.flat) is in nothing's way but another sheet's: whatever
+   * else is set down on its cell stands on it as if it weren't there, a stand's base included. And nothing but
+   * another sheet, and what's built in (the room, the counters, the cabinet, the faucets' risers and the tools that
+   * are fixed), is in the way of a held sheet, which is laid under whatever stands there.
    */
   private obstacles(h: Held | null, bases = true, away: Tool | null = null, skip: ReadonlySet<Hose> = new Set()): Box[] {
     // while the airlock's doors are open, its doorway and chamber take the front wall's place
     const room = this.wake === 'closed' ? roomBoxes(ROOM) : [...roomBoxes(ROOM, false), ...airlockBoxes()];
     const riders = h?.kind === 'scale' ? new Set(h.sc.load.map((l) => l.f)) : new Set<Flask>();
     const out: Box[] = [...room, ...COUNTER_BOXES, CABINET_BOX, ...this.risers()];
-    for (const f of this.flasks) if (!(h?.kind === 'flask' && h.f === f) && !riders.has(f)) out.push(flaskBox(f));
     const gone = (t: Tool) => (h?.kind === 'tool' && h.t === t) || t === away;
-    for (const t of this.tools) if (!gone(t)) out.push(toolBox(t));
+    if (h?.kind === 'tool' && h.t.shape.flat) {
+      for (const t of this.tools) if (!gone(t) && (t.shape.flat || t.shape.fixed)) out.push(toolBox(t));
+      return out;
+    }
+    for (const f of this.flasks) if (!(h?.kind === 'flask' && h.f === f) && !riders.has(f)) out.push(flaskBox(f));
+    for (const t of this.tools) if (!gone(t) && !t.shape.flat) out.push(toolBox(t));
     for (const sc of this.scales) if (!(h?.kind === 'scale' && h.sc === sc)) out.push(scaleBox(sc));
     const following = new Set(h?.follow?.map((f) => f.hose));
     for (const hose of this.hoses)

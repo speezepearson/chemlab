@@ -160,7 +160,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     stays in hand (see `GameEngine.placement`). Keep it that way, or `physics.ts` won't do. The sheets of test paper and bond paper
     (the `BLOTTERS`) are the tools set down on the counter itself, lying flat (`ToolShape.flat`): each one's box is
     thin and as deep as it's wide, its face is up, and it has no stand. They're one sheet, printed differently: share
-    what they do (`isBlotter`), and keep only the print and the reading apart.
+    what they do (`isBlotter`), and keep only the print and the reading apart. A sheet lying there is in nothing's
+    way but another sheet's (the engine's `obstacles`): whatever else is set down on its cell stands on the counter
+    through it, and it's laid under what's there. So it must stay thinner than the 0.6 between a flask's floor and
+    its fluid's (`FLASK_FLUID` in `view.ts`), or it shows inside a flask standing on it.
   - **The grid.** Whatever's set down is on the floor's grid of `CELL` (100) squares: facing one of the four ways
     along it, with every mouth and spout over a cell's middle (`onGrid`, `toolAnchor` and `SCALE_ANCHOR` in
     `bodies.ts`; the engine's `gridded` and `toGrid`). So a tool's tanks and spouts must be a whole number of cells

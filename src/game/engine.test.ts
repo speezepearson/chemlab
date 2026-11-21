@@ -3,7 +3,8 @@ import { BOND_KEYS } from '../chem/atoms';
 import { ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
-import { SHEET_SLOT, flaskLip, inSlot, sheetIn, slotPose, toolStands } from './bodies';
+import { SHEET_SLOT, flaskLip, inSlot, scaleBox, sheetIn, slotPose, standBase, toolBox, toolStands } from './bodies';
+import { boxesOverlap } from './physics';
 import { STOCK } from './cabinet';
 import { CAP, TRACE } from './config';
 import type { GameEngine } from './engine';
@@ -131,7 +132,7 @@ function lay(l: Lab, x = SPOT.x, z = SPOT.z, kind: Sheet = 'testpaper'): Tool {
   there();
   const t = l.in.held!.t!;
   l.in.release();
-  expect(l.in.held).toBeNull();
+  expect(l.in.held, `at ${x}, ${z}: ${l.in.flash?.text}`).toBeNull();
   return t;
 }
 
@@ -192,20 +193,15 @@ describe('test paper', () => {
     expect(where(turned.pose)).toEqual(flat(350, 950, where({ ...turned.pose, yaw: Math.PI / 2 })[3]));
   });
 
-  it('lets nothing else be set down on its cell, but a tool on its stand can have its spout over it', () => {
+  it('lets no other sheet be laid on its cell, but a tool on its stand can have its spout over it', () => {
     const l = lab();
     const sheet = lay(l);
     const cell = (p: { x: number; z: number }) => [toCell(p.x), toCell(p.z)];
-    // a flask held over it goes down in the next cell
-    holdAt(l, 'flask', { x: SPOT.x + 10, y: LIFT + 150, z: SPOT.z, yaw: 0 });
-    const fl = l.in.placement(l.in.held);
-    expect('rest' in fl && cell(fl.rest.pose)).not.toEqual(cell(SPOT));
-    expect('rest' in fl && Math.hypot(fl.rest.pose.x - SPOT.x, fl.rest.pose.z - SPOT.z)).toBe(CELL);
-    l.in.putAway();
-    // and so does another sheet
+    // another sheet held over it goes down in the next cell
     holdAt(l, 'testpaper', { x: SPOT.x - 10, y: LIFT + 150, z: SPOT.z, yaw: 0 });
     const sh = l.in.placement(l.in.held);
     expect('rest' in sh && cell(sh.rest.pose)).not.toEqual(cell(SPOT));
+    expect('rest' in sh && Math.hypot(sh.rest.pose.x - SPOT.x, sh.rest.pose.z - SPOT.z)).toBe(CELL);
     l.in.putAway();
     // a pipette on its stand goes right over it, its spout over the sheet's middle, its stand's base behind
     const pip = pipetteOver(l);
@@ -660,7 +656,7 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
     expect(volume(f)).toBeGreaterThan(2 * cap);
   });
 
-  it('is laid down afterwards as it is, wet, and lets nothing by that lands on it there', () => {
+  it('is laid down afterwards as it is, wet', () => {
     const l = lab();
     const { pip, f } = line(l);
     const sheet = wave(l, 150);
@@ -671,11 +667,10 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
     pip.valves[0] = 0;
     expect(volume(paper) / cap).toBeCloseTo(1, 4);
     const held = [...paper.n];
-    // let go of over the flask's cell, it goes down in the next one
+    // let go of over the flask's cell, it's laid there, under the flask
     l.in.release();
     expect(l.in.held).toBeNull();
-    expect(where(sheet.pose)[1]).toBe(LIFT + TEST_PAPER.thick);
-    expect(Math.hypot(sheet.pose.x - f.pose.x, sheet.pose.z - f.pose.z)).toBe(CELL);
+    expect(where(sheet.pose)).toEqual(flat(f.pose.x, f.pose.z));
     expect([...paper.n]).toEqual(held);
     // soaked in R–G, it reads R and G, or their bond, as strongly as it ever will
     const shown = kind === 'testpaper' ? paperReading(paper)[0].slice(0, 2) : bondReading(paper).filter((x) => x > 0);
@@ -769,6 +764,174 @@ describe.each(['testpaper', 'bondpaper'] as const)('what a sheet of %s shows, in
     expect(old.showing.filter((x) => x > 0).length).toBeGreaterThan(1);
     // and once it's all there, a save keeps nothing more of it
     expect(l.e.snapshot().tools.find((t) => t.kind === kind)!.memory).toBeUndefined();
+  });
+});
+
+describe.each(['testpaper', 'bondpaper'] as const)('what stands on a sheet of %s', (kind) => {
+  const R = singleOf('R');
+  const cap = TEST_PAPER.cap;
+  const cell = (p: { x: number; z: number }) => [toCell(p.x), toCell(p.z)];
+  /** Where what's held would come to rest, if it can. */
+  const rests = (l: Lab) => {
+    const p = l.in.placement(l.in.held);
+    return 'rest' in p ? p.rest.pose : null;
+  };
+  /** More of the engine's own things: its scales. */
+  const scales = (l: Lab) => (l.in as unknown as { scales: { pose: Tool['pose'] }[] }).scales;
+
+  it('is set down on it as if it were not there: a flask, a scale, a thermometer or a strip on its stand', () => {
+    const l = lab();
+    const sheet = lay(l, SPOT.x, SPOT.z, kind);
+    // a flask held over it goes straight down onto the counter in its cell
+    holdAt(l, 'flask', { x: SPOT.x + 10, y: LIFT + 150, z: SPOT.z - 5, yaw: 0 });
+    const f = hands(l).held!.f!;
+    expect(cell(rests(l)!)).toEqual(cell(SPOT));
+    l.in.release();
+    expect(where(f.pose)).toEqual([SPOT.x, LIFT + 70, SPOT.z, where(f.pose)[3]]);
+    expect(where(sheet.pose)).toEqual(flat(SPOT.x, SPOT.z));
+    // and so do a scale, and the dippers on their stands, each over a sheet
+    for (const what of ['scale', 'thermometer', 'strip'] as const) {
+      const l = lab();
+      const x = SPOT.x + 2 * CELL;
+      const under = lay(l, x, SPOT.z, kind);
+      l.e.debug({ x, z: SPOT.z + 400, yaw: 0, pitch: 0 });
+      l.in.move(0);
+      expect(l.e.spawn(what)).toBe(true);
+      const h = l.in.held as unknown as { kind: string; t?: Tool; sc?: { pose: Tool['pose'] } };
+      hands(l).placeHeld(l.in.held, { x, y: LIFT + 200, z: SPOT.z, yaw: 0 });
+      const was = h.kind === 'scale' ? scaleBox(h.sc as never) : toolBox(h.t!);
+      const to = rests(l)!;
+      expect(to).not.toBeNull();
+      // it comes down where it's held, moved across no further than onto the grid
+      expect(Math.abs(to.x - x)).toBeLessThan(CELL);
+      expect(Math.abs(to.z - SPOT.z)).toBeLessThan(CELL);
+      l.in.release();
+      expect(l.in.held, `${what}: ${l.in.flash?.text}`).toBeNull();
+      const now = h.kind === 'scale' ? scaleBox(h.sc as never) : toolBox(h.t!);
+      // over the sheet, which is where it was
+      expect(Math.abs(now.x - x)).toBeLessThan(now.hx + TEST_PAPER.w / 2);
+      expect(Math.abs(now.z - SPOT.z)).toBeLessThan(now.hz + TEST_PAPER.d / 2);
+      expect(now.y).toBeLessThanOrEqual(was.y);
+      expect(where(under.pose)).toEqual(flat(x, SPOT.z));
+      // (a scale stands on the counter, not on the paper)
+      if (what === 'scale') expect(now.y - now.hy).toBeCloseTo(LIFT, 6);
+      expect(scales(l)).toHaveLength(what === 'scale' ? 1 : 0);
+    }
+  });
+
+  it("is a tool's stand too, base and all: nothing about a sheet under it is in its way", () => {
+    // every kind of tool that stands on a stand, with a sheet in each cell its base touches
+    const kinds = (Object.keys(STOCK) as (keyof typeof STOCK)[]).filter((k) => k !== 'flask' && k !== 'scale' && !SHAPES[k as Tool['kind']].flat);
+    let onSheets = 0;
+    for (const k of kinds) {
+      const l = lab();
+      holdAt(l, k as 'pipette', { x: 450, y: LIFT + 260, z: 950, yaw: 0 });
+      const t = l.in.held!.t!;
+      const bare = rests(l);
+      if (!bare) continue;
+      // where it would stand with nothing there: lay sheets under its stands' bases, and under its spouts
+      const bases = toolStands(t, bare).map((st) => standBase(st, LIFT));
+      const cells = new Set([...bases.flatMap((b) => [-1, 1].flatMap((sx) => [-1, 1].map((sz) => `${toCell(b.x + sx * (b.hx - 1))},${toCell(b.z + sz * (b.hz - 1))}`)))]);
+      l.in.putAway();
+      const sheets = [...cells].map((c) => c.split(',').map(Number)).map(([x, z]) => lay(l, x, z, kind));
+      if (bases.some((b) => sheets.some((sh) => boxesOverlap(b, toolBox(sh))))) onSheets++;
+      holdAt(l, k as 'pipette', { x: 450, y: LIFT + 260, z: 950, yaw: 0 });
+      // it stands just where it would have
+      expect(rests(l), k).toEqual(bare);
+      l.in.release();
+      expect(l.in.held, k).toBeNull();
+      sheets.forEach((sh, i) => expect(where(sh.pose)).toEqual(flat(...([...cells][i].split(',').map(Number) as [number, number]))));
+    }
+    // (and some of those bases do stand on a sheet: the big tank's, which is a cell and more behind it)
+    expect(onSheets).toBeGreaterThan(0);
+  });
+
+  it('is laid under what already stands there, but not on another sheet, of either kind', () => {
+    const l = lab();
+    holdAt(l, 'flask', { x: SPOT.x, y: LIFT + 150, z: SPOT.z, yaw: 0 });
+    const f = hands(l).held!.f!;
+    l.in.release();
+    const pip = pipetteOver(l, SPOT.x + 2 * CELL);
+    const under = lay(l, SPOT.x, SPOT.z, kind);
+    expect(where(under.pose)).toEqual(flat(SPOT.x, SPOT.z));
+    expect(where(f.pose).slice(0, 3)).toEqual([SPOT.x, LIFT + 70, SPOT.z]);
+    const below = lay(l, SPOT.x + 2 * CELL, SPOT.z, kind);
+    expect(where(below.pose)).toEqual(flat(SPOT.x + 2 * CELL, SPOT.z));
+    expect(where(pip.pose).slice(0, 3)).toEqual([SPOT.x + 2 * CELL, LIFT + 60 + SHAPES.pipette.spoutY, SPOT.z]);
+    // but two sheets don't share a cell
+    for (const other of ['testpaper', 'bondpaper'] as const) {
+      holdAt(l, other, { x: SPOT.x + 5, y: LIFT + 150, z: SPOT.z, yaw: 0 });
+      expect(cell(rests(l)!)).not.toEqual(cell(SPOT));
+      l.in.putAway();
+    }
+  });
+
+  it('catches what falls before the sheet does; what it spills lands on the sheet', () => {
+    const l = lab();
+    const sheet = lay(l, SPOT.x, SPOT.z, kind);
+    holdAt(l, 'flask', { x: SPOT.x, y: LIFT + 150, z: SPOT.z, yaw: 0 });
+    const f = hands(l).held!.f!;
+    l.in.release();
+    expect(cell(f.pose)).toEqual(cell(sheet.pose));
+    const pip = pipetteOver(l, SPOT.x, SPOT.z, 200);
+    pip.tanks[0].setMolecules(R, 2 * cap);
+    pip.valves[0] = 1;
+    run(l, 3);
+    // the flask has it all, and the sheet under it is dry
+    expect(volume(f)).toBeGreaterThan(0.5 * cap);
+    expect(paperOf(sheet).N).toBe(0);
+    // brim full, the flask spills over its lip, onto the sheet it stands on
+    f.setMolecules(R, f.cap);
+    run(l, 3);
+    expect(volume(f)).toBeLessThanOrEqual(f.cap);
+    expect(paperOf(sheet).n[R]).toBeGreaterThan(0);
+    expect(paperOf(sheet).n[R]).toBe(volume(paperOf(sheet)));
+  });
+
+  it('finds a sheet from when sheets were thicker laid down on the counter as its save loads', () => {
+    const l = lab();
+    const sheet = lay(l, SPOT.x, SPOT.z, kind);
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    const saved = s.tools.find((t) => t.kind === kind)!;
+    // (saves keep heights as fractions of the old bench's, growing downward: this is one unit higher)
+    saved.fy -= (1 - TEST_PAPER.thick) / 620;
+    l.e.restore(s, DEFAULT_PRESET);
+    const [back] = l.in.tools.filter((t) => t.kind === kind);
+    expect(where(back.pose)).toEqual(where(sheet.pose));
+    expect(where(back.pose)).toEqual(flat(SPOT.x, SPOT.z));
+  });
+
+  it('stays where it is when the sheet is picked up from under it, and when the lab is saved and loaded', () => {
+    const l = lab();
+    const sheet = lay(l, SPOT.x, SPOT.z, kind);
+    holdAt(l, 'flask', { x: SPOT.x, y: LIFT + 150, z: SPOT.z, yaw: 0 });
+    const f = hands(l).held!.f!;
+    l.in.release();
+    f.setMolecules(R, 0.3 * CAP);
+    const stood = where(f.pose);
+    // saved and loaded, both are where they were
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    l.e.restore(s, DEFAULT_PRESET);
+    const [sheet2] = l.in.tools.filter((t) => t.kind === kind);
+    const [f2] = hands(l).flasks;
+    expect(where(sheet2.pose)).toEqual(where(sheet.pose));
+    expect(where(f2.pose).slice(0, 3)).toEqual(stood.slice(0, 3));
+    // the sheet can still be picked up, and the flask doesn't move
+    l.e.debug({ x: SPOT.x, z: SPOT.z + 400, yaw: 0, pitch: 0 });
+    l.in.target = { kind: 'tool', t: sheet2, part: 'body', k: 0, point: { ...sheet2.pose }, distance: 300 };
+    l.in.leftDown(false);
+    expect(l.in.held?.t).toBe(sheet2);
+    expect(where(f2.pose).slice(0, 3)).toEqual(stood.slice(0, 3));
+    expect(f2.n[R]).toBe(0.3 * CAP);
+    hands(l).placeHeld(l.in.held, { x: SPOT.x + 3 * CELL, y: LIFT + 100, z: SPOT.z, yaw: 0 });
+    l.in.target = null;
+    l.in.release();
+    expect(where(sheet2.pose)).toEqual(flat(SPOT.x + 3 * CELL, SPOT.z));
+    expect(where(f2.pose).slice(0, 3)).toEqual(stood.slice(0, 3));
+    // and undo puts the sheet back under it
+    l.e.undo();
+    expect(where(sheet2.pose)).toEqual(flat(SPOT.x, SPOT.z));
+    expect(where(f2.pose).slice(0, 3)).toEqual(stood.slice(0, 3));
   });
 });
 

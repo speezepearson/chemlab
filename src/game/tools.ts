@@ -1016,7 +1016,9 @@ export function sectorInset(atom: ColorAtom, margin: number): (readonly [number,
  * that color in it, for good:
  * - w and d: how far across and front to back the sheet is, and thick, how thick, in world units. It lies within
  *   one grid cell, clear of the base of a stand holding something over its middle (see STAND_BASE in bodies.ts),
- *   which starts 34 from there;
+ *   which starts 34 from there. It's thin enough to lie under the floor of the fluid in a flask standing on it,
+ *   which is 0.6 above what the flask stands on (see FLASK_FLUID in view.ts): whatever's set down in its cell
+ *   stands on the counter as if the sheet weren't there, through it, so a thicker sheet would show inside a flask;
  * - cap: how much it soaks up, by volume, before it's soaked and shows as strongly as it ever will: three
  *   hundredths of a flask, three times what a wicking strip's paper holds, and about twenty drops (see DRIP);
  * - triangles: the triangles printed on it, in a row from its left, each for molecules of the sizes (in atoms)
@@ -1027,7 +1029,7 @@ export function sectorInset(atom: ColorAtom, margin: number): (readonly [number,
 export const TEST_PAPER: {
   w: number; d: number; thick: number; cap: number; triangles: readonly { sizes: readonly number[] }[]; edge: number; line: number; margin: number;
 } = {
-  w: 64, d: 64, thick: 1, cap: (3 * CAP) / 100,
+  w: 64, d: 64, thick: 0.4, cap: (3 * CAP) / 100,
   triangles: [{ sizes: [1, 2, 3, 4] }],
   edge: 4, line: 1, margin: 2,
 };

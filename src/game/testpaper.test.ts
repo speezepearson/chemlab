@@ -306,6 +306,13 @@ describe('test paper in the room', () => {
     }
   });
 
+  it("is thin enough to lie under the fluid in a flask that stands on it, through it", () => {
+    // (a flask's fluid is drawn from 0.6 above what the flask stands on: see FLASK_FLUID in view.ts; and the sheet's
+    // printed face is drawn 0.06 above the sheet)
+    expect(TEST_PAPER.thick).toBeGreaterThan(0);
+    expect(TEST_PAPER.thick + 0.06).toBeLessThan(0.55);
+  });
+
   it('is solid all over, and has no stand', () => {
     const t = lying(150, 950);
     expect(toolStands(t)).toEqual([]);
