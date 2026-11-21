@@ -2491,30 +2491,29 @@ describe('the shadow lamp', () => {
     expect(t.owed).toBe(SHEET.full);
   });
 
-  it("has its bulb deep in a recess that's just big enough for its light to reach all of a sheet in the holder", () => {
-    const { housing, bulb, mouth, holder, h } = LAMP;
-    expect(bulb.z - bulb.r).toBeGreaterThan(housing.z0);
-    expect(bulb.z + bulb.r).toBeLessThan(housing.z1);
-    // where the light to each edge of the sheet's square crosses the opening, from anywhere on the bulb
-    const share = (housing.z1 - bulb.z) / (holder.z - bulb.z);
-    const across = (SHEET.side / 2) * share + bulb.r * (1 - share);
-    const foot = h - holder.rail;
-    const up = bulb.y - bulb.r + (foot - SHEET.side - (bulb.y - bulb.r)) * share;
-    const down = bulb.y + bulb.r + (foot - (bulb.y + bulb.r)) * share;
-    expect(mouth.x).toBeGreaterThan(across);
-    expect(mouth.x).toBeLessThan(across + 2 * bulb.r);
-    expect(mouth.y0).toBeLessThan(up);
-    expect(mouth.y0).toBeGreaterThan(up - 2 * bulb.r);
-    expect(mouth.y1).toBeGreaterThan(down);
-    expect(mouth.y1).toBeLessThanOrEqual(h);
+  it("is a trough as tall as a sheet's paper, with a channel a grid cell wide and a whole number of cells long", () => {
+    const { h, wall, box, channel: ch } = LAMP;
+    expect(h).toBe(SHEET.side);
+    expect(2 * ch.z).toBe(CELL);
+    expect((ch.x1 - ch.x0) / CELL).toBe(Math.round((ch.x1 - ch.x0) / CELL));
+    expect(ch.x1 - ch.x0).toBeGreaterThanOrEqual(2 * CELL);
+    // the enclosure runs up to the channel's start, and the trough's box is all of it, end wall included
+    expect(box.x1).toBe(ch.x0);
+    expect(box.x0).toBeLessThan(box.x1);
+    const b = SHAPES.shadowlamp.box;
+    expect([b.x0, b.x1, b.y0, b.y1]).toEqual([box.x0, ch.x1 + wall, 0, h]);
   });
 
-  it('has its bulb just above the bench, level with the foot of a sheet in the holder, so shadows stand on its bottom edge', () => {
-    const { bulb, holder, h } = LAMP;
-    // all of the bulb is above the bench, and none of it more than its own width above the rail's top
-    expect(bulb.y + bulb.r).toBeLessThan(h);
-    expect(h - holder.rail - (bulb.y - bulb.r)).toBeLessThanOrEqual(3 * bulb.r);
-    expect(h - holder.rail - (bulb.y - bulb.r)).toBeGreaterThan(0);
+  it('sends its light out as a beam the size of the square of the sheet it lights, straying little', () => {
+    const { h, channel: ch, window: win, spread } = LAMP;
+    // a sheet in the slot has its paper from the top of the walls down: the window is square on to its square
+    expect(win.r).toBe(SHEET.side / 2);
+    expect(win.y).toBe(h - SHEET.side / 2);
+    expect(win.r).toBeLessThanOrEqual(ch.z);
+    // a shadow's edge from the far end of the channel is a few units wide: soft, but no wider than a flask's neck
+    const edge = 2 * spread * (ch.x1 - ch.x0);
+    expect(edge).toBeGreaterThan(2);
+    expect(edge).toBeLessThan(12);
   });
 });
 
@@ -2524,15 +2523,19 @@ describe('shadow paper', () => {
   const light = (at: (i: number, j: number) => number) => Float32Array.from({ length: N * N }, (_, k) => at(k % N, Math.floor(k / N)));
   const all = light(() => 1);
 
-  it('is a square of paper with no tanks, spouts or valves, which fits between the posts of the lamp\'s holder', () => {
+  it("is a square of paper a grid cell on a side, with no tanks, spouts or valves, which fits across the lamp's channel", () => {
     const t = new Tool('sheet', 0);
     expect([t.tanks.length, t.shape.spouts.length, t.valves.length]).toEqual([0, 0, 0]);
     expect(t.step(0.02)).toEqual([]);
     expect(UNIQUE_TOOLS).not.toContain('sheet');
+    expect(SHEET.side).toBe(CELL);
+    expect(SHEET.side).toBe(2 * LAMP.channel.z);
+    // the bar along its top is a little wider than the paper, which starts where the bar ends
     const b = t.shape.box;
-    expect(b.x1 - b.x0).toBeLessThan(2 * (LAMP.holder.x - LAMP.holder.post));
-    // standing on the rail, it's no taller than the posts
-    expect(b.y1 - b.y0).toBeLessThanOrEqual(LAMP.h - LAMP.holder.rail);
+    expect(b.x1 - b.x0).toBeGreaterThan(SHEET.side);
+    expect(b.x1 - b.x0).toBeLessThan(SHEET.side + 2 * LAMP.wall);
+    expect(SHEET.top).toBe(SHEET.clip.h);
+    expect(b.y1 - b.y0).toBe(SHEET.clip.h + SHEET.side);
     expect(t.dose).toHaveLength(N * N);
     expect(new Tool('strip', 1).dose).toHaveLength(0);
   });
@@ -2604,7 +2607,7 @@ describe('shadow paper', () => {
 
   it('saves compactly: a small fraction of a byte a cell for a picture of flat shades, and never much more than one', () => {
     const flat = new Tool('sheet', 0);
-    flat.expose(light((i, j) => (Math.hypot(i - 48, j - 30) < 20 ? 0 : 1)), 1);
+    flat.expose(light((i, j) => (Math.hypot(i - N / 2, j - N / 3) < N / 5 ? 0 : 1)), 1);
     expect(flat.image!.length).toBeLessThan(N * N / 8);
     // one with no two cells alike in a row, which runs can't shorten, is kept byte for byte
     const noisy = new Tool('sheet', 1);

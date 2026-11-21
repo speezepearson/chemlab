@@ -67,8 +67,9 @@ export const CABINET_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 18 * CELL, z0: ROOM.z0,
 /**
  * Where the shadow lamp stands (see LAMP in tools.ts): on a bench of its own in the room's front left corner, five
  * grid cells along the front wall and three out from it, as high as the counters. Nothing could be set down there
- * before it was, so no save has anything standing in its way. It's long enough for the longest tools (a heater, a
- * sorter, a separator) to stand across it on their two stands, and stops short of the airlock's doorway.
+ * before it was, so no save has anything standing in its way. The lamp's trough lies along its edge toward the room;
+ * the two rows of cells behind that are free bench, long enough for the longest tools (a heater, a sorter, a
+ * separator) on their two stands. It stops short of the airlock's doorway.
  */
 export const LAMP_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 5 * CELL, z0: ROOM.z1 - 3 * CELL, z1: ROOM.z1 };
 /**

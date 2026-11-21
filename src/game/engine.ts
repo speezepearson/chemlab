@@ -1013,7 +1013,7 @@ export class GameEngine {
   private toGrid(): void {
     const onCounter = (t: Tool) => toolStands(t).every((st) => counterUnder(standBase(st, 0)) !== null);
     for (const t of this.tools) {
-      // (what's fixed is where it is, and so is a sheet in the shadow lamp's holder)
+      // (what's fixed is where it is, and so is a sheet in the shadow lamp's slot)
       if (t.shape.fixed) continue;
       if (t.kind === 'sheet' && inSlot(t.pose)) {
         t.pose = slotPose(t.pose.yaw);
@@ -2669,10 +2669,10 @@ export class GameEngine {
   /**
    * Where what's held would be set down, at pose p: on the grid (see onGrid), facing the nearest way along it, with its
    * mouths and spouts over the middles of cells; but a hose's nozzle over an inline instrument's tube on its top (see
-   * docked), and a sheet of shadow paper at the shadow lamp's holder in it (see slotted).
+   * docked), and a sheet of shadow paper at the shadow lamp's slot in it (see slotted).
    */
   private gridded(h: Held, p: Pose): Pose {
-    // (a sheet of shadow paper held at the shadow lamp's holder goes into it)
+    // (a sheet of shadow paper held at the shadow lamp's slot goes into it)
     if (h.kind === 'tool' && h.t.kind === 'sheet') return slotted(h.t, onGrid(p, toolAnchor(h.t)), this.tools);
     if (h.kind === 'tool') return onGrid(p, toolAnchor(h.t));
     if (h.kind === 'scale') return onGrid(p, SCALE_ANCHOR);
@@ -2721,7 +2721,7 @@ export class GameEngine {
    * reach out past the counter's edge). Either way, it mustn't overlap anything where it comes to rest (what's held passes through everything, so there's no way down to look
    * at), nor its stand's base sit on anything but the counter. (Stands don't bump into each other: their rods can stand side by side.) A hose's
    * nozzle's stand goes where it's wanted (see nozzleWant) if it can, or else the first place it can of nozzleMounts.
-   * A sheet of shadow paper in the shadow lamp's holder (see inSlot) just stands there, if nothing's in its way.
+   * A sheet of shadow paper in the shadow lamp's slot (see inSlot) just stands there, if nothing's in its way.
    */
   private rest(h: Held, p: Pose, obstacles: readonly Box[], solid: readonly Box[]): Rest | string {
     const blocked = (b: Box) => obstacles.some((o) => boxesOverlap(b, o));
@@ -2752,7 +2752,7 @@ export class GameEngine {
       }
       return why!;
     }
-    // a sheet in the shadow lamp's holder stands in it, on its rail, with no stand
+    // a sheet in the shadow lamp's slot stands in it, against its end wall, with no stand
     if (h.kind === 'tool' && h.t.kind === 'sheet' && inSlot(p)) return blocked(box) ? 'No room' : { pose: p };
     const stands = this.standsAt(h, p);
     if (stands.length) return onStands(stands);
@@ -2980,7 +2980,7 @@ export class GameEngine {
       const ok = !!this.placed && 'rest' in this.placed;
       const how = h.kind === 'hose' ? 'set the hose’s end down'
         : h.kind === 'tool' && isDipper(h.t.kind) && this.mouthAimed() ? 'stand it in it'
-        : ok && h.kind === 'tool' && h.t.kind === 'sheet' && 'rest' in this.placed! && inSlot(this.placed.rest.pose) ? 'slot it into the holder'
+        : ok && h.kind === 'tool' && h.t.kind === 'sheet' && 'rest' in this.placed! && inSlot(this.placed.rest.pose) ? 'slot it into the lamp'
         : 'set it down';
       // a button looked at takes the click
       if (this.intoCabinet()) add(['LMB'], 'put it in the cabinet');
@@ -3409,7 +3409,7 @@ export class GameEngine {
   }
 
   /**
-   * Tell the shadow lamp which sheet is in its holder, if any (see Tool.sheet), from where things are now. One in
+   * Tell the shadow lamp which sheet is in its slot, if any (see Tool.sheet), from where things are now. One in
    * hand isn't in it, though it's still where it was picked up until it's moved.
    */
   private slotting(): void {

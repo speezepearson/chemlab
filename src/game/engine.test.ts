@@ -482,13 +482,14 @@ describe('shadow paper', () => {
   }
   /**
    * Take a sheet out of the cabinet, by the wheel, standing out in the room in front of the lamp's bench, with the
-   * sheet held up to the holder: turned to face the lamp, or as it comes, facing whoever holds it.
+   * sheet held up over the end of the lamp's channel: turned to face the lamp, or with its back to it.
    */
-  function sheetAtHolder(l: { e: GameEngine; in: Inside }, turned = true): Tool {
+  function sheetAtSlot(l: { e: GameEngine; in: Inside }, facing = true): Tool {
     const at = () => look(l, SHEET_SLOT.x, SHEET_SLOT.z - 240, SHEET_SLOT.x, SHEET_SLOT.y - 150, SHEET_SLOT.z);
     at();
     expect(l.e.spawn('sheet')).toBe(true);
-    if (turned) l.in.held!.relYaw = Math.PI;
+    // (whoever holds it is looking across the channel, the lamp on their left)
+    l.in.held!.relYaw = facing ? -Math.PI / 2 : Math.PI / 2;
     at();
     return l.in.held!.t!;
   }
@@ -505,10 +506,10 @@ describe('shadow paper', () => {
     expect(l.in.stock.sheet.every(Boolean)).toBe(true);
   });
 
-  it("goes into the lamp's holder when it's let go of there, with no stand, and out again when it's picked up", () => {
+  it("goes into the lamp's slot when it's let go of there, with no stand, and out again when it's picked up", () => {
     const l = lab();
-    const sheet = sheetAtHolder(l);
-    // in hand it has no stand, and where it would go is the holder
+    const sheet = sheetAtSlot(l);
+    // in hand it has no stand, and where it would go is the slot
     expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(false);
     const pl = l.in.placement(l.in.held);
     expect('rest' in pl && pl.rest.pose).toEqual(SHEET_SLOT);
@@ -519,7 +520,7 @@ describe('shadow paper', () => {
     expect(toolStands(sheet)).toEqual([]);
     expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(false);
     // a second sheet held there has to go somewhere else: on a stand, over the bench
-    const second = sheetAtHolder(l);
+    const second = sheetAtSlot(l);
     const pl2 = l.in.placement(l.in.held);
     if ('rest' in pl2) expect(inSlot(pl2.rest.pose)).toBe(false);
     l.in.putAway();
@@ -534,7 +535,7 @@ describe('shadow paper', () => {
     expect(sheetIn(l.in.tools)).toBeNull();
     expect(toolStands(sheet)).toHaveLength(1);
     expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(true);
-    // undo puts it back in the holder, and Q puts back one picked up from there
+    // undo puts it back in the slot, and Q puts back one picked up from there
     l.e.undo();
     expect(sheet.pose).toEqual(SHEET_SLOT);
     l.in.leftDown(false);
@@ -545,21 +546,20 @@ describe('shadow paper', () => {
 
   it('goes in with its back to the lamp, if that is how it is held', () => {
     const l = lab();
-    // as it comes out of the cabinet it faces whoever holds it, who's looking at the lamp across the holder
-    const sheet = sheetAtHolder(l, false);
+    const sheet = sheetAtSlot(l, false);
     l.in.release();
     expect(sheet.pose).toEqual(slotPose(SHEET_SLOT.yaw + Math.PI));
     expect(Math.cos(sheet.pose.yaw - SHEET_SLOT.yaw)).toBeCloseTo(-1);
     expect(sheetIn(l.in.tools)).toBe(sheet);
   });
 
-  it('keeps its image, and its place in the holder, through a save', () => {
+  it('keeps its image, and its place in the slot, through a save', () => {
     const l = lab();
-    const sheet = sheetAtHolder(l);
+    const sheet = sheetAtSlot(l);
     l.in.release();
     const N = SHEET.cells;
     sheet.expose(Float32Array.from({ length: N * N }, (_, k) => (k % N < N / 3 ? 0 : 1)), 0.6);
-    const loose = sheetAtHolder(l);
+    const loose = sheetAtSlot(l);
     look(l, 100, 1200, 100, 700, 800);
     l.in.release();
     const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
@@ -575,7 +575,7 @@ describe('shadow paper', () => {
     expect(Math.max(...b.dose)).toBe(0);
   });
 
-  it("is owed the lamp's light while it's in the holder with the lamp on, on sim time", () => {
+  it("is owed the lamp's light while it's in the slot with the lamp on, on sim time", () => {
     const l = lab();
     const [lamp] = lampOf(l.in);
     const press = () => {
@@ -587,8 +587,8 @@ describe('shadow paper', () => {
     press();
     l.in.simulate(0.1);
     expect([lamp.lit, lamp.sheet, lamp.owed]).toEqual([true, null, 0]);
-    // a sheet in hand at the holder isn't in it yet; let go of there, it is, and the light's time is the lab's
-    const sheet = sheetAtHolder(l);
+    // a sheet in hand at the slot isn't in it yet; let go of there, it is, and the light's time is the lab's
+    const sheet = sheetAtSlot(l);
     l.in.simulate(0.1);
     expect([lamp.sheet, lamp.owed]).toEqual([null, 0]);
     l.in.release();
@@ -608,7 +608,7 @@ describe('shadow paper', () => {
     l.in.simulate(0.1);
     expect(lamp.owed).toBeCloseTo(0.9);
     expect(Math.max(...sheet.dose)).toBe(0);
-    // picked up, it's out of the holder, and owed nothing
+    // picked up, it's out of the slot, and owed nothing
     l.in.target = { kind: 'tool', t: sheet, part: 'body', k: 0, point: { ...SHEET_SLOT }, distance: 200 };
     l.in.leftDown(false);
     l.in.simulate(0.1);
@@ -618,7 +618,7 @@ describe('shadow paper', () => {
   it('is owed no more than darkens it all the way, through the longest sleep', () => {
     const l = lab();
     const [lamp] = lampOf(l.in);
-    sheetAtHolder(l);
+    sheetAtSlot(l);
     l.in.release();
     lamp.lit = true;
     l.in.simulate(0.1, true);

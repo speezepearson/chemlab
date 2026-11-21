@@ -882,23 +882,39 @@ export function cultureLevel(share: number): number {
 }
 
 /**
- * The shadow lamp (see SHAPES.shadowlamp): a lamp in a housing at the back of a bench of its own, shining along the
- * bench at a holder for a sheet at its front. In its own frame (x right, y down from its top, z toward its front,
- * from the middle of the bench), in world units:
- * - h: how tall it stands on its bench: its housing, and its holder's posts; w and d: how far across and front to
- *   back its bench is, in whole grid cells, the lamp in the middle of it across;
- * - housing: the cabinet the lamp is in, at the back, as tall as it stands;
- * - bulb: the bulb, deep in a recess at the foot of the housing's face: how far down from the top its middle is,
- *   where it is front to back, and its radius. It's just above the bench, level with the foot of a sheet in the
- *   holder, so the shadow of whatever stands on the bench stands on the sheet's bottom edge, however near the lamp it
- *   is; were it higher, the shadow of anything below it would be thrown down past the foot of the sheet;
- * - mouth: the recess's opening in the housing's face: how far it reaches either side of the bulb, across, and from
- *   how far down from the top to how far: just big enough for the bulb's light to reach all of a sheet in the holder,
- *   and no bigger, so it lights nothing else;
- * - console: the box beside the housing that the switch is on, and switch, the switch's middle on the box's front;
- * - holder: the frame a sheet stands in, at the front: where it is front to back, how thick it is that way, how far
- *   it reaches either side of the lamp's middle line (`x`), how wide each of the two posts at its ends is, and how
- *   tall the rail between their feet, which the sheet stands on;
+ * A sheet of shadow paper (see SHAPES.sheet), which the shadow lamp's light darkens, for good, where it falls on it:
+ * - side: the paper, a square, this far across and tall, a grid cell, so it stands across the lamp's channel from wall
+ *   to wall; top: how far down from the sheet's top its square starts, under the bar;
+ * - clip: the bar clipped along its top edge, `h` tall and `d` front to back, which a stand's clamp holds, a little
+ *   wider than the paper;
+ * - cells: how many cells a side the light it's had is kept in (see Tool.dose);
+ * - tau: how many sim seconds of the lamp's light, unshadowed, darken it all but 1/e of the way (see darkness): so
+ *   it's most of the way dark in a second, and all but dark in two;
+ * - full: the most light a cell takes, in sim seconds of it unshadowed: as dark as it gets, to within what a save
+ *   keeps of it (see Tool.image).
+ */
+export const SHEET = { side: CELL, top: 14, clip: { h: 14, d: 5 }, cells: 64, tau: 0.5, full: 3.2 };
+
+/**
+ * The shadow lamp (see SHAPES.shadowlamp): one long, low trough on a bench of its own. At one end is a closed box, the
+ * lamp's enclosure; from its face an open channel runs between two side walls; and across the channel's far end is an
+ * end wall, against whose inner face a sheet of shadow paper stands, facing the lamp (see the slot, in bodies.ts). In
+ * its own frame (x along it, from the lamp toward the sheet; y down from its top; z toward its front, which is the
+ * room; from the middle of the channel), in world units:
+ * - h: how tall it is, enclosure and walls alike: as tall as a sheet's paper, so the bar along a sheet's top stands
+ *   clear above the end wall, to take it out by;
+ * - wall: how thick its side walls and its end wall are;
+ * - box: the enclosure, from `x0` to `x1` along it, and as wide as the trough is over its walls;
+ * - channel: the channel, from the enclosure's face at `x0` to the end wall's at `x1`, three grid cells, and reaching
+ *   `z` either side of its middle line, one cell from wall to wall: what's set down in it is on the grid like anything;
+ * - window: the square pane in the enclosure's face that its light leaves by, reaching `r` either side of the
+ *   channel's middle line and of a height `y` down from the top: exactly the square of the sheet it lights;
+ * - spread: how far its light strays from straight along the channel, as a slope. The enclosure sends its light out
+ *   as a beam with the window's cross-section all the way to the sheet, not spreading from a point, so a shadow is the
+ *   size of what casts it wherever along the channel that stands; but the lamp inside isn't a point, so the beam's
+ *   rays stray this far either side of straight, and a shadow's edge is soft, twice this times how far from the sheet
+ *   what casts it is;
+ * - switch: the switch's middle, on the enclosure's front;
  * - dim: how much fluid dims its light, per world unit of the light's way through fluid all of whose molecules have a
  *   ring in them (see lampLight): so that a flask with a few rings in a hundred molecules, about 50 across inside,
  *   takes a quarter of it, a faint shadow but one that shows on the sheet (see darkness: the sheet's darkening levels
@@ -906,13 +922,11 @@ export function cultureLevel(share: number): number {
  *   and visibly less toward its edges, and a full flask of nothing but rings lets through e^−10 of it, none.
  */
 export const LAMP = {
-  h: 300, w: 5 * CELL, d: 3 * CELL, dim: 0.2,
-  housing: { x0: -110, x1: 110, z0: -150, z1: -50 },
-  bulb: { y: 290, z: -135, r: 5 },
-  mouth: { x: 50, y0: 196, y1: 298 },
-  console: { x0: -150, x1: -110, y0: 180 },
-  switch: { x: -130, y: 216 },
-  holder: { z: 145, d: 10, x: 150, post: 8.5, rail: 4 },
+  h: SHEET.side, wall: 6, dim: 0.2, spread: 0.016,
+  box: { x0: -2.5 * CELL, x1: -1.5 * CELL },
+  channel: { x0: -1.5 * CELL, x1: 1.5 * CELL, z: CELL / 2 },
+  window: { r: SHEET.side / 2, y: SHEET.side / 2 },
+  switch: { x: -2 * CELL, y: 40 },
 };
 
 /**
@@ -924,18 +938,6 @@ export const LAMP = {
 export function lampLight(ring: number, length: number): number {
   return Math.exp(-LAMP.dim * Math.max(0, ring) * Math.max(0, length));
 }
-
-/**
- * A sheet of shadow paper (see SHAPES.sheet), which the shadow lamp's light darkens, for good, where it falls on it:
- * - side: the paper, a square, this far across and tall; top: how far down from the sheet's top its square starts;
- * - clip: the bar clipped along its top edge, `h` tall and `d` front to back, which a stand's clamp holds;
- * - cells: how many cells a side the light it's had is kept in (see Tool.dose);
- * - tau: how many sim seconds of the lamp's light, unshadowed, darken it all but 1/e of the way (see darkness): so
- *   it's most of the way dark in a second, and all but dark in two;
- * - full: the most light a cell takes, in sim seconds of it unshadowed: as dark as it gets, to within what a save
- *   keeps of it (see Tool.image).
- */
-export const SHEET = { side: 280, top: 10, clip: { h: 14, d: 5 }, cells: 96, tau: 0.5, full: 3.2 };
 
 /**
  * How dark shadow paper is, from 0 (as new) to 1, where it's had `dose` sim seconds of the lamp's unshadowed light:
@@ -1052,7 +1054,7 @@ export type ToolKind =
 
 /**
  * Tools there's only ever one of: not on an equipment wheel, and never put away. The receptacle is the whole cryostabilizer
- * station (see STATION), reservoir included, and the shadow lamp stands on a bench of its own (see LAMP).
+ * station (see STATION), reservoir included, and the shadow lamp is fixed to a bench of its own (see LAMP).
  */
 export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectroscope', 'visualizer', 'receptacle', 'shadowlamp'];
 
@@ -1351,14 +1353,15 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -24, x1: 24, y0: -14, y1: 76 },
   },
   shadowlamp: {
-    // a lamp's housing, and a holder for a sheet across the bench from it (see LAMP), with no tanks, spouts or valves
+    // a trough: the lamp's enclosure, a channel between two walls, and an end wall (see LAMP), with no tanks, spouts
+    // or valves
     tanks: [],
     noValve: true,
     fixed: true,
     spouts: [],
     valveY: 0,
     spoutY: LAMP.h,
-    box: { x0: -LAMP.w / 2, x1: LAMP.w / 2, y0: 0, y1: LAMP.h },
+    box: { x0: LAMP.box.x0, x1: LAMP.channel.x1 + LAMP.wall, y0: 0, y1: LAMP.h },
   },
   sheet: {
     // a square of paper hanging from a bar clipped along its top edge (see SHEET), with no tanks, spouts or valves
@@ -1708,8 +1711,8 @@ export class Blotter extends Vessel {
  *   the recent past (see INSTRUMENT_TAU and bondCounts) and showing them by energy as a graph (see spectroscopeAt).
  * - A **bond visualizer** is an inline instrument too, which lets everything through, showing which atoms are bonded
  *   in what passed over the recent past (see INSTRUMENT_TAU and bondShares) as lines between the corners and middle of a triangle (see BOND_TRIANGLE).
- * - A **shadow lamp** has no tanks either: it's a lamp in a housing (see LAMP), fixed on a bench of its own, with a
- *   switch (see lit). While it's on, the sheet in its holder is owed its light (see shine).
+ * - A **shadow lamp** has no tanks either: it's a trough with a lamp in a box at one end (see LAMP), fixed on a bench
+ *   of its own, with a switch (see lit). While it's on, the sheet at its other end is owed its light (see shine).
  * - A sheet of **shadow paper** has none: it's a square of paper (see SHEET) that darkens, for good, where the shadow
  *   lamp's light falls on it (see dose and expose).
  * - A sheet of **test paper** has none either: it lies flat on a counter (see TEST_PAPER), soaks up what lands on it
@@ -1799,12 +1802,12 @@ export class Tool {
   /** Whether a shadow lamp is switched on. */
   lit = false;
   /**
-   * The sheet of shadow paper in a shadow lamp's holder, if there is one, which whoever runs it sets before each step
+   * The sheet of shadow paper in a shadow lamp's slot, if there is one, which whoever runs it sets before each step
    * (see shine): what its light falls on.
    */
   sheet: Tool | null = null;
   /**
-   * How many sim seconds of a shadow lamp's light the sheet in its holder has yet to be darkened by (see shine), up
+   * How many sim seconds of a shadow lamp's light the sheet in its slot has yet to be darkened by (see shine), up
    * to SHEET.full: the light has fallen, but what shadows lay across the sheet is for whoever draws the lab to say
    * (see the view's Exposer), which then hands it on (see expose) and sets this back to 0.
    */
@@ -2163,7 +2166,7 @@ export class Tool {
   }
 
   /**
-   * A shadow lamp's light for `h` sim seconds: while it's on with a sheet in its holder (see sheet), that sheet is
+   * A shadow lamp's light for `h` sim seconds: while it's on with a sheet in its slot (see sheet), that sheet is
    * owed that much more of it (see owed), though never more than darkens it all the way. With no sheet there,
    * nothing's owed: what a sheet taken out had yet to get is lost. It shines on nothing else.
    */
