@@ -1050,7 +1050,7 @@ export class GameEngine {
   private toGrid(): void {
     const onCounter = (t: Tool) => toolStands(t).every((st) => counterUnder(standBase(st, 0)) !== null);
     for (const t of this.tools) {
-      // (what's fixed is where it is, and so is a sheet in the shadow lamp's holder)
+      // (what's fixed is where it is, and so is a sheet in the shadow lamp's slot)
       if (t.shape.fixed) continue;
       if (t.kind === 'sheet' && inSlot(t.pose)) {
         t.pose = slotPose(t.pose.yaw);
@@ -1619,8 +1619,8 @@ export class GameEngine {
       return;
     }
     if (p.kind === 'faucet' || p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake' || p.kind === 'cabinet') return;
-    // (a switch is for pressing, with the left button)
-    if (p.kind === 'tool' && p.part === 'switch') return;
+    // (the shadow lamp's button is for pressing, with the left button, and its dial for turning, with the right)
+    if (p.kind === 'tool' && (p.part === 'button' || (p.t.kind === 'shadowlamp' && p.part === 'valve'))) return;
     if (p.kind === 'tool' && p.t.shape.fixed) {
       this.say('That stays where it is');
       return;
@@ -2011,8 +2011,8 @@ export class GameEngine {
       this.tarePress = p.sc;
       return;
     }
-    if (p?.kind === 'tool' && p.part === 'switch') {
-      this.change(() => (p.t.lit = !p.t.lit));
+    if (p?.kind === 'tool' && p.part === 'button') {
+      this.change(() => p.t.press());
       return;
     }
     // anywhere else, what's held is set down, or with empty hands, what's looked at picked up
@@ -2894,10 +2894,10 @@ export class GameEngine {
   /**
    * Where what's held would be set down, at pose p: on the grid (see onGrid), facing the nearest way along it, with its
    * mouths and spouts over the middles of cells; but a hose's nozzle over an inline instrument's tube on its top (see
-   * docked), and a sheet of shadow paper at the shadow lamp's holder in it (see slotted).
+   * docked), and a sheet of shadow paper at the shadow lamp's slot in it (see slotted).
    */
   private gridded(h: Held, p: Pose): Pose {
-    // (a sheet of shadow paper held at the shadow lamp's holder goes into it)
+    // (a sheet of shadow paper held at the shadow lamp's slot goes into it)
     if (h.kind === 'tool' && h.t.kind === 'sheet') return slotted(h.t, onGrid(p, toolAnchor(h.t)), this.tools);
     if (h.kind === 'tool') return onGrid(p, toolAnchor(h.t));
     if (h.kind === 'scale') return onGrid(p, SCALE_ANCHOR);
@@ -2942,11 +2942,11 @@ export class GameEngine {
    * a scale or a tool that lies on the bench (a sheet of test paper or bond paper) goes straight up or down until it's on the counter under it, which
    * its whole footprint must be over (or a flask over a scale, onto its platform); a tool or hose's nozzle on a stand
    * stays at the height it's held, no higher than its stand reaches and no lower than the top of a counter it's held
-   * sunk into, while its stand's base goes down onto the counter, which the whole base must be over (what it holds can
-   * reach out past the counter's edge). Either way, it mustn't overlap anything where it comes to rest (what's held passes through everything, so there's no way down to look
+   * sunk into (or the floor of the shadow lamp's channel, if that's what its stand is on), while its stand's base goes
+   * down onto the counter, which the whole base must be over (what it holds can reach out past the counter's edge). Either way, it mustn't overlap anything where it comes to rest (what's held passes through everything, so there's no way down to look
    * at), nor its stand's base sit on anything but the counter. (Stands don't bump into each other: their rods can stand side by side.) A hose's
    * nozzle's stand goes where it's wanted (see nozzleWant) if it can, or else the first place it can of nozzleMounts.
-   * A sheet of shadow paper in the shadow lamp's holder (see inSlot) just stands there, if nothing's in its way.
+   * A sheet of shadow paper in the shadow lamp's slot (see inSlot) just stands there, if nothing's in its way.
    */
   private rest(h: Held, p: Pose, obstacles: readonly Box[], solid: readonly Box[]): Rest | string {
     const blocked = (b: Box) => obstacles.some((o) => boxesOverlap(b, o));
@@ -2957,9 +2957,11 @@ export class GameEngine {
       let dy = -Math.max(0, ...stands.map((st, i) => st.clampY - tops[i]! - STAND_MAX));
       // held sunk into a counter, it comes up to stand on it: all of a strip or a thermometer, though its lower part
       // bumps into nothing else
-      const sunk = LIFT - (box.y + dy - box.hy);
+      // (what its stand is on, if that's higher than the counters, is under it too: the floor of the lamp's channel)
+      const ground = Math.max(LIFT, ...tops.map((t) => t!));
+      const sunk = ground - (box.y + dy - box.hy);
       const solidBox = h.kind === 'tool' && isDipper(h.t.kind) ? { ...box, parts: undefined } : box;
-      if (sunk > 0 && COUNTER_BOXES.some((c) => boxesOverlap({ ...solidBox, y: box.y + dy }, c))) dy += sunk;
+      if (sunk > 0 && (ground > LIFT || COUNTER_BOXES.some((c) => boxesOverlap({ ...solidBox, y: box.y + dy }, c)))) dy += sunk;
       const to = { ...box, y: box.y + dy };
       if (blocked(to)) return 'No room';
       if (stands.some((st, i) => solid.some((o) => boxesOverlap(standBase(st, tops[i]!), o)))) return 'No room for its stand';
@@ -2977,7 +2979,7 @@ export class GameEngine {
       }
       return why!;
     }
-    // a sheet in the shadow lamp's holder stands in it, on its rail, with no stand
+    // a sheet in the shadow lamp's slot stands in it, against its end wall, on the bench, with no stand
     if (h.kind === 'tool' && h.t.kind === 'sheet' && inSlot(p)) return blocked(box) ? 'No room' : { pose: p };
     const stands = this.standsAt(h, p);
     if (stands.length) return onStands(stands);
@@ -3215,7 +3217,7 @@ export class GameEngine {
       const ok = !!this.placed && 'rest' in this.placed;
       const how = h.kind === 'hose' ? 'set the hose’s end down'
         : h.kind === 'tool' && isDipper(h.t.kind) && this.mouthAimed() ? 'stand it in it'
-        : ok && h.kind === 'tool' && h.t.kind === 'sheet' && 'rest' in this.placed! && inSlot(this.placed.rest.pose) ? 'slot it into the holder'
+        : ok && h.kind === 'tool' && h.t.kind === 'sheet' && 'rest' in this.placed! && inSlot(this.placed.rest.pose) ? 'slot it into the lamp'
         : 'set it down';
       // a button looked at takes the click
       if (this.intoCabinet()) add(['LMB'], 'put it in the cabinet');
@@ -3243,7 +3245,7 @@ export class GameEngine {
     }
     if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
     else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
-    else if (p?.kind === 'tool' && p.part === 'switch') add(['LMB'], p.t.lit ? 'switch it off' : 'switch it on');
+    else if (p?.kind === 'tool' && p.part === 'button') add(['LMB'], p.t.lit ? 'put the lamp out' : 'light the lamp');
     else if (this.pressable()) add(['LMB'], 'press it');
     const m = h ? null : this.mountAimed();
     if (m) add(['LMB'], this.hoseOn(m) ? 'take hold of its hose' : 'pull out its hose');
@@ -3286,7 +3288,7 @@ export class GameEngine {
   private onButton(): boolean {
     const p = this.target;
     return (
-      (p?.kind === 'scale' && p.part === 'tare') || (p?.kind === 'tool' && p.part === 'switch') ||
+      (p?.kind === 'scale' && p.part === 'tare') || (p?.kind === 'tool' && p.part === 'button') ||
       p?.kind === 'alarm' || p?.kind === 'blinds' || p?.kind === 'wake'
     );
   }
@@ -3296,7 +3298,7 @@ export class GameEngine {
     const p = this.target;
     return (
       (p?.kind === 'scale' && p.part === 'tare') ||
-      (p?.kind === 'tool' && p.part === 'switch') ||
+      (p?.kind === 'tool' && p.part === 'button') ||
       p?.kind === 'alarm' ||
       p?.kind === 'blinds' ||
       p?.kind === 'wake'
@@ -3439,8 +3441,8 @@ export class GameEngine {
         this.clock += dt;
         this.spin = (this.spin + SPIN * dt) % (2 * Math.PI);
         this.station().steady += dt;
-        // (and the shadow lamp, if it's on, shines on through it; and a sheet of blotting paper that was still
-        // developing goes on developing)
+        // (and the shadow lamp, if it's lit, shines on through it, for as long as its exposure has left; and a sheet
+        // of blotting paper that was still developing goes on developing)
         for (const t of this.tools) {
           if (t.kind === 'shadowlamp') t.shine(dt);
           if (isBlotter(t.kind)) t.step(dt);
@@ -3647,7 +3649,7 @@ export class GameEngine {
   }
 
   /**
-   * Tell the shadow lamp which sheet is in its holder, if any (see Tool.sheet), from where things are now. One in
+   * Tell the shadow lamp which sheet is in its slot, if any (see Tool.sheet), from where things are now. One in
    * hand isn't in it, though it's still where it was picked up until it's moved.
    */
   private slotting(): void {

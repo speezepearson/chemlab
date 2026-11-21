@@ -39,11 +39,13 @@ export const SPECTROSCOPE_AT: Spot = { at: [1.45, 0.5] };
 export const STATION_POSE: Pose = { x: ROOM.x1 - CELL / 2, y: STATION.top, z: 11.5 * CELL, yaw: -Math.PI / 2 };
 
 /**
- * Where the shadow lamp is (see LAMP in tools.ts): in the middle of its own bench in the front left corner, its top
- * LAMP.h above the bench, its housing against the front wall and facing into the room, so it shines out from the wall.
- * Every lab has it, always here.
+ * Where the shadow lamp is (see LAMP in tools.ts): on its own bench in the front left corner, along its edge toward
+ * the room, its top LAMP.h above the bench and its front to the room. Its channel is the bench's row of cells nearest
+ * the room, so it can be reached into and seen down into from there (its near wall stands just off the bench's edge);
+ * its enclosure is at the bench's end away from the left wall, and it shines along the bench toward that wall, at its
+ * end wall, a cell short of it. Every lab has it, always here.
  */
-export const LAMP_POSE: Pose = { x: (LAMP_AREA.x0 + LAMP_AREA.x1) / 2, y: LIFT + LAMP.h, z: (LAMP_AREA.z0 + LAMP_AREA.z1) / 2, yaw: Math.PI };
+export const LAMP_POSE: Pose = { x: LAMP_AREA.x1 + LAMP.box.x0, y: LIFT + LAMP.h, z: LAMP_AREA.z0 + LAMP.channel.z, yaw: Math.PI };
 
 /**
  * What the cryostabilizer's reservoir starts with: the hundred flasks of the target left on board (see VOYAGE). It's

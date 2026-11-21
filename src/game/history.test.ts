@@ -33,14 +33,24 @@ describe('arrangement', () => {
     expect(f.N).toBe(5);
   });
 
-  it("puts the shadow lamp's switch back as it was", () => {
+  it('puts the shadow lamp back lit or out, as it was, and its dial where it was', () => {
     const l = lab();
     const lamp = new Tool('shadowlamp', 1);
     l.tools.push(lamp);
-    const off = arrangement(l, sw);
-    lamp.lit = true;
-    expect(sameArrangement(off, arrangement(l, sw))).toBe(false);
-    arrange(l, off);
+    const out = arrangement(l, sw);
+    lamp.valves[0] = 0.9;
+    lamp.press();
+    const lit = arrangement(l, sw);
+    expect(sameArrangement(out, lit)).toBe(false);
+    arrange(l, out);
+    expect([lamp.lit, lamp.valves[0]]).toEqual([false, 0.5]);
+    // put back lit, it shines for what it had left, however long that is by now
+    arrange(l, lit);
+    expect([lamp.lit, lamp.valves[0]]).toEqual([true, 0.9]);
+    lamp.step(lamp.left);
+    expect(lamp.lit).toBe(false);
+    // and once it's shone itself out, putting it back as it was leaves it out
+    arrange(l, lit);
     expect(lamp.lit).toBe(false);
   });
 
