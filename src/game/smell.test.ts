@@ -449,14 +449,14 @@ describe('script', () => {
       spans[band].most = Math.max(spans[band].most, span(says));
     }
     for (let band = 1; band < BANDS; band++) expect(spans[band].most).toBeLessThan(spans[band - 1].least);
-    // one thing that reeks is said in under half a second
-    expect(spans[BANDS - 1].most).toBeLessThan(0.5);
+    // one thing that reeks is said in under a second
+    expect(spans[BANDS - 1].most).toBeLessThan(1);
     // three, the last of them faint, take a few seconds, however they're put
     const longest = (table: readonly (readonly string[])[], band: number) =>
       Math.max(...table[band].map((ph) => PACE.notice[band] + (ph.split('|').length > 1 ? PACE.name[band] : 0) + PACE.think * Math.max(0, ph.split('|').length - 2)));
-    expect(longest(LEADS, 2) + longest(FOLLOWS, 1) + longest(FOLLOWS, 0)).toBeLessThan(5.5);
+    expect(longest(LEADS, 2) + longest(FOLLOWS, 1) + longest(FOLLOWS, 0)).toBeLessThan(11);
     // and at the very longest, three as faint as can be
-    expect(longest(LEADS, 0) + 2 * longest(FOLLOWS, 0)).toBeLessThan(7.5);
+    expect(longest(LEADS, 0) + 2 * longest(FOLLOWS, 0)).toBeLessThan(15);
   });
 
   it('says so when there’s nothing, one way or another, after a short sniff', () => {
@@ -466,6 +466,6 @@ describe('script', () => {
       expect(nothing).toMatch(/no|n’t/i);
     });
     expect(NOTHINGS).toContain(lines(script(smell(fluid({}))))[0]);
-    expect(PACE.nothing).toBeLessThan(1);
+    expect(PACE.nothing).toBeLessThan(2);
   });
 });

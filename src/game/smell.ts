@@ -185,7 +185,7 @@ export const NOTHINGS: readonly string[] = ['Nothing.', 'No smell.', 'Nothing at
  * - `name`: how long she hesitates before its name, where its phrasing has her hesitate (see LEADS).
  * And `think` is any other hesitation, and `nothing` how long before she's sure there's nothing to smell.
  */
-export const PACE = { notice: [0.8, 0.65, 0.5, 0.4, 0.3], name: [1.1, 0.6, 0.3, 0.15, 0], think: 0.45, nothing: 0.7 };
+export const PACE = { notice: [1.6, 1.3, 1, 0.8, 0.6], name: [2.2, 1.2, 0.6, 0.3, 0], think: 0.9, nothing: 1.4 };
 
 /**
  * A piece of what she says of a sniff, which comes up all at once: its text, how many real seconds after the piece
