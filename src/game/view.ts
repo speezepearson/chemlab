@@ -1596,10 +1596,6 @@ class ToolView {
     else if (t.kind === 'shadowlamp') this.buildLamp(pick);
     else if (t.kind === 'sheet') this.buildSheet();
     else if (isBlotter(t.kind)) this.buildBlotter();
-    else if (t.kind === 'dish') {
-      // a little base under the dish, for its stand to clamp
-      block(art, darkMat, -12, 12, TH + 0.6, sh.box.y1, -D.body / 2, D.body / 2, 1);
-    }
     else if (isThermometer(t.kind)) this.buildThermometer(t.kind);
     else if (t.kind === 'column') {
       this.buildColumn();

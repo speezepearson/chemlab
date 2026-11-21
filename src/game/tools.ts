@@ -667,15 +667,6 @@ export const dipUnder = (kind: ToolKind): number =>
   kind === 'strip' ? STRIP.paper.point / 2 - 0.5 : (THERMOMETER_ROD.bulb.y1 - THERMOMETER_ROD.bulb.y0) / 2 + 1;
 
 /**
- * The dish (see SHAPES.dish): a shallow open glass tray, reaching w either side of its middle, h deep and d front to
- * back inside, on a little base `base` tall, for its stand to clamp.
- */
-export const DISH = { w: 20, h: 5, d: 16, base: 13 };
-
-/** How much the dish holds, by volume: as much as it's drawn to hold (see SPACE_PER_ATOM), about 0.05 flask. */
-export const DISH_CAP = Math.round((2 * DISH.w * DISH.d * DISH.h) / SPACE_PER_ATOM);
-
-/**
  * How freely each species runs along a wicking strip's paper or a column's bed: 1 − drag / STRIP.drag, where a
  * molecule's drag is its weight, plus the weight of its loose ends again (see LOOSE_ENDS), which snag in the paper.
  * A liquid runs at the mean of its own (see leadOf), and each species on the paper min(1, its own over the liquid's)
@@ -1109,7 +1100,7 @@ export function bondDots(): { x: number; y: number }[] {
 
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater'
-  | 'spectroscope' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'dish' | 'column' | 'culture' | 'tank'
+  | 'spectroscope' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'column' | 'culture' | 'tank'
   | 'receptacle' | 'shadowlamp' | 'sheet' | 'testpaper' | 'bondpaper';
 
 /**
@@ -1407,17 +1398,6 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: STRIP_FOOT,
     box: { x0: -STRIP.paper.w - 0.5, x1: STRIP.paper.w + 0.5, y0: -0.5, y1: STRIP_FOOT + 0.5 },
   },
-  dish: {
-    // a shallow open glass tray (see DISH) on a little base for its stand to clamp; nothing drains from it
-    tanks: [{ name: 'dish', x0: -DISH.w, x1: DISH.w }],
-    tankH: DISH.h,
-    tankCap: DISH_CAP,
-    noValve: true,
-    spouts: [],
-    valveY: DISH.h,
-    spoutY: DISH.h + DISH.base,
-    box: { x0: -DISH.w - 2, x1: DISH.w + 2, y0: -6, y1: DISH.h + DISH.base },
-  },
   column: {
     // a small glass funnel over a tall glass tube, packed (see COLUMN), over a tap and a spout, all on one line
     tanks: [{ name: 'funnel', x0: -COLUMN.funnel.w, x1: COLUMN.funnel.w }],
@@ -1641,7 +1621,6 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   thermometerWide: 'Wide thermometer',
   dilatometer: 'Swell bulbs',
   strip: 'Wicking strip',
-  dish: 'Dish',
   column: 'Column',
   culture: 'Sleeper culture',
   tank: 'Tank',
@@ -1782,7 +1761,6 @@ export class Blotter extends Vessel {
  * - A **wicking strip** is bare paper, with no tanks. Its foot touched to a fluid takes a spot of it (see touch), and
  *   stood in a fluid, it drinks it up (see bath), carrying each species of the spot along at its own pace (see wick
  *   and STRIP_RUN), to leave it as a band once the paper's dry. It's used once.
- * - A **dish** is a shallow open tray with no valve or spout, to stand a strip in.
  * - A **column** is a small funnel over a tall tube packed with the strips' paper, its bed, over a tap and a spout. A
  *   dry bed drinks from the funnel until it's wet through; then what's poured in runs through it as far as the tap's
  *   open, carrying each species down it at its own pace, as on a strip, and out the spout (see elute).
@@ -2009,7 +1987,7 @@ export class Tool {
     }
     // a culture's cells sicken in what's in the plate, which then drains like any tank
     if (this.kind === 'culture') this.sicken(h);
-    // nothing drains from a tool with no spouts (a dish)
+    // nothing drains from a tool with no spouts
     if (!this.shape.spouts.length) return this.none();
     // with nothing in it and its readings faded to nothing, a step would do nothing; an instrument's smoothing starts
     // again from nothing measured, as it would have to within less than TRACE

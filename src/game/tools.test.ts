@@ -14,7 +14,7 @@ import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, BOND_KEYS, SPECTROSCOPE, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SHEET, darkness, lampLight, type Mouth, lampShot, sheetLit,
+  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SHEET, darkness, lampLight, type Mouth, lampShot, sheetLit,
 } from './tools';
 
 const R = singleOf('R');
@@ -1137,31 +1137,6 @@ describe('wicking strip', () => {
     u.paper.forEach((p, c) => loadVessel(v.paper[c], saveVessel(p)));
     expect(v.memory).toEqual(u.memory);
     expect(v.paper.map((p) => [...p.n])).toEqual(u.paper.map((p) => [...p.n]));
-  });
-});
-
-describe('dish', () => {
-  it('is a shallow open tray, holding as much as it is drawn to, with no valve or spout', () => {
-    const t = new Tool('dish', 0);
-    expect(t.tanks.length).toBe(1);
-    expect(t.isOpen(0)).toBe(true);
-    expect(t.shape.spouts).toEqual([]);
-    expect(t.shape.noValve).toBe(true);
-    expect(t.shape.tankH).toBe(DISH.h);
-    expect(t.tanks[0].cap * SPACE_PER_ATOM).toBeCloseTo(2 * DISH.w * DISH.d * DISH.h, -1);
-    expect(tankDepth('dish')).toBeCloseTo(DISH.d, 0);
-    expect(DISH_CAP / CAP).toBeCloseTo(0.05, 2);
-    // room for a strip to drink its fill from it, several times over
-    expect(DISH_CAP).toBeGreaterThan(4 * STRIP.cap);
-    expect(t.memory).toBeUndefined();
-  });
-
-  it('keeps what is in it: nothing drains from it', () => {
-    const t = new Tool('dish', 0);
-    filled(t.tanks[0], SOLVENT_SPECIES, t.tanks[0].cap, 1);
-    const n = [...t.tanks[0].n];
-    for (let i = 0; i < 100; i++) expect(t.step(0.02)).toEqual([]);
-    expect([...t.tanks[0].n]).toEqual(n);
   });
 });
 

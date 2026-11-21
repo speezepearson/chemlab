@@ -199,7 +199,7 @@ describe('the shadow lamp', () => {
     const fits = (Object.keys(SHAPES) as ToolKind[])
       .filter((k) => !SHAPES[k].fixed && !SHAPES[k].flat)
       .filter((k) => [0, 1, 2].some((i) => [TO_LAMP, TO_SHEET].some((yaw) => stands(k, i, yaw))));
-    expect(fits.sort()).toEqual(['column', 'culture', 'dish', 'dispenser', 'meter', 'pipette', 'sheet', 'strip', 'thermometer', 'thermometerWide']);
+    expect(fits.sort()).toEqual(['column', 'culture', 'dispenser', 'meter', 'pipette', 'sheet', 'strip', 'thermometer', 'thermometerWide']);
   });
 
   it('leaves the two rows of its bench behind it clear, with room for the longest tools on their two stands', () => {
@@ -700,9 +700,9 @@ describe('dippers', () => {
         t.pose = p;
         expect(footAt(t).y).toBeCloseTo(floor + (strip ? STRIP_FLOOR : DIP_FLOOR), 6);
       }
-      // in a dish's shallow fluid, dipped to the middle of its depth, and stood no higher: a strip's tip on its floor
-      const d = new Tool('dish', 3, onGrid(at(420, LIFT + 100, 250), toolAnchor(new Tool('dish', 3))));
-      d.tanks[0].setMolecules(SOLVENT_SPECIES, d.tanks[0].cap / 2);
+      // in a tool's shallow fluid (a flow meter's tube), dipped to the middle of its depth, and stood no higher: a strip's tip on its floor
+      const d = new Tool('meter', 3, onGrid(at(420, LIFT + 100, 250), toolAnchor(new Tool('meter', 3))));
+      d.tanks[0].setMolecules(SOLVENT_SPECIES, d.tanks[0].cap / 20);
       const fl = tankFluid(d, 0);
       const mid = (fl.floor + fl.surface) / 2;
       expect(fl.surface - fl.floor).toBeLessThan(2 * dipUnder(kind));
@@ -714,7 +714,7 @@ describe('dippers', () => {
       expect(footAt(t).y).toBeCloseTo(strip ? fl.floor + STRIP_FLOOR : mid, 6);
       expect(bathAt(footAt(t), [], [d])).toBe(d.tanks[0]);
       // and in next to nothing, either way at the middle of what there is, so it's in it
-      d.tanks[0].setMolecules(SOLVENT_SPECIES, d.tanks[0].cap / 50);
+      d.tanks[0].setMolecules(SOLVENT_SPECIES, d.tanks[0].cap / 2000);
       const film = tankFluid(d, 0);
       const least = dipPoses(t, tankMouth(d, 0), film, 0);
       for (const p of [least.dipped, least.stood]) {

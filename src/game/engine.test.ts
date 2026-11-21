@@ -6,6 +6,7 @@ import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
 import { SHEET_SLOT, flaskLip, inSlot, scaleBox, sheetIn, slotPose, standBase, toolBox, toolStands } from './bodies';
 import { boxesOverlap } from './physics';
 import { STOCK } from './cabinet';
+import { WHEELS } from './wheel';
 import { CAP, TRACE } from './config';
 import type { GameEngine } from './engine';
 import { Vessel, volume, type Flask } from './flask';
@@ -1060,6 +1061,44 @@ describe('the bond visualizer, which is gone', () => {
     expect(kinds(l.in).sort()).toEqual(['receptacle', 'shadowlamp', 'sheet', 'spectroscope']);
     expect((l.in as unknown as { hoses: unknown[] }).hoses).toEqual([]);
     expect(l.in.tools.every((t) => t.id > 0)).toBe(true);
+  });
+});
+
+describe('the dish, which is gone', () => {
+  /** A lab's save with a dish in it, set down on the front counter with solvent in it, and a pipette beside it. */
+  function withDish(l: { e: GameEngine; in: Inside }): SaveState {
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    const spectro = s.tools.find((t) => t.kind === 'spectroscope')!;
+    const dish = { ...spectro, kind: 'dish', id: 901, fx: 0.45, fy: 0.3, z: 750, valves: [], tanks: [{ n: { S: 4e7 }, Q: 4e7 }], drops: [], note: 'carrier' };
+    const pipette = { ...spectro, kind: 'pipette', id: 902, fx: 0.55, fy: 0.3, z: 750, valves: [0], tanks: [{ n: { G: 5e7 }, Q: 15e7 }], drops: [{ n: {}, Q: 0 }] };
+    s.tools.unshift(dish as unknown as SaveState['tools'][number], pipette as SaveState['tools'][number]);
+    return s;
+  }
+  const kinds = (l: Inside) => l.tools.map((t) => t.kind as string);
+
+  it('is no kind of tool, and the cabinet and the wheels have none', () => {
+    const l = lab();
+    expect(kinds(l.in)).not.toContain('dish');
+    expect(Object.keys(SHAPES)).not.toContain('dish');
+    expect(Object.keys(STOCK)).not.toContain('dish');
+    expect(WHEELS.flat() as string[]).not.toContain('dish');
+  });
+
+  it('is lost from an older save as it loads, without error, with what was in it; the rest loads as it was', () => {
+    const l = lab();
+    const before = l.in.tools.map((t) => [t.kind, t.id]);
+    const s = withDish(l);
+    expect(() => l.e.restore(s, DEFAULT_PRESET)).not.toThrow();
+    expect(kinds(l.in)).not.toContain('dish');
+    expect(l.in.tools.map((t) => [t.kind, t.id])).toEqual([['pipette', 902], ...before]);
+    expect(l.in.tools.find((t) => t.kind === 'pipette')!.tanks[0].N).toBe(5e7);
+    expect(() => {
+      for (let i = 0; i < 40; i++) l.in.simulate(0.05);
+    }).not.toThrow();
+    // saved again, there's no trace of it
+    const again = JSON.stringify(l.e.snapshot());
+    expect(again).not.toContain('dish');
+    expect(again).not.toContain('carrier');
   });
 });
 

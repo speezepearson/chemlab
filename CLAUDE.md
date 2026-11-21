@@ -214,7 +214,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     a sheet of test paper or bond paper and the shadow lamp have none, nor spouts nor
     valves. Then its grid anchor is its middle (`toolAnchor`), Enter writes its own `note`, and its collision is whatever
     `toolParts` gives it (a thermometer's, only the top of its rod; a strip's, its clip), so code that reaches for
-    `tanks[0]` must allow for there being none. Nor need a tool with tanks have spouts (the dish): nothing drains from it.
+    `tanks[0]` must allow for there being none.
   - A tank needn't be under its opening: one with a `neck` (the swell bulbs') has its bulb and neck where the flag
     says, and its own `x0` and `x1` are its inlet's, since it's the openings and spouts that go on the grid.
   - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `neck`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `flat`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
@@ -242,8 +242,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   name. A tool's own state goes in `Tool.memory` as numbers (a sheet of blotting paper keeps what it shows there
   only while that's still coming up; with none, it loads showing all it holds); a sheet of shadow paper's image, which is thousands of
   cells, goes beside it as a packed string (`Tool.image`, `Tool.develop`).
-  A saved tool of a kind there no longer is (the composition analyzer, which the test paper replaced, and the bond
-  visualizer, which the bond paper replaced) is dropped as
+  A saved tool of a kind there no longer is (the composition analyzer, which the test paper replaced, the bond
+  visualizer, which the bond paper replaced, and the dish) is dropped as
   the save loads, with the hoses on its spouts (its id isn't given to a tool the load adds, or that tool would get
   them); so is a stored volume slider for a sound that's gone (`parseVolumes`).
 
