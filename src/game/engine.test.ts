@@ -11,7 +11,7 @@ import { FLASK_H } from './flaskShape';
 import { DEFAULT_PRESET, LAMP_POSE } from './presets';
 import type { SaveState } from './save';
 import { CELL, LAMP_FLOOR, LIFT, counterUnder, toCell, toWorld } from './space';
-import { INLINE_TOOLS, SHAPES, SHEET, TEST_PAPER, UNIQUE_TOOLS, darkness, paperReading, type Tool } from './tools';
+import { INLINE_TOOLS, SHAPES, SHEET, TEST_PAPER, UNIQUE_TOOLS, darkness, lampShot, paperReading, type Tool } from './tools';
 
 /*
  * The engine itself, with nothing to draw on and nothing to hear: the view and the sounds are stood in for, as they
@@ -55,6 +55,10 @@ interface Inside {
   stock: Record<string, boolean[]>;
   flash: { text: string } | null;
   leftDown(shift: boolean): void;
+  rightDown(): void;
+  endTurn(): void;
+  valveAimed(): { t: Tool; k: number } | null;
+  viewW: number;
   grabOrRelease(linked: boolean): void;
   release(): void;
   putAway(): void;
@@ -423,12 +427,13 @@ function look(l: { e: GameEngine; in: Inside }, x: number, z: number, tx: number
 const lampOf = (l: Inside) => l.tools.filter((t) => t.kind === 'shadowlamp');
 
 describe('the shadow lamp', () => {
-  it('is in every new lab, on its bench, switched off', () => {
+  it('is in every new lab, on its bench, out, its dial halfway', () => {
     const l = lab();
     const lamps = lampOf(l.in);
     expect(lamps).toHaveLength(1);
     expect(lamps[0].pose).toEqual(LAMP_POSE);
     expect(lamps[0].lit).toBe(false);
+    expect(lamps[0].valves).toEqual([0.5]);
   });
 
   it('is added to a save from before there was one, and only ever one, always on its bench', () => {
@@ -447,31 +452,71 @@ describe('the shadow lamp', () => {
     expect(lampOf(l.in)[0].pose).toEqual(LAMP_POSE);
   });
 
-  it('is switched on and off with the left button on its switch, which a save keeps and undo takes back', () => {
+  it('is lit with the left button on its button, for as long as its dial says, and put out with it again; a save keeps it and undo takes a press back', () => {
     const l = lab();
     const [lamp] = lampOf(l.in);
-    l.in.target = { kind: 'tool', t: lamp, part: 'switch', k: 0, point: { x: 0, y: 0, z: 0 }, distance: 100 };
+    lamp.valves[0] = 1;
+    l.in.target = { kind: 'tool', t: lamp, part: 'button', k: 0, point: { x: 0, y: 0, z: 0 }, distance: 100 };
     l.in.leftDown(false);
-    expect(lamp.lit).toBe(true);
+    expect([lamp.lit, lamp.left]).toEqual([true, lampShot(1)]);
+    // it shines on the lab's time: paused it holds, and it goes out by itself when its time is up
+    l.in.simulate(0.1);
+    expect(lamp.left).toBeCloseTo(lampShot(1) - 0.1);
+    l.e.speed = 0;
+    l.in.simulate(0.1);
+    expect(lamp.left).toBeCloseTo(lampShot(1) - 0.1);
+    l.e.speed = 1;
     const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    // pressed again, it's out; undo puts it back lit, with what it had left, and undo again takes back the first press
     l.in.leftDown(false);
     expect(lamp.lit).toBe(false);
     l.e.undo();
     expect(lamp.lit).toBe(true);
+    expect(lamp.left).toBeCloseTo(lampShot(1) - 0.1);
+    l.e.undo();
+    expect(lamp.lit).toBe(false);
+    l.e.undo(true);
+    expect(lamp.lit).toBe(true);
+    l.e.speed = 16;
+    for (let i = 0; i < 5; i++) l.in.simulate(0.05);
+    expect([lamp.lit, lamp.left]).toEqual([false, 0]);
+    // and once it's shone itself out, an undo of something else doesn't light it again
     l.e.undo();
     expect(lamp.lit).toBe(false);
     l.e.restore(s, DEFAULT_PRESET);
-    expect(lampOf(l.in)[0].lit).toBe(true);
+    const [saved] = lampOf(l.in);
+    expect(saved.lit).toBe(true);
+    expect(saved.left).toBeCloseTo(lampShot(1) - 0.1);
+    expect(saved.valves).toEqual([1]);
   });
 
-  it("can't be picked up, and its switch doesn't answer the key that picks things up at all", () => {
+  it('has its dial turned like any valve, which undo takes back', () => {
+    const l = lab();
+    const [lamp] = lampOf(l.in);
+    l.in.target = { kind: 'tool', t: lamp, part: 'valve', k: 0, point: { x: 0, y: 0, z: 0 }, distance: 100 };
+    expect(l.in.valveAimed()).toEqual({ t: lamp, k: 0 });
+    // (with no view to say where the mouse points, the dial is turned by hand)
+    l.in.viewW = 0;
+    l.in.rightDown();
+    lamp.valves[0] = 0.8;
+    l.in.endTurn();
+    l.e.undo();
+    expect(lamp.valves[0]).toBe(0.5);
+    l.e.undo(true);
+    expect(lamp.valves[0]).toBe(0.8);
+  });
+
+  it("can't be picked up, and its button and dial don't answer the key that picks things up at all", () => {
     const l = lab();
     const [lamp] = lampOf(l.in);
     const on = (part: string) => (l.in.target = { kind: 'tool', t: lamp, part, k: 0, point: { x: 0, y: 0, z: 0 }, distance: 100 });
-    // the switch is for pressing, with the left button: the key neither works it nor says anything
-    on('switch');
-    l.in.grabOrRelease(false);
-    expect([l.in.held, lamp.lit, l.in.flash]).toEqual([null, false, null]);
+    // the button is for pressing, with the left button, and the dial for turning, with the right: the key neither
+    // works them nor says anything
+    for (const part of ['button', 'valve']) {
+      on(part);
+      l.in.grabOrRelease(false);
+      expect([l.in.held, lamp.lit, l.in.flash]).toEqual([null, false, null]);
+    }
     // anywhere else on it, the key says why nothing's picked up
     on('body');
     l.in.grabOrRelease(false);
@@ -612,15 +657,16 @@ describe('shadow paper', () => {
     expect(Math.max(...b.dose)).toBe(0);
   });
 
-  it("is owed the lamp's light while it's in the slot with the lamp on, on sim time", () => {
+  it("is owed the lamp's light while it's in the slot with the lamp lit, on sim time", () => {
     const l = lab();
     const [lamp] = lampOf(l.in);
+    lamp.valves[0] = 1;
     const press = () => {
-      l.in.target = { kind: 'tool', t: lamp, part: 'switch', k: 0, point: { x: 0, y: 0, z: 0 }, distance: 100 };
+      l.in.target = { kind: 'tool', t: lamp, part: 'button', k: 0, point: { x: 0, y: 0, z: 0 }, distance: 100 };
       l.in.leftDown(false);
       l.in.target = null;
     };
-    // on, with no sheet in, nothing happens
+    // lit, with no sheet in, nothing happens
     press();
     l.in.simulate(0.1);
     expect([lamp.lit, lamp.sheet, lamp.owed]).toEqual([true, null, 0]);
@@ -639,7 +685,7 @@ describe('shadow paper', () => {
     l.e.speed = 16;
     l.in.simulate(0.05);
     expect(lamp.owed).toBeCloseTo(0.9);
-    // off, no more; and with nothing drawing the lab, what's owed just waits, the sheet as it was
+    // put out, no more; and with nothing drawing the lab, what's owed just waits, the sheet as it was
     press();
     l.e.speed = 1;
     l.in.simulate(0.1);
@@ -652,17 +698,19 @@ describe('shadow paper', () => {
     expect([lamp.sheet, lamp.owed]).toEqual([null, 0]);
   });
 
-  it('is owed no more than darkens it all the way, through the longest sleep', () => {
+  it('is owed no more than the exposure had left, through the longest sleep', () => {
     const l = lab();
     const [lamp] = lampOf(l.in);
     sheetAtSlot(l);
     l.in.release();
-    lamp.lit = true;
+    lamp.valves[0] = 0.75;
+    lamp.press();
     l.in.simulate(0.1, true);
     expect(lamp.owed).toBeCloseTo(0.1);
     l.in.sleeper().skip(100000);
-    expect(lamp.owed).toBe(SHEET.full);
+    expect(lamp.owed).toBeCloseTo(lampShot(0.75));
+    expect(lamp.lit).toBe(false);
     l.in.simulate(0.1, true);
-    expect(lamp.owed).toBe(SHEET.full);
+    expect(lamp.owed).toBeCloseTo(lampShot(0.75));
   });
 });

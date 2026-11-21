@@ -926,7 +926,12 @@ export const sheetLit = (): number => SHEET.side - 2 * SHEET.margin;
  *   size of what casts it wherever along the channel that stands; but the lamp inside isn't a point, so the beam's
  *   rays stray this far either side of straight, and a shadow's edge is soft, twice this times how far from the sheet
  *   what casts it is;
- * - switch: the switch's middle, on the enclosure's front;
+ * - dial and button: the middles of the dial that sets how long it shines and of the button that sets it off, on the
+ *   enclosure's front, and the button's radius;
+ * - shot: how long it shines for a press of the button (see lampShot), in sim seconds, with the dial at either end:
+ *   from a flash that barely tints the sheet (a tenth of the way dark), to as long as darkens it all the way (see
+ *   SHEET.full), past which there'd be nothing more to see; a factor of 64, so each of the six steps between the
+ *   dial's seven ticks doubles it;
  * - dim: how much fluid dims its light, per world unit of the light's way through fluid all of whose molecules have a
  *   ring in them (see lampLight): so that a flask with a few rings in a hundred molecules, about 50 across inside,
  *   takes a quarter of it, a faint shadow but one that shows on the sheet (see darkness: the sheet's darkening levels
@@ -938,8 +943,21 @@ export const LAMP = {
   box: { x0: -2.5 * CELL, x1: -1.5 * CELL },
   channel: { x0: -1.5 * CELL, x1: 1.5 * CELL, z: CELL / 2 },
   window: { r: sheetLit() / 2, y: SHEET.side / 2 },
-  switch: { x: -2 * CELL, y: 40 },
+  dial: { x: -2 * CELL - 22, y: 36 },
+  button: { x: -2 * CELL + 20, y: 36, r: 7 },
+  shot: { min: SHEET.full / 64, max: SHEET.full },
 };
+
+/**
+ * How many sim seconds the shadow lamp shines for a press of its button, with its dial at a setting from 0 to 1:
+ * LAMP.shot.min at 0, rising by the same factor for each step along the dial to LAMP.shot.max at 1, so the short
+ * exposures that show a faint shadow best (about SHEET.tau: longer, and the paper round the shadow has little left to
+ * darken) can be set as finely as the long ones that tell one deep shadow from another.
+ */
+export function lampShot(dial: number): number {
+  const { min, max } = LAMP.shot;
+  return min * (max / min) ** Math.max(0, Math.min(1, dial));
+}
 
 /**
  * How much of the shadow lamp's light gets through `length` world units of a fluid, `ring` of whose molecules have a
@@ -1365,10 +1383,11 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -24, x1: 24, y0: -14, y1: 76 },
   },
   shadowlamp: {
-    // a trough: the lamp's enclosure, a floored channel between two walls, and an end wall (see LAMP), with no tanks,
-    // spouts or valves
+    // a trough: the lamp's enclosure, a floored channel between two walls, and an end wall (see LAMP), with no tanks
+    // or spouts; its one valve is the dial on its enclosure's front, which sets how long it shines (see lampShot)
     tanks: [],
-    noValve: true,
+    valves: [{ x: LAMP.dial.x, y: LAMP.dial.y }],
+    dial: 0,
     fixed: true,
     spouts: [],
     valveY: 0,
@@ -1724,7 +1743,8 @@ export class Blotter extends Vessel {
  * - A **bond visualizer** is an inline instrument too, which lets everything through, showing which atoms are bonded
  *   in what passed over the recent past (see INSTRUMENT_TAU and bondShares) as lines between the corners and middle of a triangle (see BOND_TRIANGLE).
  * - A **shadow lamp** has no tanks either: it's a trough with a lamp in a box at one end (see LAMP), fixed on a bench
- *   of its own, with a switch (see lit). While it's on, the sheet at its other end is owed its light (see shine).
+ *   of its own, with a button that lights it (see press) for as long as its dial says (see lampShot), after which it
+ *   goes out by itself. While it's lit, the sheet at its other end is owed its light (see shine).
  * - A sheet of **shadow paper** has none: it's a square of paper (see SHEET) that darkens, for good, where the shadow
  *   lamp's light falls on it (see dose and expose).
  * - A sheet of **test paper** has none either: it lies flat on a counter (see TEST_PAPER), soaks up what lands on it
@@ -1740,7 +1760,7 @@ export class Tool {
   /**
    * Per valve (one per tank unless the shape places them): 0 (closed) to 1 (MAX_FLOW). Closed by default, so a tool doesn't drip on everything it's carried
    * over. A splitter's one valve is instead the share going right, and a multiplexer's the share taken from the right,
-   * half by default.
+   * half by default; and a shadow lamp's is its dial (see lampShot), halfway by default.
    */
   readonly valves: number[];
   /** Per spout, what left it on the last step, for drawing the stream; null if nothing did. */
@@ -1811,8 +1831,13 @@ export class Tool {
   bath: Vessel | null = null;
   /** Whether a thermometer has shattered (see warm): for good, reading nothing. */
   broken = false;
-  /** Whether a shadow lamp is switched on. */
-  lit = false;
+  /** Whether a shadow lamp is shining (see lit). */
+  private shining = false;
+  /**
+   * How many sim seconds of the exposure a shadow lamp is making, or was when it was put out, it has left to shine
+   * (see press and shine); 0 once it's shone them all.
+   */
+  left = 0;
   /**
    * The sheet of shadow paper in a shadow lamp's slot, if there is one, which whoever runs it sets before each step
    * (see shine): what its light falls on.
@@ -1891,7 +1916,7 @@ export class Tool {
     this.dead = kind === 'culture' ? new Uint8Array(cultureCells().length) : null;
     this.dose = new Float32Array(kind === 'sheet' ? SHEET.cells ** 2 : 0);
     const nValves = SHAPES[kind].valves?.length ?? this.tanks.length;
-    this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' ? 0.5 : 0));
+    this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' || kind === 'shadowlamp' ? 0.5 : 0));
     this.out = this.shape.spouts.map(() => null);
     this.flow = this.shape.spouts.map(() => 0);
     this.drops = this.shape.spouts.map(() => new Vessel(Infinity));
@@ -2139,10 +2164,10 @@ export class Tool {
    * was used to be, when strips dried, and how scorched each stretch is (what's on its paper is saved as vessels, see paper); how much a column's bed has drunk (what's on it is
    * saved as vessels, see bed); which of a sleeper culture's cells are dead (see dead); which supply a receptacle is
    * fitted for (its place in SUPPLIES), and how far into its changeover it is, or −1 if none is under way; 1 if a
-   * shadow lamp is switched on, or 0 if not.
+   * shadow lamp is lit, or 0 if not, and how long its exposure has left (its dial's setting is saved as a valve's).
    */
   get memory(): number[] | undefined {
-    if (this.kind === 'shadowlamp') return [+this.lit];
+    if (this.kind === 'shadowlamp') return [+this.lit, this.left];
     if (this.kind === 'strip') return [this.soaked, 0, ...this.scorch];
     if (this.kind === 'column') return [this.soaked];
     if (this.kind === 'culture') return Array.from(this.dead!);
@@ -2159,7 +2184,10 @@ export class Tool {
     const old = this.kind === 'strip' && Array.isArray(m) && m.length === 3;
     if (!Array.isArray(m) || (m.length !== want && !old) || !m.every((x) => typeof x === 'number' && Number.isFinite(x))) return;
     if (isThermometer(this.kind)) [this.temp, this.broken] = [m[0] as number, (m[1] as number) > 0];
-    if (this.kind === 'shadowlamp') this.lit = (m[0] as number) > 0;
+    if (this.kind === 'shadowlamp') {
+      this.left = Math.max(0, Math.min(LAMP.shot.max, m[1] as number));
+      this.lit = (m[0] as number) > 0;
+    }
     if (this.kind === 'strip') {
       // the second was how dry it was, when strips dried
       const [soaked, , ...scorch] = (m as number[]).map((x) => Math.max(0, Math.min(1, x)));
@@ -2179,13 +2207,49 @@ export class Tool {
   }
 
   /**
-   * A shadow lamp's light for `h` sim seconds: while it's on with a sheet in its slot (see sheet), that sheet is
-   * owed that much more of it (see owed), though never more than darkens it all the way. With no sheet there,
+   * Whether a shadow lamp is lit: it's making an exposure (see press), with some of it left to shine. Set, it lights
+   * only if it has any left, which is how an undo puts back a lamp that was put out part-way, and leaves out one that
+   * has since shone itself out.
+   */
+  get lit(): boolean {
+    return this.shining;
+  }
+
+  set lit(on: boolean) {
+    this.shining = on && this.left > 0;
+  }
+
+  /**
+   * A shadow lamp's button is pressed: out, it lights, to shine for as long as its dial says just now (see lampShot),
+   * whatever the dial's turned to afterward; lit, it's put out, keeping what it had left only for an undo to put back.
+   */
+  press(): void {
+    if (this.kind !== 'shadowlamp') return;
+    if (this.lit) {
+      this.lit = false;
+      return;
+    }
+    this.left = lampShot(this.valves[this.shape.dial!]);
+    this.lit = true;
+  }
+
+  /**
+   * A shadow lamp's light for `h` sim seconds: while it's lit it shines, for no longer than its exposure has left,
+   * and then it goes out by itself; and for as long as it shines with a sheet in its slot (see sheet), that sheet is
+   * owed that much more of its light (see owed), though never more than darkens it all the way. With no sheet there,
    * nothing's owed: what a sheet taken out had yet to get is lost. It shines on nothing else.
    */
   shine(h: number): void {
     if (!this.sheet) this.owed = 0;
-    else if (this.lit) this.owed = Math.min(SHEET.full, this.owed + h);
+    if (!this.lit) return;
+    const s = Math.min(h, this.left);
+    this.left -= s;
+    if (this.sheet) this.owed = Math.min(SHEET.full, this.owed + s);
+    // (to within what adding up steps loses)
+    if (this.left < 1e-9) {
+      this.left = 0;
+      this.lit = false;
+    }
   }
 
   /**

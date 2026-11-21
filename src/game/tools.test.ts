@@ -14,7 +14,7 @@ import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ATOM_PLACE, atomSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SHEET, sheetLit, darkness, lampLight, type Mouth,
+  clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SHEET, sheetLit, darkness, lampLight, lampShot, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -2431,46 +2431,129 @@ describe('dripping', () => {
 });
 
 describe('the shadow lamp', () => {
-  it('is one of a kind, fixed where it is, with no tanks, spouts or valves', () => {
+  it('is one of a kind, fixed where it is, with no tanks or spouts, and one valve, its dial', () => {
     const t = new Tool('shadowlamp', 0);
     expect(UNIQUE_TOOLS).toContain('shadowlamp');
     expect(t.shape.fixed).toBe(true);
     expect(t.shape.wall).toBeUndefined();
-    expect([t.tanks.length, t.shape.spouts.length, t.valves.length]).toEqual([0, 0, 0]);
+    expect([t.tanks.length, t.shape.spouts.length, t.valves.length]).toEqual([0, 0, 1]);
+    expect(t.shape.dial).toBe(0);
+    // the dial starts halfway, and is where a save or a preset says
+    expect(t.valves[0]).toBe(0.5);
+    expect(new Tool('shadowlamp', 1, undefined, [0.25]).valves[0]).toBe(0.25);
     expect(t.step(0.02)).toEqual([]);
+    // the dial and the button are on the enclosure's front, clear of each other and of its edges
+    const { dial, button, box, h } = LAMP;
+    for (const c of [dial, button]) {
+      expect(c.x - 14).toBeGreaterThan(box.x0);
+      expect(c.x + 14).toBeLessThan(box.x1);
+      expect(c.y - 14).toBeGreaterThan(0);
+      expect(c.y + 14).toBeLessThan(h);
+    }
+    expect(button.x - button.r - (dial.x + 14)).toBeGreaterThan(5);
   });
 
-  it('starts off, and a save keeps whether it is on', () => {
+  it('shines for as long as its dial says, from a flash to as long as darkens a sheet all the way, each step doubling it', () => {
+    expect(lampShot(0)).toBeCloseTo(LAMP.shot.min);
+    expect(lampShot(1)).toBeCloseTo(LAMP.shot.max);
+    expect(LAMP.shot.max).toBe(SHEET.full);
+    // the shortest barely tints the sheet, and the longest leaves it as dark as it gets
+    expect(darkness(lampShot(0))).toBeGreaterThan(0.05);
+    expect(darkness(lampShot(0))).toBeLessThan(0.15);
+    // the dial has seven ticks, six steps apart
+    for (let i = 0; i < 6; i++) expect(lampShot((i + 1) / 6) / lampShot(i / 6)).toBeCloseTo(2);
+    // about what shows a faint shadow best is within its range, with room either side
+    expect(lampShot(0.2)).toBeLessThan(SHEET.tau);
+    expect(lampShot(0.8)).toBeGreaterThan(SHEET.tau);
+    expect(lampShot(-1)).toBe(lampShot(0));
+    expect(lampShot(2)).toBe(lampShot(1));
+  });
+
+  it('lights at a press of its button, shines that long on sim time, and goes out by itself', () => {
     const t = new Tool('shadowlamp', 0);
+    expect([t.lit, t.left]).toEqual([false, 0]);
+    t.valves[0] = 1 / 3;
+    const shot = lampShot(1 / 3);
+    t.press();
+    expect([t.lit, t.left]).toEqual([true, shot]);
+    // turning the dial once it's lit changes nothing about the exposure under way
+    t.valves[0] = 1;
+    const steps = Math.floor(shot / 0.02);
+    for (let i = 0; i < steps - 1; i++) t.step(0.02);
+    expect(t.lit).toBe(true);
+    expect(t.left).toBeCloseTo(shot - (steps - 1) * 0.02);
+    t.step(0.02);
+    t.step(0.02);
+    expect([t.lit, t.left]).toEqual([false, 0]);
+    // no time, no change: paused, it holds
+    t.press();
+    t.step(0);
+    expect([t.lit, t.left]).toEqual([true, lampShot(1)]);
+    // nothing else has a button
+    const d = new Tool('dispenser', 1);
+    d.press();
+    expect(d.lit).toBe(false);
+  });
+
+  it('is put out by a press while it is lit, and only lights again for a whole new exposure', () => {
+    const t = new Tool('shadowlamp', 0);
+    t.press();
+    t.step(0.1);
+    const left = t.left;
+    t.press();
     expect(t.lit).toBe(false);
-    expect(t.memory).toEqual([0]);
+    t.step(1);
+    expect(t.left).toBe(left);
+    // an undo puts it back lit, for what it had left
     t.lit = true;
+    expect(t.lit).toBe(true);
+    t.step(left + 0.02);
+    expect([t.lit, t.left]).toEqual([false, 0]);
+    // but one that's shone itself out stays out
+    t.lit = true;
+    expect(t.lit).toBe(false);
+    t.press();
+    expect(t.left).toBe(lampShot(t.valves[0]));
+  });
+
+  it("is saved with whether it's lit and how long it has left", () => {
+    const t = new Tool('shadowlamp', 0);
+    expect(t.memory).toEqual([0, 0]);
+    t.press();
+    t.step(0.1);
+    expect(t.memory).toEqual([1, t.left]);
     const u = new Tool('shadowlamp', 1);
     u.remember(JSON.parse(JSON.stringify(t.memory)));
-    expect(u.lit).toBe(true);
-    u.remember([0]);
+    expect([u.lit, u.left]).toEqual([true, t.left]);
+    u.remember([0, 0.3]);
+    expect([u.lit, u.left]).toEqual([false, 0.3]);
+    // lit with nothing left is out, and it never has more left than its longest exposure
+    u.remember([1, 0]);
     expect(u.lit).toBe(false);
-    // anything else is ignored
-    u.lit = true;
-    for (const bad of [undefined, 'on', [], [1, 2], [NaN]]) u.remember(bad);
-    expect(u.lit).toBe(true);
+    u.remember([1, 1e9]);
+    expect([u.lit, u.left]).toEqual([true, LAMP.shot.max]);
+    // anything else is ignored, a save from when it had a switch included
+    for (const bad of [undefined, 'on', [], [1], [1, 2, 3], [NaN, 1]]) u.remember(bad);
+    expect([u.lit, u.left]).toEqual([true, LAMP.shot.max]);
   });
 
-  it('owes the sheet in its holder its light, sim second for sim second, while it is on', () => {
+  it('owes the sheet in its slot its light, sim second for sim second, while it shines', () => {
     const t = new Tool('shadowlamp', 0);
     const sheet = new Tool('sheet', 1);
-    // on, with nothing in its holder, it shines on nothing
-    t.lit = true;
+    t.valves[0] = 1;
+    // lit, with nothing in its slot, it shines on nothing
+    t.press();
     for (let i = 0; i < 50; i++) t.step(0.02);
     expect(t.owed).toBe(0);
+    expect(t.left).toBeCloseTo(LAMP.shot.max - 1);
     t.sheet = sheet;
     for (let i = 0; i < 25; i++) t.step(0.02);
     expect(t.owed).toBeCloseTo(0.5);
     // in bigger steps it comes to the same
     t.step(0.25);
     expect(t.owed).toBeCloseTo(0.75);
-    // switched off, the sheet is still owed what fell on it, and no more
-    t.lit = false;
+    // put out, the sheet is still owed what fell on it, and no more
+    t.press();
     t.step(1);
     expect(t.owed).toBeCloseTo(0.75);
     // the lamp never darkens the sheet itself: that's for whoever knows what's in the way
@@ -2481,13 +2564,20 @@ describe('the shadow lamp', () => {
     expect(t.owed).toBe(0);
   });
 
-  it('never owes more light than darkens a sheet all the way, however long it is left on', () => {
+  it('owes no more light than its exposure had left, however long a step, and never more than darkens a sheet all the way', () => {
     const t = new Tool('shadowlamp', 0);
-    t.lit = true;
     t.sheet = new Tool('sheet', 1);
+    t.valves[0] = 0.5;
+    t.press();
     t.shine(3600);
-    expect(t.owed).toBe(SHEET.full);
-    t.step(0.02);
+    expect(t.owed).toBeCloseTo(lampShot(0.5));
+    expect(t.lit).toBe(false);
+    // exposure after exposure, what's owed stops at what darkens it all the way
+    t.valves[0] = 1;
+    for (let i = 0; i < 3; i++) {
+      t.press();
+      t.shine(3600);
+    }
     expect(t.owed).toBe(SHEET.full);
   });
 

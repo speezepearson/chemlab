@@ -35,8 +35,8 @@ import { CABINET, CABINET_BUILD, STOCK, type Stock, type Stocked } from './cabin
 /** What the crosshair is on. */
 export type Pick =
   | { kind: 'flask'; f: Flask }
-  /** A tool: its body, or one of its tanks, valves or spouts; or the shadow lamp's switch. */
-  | { kind: 'tool'; t: Tool; part: 'body' | 'tank' | 'valve' | 'spout' | 'switch'; k: number }
+  /** A tool: its body, or one of its tanks, valves or spouts; or the shadow lamp's button. */
+  | { kind: 'tool'; t: Tool; part: 'body' | 'tank' | 'valve' | 'spout' | 'button'; k: number }
   | { kind: 'scale'; sc: Scale; part: 'body' | 'tare' }
   /** A hose's nozzle. */
   | { kind: 'hose'; h: Hose }
@@ -1480,8 +1480,8 @@ class ToolView {
    * and its column), and the jagged end it's left with once it's shattered (see buildThermometer).
    */
   private spirit?: { column: THREE.Mesh; whole: THREE.Group; stump: THREE.Group };
-  /** The shadow lamp's pane, which glows while it's on, and its switch's lever (see buildLamp). */
-  private lamp?: { pane: THREE.MeshStandardMaterial; lever: THREE.Group };
+  /** The shadow lamp's pane and its button's cap, which glow while it's lit, the cap pushed in (see buildLamp). */
+  private lamp?: { pane: THREE.MeshStandardMaterial; cap: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>; out: number };
   /**
    * A sheet of shadow paper's picture (see buildSheet), how many of its pixels wide the margin round the image is,
    * and the dose it was last drawn from (see Tool.dosed).
@@ -1505,7 +1505,7 @@ class ToolView {
     const sh = t.shape;
     const { art } = this;
     const D = TOOL_DEPTH[t.kind];
-    const pick = (m: THREE.Object3D, part: 'body' | 'tank' | 'valve' | 'spout' | 'switch', k = 0) => pickables.set(m, { kind: 'tool', t, part, k });
+    const pick = (m: THREE.Object3D, part: 'body' | 'tank' | 'valve' | 'spout' | 'button', k = 0) => pickables.set(m, { kind: 'tool', t, part, k });
     this.body.add(art);
     this.root.add(this.body);
 
@@ -1883,53 +1883,45 @@ class ToolView {
 
   /**
    * The shadow lamp (see LAMP): one long, low trough. At one end its enclosure, a closed box with a square pane in a
-   * dark bezel in its face onto the channel, which its light leaves by, and a toggle switch on a dark plate on its front; from it
+   * dark bezel in its face onto the channel, which its light leaves by, and on its front a round button in a dark
+   * collar, beside its dial (which is built with the valves, like any tool's dial); from it
    * the channel's two side walls, and its floor between them, a plate that stops a little short of the end wall; and
    * the end wall across their far ends, which a sheet stands against, in the slot the floor leaves. The pane
-   * glows lavender while it's on, and that's all the light it gives: it lights nothing in the room.
+   * glows lavender while it's lit, and the button's cap with it, pushed in, and that's all the light it gives: it
+   * lights nothing in the room.
    */
-  private buildLamp(pick: (m: THREE.Object3D, part: 'switch') => void): void {
+  private buildLamp(pick: (m: THREE.Object3D, part: 'button') => void): void {
     const { art } = this;
     const { h, wall, floor, slot, box, channel: ch, window: win } = LAMP;
     const out = ch.z + wall;
-    const solid = <T extends THREE.Mesh>(m: T): T => {
-      m.castShadow = m.receiveShadow = true;
-      art.add(m);
-      return m;
-    };
     // the enclosure, the two side walls from its face on, and the end wall across them
     block(art, panelMat, box.x0, box.x1, 0, h, -out, out, 1.5);
     block(art, panelMat, ch.x0, ch.x1 + wall, 0, h, ch.z, out);
     block(art, panelMat, ch.x0, ch.x1 + wall, 0, h, -out, -ch.z);
     block(art, panelMat, ch.x1, ch.x1 + wall, 0, h, -ch.z, ch.z);
     block(art, panelMat, ch.x0, ch.x1 - slot, h - floor, h, -ch.z, ch.z);
-    // the pane in the enclosure's face: dark glass, glowing with the lamp's light while it's on, in a dark bezel
+    // the pane in the enclosure's face: dark glass, glowing with the lamp's light while it's lit, in a dark bezel
     const glass = new THREE.MeshStandardMaterial({ color: 0x6f6a86, roughness: 0.25, metalness: 0, emissive: LAMP_GLOW, emissiveIntensity: 0 });
     const [y0, y1] = [win.y - win.r, win.y + win.r];
     block(art, glass, ch.x0, ch.x0 + 0.8, y0, y1, -win.r, win.r).castShadow = false;
     const lip = 3;
     for (const [py0, py1, z0, z1] of [[y0 - lip, y0, -win.r - lip, win.r + lip], [y0, y1, -win.r - lip, -win.r], [y0, y1, win.r, win.r + lip]])
       block(art, darkMat, ch.x0, ch.x0 + 1.5, py0, py1, z0, z1).castShadow = false;
-    // the switch on the enclosure's front: a plate, and a toggle's lever
-    const sw = LAMP.switch;
-    pick(block(art, darkMat, sw.x - 11, sw.x + 11, sw.y - 17, sw.y + 17, out, out + 1.5, 0.6), 'switch');
-    const boss = solid(new THREE.Mesh(unitCylinder, pipeMat));
-    boss.rotation.x = Math.PI / 2;
-    boss.scale.set(5.5, 3, 5.5);
-    boss.position.set(sw.x, -sw.y, out + 2.5);
-    pick(boss, 'switch');
-    const lever = new THREE.Group();
-    lever.position.set(sw.x, -sw.y, out + 3);
-    const stem = rod(lever, pipeMat, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 13), 2);
-    const tip = new THREE.Mesh(unitSphere, pipeMat);
-    tip.position.set(0, 0, 13);
-    tip.scale.setScalar(3);
-    tip.castShadow = true;
-    lever.add(tip);
-    art.add(lever);
-    pick(stem, 'switch');
-    pick(tip, 'switch');
-    this.lamp = { pane: glass, lever };
+    // the button on the enclosure's front, beside the dial: a round cap in a dark collar, of the pane's glass
+    const bt = LAMP.button;
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(bt.r + 2.5, bt.r + 3.5, 3, 24).rotateX(Math.PI / 2), darkMat);
+    collar.position.set(bt.x, -bt.y, out + 1.5);
+    const cap = new THREE.Mesh(
+      new THREE.CylinderGeometry(bt.r, bt.r, 6, 24).rotateX(Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: 0x6f6a86, roughness: 0.35, metalness: 0, emissive: LAMP_GLOW, emissiveIntensity: 0 }),
+    );
+    cap.position.set(bt.x, -bt.y, out + 4);
+    for (const m of [collar, cap]) {
+      m.castShadow = m.receiveShadow = true;
+      art.add(m);
+      pick(m, 'button');
+    }
+    this.lamp = { pane: glass, cap, out: out + 4 };
   }
 
   /**
@@ -2592,9 +2584,11 @@ class ToolView {
       if (T !== null) column.scale.y = bulb.y0 + 1 - foot + (foot - top) * thermometerAt(t.kind as ThermometerKind, T);
     }
     if (this.lamp) {
-      // on, its pane glows, and its switch's lever is up
-      this.lamp.pane.emissiveIntensity = t.lit ? 1.5 : 0;
-      this.lamp.lever.rotation.x = t.lit ? -0.55 : 0.55;
+      // lit, its pane glows, and so does its button's cap, which is in
+      const { pane, cap, out } = this.lamp;
+      pane.emissiveIntensity = t.lit ? 1.5 : 0;
+      cap.material.emissiveIntensity = t.lit ? 1.1 : 0;
+      cap.position.z = t.lit ? out - 2.2 : out;
     }
     if (this.sheet) this.drawSheet();
     if (t.kind === 'strip' && this.screen) drawStrip(this.screen, t);
@@ -2665,6 +2659,7 @@ class ToolView {
     this.changeover?.lamp.dispose();
     this.changeover?.glow.material.dispose();
     this.lamp?.pane.dispose();
+    this.lamp?.cap.material.dispose();
     this.sheet?.tex.dispose();
     this.sheet?.mat.dispose();
   }
@@ -3821,15 +3816,16 @@ function buildFaucets(
  * The thing a pick is part of, to outline all of it: a tool for any of its parts, a faucet for its knob or spout. The
  * supply station, built into the wall, is outlined a part at a time: its funnel, its reservoir's window, or one
  * of its two faucets (its spout's pipe, with its valve); its plate, nothing. Of the shadow lamp, which stays where it
- * is too, only the switch is. Null for nothing.
+ * is too, only its button and its dial are. Null for nothing.
  */
 function thingOf(p: Pick): unknown {
   switch (p.kind) {
     case 'flask': return p.f;
     case 'tool': {
       const { t } = p;
-      // (the shadow lamp, which stays where it is too: only its switch)
-      if (p.part === 'switch') return `tool ${t.id} switch`;
+      // (the shadow lamp, which stays where it is too: only its button, and its dial)
+      if (p.part === 'button') return `tool ${t.id} button`;
+      if (t.kind === 'shadowlamp') return p.part === 'valve' ? `tool ${t.id} dial` : null;
       if (!t.shape.fixed) return t;
       if (p.part === 'tank') return `tool ${t.id} tank ${p.k}`;
       if (p.part === 'spout') return `tool ${t.id} spout ${p.k}`;

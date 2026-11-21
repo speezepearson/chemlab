@@ -1547,8 +1547,8 @@ export class GameEngine {
       return;
     }
     if (p.kind === 'faucet' || p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake' || p.kind === 'cabinet') return;
-    // (a switch is for pressing, with the left button)
-    if (p.kind === 'tool' && p.part === 'switch') return;
+    // (the shadow lamp's button is for pressing, with the left button, and its dial for turning, with the right)
+    if (p.kind === 'tool' && (p.part === 'button' || (p.t.kind === 'shadowlamp' && p.part === 'valve'))) return;
     if (p.kind === 'tool' && p.t.shape.fixed) {
       this.say('That stays where it is');
       return;
@@ -1939,8 +1939,8 @@ export class GameEngine {
       this.tarePress = p.sc;
       return;
     }
-    if (p?.kind === 'tool' && p.part === 'switch') {
-      this.change(() => (p.t.lit = !p.t.lit));
+    if (p?.kind === 'tool' && p.part === 'button') {
+      this.change(() => p.t.press());
       return;
     }
     // anywhere else, what's held is set down, or with empty hands, what's looked at picked up
@@ -3010,7 +3010,7 @@ export class GameEngine {
     }
     if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
     else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
-    else if (p?.kind === 'tool' && p.part === 'switch') add(['LMB'], p.t.lit ? 'switch it off' : 'switch it on');
+    else if (p?.kind === 'tool' && p.part === 'button') add(['LMB'], p.t.lit ? 'put the lamp out' : 'light the lamp');
     else if (this.pressable()) add(['LMB'], 'press it');
     const m = h ? null : this.mountAimed();
     if (m) add(['LMB'], this.hoseOn(m) ? 'take hold of its hose' : 'pull out its hose');
@@ -3053,7 +3053,7 @@ export class GameEngine {
   private onButton(): boolean {
     const p = this.target;
     return (
-      (p?.kind === 'scale' && p.part === 'tare') || (p?.kind === 'tool' && p.part === 'switch') ||
+      (p?.kind === 'scale' && p.part === 'tare') || (p?.kind === 'tool' && p.part === 'button') ||
       p?.kind === 'alarm' || p?.kind === 'blinds' || p?.kind === 'wake'
     );
   }
@@ -3063,7 +3063,7 @@ export class GameEngine {
     const p = this.target;
     return (
       (p?.kind === 'scale' && p.part === 'tare') ||
-      (p?.kind === 'tool' && p.part === 'switch') ||
+      (p?.kind === 'tool' && p.part === 'button') ||
       p?.kind === 'alarm' ||
       p?.kind === 'blinds' ||
       p?.kind === 'wake'
@@ -3206,7 +3206,7 @@ export class GameEngine {
         this.clock += dt;
         this.spin = (this.spin + SPIN * dt) % (2 * Math.PI);
         this.station().steady += dt;
-        // (and the shadow lamp, if it's on, shines on through it)
+        // (and the shadow lamp, if it's lit, shines on through it, for as long as its exposure has left)
         for (const t of this.tools) if (t.kind === 'shadowlamp') t.shine(dt);
         this.nose.step(dt);
       },

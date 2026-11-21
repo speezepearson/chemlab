@@ -39,8 +39,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - Tools drain fast at 16×. Use slow valves, or screenshot early, to catch something mid-flow.
 - The dev server reloads the lab when a source file changes, so don't edit `src/` while a script is driving a page.
 - The shadow lamp's bench is in the front left corner (`LAMP_AREA`), its trough along the bench's edge toward the room
-  (stand at about z = 2650 and look down to see into its channel), the lamp's switch is `tool.lit`, and a sheet's
-  image is `tool.dose` (`SHEET.cells` a side, from its bottom row up, in sim seconds of light): print that as text to
+  (stand at about z = 2650 and look down to see into its channel). `tool.press()` is its button, lighting it for
+  `lampShot(tool.valves[0])` sim seconds (the dial; `tool.lit` and `tool.left` say how it's going), and a sheet's
+  image is `tool.dose` (`SHEET.cells` a side over the square the light falls on, from its bottom row up, in sim seconds
+  of light): print that as text to
   see a shadow's shape and depth, which a screenshot of a dark sheet shows poorly. It only darkens while frames are
   drawn, so in software rendering a sim second of light takes many real ones.
 - Shell gotcha: `pkill -f "port 5199"` exits 144 because the pattern matches its own shell. That's harmless; append
@@ -118,7 +120,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Volume isn't atoms.** Capacities and flows are in `volume()` units: molecules by default, or atoms when the
   "volume counts molecules" toggle is off. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
 - **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
-  chemistry, cooling, the instruments' readings, the supply station's diverter, display and needle, and its changeover (block, door, lamp and alarm), a thermometer's bulb and its crack as it shatters, the shadow lamp's light on the sheet in its slot, and the drip and stream sounds. All of it
+  chemistry, cooling, the instruments' readings, the supply station's diverter, display and needle, and its changeover (block, door, lamp and alarm), a thermometer's bulb and its crack as it shatters, the shadow lamp's exposure and its light on the sheet in its slot, and the drip and stream sounds. All of it
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The one exception to the
   substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
@@ -201,8 +203,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   `shadowlamp` (`LAMP` in `tools.ts`) is `fixed` too, at `LAMP_POSE` on a bench of its own (`LAMP_AREA`, the last of
   `COUNTERS`): a trough, with no tanks and no stand, whose channel things are set down in like anywhere on the grid,
   on its floor, which is a little higher than the bench (`LAMP_FLOOR` in `space.ts`: the one place `counterUnder` and
-  `groundAt` don't say `LIFT` over a counter, so use what they say); its switch is a part of its own for the crosshair
-  (`'switch'`).
+  `groundAt` don't say `LIFT` over a counter, so use what they say); its button is a part of its own for the crosshair
+  (`'button'`), and its dial is its one valve.
 - **The station is fitted for a supply** (`Tool.supply`, see `supply.ts`): the antinucleant in a new lab, the
   cryostabilizer in a save from before there was any other. Anything about what it takes or wants goes by
   `t.supply` (its species, goal, start and reservoir's capacity), never by `TARGET` or `GOAL_TARGET`. With enough in
