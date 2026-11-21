@@ -20,7 +20,7 @@ import { Flask, Vessel, roomFor, sustenance, transfer, volume, volumeUnit } from
 import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
-import { DEFAULT_PRESET, LAMP_POSE, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
+import { DEFAULT_PRESET, LAMP_POSE, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
 import { CRYOSTABILIZER, FIRST_SUPPLY, litresOf, type Supply } from './supply';
 import { shatter } from './shatter';
 import { WHEELS, wheelMove, wheelPick, type WheelAim } from './wheel';
@@ -34,7 +34,7 @@ import {
 } from './space';
 import {
   changeoverAt, BOND_KEYS, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
-  TANK_H, TOOL_NAMES, isDipper, isThermometer, Blotter, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
+  TANK_H, TOOL_NAMES, isBlotter, isDipper, isThermometer, Blotter, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
   type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
@@ -222,7 +222,7 @@ const WHEEL_CODES = ['Digit1', 'Digit2'];
 const WHEEL_KEYS = ['1', '2'];
 
 /**
- * Which way from the eyes (see Held.dir) something that lies flat, a sheet of test paper, is held when it's made in
+ * Which way from the eyes (see Held.dir) something that lies flat, a sheet of test paper or bond paper, is held when it's made in
  * hand: 25° below straight ahead, so that it's looked down on and its face is seen. Straight ahead, with the eyes
  * level, it would be edge on: a line.
  */
@@ -870,7 +870,9 @@ export class GameEngine {
         }
         return t;
       });
-    this.nextToolId = Math.max(-1, ...this.tools.map((t) => t.id)) + 1;
+    // (past every saved tool's id, those of kinds there no longer are included, so that a tool added below doesn't get
+    // a dropped one's id, and with it the hoses that were on its spouts)
+    this.nextToolId = Math.max(-1, ...s.tools.map((st) => st.id).filter(Number.isFinite)) + 1;
     this.uniqueTools();
     this.oldStation(s);
     this.scales = s.scales.map((ss) => {
@@ -939,11 +941,11 @@ export class GameEngine {
   }
 
   /**
-   * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a spectroscope, a bond
-   * visualizer, a station and a shadow lamp: if there's none, one is added where it starts, or as
-   * near there as it has room (see roomy), the station fitted for the cryostabilizer, its reservoir holding what's
-   * left on board (see Tool.stock), as a save from before it was fitted for anything else would have it. The
-   * station is built into the wall, and the shadow lamp stands on its own bench, so they're always where they are.
+   * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a spectroscope, a station and a
+   * shadow lamp: if there's none, one is added where it starts, or as near there as it has room (see roomy), the
+   * station fitted for the cryostabilizer, its reservoir holding what's left on board (see Tool.stock), as a save from
+   * before it was fitted for anything else would have it. The station is built into the wall, and the shadow lamp
+   * stands on its own bench, so they're always where they are.
    */
   private uniqueTools(): void {
     for (const kind of UNIQUE_TOOLS) {
@@ -963,7 +965,6 @@ export class GameEngine {
     add('shadowlamp', LAMP_POSE);
     this.tools.find((t) => t.kind === 'shadowlamp')!.pose = { ...LAMP_POSE };
     add('spectroscope', spotPose(SPECTROSCOPE_AT));
-    add('visualizer', spotPose(VISUALIZER_AT));
   }
 
   /**
@@ -1021,8 +1022,10 @@ export class GameEngine {
   }
 
   /**
-   * Set everything that stands on the bench (flasks and scales) down on the counter under it, if there is one, and stand each flask on a scale where the scale now is. Presets and older saves leave
-   * things in the air, where arms from the ceiling used to hold them.
+   * Set everything that stands or lies on the bench (flasks, scales and sheets of blotting paper) down on the counter
+   * under it, if there is one, and stand each flask on a scale where the scale now is. Presets and older saves leave
+   * things in the air, where arms from the ceiling used to hold them; and a sheet from when sheets were thicker lies
+   * that much above the counter.
    */
   private restAll(): void {
     this.toGrid();
@@ -1034,6 +1037,7 @@ export class GameEngine {
     };
     for (const f of this.flasks) if (!riders.has(f)) down(flaskBox(f), (dy) => (f.pose = { ...f.pose, y: f.pose.y - dy }));
     for (const sc of this.scales) down(scaleBox(sc), (dy) => (sc.pose = { ...sc.pose, y: sc.pose.y - dy }));
+    for (const t of this.tools) if (t.shape.flat) down(toolBox(t), (dy) => (t.pose = { ...t.pose, y: t.pose.y - dy }));
     this.settle();
   }
 
@@ -1279,15 +1283,24 @@ export class GameEngine {
    * the stands holding up everything else (unless `bases` is false). A held tool's own hoses' nozzles don't get in its
    * way, since one left at its spout (see keepPouring) is rolled back up if it's set down there again (see setDown),
    * nor do the hoses following it (see gather). Nor are the tool `away`, about to be picked up, and the hoses `skip`.
+   *
+   * A sheet of blotting paper lying on a counter (see ToolShape.flat) is in nothing's way but another sheet's: whatever
+   * else is set down on its cell stands on it as if it weren't there, a stand's base included. And nothing but
+   * another sheet, and what's built in (the room, the counters, the cabinet, the faucets' risers and the tools that
+   * are fixed), is in the way of a held sheet, which is laid under whatever stands there.
    */
   private obstacles(h: Held | null, bases = true, away: Tool | null = null, skip: ReadonlySet<Hose> = new Set()): Box[] {
     // while the airlock's doors are open, its doorway and chamber take the front wall's place
     const room = this.wake === 'closed' ? roomBoxes(ROOM) : [...roomBoxes(ROOM, false), ...airlockBoxes()];
     const riders = h?.kind === 'scale' ? new Set(h.sc.load.map((l) => l.f)) : new Set<Flask>();
     const out: Box[] = [...room, ...COUNTER_BOXES, CABINET_BOX, ...this.risers()];
-    for (const f of this.flasks) if (!(h?.kind === 'flask' && h.f === f) && !riders.has(f)) out.push(flaskBox(f));
     const gone = (t: Tool) => (h?.kind === 'tool' && h.t === t) || t === away;
-    for (const t of this.tools) if (!gone(t)) out.push(toolBox(t));
+    if (h?.kind === 'tool' && h.t.shape.flat) {
+      for (const t of this.tools) if (!gone(t) && (t.shape.flat || t.shape.fixed)) out.push(toolBox(t));
+      return out;
+    }
+    for (const f of this.flasks) if (!(h?.kind === 'flask' && h.f === f) && !riders.has(f)) out.push(flaskBox(f));
+    for (const t of this.tools) if (!gone(t) && !t.shape.flat) out.push(toolBox(t));
     for (const sc of this.scales) if (!(h?.kind === 'scale' && h.sc === sc)) out.push(scaleBox(sc));
     const following = new Set(h?.follow?.map((f) => f.hose));
     for (const hose of this.hoses)
@@ -2209,14 +2222,14 @@ export class GameEngine {
 
   /**
    * The open top of the vessel the crosshair is on, to pour a held flask into: a flask's, or a tool's tank's; or, with
-   * `sheets`, the face of a sheet of test paper, which is poured onto but has nothing to dip into.
+   * `sheets`, the face of a sheet of blotting paper (see BLOTTERS), which is poured onto but has nothing to dip into.
    */
   private mouthAimed(sheets = false): Mouth | null {
     const p = this.target;
     const v =
       p?.kind === 'flask' ? p.f
       : p?.kind === 'tool' && p.part === 'tank' ? p.t.tanks[p.k]
-      : sheets && p?.kind === 'tool' && p.t.kind === 'testpaper' ? p.t.paper[0]
+      : sheets && p?.kind === 'tool' && isBlotter(p.t.kind) ? p.t.paper[0]
       : null;
     return (v && this.open.find((m) => m.v === v)) ?? null;
   }
@@ -2390,21 +2403,53 @@ export class GameEngine {
     for (const f of this.flasks) if (f.tilt < 0.05) out.push(flaskMouth(f));
     // (the station's funnel is back in the wall through a changeover)
     for (const t of this.tools) if (!t.away) t.tanks.forEach((_, k) => t.isOpen(k) && out.push(tankMouth(t, k)));
-    // a sheet of test paper's whole face
-    for (const t of this.tools) if (t.kind === 'testpaper') out.push(paperMouth(t));
+    // a sheet of blotting paper's whole face
+    for (const t of this.tools) if (isBlotter(t.kind)) out.push(paperMouth(t));
     return out;
   }
 
-  /** Where something falling from p stops: the first open top under it, or else the floor or counter. */
+  /**
+   * Where something falling from p stops, for drawing it: the first open top under it, or else the floor or counter. A
+   * soaked sheet of blotting paper stops none of it (see land), so it's drawn falling on past one.
+   */
   private landsAt(p: Vec3, mouths: readonly Mouth[]): number {
-    const m = mouthBelow(mouths, p);
+    let m = mouthBelow(mouths, p);
+    while (m && m.v instanceof Blotter && m.v.soaked) m = mouthBelow(mouths, { x: p.x, y: m.y, z: p.z });
     return m ? m.y : groundAt(p.x, p.z);
   }
 
   /**
+   * What fell from `from` lands in the open top m under it: `amount` of src (by volume), which isn't depleted, as a
+   * stream (see stream), or, `drop`, as a drop (see fill). A sheet of blotting paper's face is no vessel's mouth: the
+   * sheet takes up what it has room for (see Blotter.soak), and the rest falls on from where it struck, into the next
+   * open top below, if there is one. Under a sheet lying on a counter there's none, so the rest is lost, as off the
+   * bare counter; under one held in the hand there may be, so a sheet waved through a stream is wetted, and the
+   * stream runs on into whatever it was filling.
+   */
+  private land(m: Mouth | null, from: Vec3, src: Fluid, amount = volume(src), drop = false): void {
+    while (m && m.v instanceof Blotter) {
+      // (it's heard striking the sheet, however much of it the sheet takes up)
+      if (!drop) this.inflow.set(m.v, (this.inflow.get(m.v) ?? 0) + amount);
+      if (!m.v.soaked) {
+        // a packet of its own, since src isn't to be depleted, for the sheet to take its share out of
+        const rest = new Vessel(Infinity);
+        rest.addFrom(src, amount, true);
+        m.v.soak(rest);
+        if (rest.N <= 0) return;
+        src = rest;
+        amount = volume(rest);
+      }
+      m = mouthBelow(this.open, { x: from.x, y: m.y, z: from.z });
+    }
+    if (!m) return;
+    if (drop) this.fill(m.v, src, amount);
+    else this.stream(m.v, src, amount);
+  }
+
+  /**
    * Pour `amount` of src (by volume) into v, without depleting src, however full v is. Whatever no longer
-   * fits overflows (see overflow). (A sheet of test paper's paper takes up only what it has room for, and the rest is
-   * lost: see Blotter.)
+   * fits overflows (see overflow). What's falling gets here through land, which knows a sheet of blotting paper's
+   * face from a vessel's mouth.
    */
   private fill(v: Vessel, src: Fluid, amount = volume(src)): void {
     v.addFrom(src, amount, true);
@@ -2434,8 +2479,7 @@ export class GameEngine {
     let spill = this.spills.get(v);
     if (!spill) this.spills.set(v, (spill = { at: rim, v: new Vessel(Infinity) }));
     spill.v.addFrom(out, volume(out), true);
-    const below = mouthBelow(this.open, rim);
-    if (below) this.stream(below.v, out);
+    this.land(mouthBelow(this.open, rim), rim, out);
   }
 
   /* ---------------- main loop ---------------- */
@@ -2640,9 +2684,8 @@ export class GameEngine {
       // in a drop, which falls on its own time
       const pour = (drop: Vessel, out: Vessel | null, sp: Vec3, target: Mouth | null, loose: boolean): boolean => {
         const down = drip(drop, out, step);
-        if (down && down === out) {
-          if (target) this.stream(target.v, out);
-        } else if (down && !loose) this.falling.push({ v: down, x: sp.x, y: sp.y, z: sp.z, vy: 0 });
+        if (down && down === out) this.land(target, sp, out);
+        else if (down && !loose) this.falling.push({ v: down, x: sp.x, y: sp.y, z: sp.z, vy: 0 });
         return !!down && down === out;
       };
       // what leaves each outlet over the whole frame, for drawing: a single substep's can be nothing, as when a
@@ -2658,9 +2701,9 @@ export class GameEngine {
         if (D && this.pour) {
           const out = new Vessel(Infinity);
           transfer(D, out, POUR_RATE * step);
-          if (this.pour.into) this.stream(this.pour.into.v, out);
+          this.land(this.pour.into, this.pour.from, out);
         }
-        for (const { fa, m } of this.faucetFlows) this.stream(m.v, fa.output, FILL_RATE * step);
+        for (const { fa, from, m } of this.faucetFlows) this.land(m, from, fa.output, FILL_RATE * step);
         this.tools.forEach((t, j) => {
           if (t === stillTool) return;
           t.step(step).forEach((out, k) => {
@@ -2672,16 +2715,20 @@ export class GameEngine {
             tally(toolTotals[j][k], null, pour(t.drops[k], out, spouts[j][k], targets[j][k], this.loose(t, k)));
           });
         });
-        // falling drops land in the first open top they pass, or go down the sink
+        // falling drops land in the first open top they pass, or go down the sink; what's left of one that struck a
+        // sheet of blotting paper, which took up what it had room for, falls on
         this.falling = this.falling.filter((d) => {
           const from = d.y;
           d.vy += GRAVITY * step;
           d.y -= d.vy * step;
           const m = mouthBelow(mouths, { x: d.x, y: from, z: d.z });
-          const lands = !!m && m.y >= d.y;
+          let lands = !!m && m.y >= d.y;
           if (lands) {
-            this.fill(m!.v, d.v);
             this.landed.push({ x: d.x, y: m!.y, z: d.z });
+            if (m!.v instanceof Blotter) {
+              m!.v.soak(d.v);
+              lands = d.v.N <= 0;
+            } else this.fill(m!.v, d.v);
           }
           return !lands && d.y > groundAt(d.x, d.z);
         });
@@ -2818,8 +2865,8 @@ export class GameEngine {
       mine.add(h.f);
       outlets.push({ at: flaskLip(h.f, POUR_ANG), lip: true });
     } else if (h.kind === 'tool') {
-      // (a sheet of test paper's face is landed on as a tank's open top is)
-      for (const v of h.t.kind === 'testpaper' ? h.t.paper : h.t.tanks) mine.add(v);
+      // (a sheet of blotting paper's face is landed on as a tank's open top is)
+      for (const v of isBlotter(h.t.kind) ? h.t.paper : h.t.tanks) mine.add(v);
       // a spout with its hose out lets out at the hose's nozzle, which stays where it is (see below)
       h.t.shape.spouts.forEach((_, j) => {
         if (!this.hoseOn({ tool: h.t, spout: j })) outlets.push({ at: spoutAt(h.t, j), lip: false });
@@ -2892,7 +2939,7 @@ export class GameEngine {
 
   /**
    * Where what's held, at pose p, would come to rest if let go, or why it can't. Only squarely on a counter: a flask,
-   * a scale or a tool that lies on the bench (a sheet of test paper) goes straight up or down until it's on the counter under it, which
+   * a scale or a tool that lies on the bench (a sheet of test paper or bond paper) goes straight up or down until it's on the counter under it, which
    * its whole footprint must be over (or a flask over a scale, onto its platform); a tool or hose's nozzle on a stand
    * stays at the height it's held, no higher than its stand reaches and no lower than the top of a counter it's held
    * sunk into, while its stand's base goes down onto the counter, which the whole base must be over (what it holds can
@@ -3008,7 +3055,7 @@ export class GameEngine {
     if (!h || this.sniffing) return [];
     const guide = (a: Aim, look: GuideLook): Frame['guides'][number] => {
       const { x, y, z, hx, hz, yaw = 0 } = a.m;
-      // (a sheet of test paper's face is square, not round)
+      // (a sheet of blotting paper's face is square, not round)
       return { from: a.from, toY: y, look, mouth: { x, y, z, hx, hz, yaw, ...(a.m.v instanceof Blotter ? { square: true } : {}) }, v: a.m.v };
     };
     const out = this.aims(h, this.open).filter((a) => a.held === 'lip').map((a) => guide(a, 'solid'));
@@ -3059,10 +3106,10 @@ export class GameEngine {
       });
     for (const { at, v } of this.spills.values())
       if (v.N > TRACE) streams.push({ from: at, toY: this.landsAt(at, mouths), fluid: v, flow: volume(v) / (MAX_FLOW * this.spillTime) });
-    for (const { fa, from, m } of this.faucetFlows) streams.push({ from, toY: m.y, fluid: fa.output, flow: FILL_RATE / CAP });
+    for (const { fa, from } of this.faucetFlows) streams.push({ from, toY: this.landsAt(from, mouths), fluid: fa.output, flow: FILL_RATE / CAP });
     const h = this.held;
     if (this.pour && h?.kind === 'flask' && h.f.N > TRACE)
-      streams.push({ from: this.pour.from, toY: this.pour.into?.y ?? groundAt(this.pour.from.x, this.pour.from.z), fluid: h.f, flow: POUR_RATE / CAP });
+      streams.push({ from: this.pour.from, toY: this.landsAt(this.pour.from, mouths), fluid: h.f, flow: POUR_RATE / CAP });
     const drops: Frame['drops'][number][] = [];
     for (const t of this.tools) t.drops.forEach((v, k) => drops.push({ at: this.outletAt(t, k), v, hanging: true }));
     for (const d of this.falling) drops.push({ at: d, v: d.v, hanging: false });
@@ -3392,8 +3439,12 @@ export class GameEngine {
         this.clock += dt;
         this.spin = (this.spin + SPIN * dt) % (2 * Math.PI);
         this.station().steady += dt;
-        // (and the shadow lamp, if it's on, shines on through it)
-        for (const t of this.tools) if (t.kind === 'shadowlamp') t.shine(dt);
+        // (and the shadow lamp, if it's on, shines on through it; and a sheet of blotting paper that was still
+        // developing goes on developing)
+        for (const t of this.tools) {
+          if (t.kind === 'shadowlamp') t.shine(dt);
+          if (isBlotter(t.kind)) t.step(dt);
+        }
       },
     };
   }

@@ -13,7 +13,7 @@ import { tankMouth } from './bodies';
 import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, ATOM_PLACE, atomSector, BOND_ENDS, BOND_TRIANGLE, BOND_KEYS, SPECTROSCOPE, bondPoint, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, BOND_KEYS, SPECTROSCOPE, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
   clockText, needleAt, CULTURE, harm, cultureLevel, cultureCells, STRIP, STRIP_FOOT, STRIP_RUN, DISH, DISH_CAP, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SHEET, darkness, lampLight, type Mouth,
 } from './tools';
 
@@ -2085,59 +2085,9 @@ describe('spectroscope', () => {
   });
 });
 
-describe('bond visualizer', () => {
+describe('bondShares', () => {
   const bond = (k: string) => BOND_KEYS.indexOf(k);
   const RG = pairOf('R', 'G');
-
-  it('is a one-of-a-kind inline instrument with one spout', () => {
-    expect(INLINE_TOOLS).toContain('visualizer');
-    expect(UNIQUE_TOOLS).toContain('visualizer');
-    expect(new Tool('visualizer', 0).shape.spouts).toHaveLength(1);
-  });
-
-  it('puts G at the top of a triangle, R at its bottom left, B at its bottom right and K in its middle', () => {
-    const { x, y, r } = BOND_TRIANGLE;
-    const at = (a: 'R' | 'G' | 'B' | 'K') => bondPoint(SECTOR_ATOMS.indexOf(a));
-    expect(at('G').x).toBeCloseTo(x, 9);
-    expect(at('G').y).toBeCloseTo(y - r, 9);
-    expect(at('R').x).toBeCloseTo(x - (r * Math.sqrt(3)) / 2, 9);
-    expect(at('B').x).toBeCloseTo(x + (r * Math.sqrt(3)) / 2, 9);
-    expect(at('R').y).toBeCloseTo(y + r / 2, 9);
-    expect(at('B').y).toBeCloseTo(y + r / 2, 9);
-    expect(at('K')).toEqual({ x, y });
-    // equilateral: every corner as far from each other corner
-    const d = (p: { x: number; y: number }, q: { x: number; y: number }) => Math.hypot(p.x - q.x, p.y - q.y);
-    expect(d(at('G'), at('R'))).toBeCloseTo(d(at('R'), at('B')), 9);
-    expect(d(at('G'), at('B'))).toBeCloseTo(d(at('R'), at('B')), 9);
-  });
-
-  it("cuts a triangle into four equal ones, each corner's atom at its corner and K upside down in the middle", () => {
-    const area = (ps: (readonly [number, number])[]) =>
-      Math.abs((ps[1][0] - ps[0][0]) * (ps[2][1] - ps[0][1]) - (ps[2][0] - ps[0][0]) * (ps[1][1] - ps[0][1])) / 2;
-    const whole = area((['G', 'B', 'R'] as const).map((a) => ATOM_PLACE[a]));
-    for (const a of SECTOR_ATOMS) {
-      const s = atomSector(a);
-      expect(s).toHaveLength(3);
-      expect(area(s)).toBeCloseTo(whole / 4, 9);
-      // each sector is centered on its atom's place, between the corner and the middle for a corner's
-      const mid = [0, 1].map((k) => (s[0][k] + s[1][k] + s[2][k]) / 3);
-      const want = a === 'K' ? [0, 0] : ATOM_PLACE[a].map((v) => v / 2);
-      expect(mid[0]).toBeCloseTo(want[0], 9);
-      expect(mid[1]).toBeCloseTo(want[1], 9);
-    }
-    // the middle one points down: one corner at the bottom, two level above it
-    const ys = atomSector('K').map((p) => p[1]).sort((p, q) => p - q);
-    expect(ys[0]).toBeCloseTo(ys[1], 9);
-    expect(ys[2]).toBeGreaterThan(ys[1]);
-  });
-
-  it("joins each bond's own two atoms, one line for each of the six", () => {
-    expect(BOND_ENDS).toHaveLength(6);
-    expect(new Set(BOND_ENDS.map(([i, j]) => [i, j].sort().join())).size).toBe(6);
-    BOND_ENDS.forEach(([i, j], b) => {
-      expect([SECTOR_ATOMS[i], SECTOR_ATOMS[j]].sort().join('')).toBe(BOND_KEYS[b].split('').sort().join(''));
-    });
-  });
 
   it('reads the share, by volume, of molecules with each bond in them', () => {
     const v = new Vessel(Infinity);
@@ -2150,35 +2100,10 @@ describe('bond visualizer', () => {
     expect(sh[bond('RB')]).toBeCloseTo(w(20, TARGET), 9);
     expect(sh[bond('GB')]).toBeCloseTo(w(20, TARGET), 9);
     expect(sh[bond('BK')]).toBe(0);
-    // one species with a bond lights its line fully
+    // one species with a bond is all of it
     const pure = new Vessel(Infinity);
     pure.setMolecules(RG, 7);
     expect(bondShares(pure, volume(pure))[bond('RG')]).toBeCloseTo(1, 12);
-  });
-
-  it('lets everything through, reading what passed lately, fading out smoothly once nothing passes, then dark', () => {
-    const bv = new Tool('visualizer', 0);
-    expect(bv.links).toBeNull();
-    const src = new Vessel(Infinity);
-    src.setMolecules(R, CAP);
-    src.setMolecules(RG, CAP);
-    let [added, through] = [0, 0];
-    const run = (secs: number, on: boolean) => {
-      for (let i = 0; i < Math.round(secs / 0.02); i++) {
-        if (on) added += bv.tanks[0].addFrom(src, 0.25 * CAP * 0.02);
-        through += bv.step(0.02)[0]?.N ?? 0;
-      }
-    };
-    run(20 * INSTRUMENT_TAU, true);
-    expect(through + bv.tanks[0].N).toBe(added);
-    const half = bondShares(src, volume(src))[bond('RG')];
-    expect(bv.links![bond('RG')]).toBeCloseTo(half, 2);
-    expect(bv.links![bond('RB')]).toBe(0);
-    // as it fades it still reads the same mix
-    run(2 * INSTRUMENT_TAU, false);
-    expect(bv.links![bond('RG')]).toBeCloseTo(half, 2);
-    run(30 * INSTRUMENT_TAU, false);
-    expect(bv.links).toBeNull();
   });
 });
 
