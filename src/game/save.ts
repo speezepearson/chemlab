@@ -81,7 +81,7 @@ export interface SavedTool extends SavedDepth {
   /**
    * An instrument's own state, if it has any (see Tool.memory): a thermometer's bulb's temperature, and whether it's
    * broken; how much a wicking strip's paper has drunk and how scorched it is; how much a column's bed has
-   * drunk; which of a sleeper culture's cells are dead; what the station is fitted for, and how far into its
+   * drunk; what the station is fitted for, and how far into its
    * changeover it is (a save from before it was fitted for anything but the cryostabilizer has none).
    */
   memory?: number[];
@@ -91,6 +91,8 @@ export interface SavedTool extends SavedDepth {
   bed?: SavedVessel[];
   /** From when a wicking strip's paper took up a sample from a pad on top of it, as one vessel; ignored now. */
   sample?: SavedVessel;
+  /** A sheet of shadow paper's image, if it's had any light (see Tool.image). */
+  image?: string;
 }
 
 export interface SavedScale extends SavedDepth {

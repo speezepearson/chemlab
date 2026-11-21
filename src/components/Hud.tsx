@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { TOUCH, type Action, type GameEngine, type Hud as HudState } from '../game/engine';
+import { SMELL_FADE_MS, TOUCH, type Action, type GameEngine, type Hud as HudState } from '../game/engine';
 import { WHEEL, wheelSpan } from '../game/wheel';
 
 /** How far a stick's knob can go from its middle, in CSS pixels. */
@@ -225,7 +225,35 @@ function Wheel({ wheel, engine }: { wheel: NonNullable<HudState['wheel']>; engin
 }
 
 /**
- * The crosshair, with hints by it for what the mouse buttons would do, or an equipment wheel while it's held open; the aim while a valve turns; and, on a
+ * What the last sniff smelled of, under the crosshair: each line a strip of its own, the pieces that have come up so
+ * far along it, and lines begun later under the ones before. Nothing that's up ever moves as more comes up: the block
+ * is as wide from the start as it'll be once it's all said (the whole of it is there unseen, for its width), its top
+ * stays put, and its strips grow rightward and downward from their left ends.
+ */
+function Smell({ smell }: { smell: NonNullable<HudState['smell']> }) {
+  let k = 0;
+  const lines = smell.lines.map((line) => line.map((text) => ({ text, on: k++ < smell.shown })));
+  // (the unseen whole is in the same pieces as what's seen, so that it's as wide to the last fraction of a pixel)
+  const strip = (line: { text: string }[], i: number) => (
+    <p key={i}>
+      {line.map((f, j) => (
+        <span key={j}>{(j ? ' ' : '') + f.text}</span>
+      ))}
+    </p>
+  );
+  return (
+    <div className={smell.out ? 'smell out' : 'smell'} style={{ transitionDuration: `${SMELL_FADE_MS}ms` }}>
+      <div className="whole" aria-hidden="true">
+        {lines.map(strip)}
+      </div>
+      <div className="said">{lines.filter((line) => line[0].on).map((line, i) => strip(line.filter((f) => f.on), i))}</div>
+    </div>
+  );
+}
+
+/**
+ * The crosshair, with hints by it for what the mouse buttons would do, or an equipment wheel while it's held open; the aim while a valve turns; under
+ * the crosshair, what the last sniff smelled of, coming up a piece at a time and then fading out; and, on a
  * screen with a mouse and keys, everything else that can be done just now, in a corner, unless `/` has hidden it.
  */
 export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; help: boolean }) {
@@ -237,7 +265,8 @@ export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; 
         <Wheel wheel={hud.wheel} engine={engine} />
       ) : (
         <>
-          <div className={hud.aim ? 'crosshair dim' : 'crosshair'} />
+          {/* (dim while a valve turns, or she's sniffing: it aims at nothing then) */}
+          <div className={hud.aim || hud.sniffing ? 'crosshair dim' : 'crosshair'} />
           {/* each on its own side of the crosshair, whether or not the other's there */}
           <div className="hints">
             {hud.press && (
@@ -255,6 +284,8 @@ export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; 
       )}
       {hud.aim && <div className="aim" style={{ left: hud.aim.x, top: hud.aim.y }} />}
       {hud.note && <div className={hud.tip ? 'note tip' : 'note'}>{hud.note}</div>}
+      {/* what the last sniff smelled of: a new one comes up afresh, even if it reads the same */}
+      {hud.smell && <Smell key={hud.smell.n} smell={hud.smell} />}
       {!TOUCH && help && <Actions actions={hud.actions} />}
     </>
   );

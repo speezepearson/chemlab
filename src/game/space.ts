@@ -64,18 +64,37 @@ const ISLAND = { w: 10 * CELL, d: 4 * CELL, x0: -4 * CELL, z0: 6 * CELL, dx: 13 
  * runs on from its end.
  */
 export const CABINET_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 18 * CELL, z0: ROOM.z0, z1: ROOM.z0 + 3 * CELL };
-/** A counter: its x and z extents, and whether it's an island out in the room rather than a sink counter on a wall. */
+/**
+ * Where the shadow lamp stands (see LAMP in tools.ts): on a bench of its own in the room's front left corner, five
+ * grid cells along the front wall and three out from it, as high as the counters. Nothing could be set down there
+ * before it was, so no save has anything standing in its way. The lamp's trough lies along its edge toward the room;
+ * the two rows of cells behind that are free bench, long enough for the longest tools (a heater, a sorter, a
+ * separator) on their two stands. It stops short of the airlock's doorway.
+ */
+export const LAMP_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 5 * CELL, z0: ROOM.z1 - 3 * CELL, z1: ROOM.z1 };
+/**
+ * The floor of the shadow lamp's channel (see LAMP in tools.ts): a plate lying on its bench, over the three cells of
+ * the bench's row nearest the room that the channel is, a cell in from either end, its top `y` high, a little above
+ * the bench's. What's set down in the channel stands on it (see counterUnder), and what falls there lands on it (see
+ * groundAt).
+ */
+export const LAMP_FLOOR = { x0: LAMP_AREA.x0 + CELL, x1: LAMP_AREA.x1 - CELL, z0: LAMP_AREA.z0, z1: LAMP_AREA.z0 + CELL, y: LIFT + CELL / 10 };
+/**
+ * A counter: its x and z extents, and whether it's an island out in the room rather than a sink counter on a wall, or
+ * the shadow lamp's own bench.
+ */
 export interface Counter {
   x0: number;
   x1: number;
   z0: number;
   z1: number;
   island?: boolean;
+  lamp?: boolean;
 }
 /**
- * The counters, all LIFT high, as x and z extents: one along the back wall under the old bench, from the equipment
- * cabinet on, one along the right wall under the faucets, and a grid of islands out in the room, like an
- * undergraduate lab's benches.
+ * The counters, all LIFT high (but for the floor of the shadow lamp's channel on its bench, see LAMP_FLOOR), as x and z extents: one along the back wall under the old bench, from the equipment
+ * cabinet on, one along the right wall under the faucets, a grid of islands out in the room, like an
+ * undergraduate lab's benches, and last the shadow lamp's bench in the front left corner.
  */
 export const COUNTERS: readonly Counter[] = [
   { x0: CABINET_AREA.x1, x1: ROOM.x1 - SINK_D, z0: ROOM.z0, z1: ROOM.z0 + COUNTER_D },
@@ -85,15 +104,21 @@ export const COUNTERS: readonly Counter[] = [
     const z0 = ISLAND.z0 + Math.floor(i / ISLAND.cols) * ISLAND.dz;
     return { x0, x1: x0 + ISLAND.w, z0, z1: z0 + ISLAND.d, island: true };
   }),
+  { ...LAMP_AREA, lamp: true },
 ];
 
-/** How high the floor or counter is under (x, z): where whatever falls there goes down the sink. */
+/**
+ * How high the floor or counter is under (x, z), or the floor of the shadow lamp's channel (see LAMP_FLOOR): where
+ * whatever falls there goes down the sink.
+ */
 export function groundAt(x: number, z: number): number {
-  return COUNTERS.some((c) => x >= c.x0 && x <= c.x1 && z >= c.z0 && z <= c.z1) ? LIFT : 0;
+  const within = (c: { x0: number; x1: number; z0: number; z1: number }) => x >= c.x0 && x <= c.x1 && z >= c.z0 && z <= c.z1;
+  return within(LAMP_FLOOR) ? LAMP_FLOOR.y : COUNTERS.some(within) ? LIFT : 0;
 }
 /**
  * The top of the counter a footprint (a rectangle `hx` by `hz` either side of (x, z), turned by `yaw` like a box) lies
- * wholly on, or null if it doesn't lie wholly on one: things are set down only squarely on a counter.
+ * wholly on, or null if it doesn't lie wholly on one: things are set down only squarely on a counter. One wholly on
+ * the floor of the shadow lamp's channel (see LAMP_FLOOR) is on that, which is a little higher than its bench.
  */
 export function counterUnder(f: { x: number; z: number; hx: number; hz: number; yaw: number }): number | null {
   const c = Math.cos(f.yaw);
@@ -101,8 +126,8 @@ export function counterUnder(f: { x: number; z: number; hx: number; hz: number; 
   const corners = [-1, 1].flatMap((sx) =>
     [-1, 1].map((sz) => ({ x: f.x + sx * f.hx * c + sz * f.hz * s, z: f.z - sx * f.hx * s + sz * f.hz * c })),
   );
-  const on = COUNTERS.find((k) => corners.every((p) => p.x >= k.x0 && p.x <= k.x1 && p.z >= k.z0 && p.z <= k.z1));
-  return on ? LIFT : null;
+  const on = (k: { x0: number; x1: number; z0: number; z1: number }) => corners.every((p) => p.x >= k.x0 && p.x <= k.x1 && p.z >= k.z0 && p.z <= k.z1);
+  return on(LAMP_FLOOR) ? LAMP_FLOOR.y : COUNTERS.some(on) ? LIFT : null;
 }
 /**
  * How far out from the back wall things stand when nothing says otherwise: over the counter, in the middle of its

@@ -12,10 +12,10 @@ import { Tool, type ToolKind } from './tools';
  */
 
 /** What the cabinet stocks: every kind of thing the equipment wheels make. */
-export type Stocked = 'flask' | 'scale' | Exclude<ToolKind, 'receptacle' | 'analyzer' | 'spectroscope' | 'visualizer'>;
+export type Stocked = 'flask' | 'scale' | Exclude<ToolKind, 'receptacle' | 'spectroscope' | 'shadowlamp'>;
 
 /** The consumables: stacked deep in the cabinet, more than anyone could use, so taking one never empties it. */
-export const ENDLESS: readonly Stocked[] = ['thermometer', 'thermometerWide', 'strip', 'culture'];
+export const ENDLESS: readonly Stocked[] = ['thermometer', 'thermometerWide', 'strip', 'sheet', 'testpaper', 'bondpaper'];
 
 /** Whether the cabinet's supply of a kind never runs out. */
 export const endless = (k: Stocked) => ENDLESS.includes(k);
@@ -23,9 +23,9 @@ export const endless = (k: Stocked) => ENDLESS.includes(k);
 /** How many of each kind the cabinet holds, full: thirty flasks, and eight of everything else (see ENDLESS). */
 export const STOCK: Record<Stocked, number> = {
   flask: 30, scale: 8, dispenser: 8, pipette: 8, exchanger: 8, separator: 8, splitter: 8, multiplexer: 8, sorter: 8,
-  heater: 8, tank: 8, meter: 8, dilatometer: 8, column: 8, dish: 8,
+  heater: 8, tank: 8, meter: 8, dilatometer: 8, column: 8,
   // drawn as this many, but endless
-  thermometer: 16, thermometerWide: 16, strip: 16, culture: 8,
+  thermometer: 16, thermometerWide: 16, strip: 16, sheet: 16, testpaper: 16, bondpaper: 16,
 };
 
 /**
@@ -59,12 +59,17 @@ const BAYS: readonly (readonly (readonly Compartment[])[])[] = [
     [{ kind: 'exchanger', cols: 2, high: 1, deep: 4 }],
     [{ kind: 'splitter', cols: 1, high: 2, deep: 4 }, { kind: 'pipette', cols: 2, high: 1, deep: 4 }],
     [{ kind: 'dilatometer', cols: 2, high: 1, deep: 4 }],
-    [{ kind: 'column', cols: 1, high: 1, deep: 8 }, { kind: 'meter', cols: 1, high: 1, deep: 8 }, { kind: 'dish', cols: 1, high: 2, deep: 4 }],
+    [{ kind: 'column', cols: 1, high: 1, deep: 8 }, { kind: 'meter', cols: 1, high: 1, deep: 8 }],
   ],
   [
-    [{ kind: 'dispenser', cols: 2, high: 1, deep: 4 }, { kind: 'culture', cols: 2, high: 1, deep: 4 }],
-    [{ kind: 'strip', cols: 8, high: 1, deep: 2 }],
+    [{ kind: 'dispenser', cols: 2, high: 1, deep: 4 }],
+    // (the sheets of test paper in one stack, lying flat on the shelf, and the sheets of bond paper in another)
+    [
+      { kind: 'strip', cols: 8, high: 1, deep: 2 }, { kind: 'testpaper', cols: 1, high: 16, deep: 1 },
+      { kind: 'bondpaper', cols: 1, high: 16, deep: 1 },
+    ],
     [{ kind: 'thermometer', cols: 8, high: 1, deep: 2 }, { kind: 'thermometerWide', cols: 8, high: 1, deep: 2 }],
+    [{ kind: 'sheet', cols: 1, high: 1, deep: 16 }],
   ],
 ];
 

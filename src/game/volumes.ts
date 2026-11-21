@@ -2,9 +2,10 @@
  * The player's volume settings, one slider per kind of sound plus one for everything. A slider runs from 0 to 1;
  * its gain goes as the square of its position, so the middle is the sound as synthesized, the top is four times
  * that, and the bottom is silent. Each starts where it sounds right (DEFAULT_VOLUMES). Kept in local storage, not
- * in saves: it's a preference.
+ * in saves: it's a preference. What's stored can have sliders there no longer are (as one for a machine's hum, from
+ * when there was a machine that hummed): they're ignored (see parseVolumes).
  */
-export const CHANNELS = ['master', 'hum', 'klaxon', 'alarm', 'drips', 'trickle', 'analyzer', 'receptacle', 'glass'] as const;
+export const CHANNELS = ['master', 'hum', 'klaxon', 'alarm', 'drips', 'trickle', 'receptacle', 'glass'] as const;
 export type Channel = (typeof CHANNELS)[number];
 
 export const CHANNEL_NAMES: Record<Channel, string> = {
@@ -14,7 +15,6 @@ export const CHANNEL_NAMES: Record<Channel, string> = {
   alarm: 'fire alarm',
   drips: 'drips',
   trickle: 'streams',
-  analyzer: 'analyzer',
   receptacle: 'station',
   glass: 'glass',
 };
@@ -32,7 +32,6 @@ export const DEFAULT_VOLUMES: Readonly<Volumes> = {
   alarm: 0.26,
   drips: MIDDLE,
   trickle: MIDDLE,
-  analyzer: MIDDLE,
   receptacle: MIDDLE,
   glass: MIDDLE,
 };
@@ -46,7 +45,10 @@ export function gainOf(slider: number): number {
   return (Math.max(0, Math.min(1, slider)) / MIDDLE) ** 2;
 }
 
-/** Volumes from stored JSON, tolerating junk: anything missing or not a number in [0, 1] gets its default. */
+/**
+ * Volumes from stored JSON, tolerating junk: anything missing or not a number in [0, 1] gets its default, and
+ * anything for a slider there isn't is left out.
+ */
 export function parseVolumes(json: string | null): Volumes {
   const out = defaultVolumes();
   let raw: unknown;

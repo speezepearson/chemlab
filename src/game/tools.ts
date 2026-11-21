@@ -1,13 +1,13 @@
-import { BOND_KEYS, BONDS, SOLVENT, type ColorAtom } from '../chem/atoms';
+import { BOND_KEYS, BONDS, type ColorAtom } from '../chem/atoms';
 import { THERMO, T_ROOM } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
-import { END_WEIGHT, LOOSE_ENDS } from '../chem/shape';
+import { END_WEIGHT, RINGED } from '../chem/shape';
 import { NS, SPECIES } from '../chem/species';
 import { CAP, DELIVERY, TRACE } from './config';
 import { COOLING } from './cooling';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
-import { CELL, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
+import { CELL, LAMP_FLOOR, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
 import { CRYOSTABILIZER, SUPPLIES, nextSupply, type Supply } from './supply';
 
 /** Capacity of each tank on a tool, in atoms. */
@@ -461,7 +461,7 @@ export const DIVERTER_HOLD = 0.4;
  * straight through at FUNNEL_RATE however full it is, down to a spout at its foot, past what reads what goes by: a
  * cabinet beside it (see INSTRUMENT), or the flow meter's little readout (see METER_BODY).
  */
-export const INLINE_TOOLS: readonly ToolKind[] = ['analyzer', 'spectroscope', 'visualizer', 'meter'];
+export const INLINE_TOOLS: readonly ToolKind[] = ['spectroscope', 'meter'];
 /** How much an inline instrument's tube holds, by volume: a twentieth of a flask, just a buffer. */
 export const TUBE_CAP = CAP / 20;
 /** How wide an inline instrument's tube is inside, in local units. */
@@ -481,19 +481,14 @@ export const INLINE_DOCK = 150;
  */
 export const INSTRUMENT_TAU = 0.5;
 /**
- * The composition analyzer's, spectroscope's and bond visualizer's cabinet, right of the tube, with its screen, and how high the pipe
- * from the tube into it runs, in local units. The flow meter has none, just a little readout (see METER_BODY).
+ * The spectroscope's cabinet, right of the tube, with its screen, and how high the pipe from the tube into it runs,
+ * in local units. The flow meter has none, just a little readout (see METER_BODY).
  */
 export const INSTRUMENT = {
   body: { x0: 14, x1: 186, y0: 4, y1: 96 },
   screen: { x0: 24, x1: 176, y0: 14, y1: 86 },
   inY: 70,
 };
-
-/** How loud the composition analyzer hums while it has something to read, from 0 to 1 (see rumble.ts). */
-export const ANALYZER_HUM = 0.3;
-/** The share of what passes through the composition analyzer that it draws off into its cabinet, to read, and out its waste spout. */
-export const ANALYZER_SAMPLE = 0.01;
 
 /** How many stretches the heater's tube is cut into, each holding what passes through it as one mixed packet. */
 export const HEATER_CELLS = 24;
@@ -672,15 +667,6 @@ export const dipUnder = (kind: ToolKind): number =>
   kind === 'strip' ? STRIP.paper.point / 2 - 0.5 : (THERMOMETER_ROD.bulb.y1 - THERMOMETER_ROD.bulb.y0) / 2 + 1;
 
 /**
- * The dish (see SHAPES.dish): a shallow open glass tray, reaching w either side of its middle, h deep and d front to
- * back inside, on a little base `base` tall, for its stand to clamp.
- */
-export const DISH = { w: 20, h: 5, d: 16, base: 13 };
-
-/** How much the dish holds, by volume: as much as it's drawn to hold (see SPACE_PER_ATOM), about 0.05 flask. */
-export const DISH_CAP = Math.round((2 * DISH.w * DISH.d * DISH.h) / SPACE_PER_ATOM);
-
-/**
  * How freely each species runs along a wicking strip's paper or a column's bed: 1 − drag / STRIP.drag, where a
  * molecule's drag is its weight, plus the weight of its loose ends again (see LOOSE_ENDS), which snag in the paper.
  * A liquid runs at the mean of its own (see leadOf), and each species on the paper min(1, its own over the liquid's)
@@ -814,77 +800,103 @@ export function scorchAt(T: number): number {
 }
 
 /**
- * How a sleeper culture behaves (see SHAPES.culture and Tool.sicken):
- * - rate: how fast its cells die, per sim second, in fluid that does them one unit of harm (see harm): each cell in
- *   the fluid dies at random, at this times the fluid's harm, whatever the others do. So half of those in fluid of
- *   harm 0.1 are dead in 30 sim s, and in fluid of harm 1, in 3;
- * - heat: fluid hotter than `from` harms them too, as `per` of a loose end per molecule for each unit of temperature
- *   above it;
- * - pitch: how far apart the cells are, in local units, in rows half a step out of line with each other;
- * - drain: how fast its plate drains, full and with its valve fully open, by volume per sim second: a fifth of a
- *   flask, so it's empty in a few seconds, leaving its cells as they are.
+ * A sheet of shadow paper (see SHAPES.sheet), which the shadow lamp's light darkens, for good, where it falls on it:
+ * - side: the paper, a square, this far across and tall, a grid cell, so it stands across the lamp's channel from wall
+ *   to wall; top: how far down from the sheet's top its square starts, under the bar;
+ * - clip: the bar clipped along its top edge, `h` tall and `d` front to back, which a stand's clamp holds, a little
+ *   wider than the paper;
+ * - margin: how far in from each edge of the paper the lamp's light stops: it falls on the square in the middle (see
+ *   sheetLit), and the margin round that stays as new however long the lamp shines;
+ * - cells: how many cells a side the light that square has had is kept in (see Tool.dose), a whole number of them to
+ *   the margin's width;
+ * - tau: how many sim seconds of the lamp's light, unshadowed, darken it all but 1/e of the way (see darkness): so
+ *   it's most of the way dark in a second, and all but dark in two;
+ * - full: the most light a cell takes, in sim seconds of it unshadowed: as dark as it gets, to within what a save
+ *   keeps of it (see Tool.image).
  */
-export const CULTURE = { rate: Math.LN2 / 3, heat: { from: 2, per: 0.2 }, pitch: 3.2, drain: CAP / 5 };
+export const SHEET = { side: CELL, top: 14, clip: { h: 14, d: 5 }, margin: CELL / 10, cells: 64, tau: 0.5, full: 3.2 };
+
+/** How far across and tall the square in the middle of a sheet of shadow paper that the lamp's light falls on is (see SHEET.margin). */
+export const sheetLit = (): number => SHEET.side - 2 * SHEET.margin;
 
 /**
- * How loose a molecule of each species is, to a sleeper culture: its loose ends (see LOOSE_ENDS), or 1 for a lone atom,
- * but none for the solvent, which does the cells no harm.
+ * The shadow lamp (see SHAPES.shadowlamp): one long, low trough on a bench of its own. At one end is a closed box, the
+ * lamp's enclosure; from its face an open channel runs between two side walls, over a floor of its own; and across the
+ * channel's far end is an end wall, against whose inner face a sheet of shadow paper stands, facing the lamp (see the slot, in bodies.ts). In
+ * its own frame (x along it, from the lamp toward the sheet; y down from its top; z toward its front, which is the
+ * room; from the middle of the channel), in world units:
+ * - h: how tall it is, enclosure and walls alike: as tall as a sheet's paper, so the bar along a sheet's top stands
+ *   clear above the end wall, to take it out by;
+ * - wall: how thick its side walls and its end wall are;
+ * - floor: how thick the plate that floors the channel is (see LAMP_FLOOR in space.ts, which is where it is in the
+ *   room): as thick as a sheet's margin is wide, so the light's lower edge is level with its top, and the shadow of
+ *   whatever stands on it stands on the bottom edge of the square the light falls on, none of it lost below;
+ * - slot: how far short of the end wall the floor stops: the slot a sheet stands in, its foot on the bench below, a
+ *   little wider than the bar along a sheet's top is thick;
+ * - box: the enclosure, from `x0` to `x1` along it, and as wide as the trough is over its walls;
+ * - channel: the channel, from the enclosure's face at `x0` to the end wall's at `x1`, three grid cells, and reaching
+ *   `z` either side of its middle line, one cell from wall to wall: what's set down in it is on the grid like anything;
+ * - window: the square pane in the enclosure's face that its light leaves by, reaching `r` either side of the
+ *   channel's middle line and of a height `y` down from the top: exactly the square of the sheet it lights (see
+ *   sheetLit), so the sheet's margin, the channel's walls and whatever's outside the trough are never in its light;
+ * - spread: how far its light strays from straight along the channel, as a slope. The enclosure sends its light out
+ *   as a beam with the window's cross-section all the way to the sheet, not spreading from a point, so a shadow is the
+ *   size of what casts it wherever along the channel that stands; but the lamp inside isn't a point, so the beam's
+ *   rays stray this far either side of straight, and a shadow's edge is soft, twice this times how far from the sheet
+ *   what casts it is;
+ * - dial and button: the middles of the dial that sets how long it shines and of the button that sets it off, on the
+ *   enclosure's front, and the button's radius;
+ * - shot: how long it shines for a press of the button (see lampShot), in sim seconds, with the dial at either end:
+ *   from a flash that barely tints the sheet (a tenth of the way dark), to as long as darkens it all the way (see
+ *   SHEET.full), past which there'd be nothing more to see; a factor of 64, so each of the six steps between the
+ *   dial's seven ticks doubles it;
+ * - dim: how much fluid dims its light, per world unit of the light's way through fluid all of whose molecules have a
+ *   ring in them (see lampLight): so that a flask with a few rings in a hundred molecules, about 50 across inside,
+ *   takes a quarter of it, a faint shadow but one that shows on the sheet (see darkness: the sheet's darkening levels
+ *   off, so much less than that never shows at all), one with ten in a hundred takes most of it through its middle
+ *   and visibly less toward its edges, and a full flask of nothing but rings lets through e^−10 of it, none.
  */
-const LOOSENESS: readonly number[] = SPECIES.map((sp, s) =>
-  sp.size === 1 ? +(sp.atoms[0] !== SOLVENT) : LOOSE_ENDS[s].length,
-);
+export const LAMP = {
+  h: SHEET.side, wall: 6, floor: LAMP_FLOOR.y - LIFT, slot: SHEET.clip.d + 1, dim: 0.2, spread: 0.016,
+  box: { x0: -2.5 * CELL, x1: -1.5 * CELL },
+  channel: { x0: -1.5 * CELL, x1: 1.5 * CELL, z: CELL / 2 },
+  window: { r: sheetLit() / 2, y: SHEET.side / 2 },
+  dial: { x: -2 * CELL - 22, y: 36 },
+  button: { x: -2 * CELL + 20, y: 36, r: 7 },
+  shot: { min: SHEET.full / 64, max: SHEET.full },
+};
 
 /**
- * What a fluid does to a sleeper culture: its loose ends per molecule (a lone atom counting as one), plus, if it's
- * hotter than CULTURE.heat.from, CULTURE.heat.per for each unit of temperature above that. Nothing, if there's none.
+ * How many sim seconds the shadow lamp shines for a press of its button, with its dial at a setting from 0 to 1:
+ * LAMP.shot.min at 0, rising by the same factor for each step along the dial to LAMP.shot.max at 1, so the short
+ * exposures that show a faint shadow best (about SHEET.tau: longer, and the paper round the shadow has little left to
+ * darken) can be set as finely as the long ones that tell one deep shadow from another.
  */
-export function harm(f: Fluid): number {
-  let ends = 0;
-  let molecules = 0;
-  for (let s = 0; s < NS; s++) {
-    if (!f.n[s]) continue;
-    ends += f.n[s] * LOOSENESS[s];
-    molecules += f.n[s];
-  }
-  if (molecules <= 0) return 0;
-  return ends / molecules + CULTURE.heat.per * Math.max(0, temperature(f) - CULTURE.heat.from);
+export function lampShot(dial: number): number {
+  const { min, max } = LAMP.shot;
+  return min * (max / min) ** Math.max(0, Math.min(1, dial));
 }
 
-let cultureLayout: { x: number; y: number }[] | null = null;
-
 /**
- * Where a sleeper culture's cells are on its plate, in local units, top row first: in rows CULTURE.pitch apart, each
- * row half a step out of line with the last. The same on every plate.
+ * How much of the shadow lamp's light gets through `length` world units of a fluid, `ring` of whose molecules have a
+ * ring in them (see ringShare): e^(−LAMP.dim · ring · length), so each further stretch of the same fluid takes the
+ * same share of what's left. All of it gets through a fluid with no rings, however much of it there is. Fluids one
+ * after another each take their share.
  */
-export function cultureCells(): readonly { x: number; y: number }[] {
-  if (cultureLayout) return cultureLayout;
-  const tk = SHAPES.culture.tanks[0];
-  const H = SHAPES.culture.tankH ?? TANK_H;
-  const p = CULTURE.pitch;
-  const cells: { x: number; y: number }[] = [];
-  const dy = (p * Math.sqrt(3)) / 2;
-  const rows = Math.floor((H - p) / dy) + 1;
-  const y0 = (H - (rows - 1) * dy) / 2;
-  const across = Math.floor((tk.x1 - tk.x0 - p) / p) + 1;
-  for (let r = 0; r < rows; r++) {
-    // every other row has one fewer, so, centered, it's half a step out of line
-    const cols = across - (r % 2);
-    const x0 = (tk.x0 + tk.x1) / 2 - ((cols - 1) * p) / 2;
-    for (let c = 0; c < cols; c++) cells.push({ x: x0 + c * p, y: y0 + r * dy });
-  }
-  return (cultureLayout = cells);
+export function lampLight(ring: number, length: number): number {
+  return Math.exp(-LAMP.dim * Math.max(0, ring) * Math.max(0, length));
 }
 
-let cultureInside: Piece[] | null = null;
-
 /**
- * How high above the floor of a sleeper culture's plate fluid filling `share` of it stands, as it's drawn (see
- * tankPieces): a cell is in the fluid if it's below that.
+ * How dark shadow paper is, from 0 (as new) to 1, where it's had `dose` sim seconds of the lamp's unshadowed light:
+ * 1 − e^(−dose / SHEET.tau). It only ever darkens, quickly at first and ever more slowly.
  */
-export function cultureLevel(share: number): number {
-  cultureInside ??= tankPieces(SHAPES.culture, 0, tankDepth('culture'));
-  return levelIn(cultureInside, share);
+export function darkness(dose: number): number {
+  return 1 - Math.exp(-Math.max(0, dose) / SHEET.tau);
 }
+
+/** How many of each byte value in a row a sheet's saved image counts at most (see Tool.image). */
+const RUN = 255;
 
 /** How many digits the meter's display has. */
 export const METER_DIGITS = 4;
@@ -903,15 +915,15 @@ export function meterText(rate: number): string {
 }
 
 /**
- * The order of an analyzer triangle's sectors in its reading, and of the bond visualizer's points: the four colors.
- * There's none for the solvent, which the instruments are blind to.
+ * The order of the sectors of a sheet of test paper's triangle in its reading, and of a sheet of bond paper's dots:
+ * the four colors. There's none for the solvent, which both are blind to.
  */
 export const SECTOR_ATOMS: readonly ColorAtom[] = ['R', 'G', 'B', 'K'];
 
 /**
- * Where each atom is on the instruments' screens, the composition analyzer's and the bond visualizer's alike: a
- * triangle standing on its base, G at the top, R at the bottom left, B at the bottom right, and K in the middle. As
- * offsets from the triangle's middle, x right and y down, its corners 1 away.
+ * Where each atom is in a triangle, on a sheet of test paper and a sheet of bond paper alike: the triangle
+ * stands on its base, G at the top, R at the bottom left, B at the bottom right, and K in the middle. As offsets from
+ * the triangle's middle, x right and y down, its corners 1 away.
  */
 export const ATOM_PLACE: Record<ColorAtom, readonly [number, number]> = {
   G: [0, -1],
@@ -921,11 +933,11 @@ export const ATOM_PLACE: Record<ColorAtom, readonly [number, number]> = {
 };
 
 /**
- * An atom's sector of an analyzer triangle, as its three corners (offsets as ATOM_PLACE's): the triangle is cut into
- * four through the middles of its sides, so each corner's atom has the small triangle at that corner, and K the
- * upside-down one in the middle.
+ * An atom's sector of a sheet of test paper's triangle, as its three corners (offsets as ATOM_PLACE's): the triangle
+ * is cut into four through the middles of its sides, so each corner's atom has the small triangle at that corner, and
+ * K the upside-down one in the middle.
  */
-export function analyzerSector(atom: ColorAtom): (readonly [number, number])[] {
+export function atomSector(atom: ColorAtom): (readonly [number, number])[] {
   const corners = (['G', 'B', 'R'] as const).map((a) => ATOM_PLACE[a]);
   const mid = (p: readonly [number, number], q: readonly [number, number]) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2] as const;
   if (atom === 'K') return corners.map((p, i) => mid(p, corners[(i + 1) % 3]));
@@ -933,16 +945,115 @@ export function analyzerSector(atom: ColorAtom): (readonly [number, number])[] {
   return [own, ...corners.filter((p) => p !== own).map((p) => mid(own, p))];
 }
 
+/**
+ * An atom's sector (see atomSector) drawn in from its three sides by `margin`, in the same units (the triangle's
+ * corners 1 from its middle): where a sheet of test paper's stain goes, clear of the lines printed round it. A small
+ * triangle's sides are a quarter of that from its own middle, so from there on nothing's left of it.
+ */
+export function sectorInset(atom: ColorAtom, margin: number): (readonly [number, number])[] {
+  const ps = atomSector(atom);
+  const cx = (ps[0][0] + ps[1][0] + ps[2][0]) / 3;
+  const cy = (ps[0][1] + ps[1][1] + ps[2][1]) / 3;
+  const k = Math.max(0, 1 - margin / 0.25);
+  return ps.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k] as const);
+}
+
+/**
+ * A sheet of test paper (see SHAPES.testpaper): the wicking strip's blotting paper as a sheet that lies flat on a
+ * counter, with a triangle printed on it in black, cut through the middles of its sides into four smaller ones, one
+ * per color (see atomSector). It soaks up what lands on it, as far as it has room (see Blotter), and each small
+ * triangle is stained its atom's color, as strongly as paperReading says, by how much of what it could hold has
+ * that color in it, for good:
+ * - w and d: how far across and front to back the sheet is, and thick, how thick, in world units. It lies within
+ *   one grid cell, clear of the base of a stand holding something over its middle (see STAND_BASE in bodies.ts),
+ *   which starts 34 from there. It's thin enough to lie under the floor of the fluid in a flask standing on it,
+ *   which is 0.6 above what the flask stands on (see FLASK_FLUID in view.ts): whatever's set down in its cell
+ *   stands on the counter as if the sheet weren't there, through it, so a thicker sheet would show inside a flask;
+ * - cap: how much it soaks up, by volume, before it's soaked and shows as strongly as it ever will: three
+ *   hundredths of a flask, three times what a wicking strip's paper holds, and about twenty drops (see DRIP);
+ * - triangles: the triangles printed on it, in a row from its left, each for molecules of the sizes (in atoms)
+ *   listed. There's one, for molecules of every size; one for each size would be four entries here;
+ * - edge: how far in from the sheet's edges, and from each other, the triangles keep; line: how thick their lines
+ *   are; margin: how far in from the middles of those lines each small triangle's stain keeps.
+ */
+export const TEST_PAPER: {
+  w: number; d: number; thick: number; cap: number; triangles: readonly { sizes: readonly number[] }[]; edge: number; line: number; margin: number;
+} = {
+  w: 64, d: 64, thick: 0.4, cap: (3 * CAP) / 100,
+  triangles: [{ sizes: [1, 2, 3, 4] }],
+  edge: 4, line: 1, margin: 2,
+};
+
+/**
+ * Where a sheet of test paper's triangles are printed (see TEST_PAPER.triangles), in the sheet's own frame, from its
+ * middle, x right and y toward its front: each one's middle, and the distance from there to a corner. They stand
+ * in a row across the sheet, each on its base as seen from the sheet's front, as big as fits its share of the
+ * sheet's width and the sheet's depth, TEST_PAPER.edge clear of the edges and of each other. A triangle on its base
+ * reaches r behind its middle and half that in front, so their middles are a quarter of r in front of the sheet's.
+ */
+export function paperTriangles(): { x: number; y: number; r: number }[] {
+  const { w, d, edge, triangles } = TEST_PAPER;
+  const n = triangles.length;
+  const each = (w - (n + 1) * edge) / n;
+  const r = Math.min(each / Math.sqrt(3), (d - 2 * edge) / 1.5);
+  return triangles.map((_, i) => ({ x: -w / 2 + edge + each / 2 + i * (each + edge), y: r / 4, r }));
+}
+
+/**
+ * A sheet of bond paper (see SHAPES.bondpaper): a sheet of test paper's blotting paper, the same size, lying flat the
+ * same way and soaking up as much (see TEST_PAPER and Blotter), but printed differently: with four dots, one per
+ * color, each in its atom's own color, placed as the colors' sectors are in a sheet of test paper's triangle (see
+ * ATOM_PLACE): at the corners of a triangle standing on its base, and in its middle. Between each two of them runs a
+ * line in an ink that's all but invisible dry, and that darkens, for good, by what the sheet soaks up: by how much
+ * of what it could hold has a bond between those two atoms (see bondReading):
+ * - edge: how far in from the sheet's edges the dots keep, in world units; dot: a dot's radius;
+ * - line: how thick the lines between them are, and gap: how far short of each dot's rim a line stops;
+ * - faint: how opaque a line's ink is dry, or wet with nothing that has its bond, and dark: how opaque it is when
+ *   the sheet is soaked and everything it holds has it. In between, it goes evenly with how much does.
+ */
+export const BOND_PAPER = { edge: 5, dot: 3.5, line: 2.2, gap: 1.6, faint: 0.05, dark: 0.96 };
+
+/**
+ * Where a sheet of bond paper's dots are printed, in the sheet's own frame, from its middle, x right and y toward its
+ * front, in SECTOR_ATOMS order: the corners and the middle of a triangle on its base as seen from the sheet's front
+ * (see ATOM_PLACE), as big as leaves every dot BOND_PAPER.edge clear of the sheet's edges, and midway between its
+ * front and back (see paperTriangles).
+ */
+export function bondDots(): { x: number; y: number }[] {
+  const { edge, dot } = BOND_PAPER;
+  const r = Math.min((TEST_PAPER.w / 2 - edge - dot) / (Math.sqrt(3) / 2), (TEST_PAPER.d - 2 * (edge + dot)) / 1.5);
+  return SECTOR_ATOMS.map((a) => ({ x: r * ATOM_PLACE[a][0], y: r / 4 + r * ATOM_PLACE[a][1] }));
+}
+
 export type ToolKind =
-  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater' | 'analyzer'
-  | 'spectroscope' | 'visualizer' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'dish' | 'column' | 'culture' | 'tank'
-  | 'receptacle';
+  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater'
+  | 'spectroscope' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'column' | 'tank'
+  | 'receptacle' | 'shadowlamp' | 'sheet' | 'testpaper' | 'bondpaper';
+
+/**
+ * How quickly what a sheet of blotting paper shows comes up, in sim seconds: each thing it shows (how wet it looks, and
+ * each stain or each line's darkening) closes 1 − e^(−t / PAPER_TAU) of the gap to what the sheet holds calls for in
+ * t seconds. So it starts at once, at its fastest, with no easing in, and eases out: 63% of the way in half a second,
+ * 86% in one, 98% in two.
+ */
+export const PAPER_TAU = 0.5;
+/** How near what a sheet shows comes to what it's to show before it's just that, and the sheet is done developing. */
+const PAPER_DONE = 1e-4;
+
+/**
+ * The sheets of blotting paper that lie flat on a counter and soak up what lands on them, once (see Blotter): test
+ * paper and bond paper, which differ only in what's printed on them and so in what they show of what they hold.
+ */
+export const BLOTTERS: readonly ToolKind[] = ['testpaper', 'bondpaper'];
+
+/** Whether a tool of this kind is a sheet of blotting paper (see BLOTTERS). */
+export const isBlotter = (kind: ToolKind) => BLOTTERS.includes(kind);
 
 /**
  * Tools there's only ever one of: not on an equipment wheel, and never put away. The receptacle is the whole cryostabilizer
- * station (see STATION), reservoir included.
+ * station (see STATION), reservoir included, and the shadow lamp is fixed to a bench of its own (see LAMP).
  */
-export const UNIQUE_TOOLS: readonly ToolKind[] = ['analyzer', 'spectroscope', 'visualizer', 'receptacle'];
+export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectroscope', 'receptacle', 'shadowlamp'];
 
 /**
  * A tool's geometry in local units: multiply by the stage scale and offset by
@@ -991,10 +1102,12 @@ export interface ToolShape {
   dial?: number;
   /** Whether its tanks are upright cylinders, as wide front to back as across, rather than boxes; a sump too. */
   round?: boolean;
-  /** Whether it stays where it is: it can't be picked up and carried. */
+  /** Whether it stays where it is: it can't be picked up and carried, and has no clamp stand. */
   fixed?: boolean;
   /** Whether it's built into a wall, with no stand: only the supply station (see STATION). */
   wall?: boolean;
+  /** Whether it lies flat on a counter, with no stand, as deep front to back as its box says: a sheet of test paper. */
+  flat?: boolean;
   /** Whether the tanks are sealed on top, so nothing can be poured or fall into them. */
   sealed?: boolean;
   /** Spout flow with a valve fully open and the tank full, in atoms per sim second, if not MAX_FLOW. */
@@ -1017,6 +1130,17 @@ const THERMOMETER_SHAPE: ToolShape = {
   valveY: 0,
   spoutY: THERMOMETER_ROD.h,
   box: { x0: -THERMOMETER_ROD.r - 0.5, x1: THERMOMETER_ROD.r + 0.5, y0: -0.5, y1: THERMOMETER_ROD.h + 0.5 },
+};
+
+/** A sheet of blotting paper lying flat (see TEST_PAPER and BLOTTERS), its top face up, with no tanks, spouts or valves. */
+const BLOTTER_SHAPE: ToolShape = {
+  tanks: [],
+  noValve: true,
+  flat: true,
+  spouts: [],
+  valveY: 0,
+  spoutY: TEST_PAPER.thick,
+  box: { x0: -TEST_PAPER.w / 2, x1: TEST_PAPER.w / 2, y0: 0, y1: TEST_PAPER.thick },
 };
 
 export const SHAPES: Record<ToolKind, ToolShape> = {
@@ -1201,17 +1325,6 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: STRIP_FOOT,
     box: { x0: -STRIP.paper.w - 0.5, x1: STRIP.paper.w + 0.5, y0: -0.5, y1: STRIP_FOOT + 0.5 },
   },
-  dish: {
-    // a shallow open glass tray (see DISH) on a little base for its stand to clamp; nothing drains from it
-    tanks: [{ name: 'dish', x0: -DISH.w, x1: DISH.w }],
-    tankH: DISH.h,
-    tankCap: DISH_CAP,
-    noValve: true,
-    spouts: [],
-    valveY: DISH.h,
-    spoutY: DISH.h + DISH.base,
-    box: { x0: -DISH.w - 2, x1: DISH.w + 2, y0: -6, y1: DISH.h + DISH.base },
-  },
   column: {
     // a small glass funnel over a tall glass tube, packed (see COLUMN), over a tap and a spout, all on one line
     tanks: [{ name: 'funnel', x0: -COLUMN.funnel.w, x1: COLUMN.funnel.w }],
@@ -1223,49 +1336,35 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: COLUMN.tube.y1 + 28,
     box: { x0: -COLUMN.funnel.w - 2, x1: COLUMN.funnel.w + 2, y0: -6, y1: COLUMN.tube.y1 + 30 },
   },
-  culture: {
-    // a flat glass cell, the plate, filled through a funnel on top and drained through a valve under it; the cells
-    // stand on the inside of its front (see cultureCells)
-    tanks: [{ name: 'plate', x0: -20, x1: 20 }],
-    tankH: 46,
-    tankCap: CAP / 10,
-    cup: { w: 10, h: 8 },
-    maxFlow: CULTURE.drain,
-    spouts: [0],
-    valveY: 58,
-    spoutY: 74,
-    box: { x0: -24, x1: 24, y0: -14, y1: 76 },
+  shadowlamp: {
+    // a trough: the lamp's enclosure, a floored channel between two walls, and an end wall (see LAMP), with no tanks
+    // or spouts; its one valve is the dial on its enclosure's front, which sets how long it shines (see lampShot)
+    tanks: [],
+    valves: [{ x: LAMP.dial.x, y: LAMP.dial.y }],
+    dial: 0,
+    fixed: true,
+    spouts: [],
+    valveY: 0,
+    spoutY: LAMP.h,
+    box: { x0: LAMP.box.x0, x1: LAMP.channel.x1 + LAMP.wall, y0: 0, y1: LAMP.h },
   },
+  sheet: {
+    // a square of paper hanging from a bar clipped along its top edge (see SHEET), with no tanks, spouts or valves
+    tanks: [],
+    noValve: true,
+    spouts: [],
+    valveY: 0,
+    spoutY: SHEET.top + SHEET.side,
+    box: { x0: -SHEET.side / 2 - 1, x1: SHEET.side / 2 + 1, y0: 0, y1: SHEET.top + SHEET.side },
+  },
+  // the sheets of blotting paper (see BLOTTERS): the same sheet, printed differently
+  testpaper: BLOTTER_SHAPE,
+  bondpaper: BLOTTER_SHAPE,
   // the thermometers: a glass rod each (see THERMOMETER_ROD), with no tanks, spouts or valves
   thermometer: THERMOMETER_SHAPE,
   thermometerWide: THERMOMETER_SHAPE,
-  analyzer: {
-    // a glass tube straight down to a spout, and a cabinet beside it with a screen (see ANALYZER), which takes its
-    // sample from the tube's foot and lets it out a waste spout on its far side, two grid cells along
-    tanks: [{ name: 'tube', x0: -TUBE_W / 2, x1: TUBE_W / 2 }],
-    tankH: TUBE_H,
-    tankCap: TUBE_CAP,
-    round: true,
-    noValve: true,
-    spouts: [0, 2 * CELL],
-    valveY: TUBE_H,
-    spoutY: 116,
-    box: { x0: -10, x1: 2 * CELL + 6, y0: -6, y1: 118 },
-  },
   spectroscope: {
     // a glass tube straight down to a spout, past a cabinet beside it with a screen showing a graph (see SPECTROSCOPE)
-    tanks: [{ name: 'tube', x0: -TUBE_W / 2, x1: TUBE_W / 2 }],
-    tankH: TUBE_H,
-    tankCap: TUBE_CAP,
-    round: true,
-    noValve: true,
-    spouts: [0],
-    valveY: TUBE_H,
-    spoutY: 116,
-    box: { x0: -10, x1: INSTRUMENT.body.x1 + 4, y0: -6, y1: 118 },
-  },
-  visualizer: {
-    // the spectroscope's tube and cabinet, its screen showing the bonds going by between four points (see BOND_TRIANGLE)
     tanks: [{ name: 'tube', x0: -TUBE_W / 2, x1: TUBE_W / 2 }],
     tankH: TUBE_H,
     tankCap: TUBE_CAP,
@@ -1283,16 +1382,6 @@ export const SORTER_CHUTE = { x0: -112, x1: 300, y0: 44, y1: 76 };
 /** Height of the sorter's chute at x, in local units. */
 export const chuteY = (x: number) =>
   SORTER_CHUTE.y0 + ((x - SORTER_CHUTE.x0) / (SORTER_CHUTE.x1 - SORTER_CHUTE.x0)) * (SORTER_CHUTE.y1 - SORTER_CHUTE.y0);
-
-/**
- * The composition analyzer's triangles on its screen (their middles, and the distance from a middle to a corner), one
- * per molecule size, and how high the pipe out of its cabinet to its waste spout runs, in local units. A triangle on
- * its base reaches r above its middle and half that below, so the middles are a quarter of r below the screen's.
- */
-export const ANALYZER = {
-  triangles: { xs: [43, 81, 119, 157], y: 54.75, r: 19 },
-  wasteY: 84,
-};
 
 /**
  * The spectroscope's graph (see spectroscopeAt): its x axis runs from lnE0 to lnE1, and each bond's line is a Gaussian
@@ -1375,34 +1464,38 @@ export function spectroscopeUnit(top: number): { name: string; exp: number } {
 }
 
 /**
- * The bond visualizer's triangle on its screen, standing on its base: its middle, and the distance from there to a
- * corner, in local units. The four atoms are its corners and its middle, placed as in the composition analyzer's
- * triangles (see ATOM_PLACE), and a line joins two of them for each bond between them going by (see bondShares): one
- * of its sides, or from the middle out to a corner.
+ * For each bond (in BOND_KEYS order), its two atoms' places in SECTOR_ATOMS: the ends of the line it darkens on a
+ * sheet of bond paper, between those atoms' dots (see bondDots).
  */
-export const BOND_TRIANGLE = { x: 100, y: 58, r: 32 };
-
-/** The bond visualizer's point for SECTOR_ATOMS[i] (see BOND_TRIANGLE), in local units. */
-export function bondPoint(i: number): { x: number; y: number } {
-  const [dx, dy] = ATOM_PLACE[SECTOR_ATOMS[i]];
-  return { x: BOND_TRIANGLE.x + BOND_TRIANGLE.r * dx, y: BOND_TRIANGLE.y + BOND_TRIANGLE.r * dy };
-}
-
-/** For each bond (in BOND_KEYS order), its two atoms' places in SECTOR_ATOMS, the ends of the line it lights. */
 export const BOND_ENDS: readonly (readonly [number, number])[] = BOND_KEYS.map(
   (k) => [SECTOR_ATOMS.indexOf(k[0] as ColorAtom), SECTOR_ATOMS.indexOf(k[1] as ColorAtom)] as const,
 );
 
 /**
- * What the bond visualizer shows for a fluid, against `cap`: for each bond (in BOND_KEYS order), how much of `cap`
- * molecules with that bond in them make up (by volume, see VOLUME), as the composition analyzer reads its sectors. So
- * against the fluid's own volume, R–G lights its line fully, △RGB all three of its, and half R, half R–G its one line
- * half as bright.
+ * Which bonds a fluid has, against `cap`: for each bond (in BOND_KEYS order), how much of `cap` molecules with that
+ * bond in them make up (by volume, see VOLUME). So against the fluid's own volume, R–G is all R–G's, △RGB all of each
+ * of its three, and half R, half R–G half R–G's. A sheet of bond paper reads this (see bondReading).
  */
 export function bondShares(f: Fluid, cap: number): number[] {
   const out = BOND_KEYS.map(() => 0);
   for (let s = 0; s < NS; s++) if (f.n[s]) for (const b of SPECIES_BONDS[s]) out[b] += (f.n[s] * roomFor(s)) / cap;
   return out;
+}
+
+/**
+ * The share of a fluid's molecules that have a ring in them (see RINGED), from 0 to 1: what dims the shadow lamp's
+ * light on its way through the fluid. Every molecule counts as one, whatever its size, and the solvent's atoms are
+ * molecules too, so diluting a fluid lowers it. 0 for an empty fluid.
+ */
+export function ringShare(f: Fluid): number {
+  let rings = 0;
+  let all = 0;
+  for (let s = 0; s < NS; s++) {
+    if (!f.n[s]) continue;
+    all += f.n[s];
+    if (RINGED[s]) rings += f.n[s];
+  }
+  return all > 0 ? rings / all : 0;
 }
 
 /**
@@ -1442,14 +1535,14 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   thermometerWide: 'Wide thermometer',
   dilatometer: 'Swell bulbs',
   strip: 'Wicking strip',
-  dish: 'Dish',
   column: 'Column',
-  culture: 'Sleeper culture',
   tank: 'Tank',
   receptacle: 'Cryostabilizer',
-  analyzer: 'Composition analyzer',
   spectroscope: 'Spectroscope',
-  visualizer: 'Bond visualizer',
+  shadowlamp: 'Shadow lamp',
+  sheet: 'Shadow paper',
+  testpaper: 'Test paper',
+  bondpaper: 'Bond paper',
 };
 
 /**
@@ -1499,6 +1592,51 @@ export function separatorShares(): number[][] {
 }
 
 /**
+ * What a sheet of test paper or of bond paper soaks up (see TEST_PAPER and BLOTTERS): blotting paper, which takes up
+ * what lands on it only as far as it has room, however it's poured on, so it's never overfilled and nothing mixes
+ * into what it already holds: what's more runs off it, and falls on past it (see soak): onto a bare counter, where
+ * it's lost, if the sheet lies on one, or onto whatever's under a sheet held in the hand. Once it's soaked (see
+ * soaked) it takes up nothing at all. So it holds the first of what landed on it, for good. It keeps none of its
+ * heat, as a wicking strip's paper keeps none.
+ */
+export class Blotter extends Vessel {
+  /** Whether it's soaked: it has room for less than a trace more. */
+  get soaked(): boolean {
+    return this.cap - volume(this) < TRACE;
+  }
+
+  override addFrom(src: Fluid, amount: number): number {
+    if (this.soaked) return 0;
+    const was = this.N;
+    super.addFrom(src, amount, false);
+    this.trim();
+    this.Q = 0;
+    return this.N - was;
+  }
+
+  /**
+   * A share of a mixture is rounded species by species, so what was taken up can come to a molecule or two more than
+   * there was room for: those run off again with the rest (into `back`, if that's kept), so that the paper is never
+   * overfilled.
+   */
+  private trim(back: Vessel | null = null): void {
+    while (volume(this) > this.cap) transfer(this, back, volume(this) - this.cap);
+  }
+
+  /**
+   * Take up what there's room for of a fluid that's landed on the paper, out of that fluid itself, in whole molecules
+   * (see transfer): what's left in `src` is what ran off, so between the two there's just what landed, none of it
+   * lost or made (but for a last trace of `src`, let go as transfer lets go of any).
+   */
+  soak(src: Vessel): void {
+    if (this.soaked) return;
+    transfer(src, this, Infinity);
+    this.trim(src);
+    this.Q = 0;
+  }
+}
+
+/**
  * Something with tanks on top, each draining through its own valve, and
  * spouts on the bottom.
  *
@@ -1536,23 +1674,24 @@ export function separatorShares(): number[][] {
  * - A **wicking strip** is bare paper, with no tanks. Its foot touched to a fluid takes a spot of it (see touch), and
  *   stood in a fluid, it drinks it up (see bath), carrying each species of the spot along at its own pace (see wick
  *   and STRIP_RUN), to leave it as a band once the paper's dry. It's used once.
- * - A **dish** is a shallow open tray with no valve or spout, to stand a strip in.
  * - A **column** is a small funnel over a tall tube packed with the strips' paper, its bed, over a tap and a spout. A
  *   dry bed drinks from the funnel until it's wet through; then what's poured in runs through it as far as the tap's
  *   open, carrying each species down it at its own pace, as on a strip, and out the spout (see elute).
- * - A **sleeper culture** is a flat glass plate of living cells, filled through a funnel on top. What's in it harms
- *   those of them it covers, by its loose ends and its heat (see harm): each dies at random, for good, the sooner the
- *   more harmful the fluid (see sicken). It drains through a valve under it, leaving its cells as they are, as a
- *   record of what was tried on them.
  * - A **thermometer** (fine or wide, see THERMOMETERS) has no tanks at all: it's a glass rod whose bulb takes the
  *   temperature of whatever fluid it's dipped in, or the room's (see warm and bath), and which shatters, for good, if
  *   that's too hot for it.
- * - A **composition analyzer** is an inline instrument too, and it draws off ANALYZER_SAMPLE of what passes, out its waste spout, reading that (see
- *   composition) onto a screen, averaged over the recent past (see INSTRUMENT_TAU).
  * - A **spectroscope** is an inline instrument too, which lets everything through, counting the bonds that pass over
  *   the recent past (see INSTRUMENT_TAU and bondCounts) and showing them by energy as a graph (see spectroscopeAt).
- * - A **bond visualizer** is an inline instrument too, which lets everything through, showing which atoms are bonded
- *   in what passed over the recent past (see INSTRUMENT_TAU and bondShares) as lines between the corners and middle of a triangle (see BOND_TRIANGLE).
+ * - A **shadow lamp** has no tanks either: it's a trough with a lamp in a box at one end (see LAMP), fixed on a bench
+ *   of its own, with a button that lights it (see press) for as long as its dial says (see lampShot), after which it
+ *   goes out by itself. While it's lit, the sheet at its other end is owed its light (see shine).
+ * - A sheet of **shadow paper** has none: it's a square of paper (see SHEET) that darkens, for good, where the shadow
+ *   lamp's light falls on it (see dose and expose).
+ * - A sheet of **test paper** has none either: it lies flat on a counter (see TEST_PAPER), soaks up what lands on it
+ *   until it's wet through (see paper and Blotter), and shows what it holds as stains (see paperReading). It's used once.
+ * - A sheet of **bond paper** is the same sheet printed differently (see BOND_PAPER): it shows what it holds as the
+ *   lines between its dots, darkened (see bondReading). What either sheet shows comes up over a couple of sim seconds
+ *   (see showing and PAPER_TAU).
  *
  * Tools run on sim time, so a slow drip into a reacting flask gives the same
  * result at any sim speed.
@@ -1564,7 +1703,7 @@ export class Tool {
   /**
    * Per valve (one per tank unless the shape places them): 0 (closed) to 1 (MAX_FLOW). Closed by default, so a tool doesn't drip on everything it's carried
    * over. A splitter's one valve is instead the share going right, and a multiplexer's the share taken from the right,
-   * half by default.
+   * half by default; and a shadow lamp's is its dial (see lampShot), halfway by default.
    */
   readonly valves: number[];
   /** Per spout, what left it on the last step, for drawing the stream; null if nothing did. */
@@ -1578,21 +1717,10 @@ export class Tool {
   /** What step hands out, emptied and reused from step to step, so stepping allocates no fluid (see packet). */
   private scratch: Vessel[] = [];
   /**
-   * An analyzer's reading (see composition), shown on its screen: what it drew off in the recent past (see
-   * INSTRUMENT_TAU), as shares of its volume; null once that's down to less than TRACE a sim second.
-   */
-  reading: number[] | null = null;
-  /**
    * A spectroscope's reading: how many of each bond (in BOND_KEYS order) have passed through it per sim second, in
    * the recent past (see INSTRUMENT_TAU); all 0 once they're down to less than TRACE a sim second in all.
    */
   bonds: number[] = BOND_KEYS.map(() => 0);
-  /**
-   * A bond visualizer's reading (see bondShares), shown on its screen: for each bond, in BOND_KEYS order, the share of
-   * what passed through it in the recent past (see INSTRUMENT_TAU) that has that bond, by volume; null once that's
-   * down to less than TRACE a sim second.
-   */
-  links: number[] | null = null;
   /**
    * A meter's reading: what's flowed out of it, by volume per sim second, in the recent past (see INSTRUMENT_TAU); 0
    * once that's down to less than TRACE a sim second.
@@ -1600,10 +1728,18 @@ export class Tool {
   rate = 0;
   /**
    * A wicking strip's paper, stretch by stretch from its foot to its top (see STRIP.cells), each holding what's on
-   * that stretch; it doesn't react or cool, having lost its heat as the paper took it up (see scorch). Empty for any
-   * other tool.
+   * that stretch; it doesn't react or cool, having lost its heat as the paper took it up (see scorch). Or a sheet of
+   * test paper's or bond paper's (see BLOTTERS), all of it as one (see Blotter), holding what it's soaked up, which
+   * doesn't react or cool either. Empty for any other tool.
    */
   readonly paper: Vessel[];
+  /**
+   * What a sheet of blotting paper shows so far (see showing), or null if that's just what it holds calls for and
+   * hasn't been worked out yet: a sheet from a save that kept no account of it. Null for any other tool.
+   */
+  private shows: number[] | null;
+  /** How many atoms a sheet of blotting paper held when what it shows last caught up with it (see emerge); −1 if it hasn't. */
+  private shownFor = -1;
   /**
    * A column's bed, stretch by stretch from its top to its foot (see COLUMN.cells), each holding what's on that
    * stretch; it doesn't react or cool. Empty for any other tool.
@@ -1628,8 +1764,6 @@ export class Tool {
   readonly scorch: Float32Array;
   /** How many of a wicking strip's stretches, from its foot, are in what it's in, as it was last told (see dipIn). */
   private under = 1;
-  /** Which of a sleeper culture's cells are dead, 1 for each that is, in cultureCells' order; null for any other tool. */
-  readonly dead: Uint8Array | null;
   /** A thermometer's bulb's temperature (see warm), which its column shows; the room's to start with. */
   temp = COOLING.ambient;
   /**
@@ -1639,6 +1773,33 @@ export class Tool {
   bath: Vessel | null = null;
   /** Whether a thermometer has shattered (see warm): for good, reading nothing. */
   broken = false;
+  /** Whether a shadow lamp is shining (see lit). */
+  private shining = false;
+  /**
+   * How many sim seconds of the exposure a shadow lamp is making, or was when it was put out, it has left to shine
+   * (see press and shine); 0 once it's shone them all.
+   */
+  left = 0;
+  /**
+   * The sheet of shadow paper in a shadow lamp's slot, if there is one, which whoever runs it sets before each step
+   * (see shine): what its light falls on.
+   */
+  sheet: Tool | null = null;
+  /**
+   * How many sim seconds of a shadow lamp's light the sheet in its slot has yet to be darkened by (see shine), up
+   * to SHEET.full: the light has fallen, but what shadows lay across the sheet is for whoever draws the lab to say
+   * (see the view's Exposer), which then hands it on (see expose) and sets this back to 0.
+   */
+  owed = 0;
+  /**
+   * How much of the shadow lamp's light each cell of a sheet of shadow paper has had, in sim seconds of it unshadowed,
+   * up to SHEET.full: the cells of the square in its middle that the light falls on (see sheetLit; its margin has
+   * none), SHEET.cells a side, row by row from the square's bottom edge up, each row from its left edge as the sheet
+   * faces (see darkness for how dark that leaves it). It only ever grows (see expose). Empty for any other tool.
+   */
+  readonly dose: Float32Array;
+  /** How many times a sheet's dose has changed (see expose and develop), for whoever draws it to know to draw it again. */
+  dosed = 0;
   /** An inline instrument's exponentially weighted average of what it's measured, per sim second (see smooth). */
   private smoothed: number[] | null = null;
   /**
@@ -1689,13 +1850,16 @@ export class Tool {
   ) {
     this.tanks = SHAPES[kind].tanks.map((tk) => new Vessel(tk.cap ?? SHAPES[kind].tankCap ?? TANK_CAP));
     this.tube = Array.from({ length: kind === 'heater' ? HEATER_CELLS : 0 }, () => new Vessel(Infinity));
-    this.paper = Array.from({ length: kind === 'strip' ? STRIP.cells : 0 }, () => new Vessel(Infinity));
-    this.scorch = new Float32Array(this.paper.length);
+    this.paper =
+      isBlotter(kind) ? [new Blotter(TEST_PAPER.cap)] : Array.from({ length: kind === 'strip' ? STRIP.cells : 0 }, () => new Vessel(Infinity));
+    // a new sheet shows nothing yet
+    this.shows = isBlotter(kind) ? this.calledFor().map(() => 0) : null;
+    this.scorch = new Float32Array(kind === 'strip' ? STRIP.cells : 0);
     this.bed = Array.from({ length: kind === 'column' ? COLUMN.cells : 0 }, () => new Vessel(Infinity));
     this.packing = kind === 'strip' ? new Bed(this.paper) : kind === 'column' ? new Bed(this.bed) : null;
-    this.dead = kind === 'culture' ? new Uint8Array(cultureCells().length) : null;
+    this.dose = new Float32Array(kind === 'sheet' ? SHEET.cells ** 2 : 0);
     const nValves = SHAPES[kind].valves?.length ?? this.tanks.length;
-    this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' ? 0.5 : 0));
+    this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' || kind === 'shadowlamp' ? 0.5 : 0));
     this.out = this.shape.spouts.map(() => null);
     this.flow = this.shape.spouts.map(() => 0);
     this.drops = this.shape.spouts.map(() => new Vessel(Infinity));
@@ -1714,18 +1878,24 @@ export class Tool {
     if (this.kind === 'heater') return this.heat(h);
     if (this.kind === 'receptacle') return this.receive(h);
     if (this.kind === 'strip') return this.wick(h);
+    if (this.kind === 'shadowlamp') {
+      this.shine(h);
+      return this.none();
+    }
     if (isThermometer(this.kind)) {
       this.warm(h);
       return this.none();
     }
     if (this.kind === 'column') return this.elute(h);
-    // a culture's cells sicken in what's in the plate, which then drains like any tank
-    if (this.kind === 'culture') this.sicken(h);
-    // nothing drains from a tool with no spouts (a dish)
+    if (isBlotter(this.kind)) {
+      this.emerge(h);
+      return this.none();
+    }
+    // nothing drains from a tool with no spouts
     if (!this.shape.spouts.length) return this.none();
     // with nothing in it and its readings faded to nothing, a step would do nothing; an instrument's smoothing starts
     // again from nothing measured, as it would have to within less than TRACE
-    if (this.tanks.every((tk) => tk.N <= 0) && this.rate === 0 && !this.reading && !this.links && this.bonds.every((b) => b === 0)) {
+    if (this.tanks.every((tk) => tk.N <= 0) && this.rate === 0 && this.bonds.every((b) => b === 0)) {
       this.smoothed = null;
       return this.none();
     }
@@ -1756,51 +1926,17 @@ export class Tool {
       packets = [packets[0]];
     }
     if (this.kind === 'sorter') packets = sieve(packets[0], parts(SORTER_OUTLETS));
-    if (this.kind === 'analyzer') packets = divide(packets[0], () => 1 - ANALYZER_SAMPLE, parts(2));
     this.out = packets.map((p) => (p.N > 0 ? p : null));
     this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
     if (this.kind === 'meter') {
       const [v] = this.smooth(h, [volume(packets[0])]);
       this.rate = v >= TRACE ? v : 0;
     }
-    if (this.kind === 'analyzer') {
-      const [v, ...spec] = this.smooth(h, [volume(packets[1]), ...composition(packets[1], 1)]);
-      this.reading = v >= TRACE ? spec.map((x) => x / v) : null;
-    }
     if (this.kind === 'spectroscope') {
       const bonds = this.smooth(h, bondCounts(packets[0]));
       this.bonds = bonds.reduce((a, b) => a + b, 0) >= TRACE ? [...bonds] : bonds.map(() => 0);
     }
-    if (this.kind === 'visualizer') {
-      const [v, ...shares] = this.smooth(h, [volume(packets[0]), ...bondShares(packets[0], 1)]);
-      this.links = v >= TRACE ? shares.map((x) => x / v) : null;
-    }
     return this.out;
-  }
-
-  /**
-   * A sleeper culture's step: each living cell that the fluid in the plate covers dies with probability
-   * 1 − e^(−CULTURE.rate · harm · h), whatever the others do, and stays dead. How many do in a step is their number
-   * times that, rounded at random, and which is drawn evenly from among them. Cells above the fluid are untouched.
-   */
-  private sicken(h: number): void {
-    const plate = this.tanks[0];
-    const dead = this.dead!;
-    const rate = CULTURE.rate * harm(plate);
-    if (rate > 0) {
-      const H = this.shape.tankH ?? TANK_H;
-      const surface = cultureLevel(Math.min(1, volume(plate) / plate.cap));
-      const at: number[] = [];
-      cultureCells().forEach((c, i) => {
-        if (!dead[i] && H - c.y < surface) at.push(i);
-      });
-      for (let n = Math.min(at.length, roundRandom(at.length * (1 - Math.exp(-rate * h)))); n > 0; n--) {
-        const j = Math.floor(Math.random() * at.length);
-        dead[at[j]] = 1;
-        at[j] = at[at.length - 1];
-        at.pop();
-      }
-    }
   }
 
   /**
@@ -1942,14 +2078,18 @@ export class Tool {
    * What a save keeps of an instrument's own state, as numbers, or undefined if it has none: a thermometer's bulb's
    * temperature, and 1 if it's broken or 0 if not; how much a wicking strip's paper has drunk, a 0 where how dry it
    * was used to be, when strips dried, and how scorched each stretch is (what's on its paper is saved as vessels, see paper); how much a column's bed has drunk (what's on it is
-   * saved as vessels, see bed); which of a sleeper culture's cells are dead (see dead); which supply a receptacle is
-   * fitted for (its place in SUPPLIES), and how far into its changeover it is, or −1 if none is under way.
+   * saved as vessels, see bed); which supply a receptacle is
+   * fitted for (its place in SUPPLIES), and how far into its changeover it is, or −1 if none is under way; 1 if a
+   * shadow lamp is lit, or 0 if not, and how long its exposure has left (its dial's setting is saved as a valve's); and what a sheet of blotting paper shows so far (see showing), while
+   * that's still coming up: none once it shows all it's going to, as none means when it's put back (see remember).
    */
   get memory(): number[] | undefined {
+    if (this.kind === 'shadowlamp') return [+this.lit, this.left];
     if (this.kind === 'strip') return [this.soaked, 0, ...this.scorch];
     if (this.kind === 'column') return [this.soaked];
-    if (this.kind === 'culture') return Array.from(this.dead!);
     if (this.kind === 'receptacle') return [SUPPLIES.indexOf(this.supply), this.swap ?? -1];
+    // (a sheet that shows all it's going to keeps nothing: that's how it loads)
+    if (isBlotter(this.kind)) return this.developed ? undefined : [...this.showing];
     return isThermometer(this.kind) ? [this.temp, +this.broken] : undefined;
   }
 
@@ -1958,10 +2098,23 @@ export class Tool {
    * strip kept one number for how scorched it was, all over: that goes for as much of it as it had soaked.
    */
   remember(m: unknown): void {
+    if (isBlotter(this.kind)) {
+      // what a sheet showed, if the save kept it (it was still developing); or else all it's ever going to, for
+      // what it turns out to hold
+      const n = this.calledFor().length;
+      const kept = Array.isArray(m) && m.length === n && m.every((x) => typeof x === 'number' && Number.isFinite(x));
+      this.shows = kept ? (m as number[]).map((x) => Math.max(0, Math.min(1, x))) : null;
+      this.shownFor = -1;
+      return;
+    }
     const want = this.memory?.length;
     const old = this.kind === 'strip' && Array.isArray(m) && m.length === 3;
     if (!Array.isArray(m) || (m.length !== want && !old) || !m.every((x) => typeof x === 'number' && Number.isFinite(x))) return;
     if (isThermometer(this.kind)) [this.temp, this.broken] = [m[0] as number, (m[1] as number) > 0];
+    if (this.kind === 'shadowlamp') {
+      this.left = Math.max(0, Math.min(LAMP.shot.max, m[1] as number));
+      this.lit = (m[0] as number) > 0;
+    }
     if (this.kind === 'strip') {
       // the second was how dry it was, when strips dried
       const [soaked, , ...scorch] = (m as number[]).map((x) => Math.max(0, Math.min(1, x)));
@@ -1970,7 +2123,6 @@ export class Tool {
       else this.scorch.set(scorch);
     }
     if (this.kind === 'column') this.soaked = Math.max(0, Math.min(1, (m as number[])[0]));
-    if (this.kind === 'culture') this.dead!.set((m as number[]).map((x) => +(x > 0)));
     if (this.kind === 'receptacle') {
       const [supply, swap] = m as number[];
       this.supply = SUPPLIES[supply] ?? CRYOSTABILIZER;
@@ -1978,6 +2130,124 @@ export class Tool {
       // from halfway through a changeover, it's already the next supply's, and only has to come out
       this.swap = swap >= 0 && swap < CHANGEOVER_S && (swap >= STOCKED_AT || nextSupply(this.supply)) ? swap : null;
     }
+  }
+
+  /**
+   * Whether a shadow lamp is lit: it's making an exposure (see press), with some of it left to shine. Set, it lights
+   * only if it has any left, which is how an undo puts back a lamp that was put out part-way, and leaves out one that
+   * has since shone itself out.
+   */
+  get lit(): boolean {
+    return this.shining;
+  }
+
+  set lit(on: boolean) {
+    this.shining = on && this.left > 0;
+  }
+
+  /**
+   * A shadow lamp's button is pressed: out, it lights, to shine for as long as its dial says just now (see lampShot),
+   * whatever the dial's turned to afterward; lit, it's put out, keeping what it had left only for an undo to put back.
+   */
+  press(): void {
+    if (this.kind !== 'shadowlamp') return;
+    if (this.lit) {
+      this.lit = false;
+      return;
+    }
+    this.left = lampShot(this.valves[this.shape.dial!]);
+    this.lit = true;
+  }
+
+  /**
+   * A shadow lamp's light for `h` sim seconds: while it's lit it shines, for no longer than its exposure has left,
+   * and then it goes out by itself; and for as long as it shines with a sheet in its slot (see sheet), that sheet is
+   * owed that much more of its light (see owed), though never more than darkens it all the way. With no sheet there,
+   * nothing's owed: what a sheet taken out had yet to get is lost. It shines on nothing else.
+   */
+  shine(h: number): void {
+    if (!this.sheet) this.owed = 0;
+    if (!this.lit) return;
+    const s = Math.min(h, this.left);
+    this.left -= s;
+    if (this.sheet) this.owed = Math.min(SHEET.full, this.owed + s);
+    // (to within what adding up steps loses)
+    if (this.left < 1e-9) {
+      this.left = 0;
+      this.lit = false;
+    }
+  }
+
+  /**
+   * Light falls on a sheet of shadow paper for `s` sim seconds: on each cell (see dose), `light[i]` of the shadow
+   * lamp's unshadowed light, from 0 (in full shadow) to 1. Each takes that much more, up to SHEET.full; none ever
+   * takes less, so a sheet lit twice shows both.
+   */
+  expose(light: ArrayLike<number>, s: number): void {
+    const { dose } = this;
+    if (!(s > 0) || light.length !== dose.length) return;
+    for (let i = 0; i < dose.length; i++) dose[i] = Math.min(SHEET.full, dose[i] + s * Math.max(0, Math.min(1, light[i])));
+    this.dosed++;
+  }
+
+  /**
+   * Whether a sheet of shadow paper is as dark as it gets all over the square the light falls on (see SHEET.full), so
+   * that no more light can show on it; never, for any other tool.
+   */
+  get spent(): boolean {
+    // (a cell holds its fill only to a float's precision)
+    return this.dose.length > 0 && this.dose.every((d) => d >= SHEET.full - 1e-4);
+  }
+
+  /**
+   * What a save keeps of a sheet of shadow paper's image, or undefined for one that's had no light (or any other
+   * tool): how dark each cell is (see darkness), as a byte, 0 as new to 255 as dark as it gets, in dose's order,
+   * packed whichever way comes out shorter, as base64: after a byte of 1, each run of the same byte as two, how many
+   * (up to 255) and the byte; or after a byte of 0, the bytes as they are. A sheet is mostly big patches of one
+   * shade, so runs usually come to a small fraction of a byte a cell.
+   */
+  get image(): string | undefined {
+    const { dose } = this;
+    if (!dose.some((d) => d > 0)) return undefined;
+    const bytes = Array.from(dose, (d) => Math.round(255 * darkness(d)));
+    const runs: number[] = [];
+    for (let i = 0; i < bytes.length; ) {
+      let n = 1;
+      while (n < RUN && bytes[i + n] === bytes[i]) n++;
+      runs.push(n, bytes[i]);
+      i += n;
+    }
+    const packed = runs.length < bytes.length ? [1, ...runs] : [0, ...bytes];
+    let bin = '';
+    for (const b of packed) bin += String.fromCharCode(b);
+    return btoa(bin);
+  }
+
+  /**
+   * Put back a sheet's image from what a save kept of it (see image), if that's an image of a sheet this size; if it
+   * isn't, the sheet is left as it is.
+   */
+  develop(saved: unknown): void {
+    const { dose } = this;
+    if (typeof saved !== 'string' || !dose.length) return;
+    let bin: string;
+    try {
+      bin = atob(saved);
+    } catch {
+      return;
+    }
+    const packed = Array.from(bin, (c) => c.charCodeAt(0));
+    let bytes = packed.slice(1);
+    if (packed[0] === 1) {
+      bytes = [];
+      // (no more than the sheet has cells, whatever it says)
+      for (let i = 1; i + 1 < packed.length && bytes.length <= dose.length; i += 2) for (let n = packed[i]; n > 0; n--) bytes.push(packed[i + 1]);
+      if (packed.length % 2 !== 1) return;
+    } else if (packed[0] !== 0) return;
+    if (bytes.length !== dose.length) return;
+    // a cell as dark as a byte can say is as dark as it gets
+    bytes.forEach((b, i) => (dose[i] = b >= 255 ? SHEET.full : b <= 0 ? 0 : Math.min(SHEET.full, -SHEET.tau * Math.log(1 - b / 255))));
+    this.dosed++;
   }
 
   /**
@@ -2021,6 +2291,52 @@ export class Tool {
     p.N = 0;
     p.Q = 0;
     return p;
+  }
+
+  /**
+   * What a sheet of blotting paper is to show, for what it holds: how wet it looks, from 0 to 1 (see wetness), then
+   * its reading's values: a sheet of test paper's stains, triangle by triangle (see paperReading), or a sheet of bond
+   * paper's lines (see bondReading).
+   */
+  private calledFor(): number[] {
+    const held = this.paper[0];
+    return [wetness(volume(held), held.cap, 1), ...(this.kind === 'testpaper' ? paperReading(held, held.cap).flat() : bondReading(held, held.cap))];
+  }
+
+  /**
+   * What a sheet of blotting paper shows, laid out as calledFor says: how wet it looks and what its print shows of
+   * what it holds, each as far as it's come up. It follows what the sheet holds, not all at once but over a couple
+   * of sim seconds (see emerge), and stays once it's there, since a soaked sheet takes up nothing more.
+   */
+  get showing(): readonly number[] {
+    return (this.shows ??= this.calledFor());
+  }
+
+  /** Whether a sheet of blotting paper shows all that what it holds calls for (see showing). */
+  get developed(): boolean {
+    const want = this.calledFor();
+    return this.showing.every((x, i) => Math.abs(want[i] - x) < PAPER_DONE);
+  }
+
+  /**
+   * A sheet of blotting paper's step of h sim seconds: each thing it shows closes 1 − e^(−h / PAPER_TAU) of the gap
+   * to what the sheet now holds calls for (see calledFor), so it sets off at once and eases out. More landing on it
+   * meanwhile only moves what it's making for. Once it's there, nothing's left to do until the sheet holds more.
+   */
+  private emerge(h: number): void {
+    const atoms = this.paper[0].N;
+    if (this.shownFor === atoms) return;
+    const want = this.calledFor();
+    const shows = (this.shows ??= [...want]);
+    const k = 1 - Math.exp(-h / PAPER_TAU);
+    let off = 0;
+    for (let i = 0; i < shows.length; i++) {
+      shows[i] += (want[i] - shows[i]) * k;
+      off = Math.max(off, Math.abs(want[i] - shows[i]));
+    }
+    if (off >= PAPER_DONE) return;
+    this.shows = want;
+    this.shownFor = atoms;
   }
 
   /** A step that lets nothing out. */
@@ -2152,11 +2468,12 @@ export class Tool {
 }
 
 /**
- * What an analyzer shows for a sample, against `cap`: for each molecule size w (1–4 atoms) and atom color c, in
- * SECTOR_ATOMS order, at index (w − 1)·4 + c, how much of `cap` molecules of size w with a c atom in them make up
- * (by volume, see VOLUME). So against the sample's own volume, R lights 1R fully, and R–G both 2R and 2G fully; and
- * half R, half G lights 1R and 1G half as bright. It has no sector for the solvent, which lights nothing, but takes up
- * room all the same, so half R, half S lights 1R half as bright too.
+ * What a sample is made of, by size and color, against `cap`: for each molecule size w (1–4 atoms) and atom color c,
+ * in SECTOR_ATOMS order, at index (w − 1)·4 + c, how much of `cap` molecules of size w with a c atom in them make up
+ * (by volume, see VOLUME). So against the sample's own volume, R is all in 1R, and R–G all in both 2R and 2G; and
+ * half R, half G is half in 1R and half in 1G. There's none for the solvent, which counts nowhere, but takes up room
+ * all the same, so half R, half S is half in 1R too. A sheet of test paper reads this, against what it soaks up, its
+ * sizes put together (see paperReading).
  */
 export function composition(f: Fluid, cap: number): number[] {
   const n = SECTOR_ATOMS.length;
@@ -2170,6 +2487,35 @@ export function composition(f: Fluid, cap: number): number[] {
     }
   }
   return out;
+}
+
+/**
+ * What a sheet of test paper shows for the fluid it holds, when it soaks up `cap`: for each of its triangles (see
+ * TEST_PAPER.triangles), for each color in SECTOR_ATOMS order, how strongly that small triangle is stained, from 0 to
+ * 1: how much of `cap`, by volume (see VOLUME), molecules of that triangle's sizes with an atom of that color in them
+ * make up (see composition). So it goes by how much there is of each: a soaked sheet reads the shares of what it
+ * holds, and one that's had a drop or two reads those shares that much fainter, by how full it is. With one triangle
+ * for every size, a sheet soaked in R stains R fully, in R–G both R and G, and in △RGB all three; in half R, half G,
+ * each half as strongly. The solvent stains nothing but takes up room, so soaked in half R, half S it stains R at
+ * half; and so does a sheet half soaked in R. Nothing, for no fluid.
+ */
+export function paperReading(f: Fluid, cap = TEST_PAPER.cap): number[][] {
+  const n = SECTOR_ATOMS.length;
+  const bySize = composition(f, cap);
+  return TEST_PAPER.triangles.map(({ sizes }) => SECTOR_ATOMS.map((_, c) => Math.min(1, sizes.reduce((t, w) => t + bySize[(w - 1) * n + c], 0))));
+}
+
+/**
+ * What a sheet of bond paper shows for the fluid it holds, when it soaks up `cap`: for each bond (in BOND_KEYS order,
+ * its line's ends as BOND_ENDS says), how far its line has darkened, from 0 (as faint as it's printed) to 1: how much
+ * of `cap`, by volume (see VOLUME), molecules with that bond in them make up (see bondShares). So it goes by how much
+ * there is: a soaked sheet reads the shares of what it holds, and one that's had a drop or two reads them that much
+ * fainter, by how full it is. Soaked in R–G, its one line is fully dark, and in △RGB all three of its; in half R,
+ * half R–G, R–G's is half as dark, as it is on a sheet half soaked in R–G. Single atoms, the solvent's among them,
+ * darken nothing, but take up room. Nothing, for no fluid.
+ */
+export function bondReading(f: Fluid, cap = TEST_PAPER.cap): number[] {
+  return bondShares(f, cap).map((x) => Math.min(1, x));
 }
 
 /**
