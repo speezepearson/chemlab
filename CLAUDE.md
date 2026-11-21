@@ -93,7 +93,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     it over the finished frame, from a mask of the meshes registered as that thing's parts.
   - `smell.ts` is what a sniff (F) makes of a fluid, pure and DOM-free: the ten odorants and Nadia's similes for them
     (`ODORANTS`), how strong each is for a composition and temperature, masking, and the line it's all put into
-    (`sentence`). It goes by the fluid alone: there's no state, so the same fluid always smells the same.
+    (`sentence`). It goes by the fluid alone: there's no state, so the same fluid always smells the same. The engine's
+    `sniff` leans the view in to the vessel's rim and back (`sniffing`, `rimGaze`, `stepSniff`), in real time. Only the
+    view goes (`gaze()`): the player's body and eyes (`player`, `eye()`) stay where they were, and so does everything
+    worked out from them.
   - `supply.ts` is what the ship is short of, in the order the station is fitted for them (`SUPPLIES`): the
     antinucleant (R–B), then the cryostabilizer.
   - `cabinet.ts` is the equipment cabinet: its layout (each kind's slots on its shelves) and its stock, which the
@@ -122,7 +125,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
-  notice; the player themselves (walking, looking, carrying, tipping a flask, their eyes closing for a nap), which is input, not the sim; and what
+  notice; the player themselves (walking, looking, carrying, tipping a flask, their eyes closing for a nap, their head leaning in to a vessel's rim to sniff it and coming back), which is input, not the sim; and what
   isn't in the world (the HUD, the guides' flashing). While the player sleeps in the cryopod, or naps, the lab is run as ever in
   windows and jumped ahead between them (`sleep.ts`): still sim time, just not substep by substep through the jumps.
   And once the reservoir holds the goal, the lab stands still as it was then through the end (the welcome to Mu Ceti,

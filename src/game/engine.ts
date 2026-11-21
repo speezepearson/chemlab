@@ -5,7 +5,7 @@ import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, 
 import { hushAlarms } from './ambience';
 import {
   FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
-  flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, inSlot, sheetIn, slotPose, slotted, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
+  FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, inSlot, sheetIn, slotPose, slotted, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
 import { CABINET, endless, isStocked, putIn, stockWith, takeFrom, takeSlot, type Stock, type Stocked } from './cabinet';
@@ -317,6 +317,14 @@ const RISER_R = 6;
 const NOTE_MS = 1600;
 /** How long what a sniff smelled of stays up, in ms, fading out at the end (it's on the display, not in the lab). */
 export const SMELL_MS = 5000;
+/**
+ * A sniff (see GameEngine.sniff), which is the player's own doing, so in real seconds: how long her head takes to
+ * lean `in` to the vessel's rim, how long her nose is held there, and how long it takes to come back `out` to where
+ * she stood. And where her eyes are with her nose at the rim: `up` over its near edge, looking down at the mouth
+ * `into` it from that edge. Under something that leaves less room than that over the rim, they're `clear` below it, if
+ * that's still `least` over the rim, or else as far further `back` as it takes, a step at a time, as far as `reach`.
+ */
+const SNIFF = { in: 0.45, hold: 1.4, out: 0.35, up: 30, into: 12, clear: 8, least: 12, back: 8, reach: 40 };
 /** How long the note that she can nap stays up, in ms: long enough to read. */
 const NAP_HINT_MS = 9000;
 /** Real seconds the player's eyes take to close for a nap, and to open again as they wake (see GameEngine.nap). */
@@ -328,6 +336,13 @@ const FUNNEL_STEM = 6;
 
 /** Where a tool stands, in the room, from a preset's spot for it. */
 const spotPose = (s: Spot): Pose => ({ ...fromFrac({ x: s.at[0], y: s.at[1] }, s.z), yaw: s.yaw ?? 0 });
+
+/** Where the view is, and which way it looks (yaw about the vertical, pitch up). */
+interface Gaze {
+  eye: Vec3;
+  yaw: number;
+  pitch: number;
+}
 
 /** Owns the lab: what's in it, the player, input, the simulation loop, and the view that draws it. */
 export class GameEngine {
@@ -390,6 +405,13 @@ export class GameEngine {
   private target: (Pick & { point: Vec3; distance: number }) | null = null;
   /** A brief note on the display, like there being no room for something (see say). */
   private flash: { text: string; until: number; tip?: boolean } | null = null;
+  /**
+   * The sniff under way (see sniff): the vessel; how far her head has leaned in to its rim, from 0, where she stands,
+   * to 1, there (see SNIFF); where the view is then (see Gaze), and, if it's the flask in her hand, where that's
+   * brought up to under her nose; the real time her nose is at the rim until, once it's there and she's smelled what's
+   * in it; and whether she's on her way back.
+   */
+  private sniffing: { v: Vessel; lean: number; to: Gaze; hand: Pose | null; until: number | null; leaving: boolean } | null = null;
   /** What the last sniff smelled of (see sniff), until it's faded from the display, and how many sniffs there have been. */
   private smelled: { text: string; n: number; until: number } | null = null;
   private sniffs = 0;
@@ -695,6 +717,7 @@ export class GameEngine {
     this.changing = null;
     this.falling = [];
     this.held = this.turning = this.tarePress = null;
+    this.sniffing = null;
     this.smelled = null;
     this.history.clear();
   }
@@ -729,7 +752,7 @@ export class GameEngine {
    * (see putBack), as a carry isn't done until it's set down. Ctrl+Shift+Z or Ctrl+Y: redo.
    */
   undo(redo = false): void {
-    if (inPod(this.wake) || this.dozing()) return;
+    if (inPod(this.wake) || this.dozing() || this.sniffing) return;
     if (this.held) {
       if (!redo) this.putBack();
       return;
@@ -1276,6 +1299,24 @@ export class GameEngine {
     return { x: this.player.x, y: EYE, z: this.player.z };
   }
 
+  /**
+   * Where the view is and which way it looks: from the player's eyes, the way they look; or, sniffing, on its way from
+   * there to the rim of what's sniffed, or back (see sniff). Only the view goes: she stands where she stood.
+   */
+  private gaze(): Gaze {
+    const eye = this.eye();
+    const { yaw, pitch } = this.player;
+    const s = this.sniffing;
+    if (!s) return { eye, yaw, pitch };
+    const a = ease(s.lean);
+    const mix = (p: number, q: number) => p + (q - p) * a;
+    return {
+      eye: { x: mix(eye.x, s.to.eye.x), y: mix(eye.y, s.to.eye.y), z: mix(eye.z, s.to.eye.z) },
+      yaw: wrapAngle(yaw + wrapAngle(s.to.yaw - yaw) * a),
+      pitch: mix(pitch, s.to.pitch),
+    };
+  }
+
   /** The way the player looks, as a unit vector. */
   private lookDir(): Vec3 {
     const { yaw, pitch } = this.player;
@@ -1379,6 +1420,8 @@ export class GameEngine {
         this.endTurn();
         this.tarePress = null;
         this.wheel = null;
+        // letting go of the mouse (Esc) cuts a sniff short
+        this.endSniff();
       }
     };
     document.addEventListener('pointerlockchange', onLock);
@@ -1396,8 +1439,8 @@ export class GameEngine {
         return;
       }
       e.preventDefault();
-      // the wheel has the mouse while it's open
-      if (this.wheel) return;
+      // the wheel has the mouse while it's open, and her hands do nothing while she sniffs
+      if (this.wheel || this.sniffing) return;
       if (e.button === 0) this.leftDown(e.shiftKey);
       if (e.button === 2) this.rightDown();
     });
@@ -1412,11 +1455,11 @@ export class GameEngine {
     on(window, 'mousemove', (e) => {
       if (!this.locked) return;
       if (this.wheel) this.wheel = { ...this.wheel, ...wheelMove(this.wheel, e.movementX, e.movementY) };
-      else this.look(e.movementX, e.movementY, e.shiftKey);
+      else if (!this.sniffing) this.look(e.movementX, e.movementY, e.shiftKey);
     });
     on(c, 'wheel', (e) => {
       e.preventDefault();
-      if (!this.held) return;
+      if (!this.held || this.sniffing) return;
       const px = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
       this.held.dist = this.clampDist(this.held, this.held.dist * Math.exp(-px * 0.0012));
     });
@@ -1437,13 +1480,19 @@ export class GameEngine {
         return;
       }
       // in god mode, = shows the end's white void, or puts the lab back
-      if (e.code === 'Equal' && (this.god || this.previewing)) {
+      if (e.code === 'Equal' && (this.god || this.previewing) && !this.sniffing) {
         if (!e.repeat) this.previewArrival(!this.previewing);
         return;
       }
       if (!this.locked) return;
       this.keys.add(e.code);
       if (e.repeat || inPod(this.wake) || this.previewing) return;
+      // sniffing, F cuts it short, and no other key does anything until she's back where she stood
+      if (this.sniffing) {
+        if (e.code === 'KeyF') this.endSniff();
+        e.preventDefault();
+        return;
+      }
       if (e.code === 'KeyE') this.grabOrRelease(e.shiftKey);
       if (e.code === 'KeyQ') this.putBack();
       if (e.code === 'KeyR') this.turn();
@@ -1989,19 +2038,111 @@ export class GameEngine {
   }
 
   /**
-   * F: sniff what's in the vessel the crosshair is on, or in the flask in hand (see sniffAim), as it is just now, by
-   * what it's made of and how warm it is. What she makes of it (see smell) comes up on the display, in a line (see
-   * sentence), and fades after SMELL_MS. Sniffing is her own doing, so it works while the lab's paused.
+   * F: sniff what's in the vessel the crosshair is on, or in the flask in hand (see sniffAim). Her head leans in until
+   * her nose is just over the vessel's rim, the view going with it to look down into its mouth (see rimGaze); or the
+   * flask in her hand is brought up under her nose (see noseGaze). There she smells what's in it, as it is just then, by
+   * what it's made of and how warm it is (see stepSniff), and after a while she straightens up again, the view going
+   * back to just where it was. Until it's back she neither walks nor looks around, and her hands do nothing: only F,
+   * or letting go of the mouse, cuts it short (see endSniff). It's her own doing, like her eyes closing for a nap, so
+   * it all goes in real time, and works while the lab's paused; the lab runs on under it as ever. Only the view moves:
+   * she stands where she stood. Not while what's in her hand is pouring, flowing or dipping.
    */
   private sniff(): void {
-    if (this.dozing() || inPod(this.wake) || this.turning || this.wheel) return;
+    if (this.dozing() || inPod(this.wake) || this.turning || this.wheel || this.sniffing) return;
     const v = this.sniffAim();
     if (!v) return;
     if (v === 'sealed') {
       this.say('It’s sealed');
       return;
     }
-    this.smelled = { text: sentence(smell(v.n, temperature(v))), n: ++this.sniffs, until: performance.now() + SMELL_MS };
+    if (this.handBusy()) return;
+    const m = this.held?.kind === 'flask' && this.held.f === v ? null : this.open.find((o) => o.v === v);
+    const hand = m ? null : this.noseGaze();
+    this.smelled = null;
+    this.sniffing = { v, lean: 0, to: m ? this.rimGaze(m) : hand!.gaze, hand: hand && hand.flask, until: null, leaving: false };
+  }
+
+  /** Whether what's held is being poured, let flow or dipped, with the right button: there's no sniffing meanwhile. */
+  private handBusy(): boolean {
+    return !!this.held && this.rightHeld;
+  }
+
+  /** Cut a sniff short, if one's under way: she straightens up from wherever her head has got to. */
+  private endSniff(): void {
+    if (this.sniffing) this.sniffing.leaving = true;
+  }
+
+  /**
+   * A frame of dt real seconds of the sniff under way (see sniff), at real time `now`: her head leans in, and once her
+   * nose is at the rim she smells what's in the vessel then, which comes up on the display in a line (see sentence)
+   * and fades after SMELL_MS; SNIFF.hold later she straightens up, and once she has, it's over.
+   */
+  private stepSniff(dt: number, now: number): void {
+    const s = this.sniffing;
+    if (!s) return;
+    s.lean = Math.max(0, Math.min(1, s.lean + (s.leaving ? -dt / SNIFF.out : dt / SNIFF.in)));
+    if (s.leaving) {
+      if (s.lean <= 0) this.sniffing = null;
+      return;
+    }
+    if (s.lean < 1) return;
+    if (s.until === null) {
+      this.smelled = { text: sentence(smell(s.v.n, temperature(s.v))), n: ++this.sniffs, until: now + SMELL_MS };
+      s.until = now + 1000 * SNIFF.hold;
+    } else if (now >= s.until) s.leaving = true;
+  }
+
+  /**
+   * Where the view is with her nose at the rim of an open top: SNIFF.up over its edge nearest where she stands, facing
+   * across it from there, and looking down at the mouth SNIFF.into in from that edge, so into it. Under something
+   * drawn that leaves less room (a nozzle or a spout over it, the tool it's standing under), her eyes are SNIFF.clear
+   * below that, if that's still SNIFF.least over the rim, or else as far back from the edge as it takes; and with no
+   * room anywhere, the view stays where it is, and she sniffs from where she stands.
+   */
+  private rimGaze(m: Mouth): Gaze {
+    const p = this.player;
+    // level, from the mouth's middle back toward her
+    let bx = p.x - m.x;
+    let bz = p.z - m.z;
+    const d = Math.hypot(bx, bz);
+    [bx, bz] = d < 1 ? [Math.sin(p.yaw), Math.cos(p.yaw)] : [bx / d, bz / d];
+    const yaw = Math.atan2(bx, bz);
+    // how far the mouth reaches that way: a box's edge, but no further than a round one's would be
+    const c = Math.cos(m.yaw ?? 0);
+    const sn = Math.sin(m.yaw ?? 0);
+    const edge = Math.min(Math.max(m.hx, m.hz), 1 / Math.max(Math.abs(bx * c - bz * sn) / m.hx, Math.abs(bx * sn + bz * c) / m.hz));
+    for (let back = 0; back <= SNIFF.reach; back += SNIFF.back) {
+      const x = m.x + bx * (edge + back);
+      const z = m.z + bz * (edge + back);
+      const room = this.view.clearance({ x, y: m.y + 1, z }, { x: 0, y: 1, z: 0 }, SNIFF.up + SNIFF.clear) + 1;
+      const up = Math.min(SNIFF.up, room - SNIFF.clear);
+      if (up >= SNIFF.least) return { eye: { x, y: m.y + up, z }, yaw, pitch: -Math.atan2(up, SNIFF.into + back) };
+    }
+    return { eye: this.eye(), yaw: p.yaw, pitch: p.pitch };
+  }
+
+  /**
+   * Sniffing the flask in her hand, there's no rim out in the room to lean to: it's brought up under her nose instead,
+   * to where she sees it as she would one she'd leaned to (see rimGaze), and she looks down into it from where she
+   * stands. Where the view is then, and where the flask is.
+   */
+  private noseGaze(): { gaze: Gaze; flask: Pose } {
+    const eye = this.eye();
+    const { yaw } = this.player;
+    const flask = { x: eye.x - Math.sin(yaw) * FLASK_CATCH, y: eye.y - SNIFF.up, z: eye.z - Math.cos(yaw) * FLASK_CATCH, yaw: 0 };
+    return { gaze: { eye, yaw, pitch: -Math.atan2(SNIFF.up, SNIFF.into) }, flask };
+  }
+
+  /**
+   * Where what's held is: in front of the eyes (see gripPose), or, a flask being sniffed, on its way from there up to
+   * under her nose, or back (see noseGaze).
+   */
+  private heldAt(h: Held): Pose {
+    const grip = this.gripPose(h);
+    const s = this.sniffing;
+    if (!s?.hand || h.kind !== 'flask' || h.f !== s.v) return grip;
+    const a = ease(s.lean);
+    return { x: grip.x + (s.hand.x - grip.x) * a, y: grip.y + (s.hand.y - grip.y) * a, z: grip.z + (s.hand.z - grip.z) * a, yaw: grip.yaw };
   }
 
   private rightDown(): void {
@@ -2279,14 +2420,17 @@ export class GameEngine {
       this.raf = requestAnimationFrame(this.frame);
       return;
     }
+    this.stepSniff(dt, now);
     // nodding off, they stand where they are
     if (!nap || nap.waking) this.move(dt);
     if (this.wake === 'settling') this.settleIn(dt);
     if (this.held) this.follow(this.held);
-    const zoomed = this.keys.has('KeyZ') ? 1 : 0;
+    const zoomed = this.keys.has('KeyZ') && !this.sniffing ? 1 : 0;
     this.zoom = Math.max(0, Math.min(1, this.zoom + (zoomed ? dt : -dt) / ZOOM.s));
-    this.view.look(this.eye(), this.player.yaw, this.player.pitch, this.fov());
-    if (!this.turning) this.target = this.previewing ? null : this.view.pick(REACH, this.heldObject());
+    const g = this.gaze();
+    this.view.look(g.eye, g.yaw, g.pitch, this.fov());
+    // (sniffing, the crosshair stays on what it was on from where she stands)
+    if (!this.turning && !this.sniffing) this.target = this.previewing ? null : this.view.pick(REACH, this.heldObject());
     this.simulate(dt);
     // the end stands the lab still as it was when there was enough, so it goes on in real time
     if (this.arrival && this.wake !== 'pod') this.stepWake(dt);
@@ -2304,15 +2448,17 @@ export class GameEngine {
     const { move, look } = this.sticks;
     const fwd = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - move.y;
     const side = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0) + move.x;
+    // sniffing, she stands as she is and looks nowhere else, but what's in her hand is still held (see sniff)
+    const still = !!this.sniffing;
     // the look stick turns the view at a rate, gently near its middle so small turns can be aimed
-    if (look.x || look.y) {
+    if (!still && (look.x || look.y)) {
       p.yaw = wrapAngle(p.yaw - look.x * Math.abs(look.x) * STICK_TURN * dt);
       p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch - look.y * Math.abs(look.y) * STICK_TILT * dt));
     }
     // shut in the pod, or in the preview of the end, they can only look
     if (inPod(this.wake) || this.previewing) return;
     const h = this.held;
-    if (fwd || side) {
+    if (!still && (fwd || side)) {
       // keys walk at full speed whichever way; the move stick as far as it's pushed
       const len = Math.hypot(fwd, side);
       const sp = (WALK * dt * Math.min(1, len)) / len;
@@ -2346,7 +2492,7 @@ export class GameEngine {
     }
     // what's held goes where it'd be in front of the eyes (or a flask pouring into something, over it), turned as
     // it's held
-    this.placeHeld(h, this.pinned ?? this.gripPose(h));
+    this.placeHeld(h, this.pinned ?? this.heldAt(h));
     if (h.kind === 'flask') {
       this.faceFlask(h.f);
       const goal = this.rightHeld ? POUR_ANG : 0;
@@ -2820,7 +2966,8 @@ export class GameEngine {
    */
   private guides(pl: ReturnType<GameEngine['placement']> | null): Frame['guides'] {
     const h = this.held;
-    if (!h) return [];
+    // (nor while she sniffs: nothing's set down or poured until she's back)
+    if (!h || this.sniffing) return [];
     const guide = (a: Aim, look: GuideLook): Frame['guides'][number] => {
       const { x, y, z, hx, hz, yaw = 0 } = a.m;
       // (a sheet of test paper's face is square, not round)
@@ -2846,7 +2993,7 @@ export class GameEngine {
    */
   private footprints(pl: ReturnType<GameEngine['placement']> | null): Frame['footprints'] {
     const h = this.held;
-    if (!h || !pl) return [];
+    if (!h || !pl || this.sniffing) return [];
     const ok = 'rest' in pl;
     const p = ok ? pl.rest.pose : this.heldPose(h);
     const base = (st: Stand) => {
@@ -2889,7 +3036,7 @@ export class GameEngine {
       return { h: hose, from: this.mountAt(on), fluid };
     });
     this.view.render({
-      eye: this.eye(), yaw: this.player.yaw, pitch: this.player.pitch,
+      ...this.gaze(),
       flasks: this.flasks, tools: this.tools, scales: this.scales, hoses, faucets: this.faucets, stock: this.stock,
       streams, drops,
       tarePress: this.tarePress, hot: this.hot(), dt, clock: this.clock,
@@ -2904,6 +3051,8 @@ export class GameEngine {
    * and nothing for the cabinet itself otherwise.
    */
   private hot(): Pick | null {
+    // (nothing while she sniffs: her nose is in it)
+    if (this.sniffing) return null;
     const p = this.target;
     if (this.held) return this.intoCabinet() ? { kind: 'cabinet' } : p?.kind === 'cabinet' || p?.kind === 'stock' ? null : p;
     return p?.kind === 'cabinet' ? null : p;
@@ -2962,6 +3111,13 @@ export class GameEngine {
       add([WHEEL_KEYS[this.wheel.which]], 'let go to take it');
       return out;
     }
+    // and so does a sniff, until she's back where she stood
+    if (this.sniffing) {
+      if (!this.sniffing.leaving) add(['F'], 'stop sniffing');
+      add(['Esc'], 'let go of the mouse');
+      add(['/'], 'hide this list');
+      return out;
+    }
     const p = this.target;
     const h = this.held;
     if (inPod(this.wake)) {
@@ -3015,7 +3171,7 @@ export class GameEngine {
     if (id) add(['Enter'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
     const nose = this.sniffAim();
     if (nose === 'sealed') add(['F'], 'sniff it: it’s sealed', true);
-    else if (nose) add(['F'], h?.kind === 'flask' && nose === h.f ? 'sniff what’s in hand' : 'sniff it');
+    else if (nose) add(['F'], h?.kind === 'flask' && nose === h.f ? 'sniff what’s in hand' : 'sniff it', this.handBusy());
     if (this.canNap()) add(['N'], 'nap');
     if (!h && this.history.canUndo) add([MOD, 'Z'], 'undo');
     if (!h && this.history.canRedo) add([MOD, 'Shift', 'Z'], 'redo');
@@ -3438,8 +3594,8 @@ export class GameEngine {
       inPod: inPod(this.wake),
       holding: !!this.held,
       drop: !!this.placed && 'rest' in this.placed,
-      press: this.leftWouldDo(),
-      right: this.rightWouldDo(),
+      press: !this.sniffing && this.leftWouldDo(),
+      right: !this.sniffing && this.rightWouldDo(),
       aim: this.turning ? { ...this.turning.aim } : null,
       label: !inPod(this.wake) && !!this.targetNote(),
       hand: h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : h?.kind === 'tool' && isDipper(h.t.kind) ? 'Dip' : 'Turn',

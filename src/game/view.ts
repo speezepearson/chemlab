@@ -5202,6 +5202,17 @@ export class View {
     return { ...best.p, point: { x: point.x, y: point.y, z: point.z }, distance };
   }
 
+  /**
+   * How far from `from`, along the unit vector `dir`, the first thing drawn that the crosshair could be on is (see
+   * pick); Infinity if there's nothing within `reach`.
+   */
+  clearance(from: Vec3, dir: Vec3, reach: number): number {
+    this.raycaster.set(new THREE.Vector3(from.x, from.y, from.z), new THREE.Vector3(dir.x, dir.y, dir.z));
+    this.raycaster.far = reach;
+    const hit = this.raycaster.intersectObjects([...this.pickables.keys()], false).find((h) => this.pickables.get(h.object));
+    return hit ? hit.distance : Infinity;
+  }
+
   /** Where a point in the room is on the canvas, in CSS pixels; null if it's behind the player. */
   project(p: Vec3, w: number, h: number): { x: number; y: number } | null {
     const v = new THREE.Vector3(p.x, p.y, p.z).project(this.camera);
