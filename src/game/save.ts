@@ -16,6 +16,12 @@ export interface SaveState {
    * this is from before, and is laid out afresh (see flatten.ts).
    */
   wall?: boolean;
+  /**
+   * Whether the supply station was at the bench's left end, by the cabinet, with the first row of faucets past it,
+   * when this was saved, as it's been since it moved there. A save on the wall without this had the faucets first and
+   * the station past them (see BEFORE_LEFT in presets.ts), and is hooked up as it was then as it loads.
+   */
+  stationLeft?: boolean;
   /** The preset Reset goes back to. */
   preset: string;
   flasks: SavedFlask[];

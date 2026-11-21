@@ -20,7 +20,7 @@ import { Flask, Vessel, roomFor, sustenance, transfer, volume, volumeUnit } from
 import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
-import { DEFAULT_PRESET, LAMP_POSE, PRESET_FLASKS_X, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
+import { BEFORE_LEFT, DEFAULT_PRESET, LAMP_POSE, PRESET_FLASKS_X, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
 import { script, smell, span, type Fragment } from './smell';
 import { CRYOSTABILIZER, FIRST_SUPPLY, litresOf, type Supply } from './supply';
 import { shatter } from './shatter';
@@ -234,10 +234,10 @@ const GRAVITY = 2000;
  */
 const FOV = 45;
 /**
- * Where the view starts at the bench: square on to the faucets, the supply station and the instruments, far enough
+ * Where the view starts at the bench: square on to the supply station, the faucets and the instruments, far enough
  * back to take them all in.
  */
-const START_VIEW = { x: 2360, y: 700, z: 1560 };
+const START_VIEW = { x: 2100, y: 700, z: 1560 };
 /**
  * How near the view can come to the bench's plane (see GameEngine.at), and how much nearer than the room's far wall
  * it stays; and how near the ends of the room, the floor and the ceiling its middle can go.
@@ -719,6 +719,7 @@ export class GameEngine {
     return {
       v: 1,
       wall: true,
+      stationLeft: true,
       preset: this.preset.id,
       flasks: this.flasks.map((f) => ({ ...saveVessel(f), x: f.pose.x / HOME_W, up: f.pose.y - LIFT, glass: f.glass })),
       tools: this.tools.map((t) => ({
@@ -827,6 +828,7 @@ export class GameEngine {
       this.hoses.push(new Hose(mount, { x: at.x, y: at.y, z: at.z }));
     }
     this.uniqueTools();
+    if (!s.stationLeft) this.keepOutlets();
     this.oldStation(s);
     for (const fa of this.faucets) fa.note = '';
     fs.forEach((f, i) => {
@@ -906,6 +908,37 @@ export class GameEngine {
           if (Math.abs(p.x - at.x - dx) < 1 && !this.blocked(h, p)) return p;
         }
     return at;
+  }
+
+  /**
+   * A save from before the supply station moved to the bench's left end, with the first row of faucets now past it
+   * (see BEFORE_LEFT), keeps pouring where it did. What fed the station's funnel where it was feeds it where it is:
+   * a hose's nozzle over the old funnel moves over the new one, and a bare spout over it has its hose pulled out to
+   * over the new one. And a faucet of the first row, or a spout of the station's, that has no hose out and would now
+   * pour into something, or did where it was, has its hose pulled out to where its spout was, so that what stood
+   * under it still fills, and nothing new does. The lab's own things stay where they were.
+   */
+  private keepOutlets(): void {
+    const station = this.station();
+    const dx = STATION_POSE.x - BEFORE_LEFT.station.x;
+    const was = new Tool('receptacle', -1, { ...BEFORE_LEFT.station });
+    const mouths = this.mouths();
+    const funnel = tankMouth(station, 0);
+    const oldFunnel = tankMouth(was, 0);
+    const intoOld = (p: Vec3) => mouthBelow([...mouths.filter((m) => m.v !== funnel.v), oldFunnel], p) === oldFunnel;
+    for (const h of this.hoses) if (intoOld(h.outlet)) h.outlet = { ...h.outlet, x: h.outlet.x + dx };
+    for (const t of this.tools)
+      t.shape.spouts.forEach((_, j) => {
+        if (t === station || this.hoseOn({ tool: t, spout: j })) return;
+        const p = spoutAt(t, j);
+        if (intoOld(p)) this.hoses.push(new Hose({ tool: t, spout: j }, { ...p, x: p.x + dx }));
+      });
+    const keep = (on: HoseMount, now: Vec3, then: Vec3) => {
+      if (this.hoseOn(on) || (!mouthBelow(mouths, now) && !mouthBelow(mouths, then))) return;
+      this.hoses.push(new Hose(on, then));
+    };
+    BEFORE_LEFT.faucets.forEach((x, i) => keep({ faucet: i }, this.faucets[i].spout, { ...this.faucets[i].spout, x }));
+    station.shape.spouts.forEach((_, j) => keep({ tool: station, spout: j }, spoutAt(station, j), spoutAt(was, j)));
   }
 
   /** The station (see STATION): there's always exactly one. */

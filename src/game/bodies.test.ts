@@ -4,15 +4,15 @@ import {
   flaskFluid, flaskLip, flaskMouth, footAt, insideVessel, isDocked, nozzleArm, nozzleBox, onScale, scaleArm, scaleBox, scaleSpot, spoutAt, spoutNear,
   tankFluid, tankMouth, toolArms, toolBox, valveLocal, valveNear, SHEET_SLOT, SLOT_REACH, inSlot, sheetIn, slotted,
 } from './bodies';
-import { LAMP_POSE } from './presets';
+import { LAMP_POSE, STATION_POSE } from './presets';
 import { singleOf } from '../chem/species';
 import { CAP } from './config';
-import { FAUCET_X } from './faucets';
+import { COLOR_FAUCETS, FAUCET_X } from './faucets';
 import { Flask } from './flask';
 import { FLASK_H } from './flaskShape';
 import { boxesOverlap, solids } from './physics';
 import { Scale } from './scale';
-import { CELL, LIFT, PLANE_Z, fromFrac, toFrac } from './space';
+import { BENCH, CELL, LIFT, PLANE_Z, fromFrac, toFrac } from './space';
 import { BULB_Y, Hose, INLINE_DOCK, LAMP, SHAPES, SHEET, STRIP_FOOT, THERMOMETER_ROD, Tool, footY, mouthBelow, tankX, type ToolKind } from './tools';
 
 const at = (x: number, y: number, z: number, yaw = 0) => ({ x, y, z, yaw });
@@ -325,6 +325,20 @@ describe('faucets', () => {
       expect(b.z + b.hz).toBeGreaterThan(spout.z);
     });
     for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) expect(boxesOverlap(boxes[i], boxes[j])).toBe(false);
+  });
+
+  it('come after the supply station, which is next to the cabinet, clear of it and of the shadow lamp', () => {
+    const station = toolBox(new Tool('receptacle', 0, { ...STATION_POSE }));
+    const lamp = toolBox(new Tool('shadowlamp', 1, { ...LAMP_POSE }));
+    expect(station.x - station.hx).toBeGreaterThanOrEqual(BENCH.x0);
+    for (const { spout } of faucetPipes()) {
+      const b = faucetBox(spout);
+      expect(b.x - b.hx).toBeGreaterThan(station.x + station.hx);
+      expect(boxesOverlap(b, station)).toBe(false);
+      expect(boxesOverlap(b, lamp)).toBe(false);
+    }
+    // the first row is between the station and the lamp
+    expect(FAUCET_X[COLOR_FAUCETS]).toBeLessThan(lamp.x - lamp.hx);
   });
 
   it('leave room under them for a flask on a scale on the counter, to fill it', () => {

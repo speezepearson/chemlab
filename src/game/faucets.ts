@@ -33,11 +33,11 @@ export const FAUCETS: readonly Faucet[] = [
 
 /**
  * Where each faucet's spout is along the wall (see FAUCETS): the colors' and the first of the solvent's in a row a
- * CELL apart, a little way along the bench from the cabinet; and the solvent's others every 900 along the rest of
- * it, past the supply station and where the one-of-a-kind instruments start.
+ * CELL apart, just past the supply station, which is at the bench's left end, by the cabinet (see STATION_POSE); and
+ * the solvent's others every 900 along the rest of it, past where the one-of-a-kind instruments start.
  */
 export const FAUCET_X: readonly number[] = FAUCETS.map((_, i) =>
-  i <= COLOR_FAUCETS ? BENCH.x0 + (2 + i) * CELL : BENCH.x0 + 2600 + (i - COLOR_FAUCETS - 1) * 900,
+  i <= COLOR_FAUCETS ? BENCH.x0 + (8 + i) * CELL : BENCH.x0 + 2600 + (i - COLOR_FAUCETS - 1) * 900,
 );
 
 /**

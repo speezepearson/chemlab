@@ -801,6 +801,7 @@ function write(s: SaveState, old: Lab, lay: Layout, hosed: Set<string>, parkedAt
   const out: SaveState = {
     ...structuredClone(s),
     wall: true,
+    stationLeft: true,
     tools,
     flasks,
     scales,

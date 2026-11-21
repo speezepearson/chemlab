@@ -3,7 +3,7 @@ import { T_ROOM } from '../chem/params';
 import { SPECIES, TARGET, singleOf } from '../chem/species';
 import { CAP } from './config';
 import type { Vessel } from './flask';
-import { LIFT, PLANE_Z, ROOM, WALL_PANEL, type Pose } from './space';
+import { BENCH, CELL, LIFT, PLANE_Z, ROOM, WALL_PANEL, type Pose } from './space';
 import { CRYOSTABILIZER } from './supply';
 import { LAMP, STATION, type ToolKind } from './tools';
 
@@ -30,12 +30,29 @@ export interface Spot {
 export const SPECTROSCOPE_AT: Spot = { at: [2.86, 0.5] };
 
 /**
- * Where the station is (see STATION in tools.ts): built into the back wall, past the first row of faucets, its block
- * lined up with the wall's panels (the thirteenth and fourteenth from the wall's left end), its funnel and spouts
- * out in the plane everything else is in (see PLANE_Z), and its spouts high enough for a flask under them. Every lab
- * has it, always here.
+ * Where the station is (see STATION in tools.ts): built into the back wall at the bench's left end, just past the
+ * equipment cabinet and before the first row of faucets, its block lined up with the wall's panels (the first two
+ * wholly past the cabinet: the tenth and eleventh from the wall's left end), its funnel and spouts out in the plane
+ * everything else is in (see PLANE_Z), and its spouts high enough for a flask under them. Every lab has it, always
+ * here.
  */
-export const STATION_POSE: Pose = { x: ROOM.x0 + 12 * WALL_PANEL.w - STATION.block.x0, y: STATION.top, z: PLANE_Z, yaw: 0 };
+export const STATION_POSE: Pose = {
+  x: ROOM.x0 + Math.ceil((BENCH.x0 - ROOM.x0) / WALL_PANEL.w) * WALL_PANEL.w - STATION.block.x0,
+  y: STATION.top,
+  z: PLANE_Z,
+  yaw: 0,
+};
+
+/**
+ * Where the station and the first row of faucets were before the station moved to the bench's left end: the faucets
+ * first, from 200 along the bench, and the station past them, its block on the wall's thirteenth and fourteenth
+ * panels. A save from then (one on the wall without `stationLeft`) is hooked up as it was there (see
+ * GameEngine.keepOutlets).
+ */
+export const BEFORE_LEFT = {
+  station: { ...STATION_POSE, x: ROOM.x0 + 12 * WALL_PANEL.w - STATION.block.x0 } as Pose,
+  faucets: [0, 1, 2, 3, 4].map((i) => BENCH.x0 + (2 + i) * CELL),
+};
 
 /** Where a preset's flasks stand, along the counter: the first one's middle, across the wall; the rest follow a CELL apart. */
 export const PRESET_FLASKS_X = 3600;

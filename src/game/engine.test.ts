@@ -2,18 +2,18 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
-import { FAUCET_Y, SHEET_SLOT, inSlot, paperFace, tankMouth, toolBox } from './bodies';
+import { FAUCET_Y, FLASK_R, SHEET_SLOT, inSlot, paperFace, spoutAt, tankMouth, toolBox } from './bodies';
 import { STOCK } from './cabinet';
 import { CAP, TRACE } from './config';
 import type { GameEngine } from './engine';
 import { FAUCET_X } from './faucets';
 import { Vessel, volume, type Flask } from './flask';
 import { FLASK_H } from './flaskShape';
-import { DEFAULT_PRESET, LAMP_POSE } from './presets';
+import { BEFORE_LEFT, DEFAULT_PRESET, LAMP_POSE } from './presets';
 import type { SaveState } from './save';
 import { CATCH_REST_S } from './still';
 import { LIFT, PLANE_Z, toFrac, type Pose } from './space';
-import { DRIP, PAPER_TAU, SHAPES, SHEET, TEST_PAPER, lampShot, paperReading, type Blotter, type Tool } from './tools';
+import { DRIP, PAPER_TAU, SHAPES, SHEET, TEST_PAPER, Tool, lampShot, paperReading, type Blotter, type Hose } from './tools';
 import { WHEELS } from './wheel';
 
 /*
@@ -367,6 +367,46 @@ describe('what main took out', () => {
       expect(l.in.tools.every((t) => t.id !== 7)).toBe(true);
     });
   }
+});
+
+describe('a save from before the station moved to the left end', () => {
+  // a flask on the counter under where the first faucet was, one under where the station's waste spigot was, and a
+  // dispenser far off with its hose's nozzle over where the station's funnel was
+  const old = (): SaveState => {
+    const flask = (x: number) => ({ n: {}, Q: 0, x: x / 1000, up: FLASK_H, glass: 100 });
+    const nozzle = toFrac({ x: spoutAt(new Tool('receptacle', -1, BEFORE_LEFT.station), 0).x, y: BEFORE_LEFT.station.y - 160, z: PLANE_Z });
+    const spot = toFrac({ x: 4000, y: 900, z: PLANE_Z });
+    return {
+      ...bare(),
+      flasks: [flask(BEFORE_LEFT.faucets[0]), flask(spoutAt(new Tool('receptacle', -1, BEFORE_LEFT.station), 0).x)],
+      tools: [{ kind: 'dispenser', id: 1, fx: spot.x, fy: spot.y, valves: [0], tanks: [], drops: [] }],
+      hoses: [{ outlet: nozzle, on: { tool: 1, spout: 0 } }],
+    };
+  };
+  const outlets = (l: Lab) =>
+    (l.in.hoses as unknown as Hose[]).map((h) => ({ on: 'tool' in h.on ? `${h.on.tool.kind}.${h.on.spout}` : `faucet ${h.on.faucet}`, x: h.outlet.x }));
+
+  it("keeps pouring where it did: into the funnel where it is now, and from the faucets and spouts that moved where they were", () => {
+    const l = lab(old());
+    const station = l.in.tools.find((t) => t.kind === 'receptacle')!;
+    const funnel = tankMouth(station, 0);
+    const spigot = spoutAt(new Tool('receptacle', -1, BEFORE_LEFT.station), 0).x;
+    // the faucet over the flask that was under the waste spigot pours where it used to, into nothing
+    const over = FAUCET_X.findIndex((x) => Math.abs(x - spigot) < FLASK_R);
+    expect(over).toBeGreaterThan(0);
+    expect(outlets(l).sort((a, b) => a.on.localeCompare(b.on))).toEqual([
+      { on: 'dispenser.0', x: funnel.x },
+      { on: 'faucet 0', x: BEFORE_LEFT.faucets[0] },
+      { on: `faucet ${over}`, x: BEFORE_LEFT.faucets[over] },
+      { on: 'receptacle.0', x: spigot },
+    ]);
+  });
+
+  it('is left as it is once saved since', () => {
+    const l = lab({ ...old(), stationLeft: true });
+    expect(outlets(l)).toEqual([{ on: 'dispenser.0', x: spoutAt(new Tool('receptacle', -1, BEFORE_LEFT.station), 0).x }]);
+    expect(lab().e.snapshot().stationLeft).toBe(true);
+  });
 });
 
 describe('the shadow lamp', () => {
