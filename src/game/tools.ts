@@ -1,7 +1,7 @@
-import { BOND_KEYS, BONDS, SOLVENT, type ColorAtom } from '../chem/atoms';
+import { BOND_KEYS, BONDS, type ColorAtom } from '../chem/atoms';
 import { THERMO, T_ROOM } from '../chem/params';
 import { heatAt, roundRandom, temperature, type Fluid } from '../chem/reactions';
-import { END_WEIGHT, LOOSE_ENDS, RINGED } from '../chem/shape';
+import { END_WEIGHT, RINGED } from '../chem/shape';
 import { NS, SPECIES } from '../chem/species';
 import { CAP, DELIVERY, TRACE } from './config';
 import { COOLING } from './cooling';
@@ -800,79 +800,6 @@ export function scorchAt(T: number): number {
 }
 
 /**
- * How a sleeper culture behaves (see SHAPES.culture and Tool.sicken):
- * - rate: how fast its cells die, per sim second, in fluid that does them one unit of harm (see harm): each cell in
- *   the fluid dies at random, at this times the fluid's harm, whatever the others do. So half of those in fluid of
- *   harm 0.1 are dead in 30 sim s, and in fluid of harm 1, in 3;
- * - heat: fluid hotter than `from` harms them too, as `per` of a loose end per molecule for each unit of temperature
- *   above it;
- * - pitch: how far apart the cells are, in local units, in rows half a step out of line with each other;
- * - drain: how fast its plate drains, full and with its valve fully open, by volume per sim second: a fifth of a
- *   flask, so it's empty in a few seconds, leaving its cells as they are.
- */
-export const CULTURE = { rate: Math.LN2 / 3, heat: { from: 2, per: 0.2 }, pitch: 3.2, drain: CAP / 5 };
-
-/**
- * How loose a molecule of each species is, to a sleeper culture: its loose ends (see LOOSE_ENDS), or 1 for a lone atom,
- * but none for the solvent, which does the cells no harm.
- */
-const LOOSENESS: readonly number[] = SPECIES.map((sp, s) =>
-  sp.size === 1 ? +(sp.atoms[0] !== SOLVENT) : LOOSE_ENDS[s].length,
-);
-
-/**
- * What a fluid does to a sleeper culture: its loose ends per molecule (a lone atom counting as one), plus, if it's
- * hotter than CULTURE.heat.from, CULTURE.heat.per for each unit of temperature above that. Nothing, if there's none.
- */
-export function harm(f: Fluid): number {
-  let ends = 0;
-  let molecules = 0;
-  for (let s = 0; s < NS; s++) {
-    if (!f.n[s]) continue;
-    ends += f.n[s] * LOOSENESS[s];
-    molecules += f.n[s];
-  }
-  if (molecules <= 0) return 0;
-  return ends / molecules + CULTURE.heat.per * Math.max(0, temperature(f) - CULTURE.heat.from);
-}
-
-let cultureLayout: { x: number; y: number }[] | null = null;
-
-/**
- * Where a sleeper culture's cells are on its plate, in local units, top row first: in rows CULTURE.pitch apart, each
- * row half a step out of line with the last. The same on every plate.
- */
-export function cultureCells(): readonly { x: number; y: number }[] {
-  if (cultureLayout) return cultureLayout;
-  const tk = SHAPES.culture.tanks[0];
-  const H = SHAPES.culture.tankH ?? TANK_H;
-  const p = CULTURE.pitch;
-  const cells: { x: number; y: number }[] = [];
-  const dy = (p * Math.sqrt(3)) / 2;
-  const rows = Math.floor((H - p) / dy) + 1;
-  const y0 = (H - (rows - 1) * dy) / 2;
-  const across = Math.floor((tk.x1 - tk.x0 - p) / p) + 1;
-  for (let r = 0; r < rows; r++) {
-    // every other row has one fewer, so, centered, it's half a step out of line
-    const cols = across - (r % 2);
-    const x0 = (tk.x0 + tk.x1) / 2 - ((cols - 1) * p) / 2;
-    for (let c = 0; c < cols; c++) cells.push({ x: x0 + c * p, y: y0 + r * dy });
-  }
-  return (cultureLayout = cells);
-}
-
-let cultureInside: Piece[] | null = null;
-
-/**
- * How high above the floor of a sleeper culture's plate fluid filling `share` of it stands, as it's drawn (see
- * tankPieces): a cell is in the fluid if it's below that.
- */
-export function cultureLevel(share: number): number {
-  cultureInside ??= tankPieces(SHAPES.culture, 0, tankDepth('culture'));
-  return levelIn(cultureInside, share);
-}
-
-/**
  * A sheet of shadow paper (see SHAPES.sheet), which the shadow lamp's light darkens, for good, where it falls on it:
  * - side: the paper, a square, this far across and tall, a grid cell, so it stands across the lamp's channel from wall
  *   to wall; top: how far down from the sheet's top its square starts, under the bar;
@@ -1100,7 +1027,7 @@ export function bondDots(): { x: number; y: number }[] {
 
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater'
-  | 'spectroscope' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'column' | 'culture' | 'tank'
+  | 'spectroscope' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'column' | 'tank'
   | 'receptacle' | 'shadowlamp' | 'sheet' | 'testpaper' | 'bondpaper';
 
 /**
@@ -1409,19 +1336,6 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: COLUMN.tube.y1 + 28,
     box: { x0: -COLUMN.funnel.w - 2, x1: COLUMN.funnel.w + 2, y0: -6, y1: COLUMN.tube.y1 + 30 },
   },
-  culture: {
-    // a flat glass cell, the plate, filled through a funnel on top and drained through a valve under it; the cells
-    // stand on the inside of its front (see cultureCells)
-    tanks: [{ name: 'plate', x0: -20, x1: 20 }],
-    tankH: 46,
-    tankCap: CAP / 10,
-    cup: { w: 10, h: 8 },
-    maxFlow: CULTURE.drain,
-    spouts: [0],
-    valveY: 58,
-    spoutY: 74,
-    box: { x0: -24, x1: 24, y0: -14, y1: 76 },
-  },
   shadowlamp: {
     // a trough: the lamp's enclosure, a floored channel between two walls, and an end wall (see LAMP), with no tanks
     // or spouts; its one valve is the dial on its enclosure's front, which sets how long it shines (see lampShot)
@@ -1622,7 +1536,6 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   dilatometer: 'Swell bulbs',
   strip: 'Wicking strip',
   column: 'Column',
-  culture: 'Sleeper culture',
   tank: 'Tank',
   receptacle: 'Cryostabilizer',
   spectroscope: 'Spectroscope',
@@ -1764,10 +1677,6 @@ export class Blotter extends Vessel {
  * - A **column** is a small funnel over a tall tube packed with the strips' paper, its bed, over a tap and a spout. A
  *   dry bed drinks from the funnel until it's wet through; then what's poured in runs through it as far as the tap's
  *   open, carrying each species down it at its own pace, as on a strip, and out the spout (see elute).
- * - A **sleeper culture** is a flat glass plate of living cells, filled through a funnel on top. What's in it harms
- *   those of them it covers, by its loose ends and its heat (see harm): each dies at random, for good, the sooner the
- *   more harmful the fluid (see sicken). It drains through a valve under it, leaving its cells as they are, as a
- *   record of what was tried on them.
  * - A **thermometer** (fine or wide, see THERMOMETERS) has no tanks at all: it's a glass rod whose bulb takes the
  *   temperature of whatever fluid it's dipped in, or the room's (see warm and bath), and which shatters, for good, if
  *   that's too hot for it.
@@ -1855,8 +1764,6 @@ export class Tool {
   readonly scorch: Float32Array;
   /** How many of a wicking strip's stretches, from its foot, are in what it's in, as it was last told (see dipIn). */
   private under = 1;
-  /** Which of a sleeper culture's cells are dead, 1 for each that is, in cultureCells' order; null for any other tool. */
-  readonly dead: Uint8Array | null;
   /** A thermometer's bulb's temperature (see warm), which its column shows; the room's to start with. */
   temp = COOLING.ambient;
   /**
@@ -1950,7 +1857,6 @@ export class Tool {
     this.scorch = new Float32Array(kind === 'strip' ? STRIP.cells : 0);
     this.bed = Array.from({ length: kind === 'column' ? COLUMN.cells : 0 }, () => new Vessel(Infinity));
     this.packing = kind === 'strip' ? new Bed(this.paper) : kind === 'column' ? new Bed(this.bed) : null;
-    this.dead = kind === 'culture' ? new Uint8Array(cultureCells().length) : null;
     this.dose = new Float32Array(kind === 'sheet' ? SHEET.cells ** 2 : 0);
     const nValves = SHAPES[kind].valves?.length ?? this.tanks.length;
     this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' || kind === 'shadowlamp' ? 0.5 : 0));
@@ -1985,8 +1891,6 @@ export class Tool {
       this.emerge(h);
       return this.none();
     }
-    // a culture's cells sicken in what's in the plate, which then drains like any tank
-    if (this.kind === 'culture') this.sicken(h);
     // nothing drains from a tool with no spouts
     if (!this.shape.spouts.length) return this.none();
     // with nothing in it and its readings faded to nothing, a step would do nothing; an instrument's smoothing starts
@@ -2033,31 +1937,6 @@ export class Tool {
       this.bonds = bonds.reduce((a, b) => a + b, 0) >= TRACE ? [...bonds] : bonds.map(() => 0);
     }
     return this.out;
-  }
-
-  /**
-   * A sleeper culture's step: each living cell that the fluid in the plate covers dies with probability
-   * 1 − e^(−CULTURE.rate · harm · h), whatever the others do, and stays dead. How many do in a step is their number
-   * times that, rounded at random, and which is drawn evenly from among them. Cells above the fluid are untouched.
-   */
-  private sicken(h: number): void {
-    const plate = this.tanks[0];
-    const dead = this.dead!;
-    const rate = CULTURE.rate * harm(plate);
-    if (rate > 0) {
-      const H = this.shape.tankH ?? TANK_H;
-      const surface = cultureLevel(Math.min(1, volume(plate) / plate.cap));
-      const at: number[] = [];
-      cultureCells().forEach((c, i) => {
-        if (!dead[i] && H - c.y < surface) at.push(i);
-      });
-      for (let n = Math.min(at.length, roundRandom(at.length * (1 - Math.exp(-rate * h)))); n > 0; n--) {
-        const j = Math.floor(Math.random() * at.length);
-        dead[at[j]] = 1;
-        at[j] = at[at.length - 1];
-        at.pop();
-      }
-    }
   }
 
   /**
@@ -2199,7 +2078,7 @@ export class Tool {
    * What a save keeps of an instrument's own state, as numbers, or undefined if it has none: a thermometer's bulb's
    * temperature, and 1 if it's broken or 0 if not; how much a wicking strip's paper has drunk, a 0 where how dry it
    * was used to be, when strips dried, and how scorched each stretch is (what's on its paper is saved as vessels, see paper); how much a column's bed has drunk (what's on it is
-   * saved as vessels, see bed); which of a sleeper culture's cells are dead (see dead); which supply a receptacle is
+   * saved as vessels, see bed); which supply a receptacle is
    * fitted for (its place in SUPPLIES), and how far into its changeover it is, or −1 if none is under way; 1 if a
    * shadow lamp is lit, or 0 if not, and how long its exposure has left (its dial's setting is saved as a valve's); and what a sheet of blotting paper shows so far (see showing), while
    * that's still coming up: none once it shows all it's going to, as none means when it's put back (see remember).
@@ -2208,7 +2087,6 @@ export class Tool {
     if (this.kind === 'shadowlamp') return [+this.lit, this.left];
     if (this.kind === 'strip') return [this.soaked, 0, ...this.scorch];
     if (this.kind === 'column') return [this.soaked];
-    if (this.kind === 'culture') return Array.from(this.dead!);
     if (this.kind === 'receptacle') return [SUPPLIES.indexOf(this.supply), this.swap ?? -1];
     // (a sheet that shows all it's going to keeps nothing: that's how it loads)
     if (isBlotter(this.kind)) return this.developed ? undefined : [...this.showing];
@@ -2245,7 +2123,6 @@ export class Tool {
       else this.scorch.set(scorch);
     }
     if (this.kind === 'column') this.soaked = Math.max(0, Math.min(1, (m as number[])[0]));
-    if (this.kind === 'culture') this.dead!.set((m as number[]).map((x) => +(x > 0)));
     if (this.kind === 'receptacle') {
       const [supply, swap] = m as number[];
       this.supply = SUPPLIES[supply] ?? CRYOSTABILIZER;

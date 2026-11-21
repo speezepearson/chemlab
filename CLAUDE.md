@@ -243,7 +243,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   only while that's still coming up; with none, it loads showing all it holds); a sheet of shadow paper's image, which is thousands of
   cells, goes beside it as a packed string (`Tool.image`, `Tool.develop`).
   A saved tool of a kind there no longer is (the composition analyzer, which the test paper replaced, the bond
-  visualizer, which the bond paper replaced, and the dish) is dropped as
+  visualizer, which the bond paper replaced, the dish and the sleeper culture) is dropped as
   the save loads, with the hoses on its spouts (its id isn't given to a tool the load adds, or that tool would get
   them); so is a stored volume slider for a sound that's gone (`parseVolumes`).
 

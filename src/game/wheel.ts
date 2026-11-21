@@ -24,7 +24,7 @@ export const WHEEL = {
  * first is for experimenting and learning, and the second for mass production.
  */
 export const WHEELS: readonly (readonly Stocked[])[] = [
-  ['flask', 'scale', 'pipette', 'thermometer', 'thermometerWide', 'strip', 'column', 'culture', 'sheet', 'testpaper', 'bondpaper'],
+  ['flask', 'scale', 'pipette', 'thermometer', 'thermometerWide', 'strip', 'column', 'sheet', 'testpaper', 'bondpaper'],
   ['dispenser', 'exchanger', 'separator', 'splitter', 'sorter', 'heater', 'tank', 'meter', 'multiplexer', 'dilatometer'],
 ];
 

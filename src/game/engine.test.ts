@@ -1102,6 +1102,55 @@ describe('the dish, which is gone', () => {
   });
 });
 
+describe('the sleeper culture, which is gone', () => {
+  /**
+   * A lab's save with a sleeper culture in it, on the front counter: some fluid in its plate, some of its cells dead,
+   * and a hose out of its spout.
+   */
+  function withCulture(l: { e: GameEngine; in: Inside }): SaveState {
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    const spectro = s.tools.find((t) => t.kind === 'spectroscope')!;
+    const culture = {
+      ...spectro, kind: 'culture', id: 901, fx: 0.45, fy: 0.3, z: 750, valves: [0.5], tanks: [{ n: { R: 2e6 }, Q: 2e6 }],
+      drops: [{ n: {}, Q: 0 }], memory: Array.from({ length: 180 }, (_, i) => +(i % 4 === 0)), note: 'tried on R',
+    };
+    const pipette = { ...spectro, kind: 'pipette', id: 902, fx: 0.55, fy: 0.3, z: 750, valves: [0], tanks: [{ n: { G: 5e7 }, Q: 15e7 }], drops: [{ n: {}, Q: 0 }] };
+    s.tools.unshift(culture as unknown as SaveState['tools'][number], pipette as SaveState['tools'][number]);
+    s.hoses.push({ outlet: { x: 0.25, y: 0.6, z: 750, yaw: 0, reach: 50 }, on: { tool: 901, spout: 0 } });
+    return s;
+  }
+  const kinds = (l: Inside) => l.tools.map((t) => t.kind as string);
+
+  it('is no kind of tool, and the cabinet and the wheels have none', () => {
+    const l = lab();
+    expect(kinds(l.in)).not.toContain('culture');
+    expect(Object.keys(SHAPES)).not.toContain('culture');
+    expect(Object.keys(STOCK)).not.toContain('culture');
+    expect(WHEELS.flat() as string[]).not.toContain('culture');
+  });
+
+  it('is lost from an older save as it loads, without error, with the hose out of its spout; the rest loads as it was', () => {
+    const l = lab();
+    const before = l.in.tools.map((t) => [t.kind, t.id]);
+    const hoses = () => (l.in as unknown as { hoses: unknown[] }).hoses.length;
+    const had = hoses();
+    const s = withCulture(l);
+    expect(() => l.e.restore(s, DEFAULT_PRESET)).not.toThrow();
+    expect(kinds(l.in)).not.toContain('culture');
+    expect(l.in.tools.map((t) => [t.kind, t.id])).toEqual([['pipette', 902], ...before]);
+    expect(l.in.tools.find((t) => t.kind === 'pipette')!.tanks[0].N).toBe(5e7);
+    // the hose that was out of its spout is gone with it
+    expect(hoses()).toBe(had);
+    expect(() => {
+      for (let i = 0; i < 40; i++) l.in.simulate(0.05);
+    }).not.toThrow();
+    // saved again, there's no trace of it
+    const again = JSON.stringify(l.e.snapshot());
+    expect(again).not.toContain('culture');
+    expect(again).not.toContain('tried on R');
+  });
+});
+
 /** Stand at (x, z) with eyes on (tx, ty, tz), carrying along what's held. */
 function look(l: { e: GameEngine; in: Inside }, x: number, z: number, tx: number, ty: number, tz: number): void {
   const [dx, dy, dz] = [tx - x, ty - 620, tz - z];
