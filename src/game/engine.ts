@@ -40,6 +40,7 @@ import {
 import { typingIn } from './typing';
 import { ARRIVAL, View, type AirlockLook, type Camera, type FaucetSpot, type Frame, type GuideLook, type Icons, type LabView, type Pick } from './view';
 import { FlatView } from './view2d';
+import { catches, stillness, type Stillness } from './still';
 import { canStand, walk, type Stand } from './walk';
 import { WaterSounds } from './water';
 
@@ -437,11 +438,15 @@ export class GameEngine {
   private tarePress: Scale | null = null;
   /** Open tops, as of the latest look this frame (see mouths). */
   private open: Mouth[] = [];
+  /** Those falling fluid lands in, as of then: all of them but what's in hand's, until it's been held still (see catching). */
+  private catch: Mouth[] = [];
+  /** How still what's in hand has been held, in real time (see still.ts): it catches falling fluid only once it's been still long enough. */
+  private still: Stillness | null = null;
   /** What overflowed each vessel this frame, and where it spilled from, for drawing (see fill). */
   private spills = new Map<Vessel, { at: Vec3; v: Vessel }>();
   private spillTime = 1;
   /** Drops that have let go of an outlet and are on their way down. */
-  private falling: { v: Vessel; x: number; y: number; z: number; vy: number }[] = [];
+  private falling: { v: Vessel; x: number; y: number; z: number; vy: number; trail: boolean }[] = [];
   /** The faucets pouring into something this frame: where from (the faucet, or its hose's nozzle), and into what. */
   private faucetFlows: { fa: FaucetSpot; from: Vec3; m: Mouth }[] = [];
   /**
@@ -596,7 +601,7 @@ export class GameEngine {
     const v = this.vessel(id)?.vessel;
     if (!v) return;
     equilibrate(v, this.chem.U, temperature(v));
-    this.open = this.mouths();
+    this.reopen();
     this.overflow(v);
   }
 
@@ -764,7 +769,7 @@ export class GameEngine {
     this.setAlarmsOff(a.alarmsOff);
     this.blindsShut = a.blindsShut;
     this.turning = null;
-    this.open = this.mouths();
+    this.reopen();
   }
 
   /** A valve being turned is let go of: that's a step to undo, if it moved. */
@@ -1852,6 +1857,8 @@ export class GameEngine {
     this.lastFoot = dipper ? footAt(h.t) : null;
     this.entered = dipper ? insideVessel(this.lastFoot!, this.flasks, this.tools) : null;
     this.dipFor = 0;
+    // just taken in hand, it's moving (see still.ts)
+    this.still = null;
     this.carry();
   }
 
@@ -2358,6 +2365,30 @@ export class GameEngine {
     return out;
   }
 
+  /** Look afresh at the open tops (see open) and at those falling fluid lands in (see catch). */
+  private reopen(): Mouth[] {
+    this.open = this.mouths();
+    this.catch = this.catching(this.open);
+    return this.open;
+  }
+
+  /**
+   * Of `mouths`, those falling fluid lands in: all of them but what's in hand's (a flask's, a tool's tanks', those of
+   * the flasks on a scale) until it's been held still for CATCH_REST_S (see still.ts), so fluid falls past what's
+   * being carried onto whatever's below. Fluid from a hose following it (see gather) lands in it all the same.
+   */
+  private catching(mouths: Mouth[]): Mouth[] {
+    const h = this.held;
+    if (!h || catches(this.still)) return mouths;
+    const mine = new Set<Vessel>(h.kind === 'flask' ? [h.f] : h.kind === 'tool' ? h.t.tanks : h.kind === 'scale' ? h.sc.load.map((l) => l.f) : []);
+    return mine.size ? mouths.filter((m) => !mine.has(m.v)) : mouths;
+  }
+
+  /** Whether the hose of a spout or faucet goes along with what's held (see gather): what it lets out lands in that, still or not. */
+  private trails(m: HoseMount): boolean {
+    return !!this.held?.follow?.some((f) => sameMount(f.hose.on, m));
+  }
+
   /** Where something falling from p stops: the first open top under it, or else the floor or counter. */
   private landsAt(p: Vec3, mouths: readonly Mouth[]): number {
     const m = mouthBelow(mouths, p);
@@ -2396,7 +2427,7 @@ export class GameEngine {
     let spill = this.spills.get(v);
     if (!spill) this.spills.set(v, (spill = { at: rim, v: new Vessel(Infinity) }));
     spill.v.addFrom(out, volume(out), true);
-    const below = mouthBelow(this.open, rim);
+    const below = mouthBelow(this.catch, rim);
     if (below) this.stream(below.v, out);
   }
 
@@ -2429,7 +2460,7 @@ export class GameEngine {
     this.retarget();
     if (this.turning) this.aimTurning();
     this.tip(dt);
-    this.carry();
+    this.carry(dt);
     this.simulate(dt);
     // the end stands the lab still as it was when there was enough, so it goes on in real time
     if (this.arrival && this.wake !== 'pod') this.stepWake(dt);
@@ -2459,10 +2490,10 @@ export class GameEngine {
    * or a scale it's near, and lined up with what it's nearly lined up with. A flask tipping to pour stays where it's
    * held instead, so it pours from where the player has it.
    */
-  private carry(): void {
+  private carry(dt = 0): void {
     const h = this.held;
     if (!h) {
-      this.placed = null;
+      this.placed = this.still = null;
       this.entered = this.lastFoot = null;
       return;
     }
@@ -2470,6 +2501,8 @@ export class GameEngine {
     const at = this.facing === 'bench' && this.pointer ? this.planeAt(this.pointer.x, this.pointer.y, PLANE_Z) : null;
     const want = this.inRoom(at ? onPlane(at.x + h.grip.x, at.y + h.grip.y) : onPlane(was.x, was.y));
     const pl = (this.placed = this.placement(h, want));
+    // by where it would be left, which tipping it to pour doesn't move
+    this.still = stillness(this.still, pl.pose.x, pl.pose.y, dt);
     const pouring = h.kind === 'flask' && (this.rightHeld || h.f.tilt > 0);
     this.placeHeld(h, pouring ? want : pl.pose);
     this.follow(h);
@@ -2523,14 +2556,15 @@ export class GameEngine {
     const simDt = quiet ? dt : this.wake === 'pod' || this.arrival ? 0 : dt * this.speed;
     this.spin = (this.spin + SPIN * simDt) % (2 * Math.PI);
     this.clock += simDt;
-    const mouths = (this.open = this.mouths());
+    const mouths = this.reopen();
+    const catching = this.catch;
     const h = this.held;
 
     // the held flask, tipped all the way, pours from its lip into whatever's below
     const D = h?.kind === 'flask' && this.rightHeld && h.f.tilt >= POUR_ANG * 0.97 ? h.f : null;
     if (D && simDt > 0) {
       const from = flaskLip(D);
-      this.pour = { from, into: mouthBelow(mouths, from) };
+      this.pour = { from, into: mouthBelow(catching, from) };
     }
 
     // a hose's nozzle in hand lets nothing out without the right button: the tool or faucet it's pulled out of stops
@@ -2546,7 +2580,7 @@ export class GameEngine {
     this.faucets.forEach((fa, i) => {
       fa.output = faucetOutput(fa.start, this.chem); // cheap, and follows edits to the chemistry
       const from = this.faucetOutlet(i);
-      const m = faucetTarget(mouths, from);
+      const m = faucetTarget(this.trails({ faucet: i }) ? mouths : catching, from);
       if (m && simDt > 0 && i !== stillFaucet) this.faucetFlows.push({ fa, from, m });
     });
 
@@ -2566,14 +2600,17 @@ export class GameEngine {
       const spouts = this.tools.map((t) => t.shape.spouts.map((_, j) => this.outletAt(t, j)));
       // a held tool keeps running, but what leaves a spout of it with no hose out goes down the drain, not into
       // whatever it's swung over (see loose)
-      const targets = this.tools.map((t, i) => spouts[i].map((sp, j) => (this.loose(t, j) ? null : mouthBelow(mouths, sp))));
+      const trailing = this.tools.map((t) => t.shape.spouts.map((_, j) => this.trails({ tool: t, spout: j })));
+      const targets = this.tools.map((t, i) =>
+        spouts[i].map((sp, j) => (this.loose(t, j) ? null : mouthBelow(trailing[i][j] ? mouths : catching, sp))),
+      );
       // a fast flow streams straight into what's below (overflowing it if it's full); a slow one gathers
       // in a drop, which falls on its own time
-      const pour = (drop: Vessel, out: Vessel | null, sp: Vec3, target: Mouth | null, loose: boolean): boolean => {
+      const pour = (drop: Vessel, out: Vessel | null, sp: Vec3, target: Mouth | null, loose: boolean, trail: boolean): boolean => {
         const down = drip(drop, out, step);
         if (down && down === out) {
           if (target) this.stream(target.v, out);
-        } else if (down && !loose) this.falling.push({ v: down, x: sp.x, y: sp.y, z: sp.z, vy: 0 });
+        } else if (down && !loose) this.falling.push({ v: down, x: sp.x, y: sp.y, z: sp.z, vy: 0, trail });
         return !!down && down === out;
       };
       // what leaves each outlet over the whole frame, for drawing: a single substep's can be nothing, as when a
@@ -2596,11 +2633,11 @@ export class GameEngine {
           if (t === stillTool) return;
           t.step(step).forEach((out, k) => {
             if (quiet) {
-              pour(t.drops[k], out, spouts[j][k], targets[j][k], this.loose(t, k));
+              pour(t.drops[k], out, spouts[j][k], targets[j][k], this.loose(t, k), trailing[j][k]);
               return;
             }
             tally(toolTotals[j][k], out, false); // before pouring, which can gather it into a drop
-            tally(toolTotals[j][k], null, pour(t.drops[k], out, spouts[j][k], targets[j][k], this.loose(t, k)));
+            tally(toolTotals[j][k], null, pour(t.drops[k], out, spouts[j][k], targets[j][k], this.loose(t, k), trailing[j][k]));
           });
         });
         // falling drops land in the first open top they pass, or go down the sink
@@ -2608,7 +2645,7 @@ export class GameEngine {
           const from = d.y;
           d.vy += GRAVITY * step;
           d.y -= d.vy * step;
-          const m = mouthBelow(mouths, { x: d.x, y: from, z: d.z });
+          const m = mouthBelow(d.trail ? mouths : catching, { x: d.x, y: from, z: d.z });
           const lands = !!m && m.y >= d.y;
           if (lands) {
             this.fill(m!.v, d.v);
@@ -2914,13 +2951,15 @@ export class GameEngine {
   }
 
   private render(dt: number): void {
-    const mouths = this.open;
+    // each falls to where it lands, past what's in hand if that doesn't catch it yet (see catching)
+    const mouths = this.catch;
     const streams: Frame['streams'][number][] = [];
     for (const t of this.tools)
       t.out.forEach((out, k) => {
         if (!out || !t.streaming[k]) return;
         const sp = this.outletAt(t, k);
-        streams.push({ from: sp, toY: this.loose(t, k) ? groundAt(sp.x, sp.z) : this.landsAt(sp, mouths), fluid: out, flow: t.flow[k] });
+        const into = this.trails({ tool: t, spout: k }) ? this.open : mouths;
+        streams.push({ from: sp, toY: this.loose(t, k) ? groundAt(sp.x, sp.z) : this.landsAt(sp, into), fluid: out, flow: t.flow[k] });
       });
     for (const { at, v } of this.spills.values())
       if (v.N > TRACE) streams.push({ from: at, toY: this.landsAt(at, mouths), fluid: v, flow: volume(v) / (MAX_FLOW * this.spillTime) });

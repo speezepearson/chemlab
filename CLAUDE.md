@@ -148,7 +148,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
   notice; the player themselves (moving the view, turning it round, its glides out of the pod and back into it,
-  walking and looking about in the walk mode, carrying, tipping a flask, their eyes closing for a nap), which is
+  walking and looking about in the walk mode, carrying, how long what's carried has been held still (`CATCH_REST_S`), tipping a flask, their eyes closing for a nap), which is
   input, not the sim; and what
   isn't in the world (the HUD, the guides' flashing). While the player sleeps in the cryopod, or naps, the lab is run as ever in
   windows and jumped ahead between them (`sleep.ts`): still sim time, just not substep by substep through the jumps.
