@@ -233,26 +233,20 @@ function Wheel({ wheel, engine }: { wheel: NonNullable<HudState['wheel']>; engin
 function Smell({ smell }: { smell: NonNullable<HudState['smell']> }) {
   let k = 0;
   const lines = smell.lines.map((line) => line.map((text) => ({ text, on: k++ < smell.shown })));
+  // (the unseen whole is in the same pieces as what's seen, so that it's as wide to the last fraction of a pixel)
+  const strip = (line: { text: string }[], i: number) => (
+    <p key={i}>
+      {line.map((f, j) => (
+        <span key={j}>{(j ? ' ' : '') + f.text}</span>
+      ))}
+    </p>
+  );
   return (
     <div className={smell.out ? 'smell out' : 'smell'} style={{ transitionDuration: `${SMELL_FADE_MS}ms` }}>
       <div className="whole" aria-hidden="true">
-        {lines.map((line, i) => (
-          <p key={i}>{line.map((f) => f.text).join(' ')}</p>
-        ))}
+        {lines.map(strip)}
       </div>
-      <div className="said">
-        {lines
-          .filter((line) => line[0].on)
-          .map((line, i) => (
-            <p key={i}>
-              {line
-                .filter((f) => f.on)
-                .map((f, j) => (
-                  <span key={j}>{(j ? ' ' : '') + f.text}</span>
-                ))}
-            </p>
-          ))}
-      </div>
+      <div className="said">{lines.filter((line) => line[0].on).map((line, i) => strip(line.filter((f) => f.on), i))}</div>
     </div>
   );
 }
