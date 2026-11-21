@@ -3,22 +3,22 @@
  * - wall: a view square on to the bench, with perspective, worked with the mouse's own pointer;
  * - walk: walking round the room and looking about, as it once was, with a crosshair in the middle of the view;
  *   the equipment is still all on the wall;
- * - iso: as wall, but with no perspective, seen a little from above and one side, so that what's dragged across the
- *   wall goes just as far across the view wherever it is;
+ * - ortho: as wall, square on, but with no perspective, as if from infinitely far off, so that what's dragged across
+ *   the wall goes just as far across the view wherever it is, and nothing shifts against the wall as the view moves;
  * - flat: the bench drawn flat, on a plain 2D canvas, with nothing three-dimensional about it.
  */
-export type ViewMode = 'wall' | 'walk' | 'iso' | 'flat';
+export type ViewMode = 'wall' | 'walk' | 'ortho' | 'flat';
 
 /** The modes that are offered, in the order they're offered, each with its name as the player sees it. */
 export const VIEW_MODES: readonly { id: ViewMode; name: string }[] = [
   { id: 'wall', name: 'Wall' },
   { id: 'walk', name: 'Walk round' },
-  { id: 'iso', name: 'Isometric' },
+  { id: 'ortho', name: 'Wall, no perspective' },
   { id: 'flat', name: 'Flat' },
 ];
 
 /** Every mode there is, offered or not. */
-const KNOWN: readonly ViewMode[] = ['wall', 'walk', 'iso', 'flat'];
+const KNOWN: readonly ViewMode[] = ['wall', 'walk', 'ortho', 'flat'];
 
 const KEY = 'slurry-lab.view';
 

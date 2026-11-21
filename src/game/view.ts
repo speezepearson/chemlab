@@ -2236,7 +2236,10 @@ function pull(scene: THREE.Object3D, x: number, y: number, z: number, nx: number
   scene.add(g);
 }
 
-function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.Mesh; fixtures: THREE.Object3D[] } {
+/** How far out from the room's edges its dark surround goes (see buildRoom): further than any view sees. */
+const SURROUND = 8000;
+
+function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.Mesh; fixtures: THREE.Object3D[]; surround: THREE.Object3D[] } {
   const W = ROOM.x1 - ROOM.x0;
   const Dp = ROOM.z1 - ROOM.z0;
   const H = ROOM.y1;
@@ -2295,6 +2298,26 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
     }
   const fixtures = [new THREE.Mesh(mergeGeometries(frames), frameMat), new THREE.Mesh(mergeGeometries(panes), diffuser)];
   scene.add(...fixtures);
+  // what a view with no perspective sees past the room's edges (the floor, the ceiling and the walls square to the
+  // one it's on are edge on to it): plain and dark, as the flat view has it, in the plane of each wall, all round it.
+  // From inside the room, with perspective, there's no seeing them.
+  const surroundMat = new THREE.MeshBasicMaterial({ color: 0x1b1f20, side: THREE.DoubleSide, toneMapped: false });
+  const surround = [
+    [W, cx, ROOM.z0, 0],
+    [W, cx, ROOM.z1, 0],
+    [Dp, ROOM.x0, cz, Math.PI / 2],
+    [Dp, ROOM.x1, cz, Math.PI / 2],
+  ].map(([w, x, z, ry]) => {
+    const all = new THREE.Shape();
+    rectPath(0, H / 2, w + 2 * SURROUND, H + 2 * SURROUND, all);
+    all.holes.push(rectPath(0, H / 2, w, H));
+    const m = new THREE.Mesh(new THREE.ShapeGeometry(all), surroundMat);
+    m.position.set(x, 0, z);
+    m.rotation.y = ry;
+    m.visible = false;
+    scene.add(m);
+    return m;
+  });
   // a dark rubber kick strip along the foot of every wall, but across the airlock's doorway
   const kickMat = new THREE.MeshStandardMaterial({ color: 0x1e2322, roughness: 0.8, metalness: 0.1 });
   const KICK = 48;
@@ -2353,7 +2376,7 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
   const beacon = new THREE.PointLight(0xff2a14, 0, 2600, 1.4);
   beacon.position.copy(lamp.position).add(new THREE.Vector3(0, 0, -30));
   scene.add(beacon);
-  return { beacon, lamp, fixtures };
+  return { beacon, lamp, fixtures, surround };
 }
 
 /** How far in front of the player's eyes, in the pod, the message projected on its front is, and how wide. */
@@ -3367,8 +3390,13 @@ export class View implements LabView {
   camera: THREE.PerspectiveCamera | THREE.OrthographicCamera = this.persp;
   /** The view's width over its height. */
   private aspect = 1;
-  /** The ceiling's light fixtures, which a view from above it, without perspective, would see the backs of: hidden then. */
+  /**
+   * The ceiling's light fixtures, which a view without perspective, square on to the wall, would see edge on, as dark
+   * bars along the top of it: hidden then.
+   */
   private fixtures: THREE.Object3D[] = [];
+  /** The plain dark surround past the room's edges (see buildRoom), which only a view without perspective sees: shown then. */
+  private surround: THREE.Object3D[] = [];
   private renderer: THREE.WebGLRenderer;
   /** What the white void of Mu Ceti is drawn with (see renderArrival), once it's needed. */
   private void?: ReturnType<View['buildVoid']>;
@@ -3385,7 +3413,7 @@ export class View implements LabView {
   private guides: THREE.Mesh[] = [];
   private rims: { g: THREE.Group; mat: THREE.MeshBasicMaterial; sides: THREE.Mesh[]; ring: THREE.Mesh }[] = [];
   private drops: THREE.Mesh[] = [];
-  private beacon: { beacon: THREE.PointLight; lamp: THREE.Mesh; fixtures: THREE.Object3D[] };
+  private beacon: { beacon: THREE.PointLight; lamp: THREE.Mesh; fixtures: THREE.Object3D[]; surround: THREE.Object3D[] };
   /** The light from the ceiling, whose shadows follow the view along the room (see SHADOW). */
   private sun: THREE.DirectionalLight;
   private alarmButton: AlarmButton;
@@ -3435,6 +3463,7 @@ export class View implements LabView {
     this.roomLights = [sky, sun].map((light) => ({ light, base: light.intensity }));
     this.beacon = buildRoom(this.scene);
     this.fixtures = this.beacon.fixtures;
+    this.surround = this.beacon.surround;
     this.scene.add(buildPort(PORT_FRAC));
     this.alarmButton = new AlarmButton(this.scene, this.pickables);
     this.blindsButton = new BlindsButton(this.scene, this.pickables);
@@ -3504,6 +3533,7 @@ export class View implements LabView {
       this.camera = this.persp;
     }
     for (const o of this.fixtures) o.visible = cam.ortho === undefined;
+    for (const o of this.surround) o.visible = cam.ortho !== undefined;
     this.camera.position.set(cam.x, cam.y, cam.z);
     // the stars are too far off to move as the view does
     this.stars.position.copy(this.camera.position);

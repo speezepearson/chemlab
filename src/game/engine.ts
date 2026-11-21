@@ -259,11 +259,6 @@ const PITCH_MAX = 1.45;
  */
 const WALK_START: Player = { x: AIRLOCK.x, z: ROOM.z1 - 400, yaw: 0, pitch: 0 };
 /**
- * The isometric view (see ViewMode): which way it looks at the wall, a little from its right and from above, with no
- * perspective.
- */
-const ISO = { yaw: 0.4, pitch: -0.3 };
-/**
  * How far back along its line of sight, from the middle of the stretch of wall it sees, a view with no perspective
  * is from: it makes no odds to what it sees, so long as everything on the wall is in front of it.
  */
@@ -1229,25 +1224,22 @@ export class GameEngine {
     };
   }
 
-  /** Whether the view has no perspective (see ViewMode): isometric, or flat. */
+  /** Whether the view has no perspective (see ViewMode): the wall seen square on without it, or drawn flat. */
   private ortho(): boolean {
-    return this.mode === 'iso' || this.mode === 'flat';
+    return this.mode === 'ortho' || this.mode === 'flat';
   }
 
   /**
-   * The camera for a view at `at` (see GameEngine.at), on the bench, or on the wall behind if `away`. With
-   * perspective, it's just there, square on. Without, it sees as much of the wall, top to bottom, as that would,
-   * from ORTHO_BACK back along its own line of sight from the middle of it: square on for the flat view, and the way
-   * ISO says for the isometric one.
+   * The camera for a view at `at` (see GameEngine.at), on the bench, or on the wall behind if `away`: square on to
+   * the wall. With perspective, it's just there. Without, it sees as much of the wall, top to bottom, as that would,
+   * from ORTHO_BACK straight out from the middle of it.
    */
   private camOf(at: Vec3, away = false): Camera {
     const turn = away ? Math.PI : 0;
     if (!this.ortho()) return { x: at.x, y: at.y, z: at.z, yaw: turn, pitch: 0, fov: FOV };
-    const look = this.mode === 'iso' ? { yaw: turn + ISO.yaw, pitch: ISO.pitch } : { yaw: turn, pitch: 0 };
     const wall = away ? ROOM.z1 : PLANE_Z;
-    const { ahead } = axes(look);
     const ortho = Math.abs(at.z - wall) * Math.tan((FOV * Math.PI) / 360);
-    return { x: at.x - ahead.x * ORTHO_BACK, y: at.y - ahead.y * ORTHO_BACK, z: wall - ahead.z * ORTHO_BACK, ...look, fov: FOV, ortho };
+    return { x: at.x, y: at.y, z: away ? wall - ORTHO_BACK : wall + ORTHO_BACK, yaw: turn, pitch: 0, fov: FOV, ortho };
   }
 
   /**
