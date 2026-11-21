@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ease, inPod, type Wake } from './airlock';
+import { ease, hearing, inPod, type Wake } from './airlock';
 
 describe('airlock', () => {
   it('tells when the player is shut in the pod', () => {
@@ -21,5 +21,22 @@ describe('ease', () => {
     expect(ease(0.1)).toBeLessThan(0.1);
     expect(ease(0.9)).toBeGreaterThan(0.9);
     for (let t = 0; t < 1; t += 0.05) expect(ease(t + 0.05)).toBeGreaterThanOrEqual(ease(t));
+  });
+});
+
+describe('hearing', () => {
+  const ALL: Wake[] = ['pod', 'flicker', 'opening', 'out', 'closed', 'open', 'boarding', 'asleep', 'arriving', 'arrived'];
+
+  it('is clear at the bench, and muffled in the pod or napping', () => {
+    for (const w of ALL) {
+      expect(hearing(w, false, false), w).toBe(inPod(w) ? 'muffled' : 'clear');
+      expect(hearing(w, true, false), w).toBe('muffled');
+    }
+    expect(hearing('closed', false, false)).toBe('clear');
+    expect(hearing('asleep', false, false)).toBe('muffled');
+  });
+
+  it('is silent once the end has begun, wherever the player is', () => {
+    for (const w of ALL) for (const dozing of [false, true]) expect(hearing(w, dozing, true), w).toBe('silent');
   });
 });

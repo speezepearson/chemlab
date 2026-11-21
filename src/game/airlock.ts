@@ -43,6 +43,20 @@ export function inPod(w: Wake): boolean {
   return w !== 'out' && w !== 'closed' && w !== 'open';
 }
 
+/**
+ * How the lab and the ship sound to the player (see setHearing in audio.ts): clear at the bench; muffled, as if
+ * through the pod's shell or through sleep, while they're in the pod (waking in it, getting in, asleep) or napping
+ * (from when their eyes start to close till they start to open); and silent once the reservoir holds the goal and
+ * the end has begun (`ended`: the welcome to Mu Ceti, the pod opening onto white), until they carry on in the lab or
+ * start again.
+ */
+export type Hearing = 'clear' | 'muffled' | 'silent';
+
+export function hearing(wake: Wake, dozing: boolean, ended: boolean): Hearing {
+  if (ended) return 'silent';
+  return inPod(wake) || dozing ? 'muffled' : 'clear';
+}
+
 /** Smoothly from 0 to 1 as t goes from 0 to 1, easing in and out. */
 export function ease(t: number): number {
   const u = Math.max(0, Math.min(1, t));

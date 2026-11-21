@@ -48,6 +48,7 @@ vi.mock('./changeover', () => ({ changeover: quiet }));
 vi.mock('./chime', () => ({ chime() {} }));
 vi.mock('./shatter', () => ({ shatter() {} }));
 vi.mock('./ambience', () => ({ hushAlarms() {} }));
+vi.mock('./audio', () => ({ setHearing() {} }));
 
 /** The engine's own things, which these tests reach into. */
 interface Inside {

@@ -1,13 +1,36 @@
+import type { Hearing } from './airlock';
 import { CENTER, type Placement } from './place';
 import { CHANNELS, gainOf, storeVolumes, storedVolumes, type Channel, type Volumes } from './volumes';
 
 /**
  * The one audio context and its mixer: each kind of sound plays into its own channel's bus, each bus into a master
- * bus, and that through a compressor (so a crowd of streams can't clip) to the speakers. Browsers keep audio off
- * until a user gesture, so the context resumes on the first click or key; until then everything is silent.
+ * bus, and that through the ear (see setHearing) and a compressor (so a crowd of streams can't clip) to the speakers.
+ * Browsers keep audio off until a user gesture, so the context resumes on the first click or key; until then
+ * everything is silent.
  */
 let ctx: AudioContext | null | undefined;
 let buses: Record<Channel, GainNode> | null = null;
+/** The ear: a low-pass filter and a gain, between the master bus and the compressor, that every sound goes through. */
+let ear: { filter: BiquadFilterNode; gain: GainNode } | null = null;
+/** How the player hears just now (see hearing in airlock.ts). */
+let heard: Hearing = 'clear';
+
+/**
+ * What the ear does for each way of hearing: where its low-pass filter cuts off (null for wide open), and its gain.
+ * Muffled is everything heard through the pod's shell, or half asleep: dull and quieter. Silent keeps the filter as
+ * it was, and fades everything out.
+ */
+export const EAR: Record<Hearing, { cutoff: number | null; gain: number }> = {
+  clear: { cutoff: null, gain: 1 },
+  muffled: { cutoff: 500, gain: 0.5 },
+  silent: { cutoff: null, gain: 0 },
+};
+/**
+ * Real seconds the ear takes to change (the time constant of an exponential glide: it's most of the way there in
+ * three): quick for muffling and clearing, so it follows the player without a click, and slower for the fade to
+ * silence at the end, which is all but silent in a second and a half.
+ */
+export const EAR_TAU = { muffle: 0.08, silence: 0.4 };
 
 /** The current slider positions (see volumes.ts). */
 export const VOLUMES: Volumes = storedVolumes();
@@ -29,8 +52,16 @@ export function audio(): AudioContext | null {
   const comp = c.createDynamicsCompressor();
   comp.threshold.value = -12;
   comp.connect(c.destination);
+  const filter = c.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.Q.value = 0;
+  const gain = c.createGain();
+  filter.connect(gain).connect(comp);
+  ear = { filter, gain };
+  filter.frequency.value = cutoff(heard, c) ?? wide(c);
+  gain.gain.value = EAR[heard].gain;
   const master = c.createGain();
-  master.connect(comp);
+  master.connect(filter);
   const b = { master } as Record<Channel, GainNode>;
   for (const ch of CHANNELS) {
     if (ch === 'master') continue;
@@ -81,6 +112,36 @@ export class Spot {
     this.input.disconnect();
     this.pan.disconnect();
   }
+}
+
+/** The ear's filter wide open: as high as it goes, or high enough to pass everything heard. */
+const wide = (c: BaseAudioContext) => Math.min(20000, c.sampleRate / 2);
+
+/** Where the ear's filter cuts off, hearing `h`; null to leave it as it is. */
+function cutoff(h: Hearing, c: BaseAudioContext): number | null {
+  if (h === 'silent') return null;
+  return EAR[h].cutoff ?? wide(c);
+}
+
+/**
+ * Hear everything as the player now does (see hearing): it glides there in real time (see EAR_TAU), since it's how
+ * they are, not anything in the lab. Calling it again with the same is nothing; before the audio's started it's only
+ * remembered, for when it does.
+ */
+export function setHearing(h: Hearing): void {
+  if (h === heard) return;
+  const was = heard;
+  heard = h;
+  if (!ctx || !ear) return;
+  const now = ctx.currentTime;
+  const tau = h === 'silent' || was === 'silent' ? EAR_TAU.silence : EAR_TAU.muffle;
+  const f = cutoff(h, ctx);
+  if (f !== null) {
+    ear.filter.frequency.cancelScheduledValues(now);
+    ear.filter.frequency.setTargetAtTime(f, now, tau);
+  }
+  ear.gain.gain.cancelScheduledValues(now);
+  ear.gain.gain.setTargetAtTime(EAR[h].gain, now, tau);
 }
 
 /** Move a slider, and remember it. */

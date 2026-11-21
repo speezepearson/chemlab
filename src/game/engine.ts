@@ -1,7 +1,8 @@
 import { equilibrate } from '../chem/equilibrium';
 import { Lag, temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
-import { BLINDED_S, RISE_S, WAKE_S, ease, inPod, type Wake } from './airlock';
+import { BLINDED_S, RISE_S, WAKE_S, ease, hearing, inPod, type Wake } from './airlock';
+import { setHearing } from './audio';
 import { hushAlarms } from './ambience';
 import {
   FLASK_CENTER, NOZZLE_H, SCALE_SLOTS, SHEET_SLOT, newTurn, turnValve, type Turn, dippedIn, docked, inSlot, paperFace, sheetIn, slotted, faucetBox, faucetPipes, flaskArm, flaskBox, flaskLip, flaskMouth, footAt, insideVessel, isDocked,
@@ -2231,6 +2232,8 @@ export class GameEngine {
   private frame = (now: number): void => {
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
+    // everything's heard muffled in the pod or napping, and nothing once the end has begun (see hearing)
+    setHearing(hearing(this.wake, this.dozing(), this.arrival));
     // a nap: their eyes close, or open again, in their own time
     const nap = this.napping;
     // (the alarm of the station's changeover wakes them, even as they nod off)
