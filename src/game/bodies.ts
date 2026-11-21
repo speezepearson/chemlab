@@ -135,8 +135,8 @@ export function tankNoteY(t: Tool, k: number): number {
  * INLINE_DOCK). A dipper's (see DIPPERS) is only its top, where its stand's clamp holds it: a thermometer's rod's, or
  * a wicking strip's clip; the rest of it bumps into nothing, so it can stand down in a flask or a tank. A sheet of
  * shadow paper's is all of it, its bar and its paper, and so is a sheet of test paper's, lying flat. The shadow
- * lamp's are its enclosure, its channel's two side walls and its end wall (see LAMP): the channel between them is
- * clear, for things to stand in its light, and so is the bench round the trough.
+ * lamp's are its enclosure, its channel's two side walls, its end wall and the channel's floor (see LAMP): the
+ * channel between them is clear, for things to stand in its light on its floor, and so is the bench round the trough.
  */
 export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean }[] {
   const sh = t.shape;
@@ -154,13 +154,14 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
     ];
   }
   if (t.kind === 'shadowlamp') {
-    const { h, wall, box, channel: ch } = LAMP;
+    const { h, wall, floor, slot, box, channel: ch } = LAMP;
     const side = { x0: ch.x0, x1: ch.x1, y0: 0, y1: h, hz: wall / 2 };
     return [
       { x0: box.x0, x1: box.x1, y0: 0, y1: h, hz: ch.z + wall },
       { ...side, z: ch.z + wall / 2 },
       { ...side, z: -ch.z - wall / 2 },
       { x0: ch.x1, x1: ch.x1 + wall, y0: 0, y1: h, hz: ch.z + wall },
+      { x0: ch.x0, x1: ch.x1 - slot, y0: h - floor, y1: h, hz: ch.z },
     ];
   }
   if (isThermometer(t.kind)) {
@@ -479,9 +480,9 @@ export function docked(p: Pose, tools: readonly Tool[]): Pose {
 
 /**
  * Where a sheet of shadow paper stands in the shadow lamp (see LAMP), facing the lamp: across the far end of its
- * channel, its back against the end wall's inner face, its foot on the bench and its paper reaching from one side wall
- * to the other, as high as they are, with the bar along its top standing above them. That's its slot: it's slid in
- * from above. The lamp never moves (see LAMP_POSE), so nor does this.
+ * channel, its back against the end wall's inner face, its foot on the bench, in the slot between the end wall and
+ * the end of the channel's floor (see LAMP.slot), and its paper reaching from one side wall to the other, as high as
+ * they are, with the bar along its top standing above them. It's slid in from above. The lamp never moves (see LAMP_POSE), so nor does this.
  */
 export const SHEET_SLOT: Pose = {
   ...toWorld(LAMP_POSE, { x: LAMP.channel.x1 - SHEET.clip.d / 2, y: SHEET.top + SHEET.side - LAMP.h, z: 0 }),

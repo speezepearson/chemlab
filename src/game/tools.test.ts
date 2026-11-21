@@ -2511,6 +2511,9 @@ describe('the shadow lamp', () => {
     expect(win.r).toBe(sheetLit() / 2);
     expect(win.y).toBe(h - SHEET.side / 2);
     expect(sheetLit()).toBe(SHEET.side - 2 * SHEET.margin);
+    // its lower edge is level with the top of the channel's floor, so what stands there casts all of its shadow
+    expect(win.y + win.r).toBe(h - LAMP.floor);
+    expect(LAMP.floor).toBe(SHEET.margin);
     // nor are the channel's walls, even by the rays that stray most
     expect(win.r + spread * (ch.x1 - ch.x0)).toBeLessThan(ch.z);
     // a shadow's edge from the far end of the channel is a few units wide: soft, but no wider than a flask's neck

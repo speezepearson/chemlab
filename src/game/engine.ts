@@ -2717,8 +2717,8 @@ export class GameEngine {
    * a scale or a tool that lies on the bench (a sheet of test paper) goes straight up or down until it's on the counter under it, which
    * its whole footprint must be over (or a flask over a scale, onto its platform); a tool or hose's nozzle on a stand
    * stays at the height it's held, no higher than its stand reaches and no lower than the top of a counter it's held
-   * sunk into, while its stand's base goes down onto the counter, which the whole base must be over (what it holds can
-   * reach out past the counter's edge). Either way, it mustn't overlap anything where it comes to rest (what's held passes through everything, so there's no way down to look
+   * sunk into (or the floor of the shadow lamp's channel, if that's what its stand is on), while its stand's base goes
+   * down onto the counter, which the whole base must be over (what it holds can reach out past the counter's edge). Either way, it mustn't overlap anything where it comes to rest (what's held passes through everything, so there's no way down to look
    * at), nor its stand's base sit on anything but the counter. (Stands don't bump into each other: their rods can stand side by side.) A hose's
    * nozzle's stand goes where it's wanted (see nozzleWant) if it can, or else the first place it can of nozzleMounts.
    * A sheet of shadow paper in the shadow lamp's slot (see inSlot) just stands there, if nothing's in its way.
@@ -2732,9 +2732,11 @@ export class GameEngine {
       let dy = -Math.max(0, ...stands.map((st, i) => st.clampY - tops[i]! - STAND_MAX));
       // held sunk into a counter, it comes up to stand on it: all of a strip or a thermometer, though its lower part
       // bumps into nothing else
-      const sunk = LIFT - (box.y + dy - box.hy);
+      // (what its stand is on, if that's higher than the counters, is under it too: the floor of the lamp's channel)
+      const ground = Math.max(LIFT, ...tops.map((t) => t!));
+      const sunk = ground - (box.y + dy - box.hy);
       const solidBox = h.kind === 'tool' && isDipper(h.t.kind) ? { ...box, parts: undefined } : box;
-      if (sunk > 0 && COUNTER_BOXES.some((c) => boxesOverlap({ ...solidBox, y: box.y + dy }, c))) dy += sunk;
+      if (sunk > 0 && (ground > LIFT || COUNTER_BOXES.some((c) => boxesOverlap({ ...solidBox, y: box.y + dy }, c)))) dy += sunk;
       const to = { ...box, y: box.y + dy };
       if (blocked(to)) return 'No room';
       if (stands.some((st, i) => solid.some((o) => boxesOverlap(standBase(st, tops[i]!), o)))) return 'No room for its stand';
@@ -2752,7 +2754,7 @@ export class GameEngine {
       }
       return why!;
     }
-    // a sheet in the shadow lamp's slot stands in it, against its end wall, with no stand
+    // a sheet in the shadow lamp's slot stands in it, against its end wall, on the bench, with no stand
     if (h.kind === 'tool' && h.t.kind === 'sheet' && inSlot(p)) return blocked(box) ? 'No room' : { pose: p };
     const stands = this.standsAt(h, p);
     if (stands.length) return onStands(stands);

@@ -199,8 +199,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   whole supply station (`STATION` in `tools.ts`): its tanks are the funnel and the ship's reservoir, in that
   order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved. The
   `shadowlamp` (`LAMP` in `tools.ts`) is `fixed` too, at `LAMP_POSE` on a bench of its own (`LAMP_AREA`, the last of
-  `COUNTERS`): a trough, with no tanks and no stand, whose channel things are set down in like anywhere on the grid;
-  its switch is a part of its own for the crosshair (`'switch'`).
+  `COUNTERS`): a trough, with no tanks and no stand, whose channel things are set down in like anywhere on the grid,
+  on its floor, which is a little higher than the bench (`LAMP_FLOOR` in `space.ts`: the one place `counterUnder` and
+  `groundAt` don't say `LIFT` over a counter, so use what they say); its switch is a part of its own for the crosshair
+  (`'switch'`).
 - **The station is fitted for a supply** (`Tool.supply`, see `supply.ts`): the antinucleant in a new lab, the
   cryostabilizer in a save from before there was any other. Anything about what it takes or wants goes by
   `t.supply` (its species, goal, start and reservoir's capacity), never by `TARGET` or `GOAL_TARGET`. With enough in

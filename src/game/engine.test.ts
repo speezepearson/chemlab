@@ -2,14 +2,15 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
-import { SHEET_SLOT, flaskLip, inSlot, sheetIn, slotPose, toolStands } from './bodies';
+import { SHEET_SLOT, flaskLip, inSlot, sheetIn, slotPose, standBase, toolStands } from './bodies';
 import { STOCK } from './cabinet';
 import { CAP } from './config';
 import type { GameEngine } from './engine';
 import { Vessel, volume, type Flask } from './flask';
+import { FLASK_H } from './flaskShape';
 import { DEFAULT_PRESET, LAMP_POSE } from './presets';
 import type { SaveState } from './save';
-import { CELL, LIFT, toCell } from './space';
+import { CELL, LAMP_FLOOR, LIFT, counterUnder, toCell, toWorld } from './space';
 import { INLINE_TOOLS, SHAPES, SHEET, TEST_PAPER, UNIQUE_TOOLS, darkness, paperReading, type Tool } from './tools';
 
 /*
@@ -49,7 +50,7 @@ vi.mock('./ambience', () => ({ hushAlarms() {} }));
 /** The engine's own things, which these tests reach into. */
 interface Inside {
   tools: Tool[];
-  held: { kind: string; t?: Tool; relYaw: number } | null;
+  held: { kind: string; t?: Tool; f?: Flask; relYaw: number; dist: number } | null;
   target: unknown;
   stock: Record<string, boolean[]>;
   flash: { text: string } | null;
@@ -412,6 +413,13 @@ describe('the composition analyzer, which is gone', () => {
   });
 });
 
+/** Stand at (x, z) with eyes on (tx, ty, tz), carrying along what's held. */
+function look(l: { e: GameEngine; in: Inside }, x: number, z: number, tx: number, ty: number, tz: number): void {
+  const [dx, dy, dz] = [tx - x, ty - 620, tz - z];
+  l.e.debug({ x, z, yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(dy, Math.hypot(dx, dz)) });
+  l.in.move(0);
+}
+
 const lampOf = (l: Inside) => l.tools.filter((t) => t.kind === 'shadowlamp');
 
 describe('the shadow lamp', () => {
@@ -471,15 +479,44 @@ describe('the shadow lamp', () => {
     expect(l.in.flash?.text).toBe('That stays where it is');
     expect(lamp.pose).toEqual(LAMP_POSE);
   });
+
+  it("stands what's set down in its channel on the channel's floor, a tool on its stand included", () => {
+    const l = lab();
+    const mid = toWorld(LAMP_POSE, { x: 0, y: 0, z: 0 });
+    /** Hold what's in hand over the middle of the channel's middle cell, its middle `y` high. */
+    const hold = (y: number) => {
+      const from = { x: mid.x, z: mid.z - 160 };
+      l.in.held!.dist = Math.hypot(160, y - 620);
+      look(l, from.x, from.z, mid.x, y, mid.z);
+    };
+    look(l, mid.x, mid.z - 160, mid.x, 560, mid.z);
+    expect(l.e.spawn('flask')).toBe(true);
+    const f = l.in.held!.f!;
+    hold(560);
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    expect([f.pose.x, f.pose.z].map((v) => +v.toFixed(6))).toEqual([mid.x, mid.z].map((v) => +v.toFixed(6)));
+    expect(f.pose.y).toBeCloseTo(LAMP_FLOOR.y + FLASK_H);
+    // a dispenser held too low in the cell by the sheet, facing the sheet, comes up to stand over the floor, its
+    // stand's base on the floor behind it
+    expect(l.e.spawn('dispenser')).toBe(true);
+    const d = l.in.held!.t!;
+    // (whoever holds it is looking across the channel, the sheet's end on their right)
+    l.in.held!.relYaw = Math.PI / 2;
+    l.in.held!.dist = Math.hypot(160, LIFT + 40 - 620);
+    look(l, mid.x - CELL, mid.z - 160, mid.x - CELL, LIFT + 40, mid.z);
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    expect(d.pose.x).toBeCloseTo(mid.x - CELL);
+    expect(d.pose.z).toBeCloseTo(mid.z);
+    expect(d.pose.y - d.shape.box.y1).toBeCloseTo(LAMP_FLOOR.y);
+    const [st] = toolStands(d);
+    expect(counterUnder(standBase(st, 0))).toBe(LAMP_FLOOR.y);
+    expect(st.x).toBeGreaterThan(d.pose.x);
+  });
 });
 
 describe('shadow paper', () => {
-  /** Stand at (x, z) with eyes on (tx, ty, tz), carrying along what's held. */
-  function look(l: { e: GameEngine; in: Inside }, x: number, z: number, tx: number, ty: number, tz: number): void {
-    const [dx, dy, dz] = [tx - x, ty - 620, tz - z];
-    l.e.debug({ x, z, yaw: Math.atan2(-dx, -dz), pitch: Math.atan2(dy, Math.hypot(dx, dz)) });
-    l.in.move(0);
-  }
   /**
    * Take a sheet out of the cabinet, by the wheel, standing out in the room in front of the lamp's bench, with the
    * sheet held up over the end of the lamp's channel: turned to face the lamp, or with its back to it.

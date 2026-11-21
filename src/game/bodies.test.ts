@@ -12,7 +12,7 @@ import { AIRLOCK } from './airlock';
 import { boxesOverlap, solids } from './physics';
 import { LAMP_POSE } from './presets';
 import { SCALE_SHAPE, Scale } from './scale';
-import { CELL, COUNTERS, LAMP_AREA, LIFT, ROOM, counterUnder, fromFrac, toCell, toFrac, toWorld } from './space';
+import { CELL, COUNTERS, LAMP_AREA, LAMP_FLOOR, LIFT, ROOM, counterUnder, fromFrac, groundAt, toCell, toFrac, toWorld } from './space';
 import { BULB_Y, Hose, INLINE_DOCK, LAMP, SHAPES, SHEET, STRIP, STRIP_FOOT, THERMOMETER_ROD, Tool, dipUnder, footY, mouthBelow, tankX, type ToolKind } from './tools';
 
 const at = (x: number, y: number, z: number, yaw = 0) => ({ x, y, z, yaw });
@@ -92,15 +92,15 @@ describe('the shadow lamp', () => {
   /** The ways a tool can face along the channel: toward the lamp, or toward the sheet. */
   const [TO_LAMP, TO_SHEET] = [LAMP_POSE.yaw - Math.PI / 2, LAMP_POSE.yaw + Math.PI / 2];
   /**
-   * Whether a tool of a kind can stand in the channel, in its cell `i`, turned by `yaw`, its foot `up` above the bench:
-   * clear of the trough, with its stands' bases on the bench and clear of it too.
+   * Whether a tool of a kind can stand in the channel, in its cell `i`, turned by `yaw`, its foot `up` above the
+   * channel's floor: clear of the trough, with its stands' bases on that floor and clear of the rest of it too.
    */
-  const stands = (kind: ToolKind, i: number, yaw: number, up = 20): boolean => {
+  const stands = (kind: ToolKind, i: number, yaw: number, up = 10): boolean => {
     const t = new Tool(kind, 1);
     const c = cell(i);
-    t.pose = onGrid(at(c.x, LIFT + up + t.shape.box.y1, c.z, yaw), toolAnchor(t));
+    t.pose = onGrid(at(c.x, LAMP_FLOOR.y + up + t.shape.box.y1, c.z, yaw), toolAnchor(t));
     const on = toolStands(t);
-    return !boxesOverlap(toolBox(t), b) && on.every((st) => counterUnder(standBase(st, 0)) !== null && !boxesOverlap(standBase(st, LIFT), b));
+    return !boxesOverlap(toolBox(t), b) && on.every((st) => counterUnder(standBase(st, 0)) === LAMP_FLOOR.y && !boxesOverlap(standBase(st, LAMP_FLOOR.y), b));
   };
 
   it('lies along the edge toward the room of a bench of its own in the front left corner, with no clamp stand', () => {
@@ -135,11 +135,19 @@ describe('the shadow lamp', () => {
     expect(toWorld(LAMP_POSE, { x: box.x0, y: 0, z: 0 }).x).toBeGreaterThan(cell(0).x);
   });
 
-  it("is solid in its enclosure, its two side walls and its end wall, all as tall as a sheet's paper", () => {
+  it("is solid in its enclosure, its two side walls and its end wall, all as tall as a sheet's paper, and its channel's floor", () => {
     const parts = solids(b);
-    expect(parts).toHaveLength(4);
-    for (const p of parts) expect([p.y - p.hy, p.y + p.hy].map((y) => +y.toFixed(6))).toEqual([LIFT, LIFT + SHEET.side]);
-    const [enclosure, near, far, end] = parts;
+    expect(parts).toHaveLength(5);
+    for (const p of parts.slice(0, 4)) expect([p.y - p.hy, p.y + p.hy].map((y) => +y.toFixed(6))).toEqual([LIFT, LIFT + SHEET.side]);
+    const [enclosure, near, far, end, floor] = parts;
+    // the floor is a plate on the bench from wall to wall, from the enclosure to a slot's width short of the end wall,
+    // and it's where space.ts says the channel's floor is
+    expect([floor.y - floor.hy, floor.y + floor.hy].map((y) => +y.toFixed(6))).toEqual([LIFT, LAMP_FLOOR.y]);
+    expect([floor.z - floor.hz, floor.z + floor.hz].map((z) => +z.toFixed(6))).toEqual([LAMP_FLOOR.z0, LAMP_FLOOR.z1]);
+    expect(floor.x + floor.hx).toBeCloseTo(LAMP_FLOOR.x1);
+    expect(floor.x - floor.hx).toBeCloseTo(LAMP_FLOOR.x0 + LAMP.slot);
+    expect(LAMP.slot).toBeGreaterThan(SHEET.clip.d);
+    expect(LAMP.floor).toBe(LAMP_FLOOR.y - LIFT);
     // the enclosure is as wide as the trough over its walls; the walls are either side of the channel, all along it
     expect(enclosure.hz).toBe(ch.z + wall);
     expect(enclosure.hx).toBe((box.x1 - box.x0) / 2);
@@ -150,22 +158,30 @@ describe('the shadow lamp', () => {
     expect(end.hz).toBe(ch.z + wall);
   });
 
-  it('takes a flask in any cell of its channel, and a scale along it, but not across', () => {
+  it('takes a flask in any cell of its channel, on its floor, and a scale along it, but not across', () => {
     for (let i = 0; i < cells; i++) {
-      const f = flaskAt(cell(i).x, cell(i).z);
-      expect(counterUnder(flaskBox(f))).toBe(LIFT);
+      const f = flaskAt(cell(i).x, cell(i).z, LAMP_FLOOR.y);
+      // it stands on the channel's floor, which is where what falls there lands too
+      expect(counterUnder(flaskBox(f))).toBe(LAMP_FLOOR.y);
+      expect(groundAt(f.pose.x, f.pose.z)).toBe(LAMP_FLOOR.y);
       expect(boxesOverlap(flaskBox(f), b), `${i}`).toBe(false);
+      // set down on the bench under the floor, it would be in it
+      expect(boxesOverlap(flaskBox(flaskAt(cell(i).x, cell(i).z)), b)).toBe(true);
     }
+    // off the floor, the bench is as high as any counter
+    expect(groundAt(cell(cells).x, cell(cells).z)).toBe(LIFT);
+    expect(groundAt(cell(1).x, cell(1).z + CELL)).toBe(LIFT);
+    expect(counterUnder(flaskBox(flaskAt(cell(1).x, cell(1).z + CELL)))).toBe(LIFT);
     // a cell further either way is the enclosure, or past the end wall, where the bench is free
-    expect(boxesOverlap(flaskBox(flaskAt(cell(-1).x, cell(-1).z)), b)).toBe(true);
+    expect(boxesOverlap(flaskBox(flaskAt(cell(-1).x, cell(-1).z, LAMP_FLOOR.y)), b)).toBe(true);
     expect(boxesOverlap(flaskBox(flaskAt(cell(cells).x, cell(cells).z)), b)).toBe(false);
     // (a scale is two cells long, a place for a flask over each: over the first two of the channel's, or the last two)
     for (const i of [1, 2]) {
-      const along = new Scale(onGrid(at(cell(i).x, LIFT + SCALE_SHAPE.body.y1, cell(i).z, LAMP_POSE.yaw), SCALE_ANCHOR));
+      const along = new Scale(onGrid(at(cell(i).x, LAMP_FLOOR.y + SCALE_SHAPE.body.y1, cell(i).z, LAMP_POSE.yaw), SCALE_ANCHOR));
       expect(boxesOverlap(scaleBox(along), b)).toBe(false);
-      expect(counterUnder(scaleBox(along))).toBe(LIFT);
+      expect(counterUnder(scaleBox(along))).toBe(LAMP_FLOOR.y);
     }
-    const across = new Scale(onGrid(at(cell(1).x, LIFT + SCALE_SHAPE.body.y1, cell(1).z, TO_LAMP), SCALE_ANCHOR));
+    const across = new Scale(onGrid(at(cell(1).x, LAMP_FLOOR.y + SCALE_SHAPE.body.y1, cell(1).z, TO_LAMP), SCALE_ANCHOR));
     expect(boxesOverlap(scaleBox(across), b)).toBe(true);
   });
 
@@ -217,11 +233,15 @@ describe("the shadow lamp's slot", () => {
   it("stands a sheet across the end of the channel, against the end wall, facing the lamp, its bar above the walls", () => {
     const s = sheetAt({ ...SHEET_SLOT });
     const sb = toolBox(s);
-    const [, near, far, end] = solids(toolBox(lamp));
-    // on the bench, its back to the end wall's inner face, its paper reaching from one side wall to the other
+    const [, near, far, end, floor] = solids(toolBox(lamp));
+    // on the bench, in the slot the floor leaves, its back to the end wall's inner face, its paper reaching from one
+    // side wall to the other
     expect(sb.y - sb.hy).toBeCloseTo(LIFT);
     const [bar, paper] = solids(sb);
     expect(paper.x - paper.hz).toBeCloseTo(end.x + end.hx);
+    expect(paper.x + paper.hz).toBeLessThan(floor.x - floor.hx);
+    // so the square its light falls on stands on the floor's top
+    expect(sb.y - sb.hy + SHEET.margin).toBeCloseTo(LAMP_FLOOR.y);
     expect(paper.z - paper.hx).toBeCloseTo(near.z + near.hz);
     expect(paper.z + paper.hx).toBeCloseTo(far.z - far.hz);
     expect(boxesOverlap(sb, toolBox(lamp))).toBe(false);
@@ -234,7 +254,7 @@ describe("the shadow lamp's slot", () => {
     expect(Math.hypot(front.x - box.x, front.z - box.z)).toBeCloseTo(Math.hypot(SHEET_SLOT.x - box.x, SHEET_SLOT.z - box.z) - 1);
     // and a flask in the cell next to it is clear of it
     const f = new Flask(CAP);
-    f.pose = { ...toWorld(LAMP_POSE, { x: LAMP.channel.x1 - CELL / 2, y: FLASK_H - LAMP.h, z: 0 }), yaw: 0 };
+    f.pose = { ...toWorld(LAMP_POSE, { x: LAMP.channel.x1 - CELL / 2, y: LAMP.floor + FLASK_H - LAMP.h, z: 0 }), yaw: 0 };
     expect(boxesOverlap(flaskBox(f), sb)).toBe(false);
   });
 

@@ -7,7 +7,7 @@ import { CAP, DELIVERY, TRACE } from './config';
 import { COOLING } from './cooling';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
-import { CELL, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
+import { CELL, LAMP_FLOOR, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
 import { CRYOSTABILIZER, SUPPLIES, nextSupply, type Supply } from './supply';
 
 /** Capacity of each tank on a tool, in atoms. */
@@ -903,13 +903,18 @@ export const sheetLit = (): number => SHEET.side - 2 * SHEET.margin;
 
 /**
  * The shadow lamp (see SHAPES.shadowlamp): one long, low trough on a bench of its own. At one end is a closed box, the
- * lamp's enclosure; from its face an open channel runs between two side walls; and across the channel's far end is an
- * end wall, against whose inner face a sheet of shadow paper stands, facing the lamp (see the slot, in bodies.ts). In
+ * lamp's enclosure; from its face an open channel runs between two side walls, over a floor of its own; and across the
+ * channel's far end is an end wall, against whose inner face a sheet of shadow paper stands, facing the lamp (see the slot, in bodies.ts). In
  * its own frame (x along it, from the lamp toward the sheet; y down from its top; z toward its front, which is the
  * room; from the middle of the channel), in world units:
  * - h: how tall it is, enclosure and walls alike: as tall as a sheet's paper, so the bar along a sheet's top stands
  *   clear above the end wall, to take it out by;
  * - wall: how thick its side walls and its end wall are;
+ * - floor: how thick the plate that floors the channel is (see LAMP_FLOOR in space.ts, which is where it is in the
+ *   room): as thick as a sheet's margin is wide, so the light's lower edge is level with its top, and the shadow of
+ *   whatever stands on it stands on the bottom edge of the square the light falls on, none of it lost below;
+ * - slot: how far short of the end wall the floor stops: the slot a sheet stands in, its foot on the bench below, a
+ *   little wider than the bar along a sheet's top is thick;
  * - box: the enclosure, from `x0` to `x1` along it, and as wide as the trough is over its walls;
  * - channel: the channel, from the enclosure's face at `x0` to the end wall's at `x1`, three grid cells, and reaching
  *   `z` either side of its middle line, one cell from wall to wall: what's set down in it is on the grid like anything;
@@ -929,7 +934,7 @@ export const sheetLit = (): number => SHEET.side - 2 * SHEET.margin;
  *   and visibly less toward its edges, and a full flask of nothing but rings lets through e^−10 of it, none.
  */
 export const LAMP = {
-  h: SHEET.side, wall: 6, dim: 0.2, spread: 0.016,
+  h: SHEET.side, wall: 6, floor: LAMP_FLOOR.y - LIFT, slot: SHEET.clip.d + 1, dim: 0.2, spread: 0.016,
   box: { x0: -2.5 * CELL, x1: -1.5 * CELL },
   channel: { x0: -1.5 * CELL, x1: 1.5 * CELL, z: CELL / 2 },
   window: { r: sheetLit() / 2, y: SHEET.side / 2 },
@@ -1360,8 +1365,8 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -24, x1: 24, y0: -14, y1: 76 },
   },
   shadowlamp: {
-    // a trough: the lamp's enclosure, a channel between two walls, and an end wall (see LAMP), with no tanks, spouts
-    // or valves
+    // a trough: the lamp's enclosure, a floored channel between two walls, and an end wall (see LAMP), with no tanks,
+    // spouts or valves
     tanks: [],
     noValve: true,
     fixed: true,

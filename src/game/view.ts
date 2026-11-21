@@ -1884,12 +1884,13 @@ class ToolView {
   /**
    * The shadow lamp (see LAMP): one long, low trough. At one end its enclosure, a closed box with a square pane in a
    * dark bezel in its face onto the channel, which its light leaves by, and a toggle switch on a dark plate on its front; from it
-   * the channel's two side walls; and the end wall across their far ends, which a sheet stands against. The pane
+   * the channel's two side walls, and its floor between them, a plate that stops a little short of the end wall; and
+   * the end wall across their far ends, which a sheet stands against, in the slot the floor leaves. The pane
    * glows lavender while it's on, and that's all the light it gives: it lights nothing in the room.
    */
   private buildLamp(pick: (m: THREE.Object3D, part: 'switch') => void): void {
     const { art } = this;
-    const { h, wall, box, channel: ch, window: win } = LAMP;
+    const { h, wall, floor, slot, box, channel: ch, window: win } = LAMP;
     const out = ch.z + wall;
     const solid = <T extends THREE.Mesh>(m: T): T => {
       m.castShadow = m.receiveShadow = true;
@@ -1901,6 +1902,7 @@ class ToolView {
     block(art, panelMat, ch.x0, ch.x1 + wall, 0, h, ch.z, out);
     block(art, panelMat, ch.x0, ch.x1 + wall, 0, h, -out, -ch.z);
     block(art, panelMat, ch.x1, ch.x1 + wall, 0, h, -ch.z, ch.z);
+    block(art, panelMat, ch.x0, ch.x1 - slot, h - floor, h, -ch.z, ch.z);
     // the pane in the enclosure's face: dark glass, glowing with the lamp's light while it's on, in a dark bezel
     const glass = new THREE.MeshStandardMaterial({ color: 0x6f6a86, roughness: 0.25, metalness: 0, emissive: LAMP_GLOW, emissiveIntensity: 0 });
     const [y0, y1] = [win.y - win.r, win.y + win.r];
