@@ -52,14 +52,12 @@ const INDEX: readonly number[] = ODORANTS.map((o) => {
 });
 
 /**
- * How strong a smell is put into words: by how many times over its own threshold the odorant is, on a log scale, a
- * word for each factor of STEP, from WORDS' first at the threshold itself up to its last. STEP is a little under ten,
- * so that something reeks from a thousand times its threshold.
+ * How strong a smell is, as one of BANDS bands: by how many times over its own threshold the odorant is, on a log
+ * scale, a band for each factor of STEP, from the first at the threshold itself up to the last. STEP is a little under
+ * ten, so that something reeks from a thousand times its threshold.
  */
 export const STEP = 10 ** 0.75;
-export const WORDS = ['a trace of', 'a whiff of', 'smells of', 'smells strongly of', 'reeks of'] as const;
-/** The first of WORDS that's a verb: the fainter ones are things, which a sentence says differently (see sentence). */
-const VERBS = 2;
+export const BANDS = 5;
 
 /**
  * How much more a warm fluid gives off than one at room temperature, and how much less a cold one: exp(VOLATILITY ×
@@ -90,9 +88,9 @@ export function levelOf(strength: number): number {
   return strength > 0 ? Math.log(strength) / Math.log(STEP) : -Infinity;
 }
 
-/** The words for a level (see WORDS): the last of them for anything past it. */
-export function wordFor(level: number): number {
-  return Math.max(0, Math.min(WORDS.length - 1, Math.floor(level)));
+/** The band of a level (see BANDS), from 0, the faintest: the last of them for anything past it. */
+export function bandOf(level: number): number {
+  return Math.max(0, Math.min(BANDS - 1, Math.floor(level)));
 }
 
 /** An odorant smelled, and how strongly, as a level (see levelOf). */
@@ -128,31 +126,71 @@ export function smell(n: ArrayLike<number>, T = T_ROOM): Smelled[] {
   return mask(smelled);
 }
 
-/** "a", "a and b", "a, b and c"; with a comma before the "and" if something before it has an "and" of its own. */
-function list(xs: readonly string[]): string {
-  if (xs.length < 2) return xs.join('');
-  const head = xs.slice(0, -1).join(', ');
-  return `${head}${head.includes(' and ') ? ',' : ''} and ${xs[xs.length - 1]}`;
+/**
+ * How each band is said, faintest first: of the first thing named (LEAD), which is the strongest, and of those after
+ * it (FOLLOW). In a phrasing, `{X}` is the smell's simile, `{with}` is "with" for the second thing named and "and"
+ * for the third, and `|` is where she hesitates (see PACE). The fainter a smell, the less sure she is of it: the two
+ * faintest bands trail off, hesitate before the name, and end in a question; the rest are said flatly, all at once.
+ */
+export const LEAD: readonly string[] = ['A trace of…|{X}?', 'A whiff of…|{X}?', 'Smells of {X}.', 'Smells strongly of {X}.', 'Reeks of {X}.'];
+export const FOLLOW: readonly string[] = [
+  '…{with} a trace of…|{X}?', '…{with} a whiff of…|{X}?', '…{with} {X}.', '…{with} a strong smell of {X}.', '…{with} a reek of {X}.',
+];
+/** What she says of what has no smell at all. */
+export const NOTHING = 'Nothing.';
+
+/**
+ * How what she says of a sniff is paced, in real seconds (it's on the display, not in the lab). By a smell's band,
+ * faintest first, since the fainter it is, the longer she takes over it:
+ * - `notice`: how long before she starts on it, from her nose reaching the rim, or from the end of the smell before;
+ * - `name`: how long she hesitates before its name, where its phrasing has her hesitate (see LEAD).
+ * And `think` is any other hesitation, and `nothing` how long before she's sure there's nothing to smell.
+ */
+export const PACE = { notice: [0.8, 0.65, 0.5, 0.4, 0.3], name: [1.1, 0.6, 0.3, 0.15, 0], think: 0.45, nothing: 0.7 };
+
+/**
+ * A piece of what she says of a sniff, which comes up all at once: its text, how many real seconds after the piece
+ * before it (or, the first, after her nose reaches the rim) it comes up, and whether it starts a new line under what's
+ * been said so far, rather than going on along the last one.
+ */
+export interface Fragment {
+  text: string;
+  wait: number;
+  line: boolean;
+}
+
+/** A phrasing (see LEAD) of the nth thing named, n from 0, at a band, by its simile: the pieces it's said in. */
+function phrase(phrasing: string, band: number, simile: string, n: number): Fragment[] {
+  return phrasing.split('|').map((part, i) => {
+    const text = part.replace('{with}', n > 1 ? 'and' : 'with').replace('{X}', simile);
+    const wait = i === 0 ? PACE.notice[band] : part.includes('{X}') ? PACE.name[band] : PACE.think;
+    return { text: n || i ? text : text[0].toUpperCase() + text.slice(1), wait, line: i === 0 };
+  });
 }
 
 /**
- * What Nadia makes of a sniff, in a line: what was made out, strongest first, each by its simile and a word for its
- * strength (see WORDS), as "Smells strongly of floor wax, with a whiff of struck match." Odorants as strong as each
- * other share the word, as "A whiff of wet coats and floor wax." It's terse: no pronouns, no numbers, and nothing of
- * what the fluid is or looks like. Nothing smelled is "Nothing."
+ * What Nadia says of a sniff, piece by piece (see Fragment): what was made out, strongest first, each on a line of
+ * its own, by its simile and a phrasing for its band (see LEAD, FOLLOW), as "Smells strongly of floor wax." and then,
+ * under it, "…with a whiff of…" and, after a pause, "struck match?" The pacing says how strong each is as much as the
+ * words do (see PACE). It's terse: no pronouns, no numbers, and nothing of what the fluid is or looks like. Nothing
+ * smelled is NOTHING.
  */
-export function sentence(smelled: readonly Smelled[]): string {
-  if (!smelled.length) return 'Nothing.';
-  const groups: { word: number; similes: string[] }[] = [];
-  for (const { odorant, level } of smelled) {
-    const word = wordFor(level);
-    const last = groups[groups.length - 1];
-    if (last?.word === word) last.similes.push(odorant.simile);
-    else groups.push({ word, similes: [odorant.simile] });
+export function script(smelled: readonly Smelled[]): Fragment[] {
+  if (!smelled.length) return [{ text: NOTHING, wait: PACE.nothing, line: true }];
+  return smelled.flatMap(({ odorant, level }, n) => phrase((n ? FOLLOW : LEAD)[bandOf(level)], bandOf(level), odorant.simile, n));
+}
+
+/** A script's lines, each as it reads once all of it has come up. */
+export function lines(script: readonly Fragment[]): string[] {
+  const out: string[] = [];
+  for (const f of script) {
+    if (f.line || !out.length) out.push(f.text);
+    else out[out.length - 1] += ` ${f.text}`;
   }
-  const said = (verbs: boolean) => groups.filter((g) => g.word >= VERBS === verbs).map((g) => `${WORDS[g.word]} ${list(g.similes)}`);
-  const strong = said(true);
-  const faint = said(false);
-  const line = strong.length && faint.length ? `${list(strong)}, with ${list(faint)}` : list(strong.length ? strong : faint);
-  return line[0].toUpperCase() + line.slice(1) + '.';
+  return out;
+}
+
+/** How many real seconds a script takes, from her nose reaching the rim to its last piece coming up. */
+export function span(script: readonly Fragment[]): number {
+  return script.reduce((t, f) => t + f.wait, 0);
 }

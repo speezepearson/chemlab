@@ -27,7 +27,7 @@ import { WHEELS, wheelMove, wheelPick, type WheelAim } from './wheel';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
 import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
-import { sentence, smell } from './smell';
+import { script, smell, span, type Fragment } from './smell';
 import {
   CELL, COUNTERS, LIFT, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toCardinal, toFrac, toLocal, toWorld, wrapAngle,
   type Pose, type Vec3,
@@ -119,10 +119,14 @@ export interface Hud {
   /** Whether N would start a nap just now. */
   nap: boolean;
   /**
-   * What the last sniff smelled of, in a line (see smell.ts), for SMELL_MS after it; `n` counts the sniffs, so the
-   * same line twice running shows as new. Otherwise null.
+   * What the last sniff smelled of (see script in smell.ts), until SMELL_MS after the last of it came up: its lines,
+   * each the pieces it's said in; how many of those pieces, counted through the lines in order, have come up so far;
+   * and whether it's fading `out`, over the last SMELL_FADE_MS. `n` counts the sniffs, so the same thing twice running
+   * shows as new. Otherwise null.
    */
-  smell: { text: string; n: number } | null;
+  smell: { n: number; lines: string[][]; shown: number; out: boolean } | null;
+  /** Whether she's sniffing something (see GameEngine.sniff): nothing can be aimed at or done until she's back. */
+  sniffing: boolean;
 }
 
 /**
@@ -315,16 +319,20 @@ const ISLAND_FAUCET_OUT = CELL / 2;
 const RISER_R = 6;
 /** How long a note stays up, in ms. */
 const NOTE_MS = 1600;
-/** How long what a sniff smelled of stays up, in ms, fading out at the end (it's on the display, not in the lab). */
-export const SMELL_MS = 5000;
+/**
+ * How long what a sniff smelled of stays up once the last of it has come up, in ms, and how long it takes to fade
+ * out, at the end of that (it's on the display, not in the lab).
+ */
+const SMELL_MS = 5000;
+export const SMELL_FADE_MS = 1100;
 /**
  * A sniff (see GameEngine.sniff), which is the player's own doing, so in real seconds: how long her head takes to
- * lean `in` to the vessel's rim, how long her nose is held there, and how long it takes to come back `out` to where
- * she stood. And where her eyes are with her nose at the rim: `up` over its near edge, looking down at the mouth
+ * lean `in` to the vessel's rim, the `beat` her nose stays there after the last of what she says of it has come up,
+ * and how long it takes to come back `out` to where she stood. And where her eyes are with her nose at the rim: `up` over its near edge, looking down at the mouth
  * `into` it from that edge. Under something that leaves less room than that over the rim, they're `clear` below it, if
  * that's still `least` over the rim, or else as far further `back` as it takes, a step at a time, as far as `reach`.
  */
-const SNIFF = { in: 0.45, hold: 1.4, out: 0.35, up: 30, into: 12, clear: 8, least: 12, back: 8, reach: 40 };
+const SNIFF = { in: 0.45, beat: 0.9, out: 0.35, up: 30, into: 12, clear: 8, least: 12, back: 8, reach: 40 };
 /** How long the note that she can nap stays up, in ms: long enough to read. */
 const NAP_HINT_MS = 9000;
 /** Real seconds the player's eyes take to close for a nap, and to open again as they wake (see GameEngine.nap). */
@@ -409,11 +417,16 @@ export class GameEngine {
    * The sniff under way (see sniff): the vessel; how far her head has leaned in to its rim, from 0, where she stands,
    * to 1, there (see SNIFF); where the view is then (see Gaze), and, if it's the flask in her hand, where that's
    * brought up to under her nose; the real time her nose is at the rim until, once it's there and she's smelled what's
-   * in it; and whether she's on her way back.
+   * in it (see stepSniff); and whether she's on her way back.
    */
   private sniffing: { v: Vessel; lean: number; to: Gaze; hand: Pose | null; until: number | null; leaving: boolean } | null = null;
-  /** What the last sniff smelled of (see sniff), until it's faded from the display, and how many sniffs there have been. */
-  private smelled: { text: string; n: number; until: number } | null = null;
+  /**
+   * What the last sniff smelled of (see sniff), until it's faded from the display: what she says of it, piece by piece
+   * (see script); the real time her nose reached the rim, which its pieces come up after; how many of them had come up
+   * when the sniff was cut short, if it was, since no more do then; and the real time it's gone. And how many sniffs
+   * there have been.
+   */
+  private smelled: { script: Fragment[]; n: number; from: number; cut: number | null; until: number } | null = null;
   private sniffs = 0;
   /** Whether the alarms are silenced, by the button under the beacon (see hushAlarms). Saved, and kept through Reset. */
   private alarmsOff = false;
@@ -2041,8 +2054,8 @@ export class GameEngine {
    * F: sniff what's in the vessel the crosshair is on, or in the flask in hand (see sniffAim). Her head leans in until
    * her nose is just over the vessel's rim, the view going with it to look down into its mouth (see rimGaze); or the
    * flask in her hand is brought up under her nose (see noseGaze). There she smells what's in it, as it is just then, by
-   * what it's made of and how warm it is (see stepSniff), and after a while she straightens up again, the view going
-   * back to just where it was. Until it's back she neither walks nor looks around, and her hands do nothing: only F,
+   * what it's made of and how warm it is, and says what she makes of it, a piece at a time (see stepSniff); a beat
+   * after the last of it she straightens up again, the view going back to just where it was. Until it's back she neither walks nor looks around, and her hands do nothing: only F,
    * or letting go of the mouse, cuts it short (see endSniff). It's her own doing, like her eyes closing for a nap, so
    * it all goes in real time, and works while the lab's paused; the lab runs on under it as ever. Only the view moves:
    * she stands where she stood. Not while what's in her hand is pouring, flowing or dipping.
@@ -2067,15 +2080,37 @@ export class GameEngine {
     return !!this.held && this.rightHeld;
   }
 
-  /** Cut a sniff short, if one's under way: she straightens up from wherever her head has got to. */
+  /**
+   * Cut a sniff short, if one's under way: she straightens up from wherever her head has got to, and says no more of
+   * it than she has, which stays up as long as it would have.
+   */
   private endSniff(): void {
-    if (this.sniffing) this.sniffing.leaving = true;
+    const s = this.sniffing;
+    if (!s || s.leaving) return;
+    s.leaving = true;
+    const now = performance.now();
+    const said = this.smelled;
+    if (!said || said.cut !== null) return;
+    said.cut = this.said(now);
+    if (!said.cut) this.smelled = null;
+    else if (said.cut < said.script.length) said.until = now + SMELL_MS;
+  }
+
+  /** How many pieces of what the last sniff smelled of have come up by real time `now` (see smelled). */
+  private said(now: number): number {
+    const s = this.smelled;
+    if (!s) return 0;
+    if (s.cut !== null) return s.cut;
+    let k = 0;
+    for (let t = s.from; k < s.script.length && (t += 1000 * s.script[k].wait) <= now; k++);
+    return k;
   }
 
   /**
    * A frame of dt real seconds of the sniff under way (see sniff), at real time `now`: her head leans in, and once her
-   * nose is at the rim she smells what's in the vessel then, which comes up on the display in a line (see sentence)
-   * and fades after SMELL_MS; SNIFF.hold later she straightens up, and once she has, it's over.
+   * nose is at the rim she smells what's in the vessel then. What she says of it (see script) comes up on the display
+   * a piece at a time from then on, in real time, and fades SMELL_MS after the last of it. SNIFF.beat after that last
+   * piece she straightens up, and once she has, it's over.
    */
   private stepSniff(dt: number, now: number): void {
     const s = this.sniffing;
@@ -2087,8 +2122,10 @@ export class GameEngine {
     }
     if (s.lean < 1) return;
     if (s.until === null) {
-      this.smelled = { text: sentence(smell(s.v.n, temperature(s.v))), n: ++this.sniffs, until: now + SMELL_MS };
-      s.until = now + 1000 * SNIFF.hold;
+      const says = script(smell(s.v.n, temperature(s.v)));
+      const last = now + 1000 * span(says);
+      this.smelled = { script: says, n: ++this.sniffs, from: now, cut: null, until: last + SMELL_MS };
+      s.until = last + 1000 * SNIFF.beat;
     } else if (now >= s.until) s.leaving = true;
   }
 
@@ -3622,7 +3659,13 @@ export class GameEngine {
       lids: this.napping ? ease(this.napping.lids) : 0,
       napping: this.dozing(),
       nap: this.canNap(),
-      smell: this.smelled && { text: this.smelled.text, n: this.smelled.n },
+      smell: this.smelled && {
+        n: this.smelled.n,
+        lines: this.smelled.script.reduce<string[][]>((ls, f) => (f.line || !ls.length ? [...ls, [f.text]] : [...ls.slice(0, -1), [...ls[ls.length - 1], f.text]]), []),
+        shown: this.said(now),
+        out: now > this.smelled.until - SMELL_FADE_MS,
+      },
+      sniffing: !!this.sniffing,
     };
     const key = JSON.stringify(hud);
     if (key === this.lastHud) return;

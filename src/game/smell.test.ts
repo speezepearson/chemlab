@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { NS, SOLVENT_SPECIES, SPECIES } from '../chem/species';
 import {
-  MASK, NAMED, ODORANTS, STEP, VOLATILITY, WORDS, levelOf, mask, sentence, smell, strengths, waft, type Odorant,
+  BANDS, FOLLOW, LEAD, MASK, NAMED, NOTHING, ODORANTS, PACE, STEP, VOLATILITY, bandOf, levelOf, lines, mask, script, smell, span, strengths, waft,
+  type Odorant, type Smelled,
 } from './smell';
 
 const named = (species: string): Odorant => ODORANTS.find((o) => o.species === species)!;
@@ -27,6 +28,8 @@ const mix = (steps: Record<string, number>) =>
 /** How strong an odorant is in a fluid at temperature T, as a level. */
 const level = (species: string, n: Float64Array, T?: number) => levelOf(strengths(n, T)[ODORANTS.indexOf(named(species))]);
 const species = (smelled: readonly { odorant: Odorant }[]) => smelled.map((s) => s.odorant.species);
+/** What was smelled, as each one's species and band. */
+const bands = (smelled: readonly Smelled[]) => smelled.map((s) => [s.odorant.species, bandOf(s.level)]);
 
 describe('ODORANTS', () => {
   it('are the four colors’ free atoms and the six pairs, and nothing else', () => {
@@ -78,16 +81,16 @@ describe('ODORANTS', () => {
 });
 
 describe('smell', () => {
-  it('finds an odorant from its own threshold up, a word stronger for each step over it', () => {
+  it('finds an odorant from its own threshold up, a band stronger for each step over it', () => {
     // a potent one and a weak one
     for (const o of [named('K'), named('R–G')]) {
       expect(smell(fluid({ [o.species]: shareAt(o, -0.2) }))).toEqual([]);
-      for (let w = 0; w < WORDS.length && shareAt(o, w + 0.5) <= 1; w++) {
-        const [found, ...others] = smell(fluid({ [o.species]: shareAt(o, w + 0.5) }));
+      for (let b = 0; b < BANDS && shareAt(o, b + 0.5) <= 1; b++) {
+        const [found, ...others] = smell(fluid({ [o.species]: shareAt(o, b + 0.5) }));
         expect(others).toEqual([]);
         expect(found.odorant).toBe(o);
-        expect(found.level).toBeCloseTo(w + 0.5, 3);
-        expect(sentence([found]).toLowerCase()).toBe(`${WORDS[w]} ${o.simile}.`);
+        expect(found.level).toBeCloseTo(b + 0.5, 3);
+        expect(bandOf(found.level)).toBe(b);
       }
     }
   });
@@ -100,10 +103,12 @@ describe('smell', () => {
     expect(species(smell(fluid({ K: 1.01e-4 })))).toEqual(['K']);
   });
 
-  it('keeps its last word for anything stronger', () => {
+  it('has five bands, the last for anything stronger still', () => {
+    expect(BANDS).toBe(5);
+    expect([-0.01, 0, 0.99, 1, 1.99, 2, 2.99, 3, 3.99, 4, 4.99, 5, 7.5].map(bandOf)).toEqual([0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 4, 4]);
     const k = named('K');
-    expect(shareAt(k, WORDS.length + 0.3)).toBeLessThan(1);
-    expect(sentence(smell(fluid({ K: shareAt(k, WORDS.length + 0.3) })))).toBe(`Reeks of ${k.simile}.`);
+    expect(shareAt(k, BANDS + 0.3)).toBeLessThan(1);
+    expect(bands(smell(fluid({ K: shareAt(k, BANDS + 0.3) })))).toEqual([['K', BANDS - 1]]);
   });
 
   it('finds nothing in the solvent, or in any molecule of three atoms or four, or in nothing at all', () => {
@@ -117,7 +122,6 @@ describe('smell', () => {
       expect(smell(n, 50), s.name).toEqual([]);
     }
     expect(smell(new Float64Array(NS))).toEqual([]);
-    expect(sentence([])).toBe('Nothing.');
   });
 
   it('goes by the share of the fluid’s molecules, so the solvent weakens a smell, and so does anything else', () => {
@@ -156,10 +160,10 @@ describe('waft', () => {
       expect(by > 0).toBe(T > 1);
       for (const s of ['K', 'R–G']) expect(level(s, n, T)).toBeCloseTo(level(s, n) + by, 9);
     }
-    expect(sentence(smell(n))).toBe(`A whiff of ${named('K').simile} and a trace of ${named('R–G').simile}.`);
-    // hot, each is a word stronger; cold, the fainter is gone and the stronger is a trace
-    expect(sentence(smell(n, 3))).toBe(`Smells of ${named('K').simile}, with a whiff of ${named('R–G').simile}.`);
-    expect(sentence(smell(n, 0.5))).toBe(`A trace of ${named('K').simile}.`);
+    expect(bands(smell(n))).toEqual([['K', 1], ['R–G', 0]]);
+    // hot, each is a band stronger; cold, the fainter is gone and the stronger is in the faintest band
+    expect(bands(smell(n, 3))).toEqual([['K', 2], ['R–G', 1]]);
+    expect(bands(smell(n, 0.5))).toEqual([['K', 0]]);
     // and cold enough, nothing
     expect(smell(n, 0.25)).toEqual([]);
   });
@@ -168,10 +172,10 @@ describe('waft', () => {
 describe('mask', () => {
   it('hides a trace under a reek', () => {
     const n = mix({ 'B–K': 4.3, 'R–K': 0.5 });
-    expect(sentence(smell(n))).toBe(`Reeks of ${named('B–K').simile}.`);
+    expect(bands(smell(n))).toEqual([['B–K', 4]]);
     // though it's there to be found, without the reek
     expect(level('R–K', n)).toBeCloseTo(0.5, 3);
-    expect(sentence(smell(mix({ 'R–K': 0.5 })))).toBe(`A trace of ${named('R–K').simile}.`);
+    expect(bands(smell(mix({ 'R–K': 0.5 })))).toEqual([['R–K', 0]]);
   });
 
   it('isn’t got round by thinning, which weakens everything alike', () => {
@@ -211,7 +215,7 @@ describe('mask', () => {
     const rb = found[1];
     expect(rb.level).toBeGreaterThan(2);
     expect(found[0].level - rb.level).toBeLessThan(MASK - 0.5);
-    expect(sentence(found)).toBe('Smells strongly of swimming pool and smells of overripe banana, with a whiff of chalk dust.');
+    expect(bands(found)).toEqual([['K', 3], ['R–B', 2], ['R–K', 1]]);
     // and still named with half as much of it beside the same free black, or a third the free black beside as much
     expect(species(smell(fluid({ 'R–K': 0.47, B: 0.47, 'R–B': 0.015, K: 0.03 })))).toContain('R–B');
     expect(species(smell(fluid({ 'R–K': 0.47, B: 0.47, 'R–B': 0.03, K: 0.09 })))).toContain('R–B');
@@ -233,53 +237,85 @@ describe('a second sniff', () => {
     smell(mix({ 'B–K': 4.4 }));
     smell(fluid({}));
     expect(smell(n)).toEqual(first);
-    expect(sentence(smell(n))).toBe(sentence(first));
   });
 });
 
-describe('sentence', () => {
-  const at = (species: string, level: number) => ({ odorant: named(species), level });
+describe('script', () => {
+  const at = (species: string, level: number): Smelled => ({ odorant: named(species), level });
   const [a, b, c] = [named('R').simile, named('G').simile, named('K').simile];
+  const says = (...smelled: Smelled[]) => lines(script(smelled));
+  /** A script as its pieces: each one's text, with `/` before it if it starts a line, and how long it waits. */
+  const pieces = (...smelled: Smelled[]) => script(smelled).map((f) => [`${f.line ? '/' : ''}${f.text}`, f.wait]);
 
-  it('says one odorant by its strength', () => {
-    expect(sentence([at('R', 0.2)])).toBe(`A trace of ${a}.`);
-    expect(sentence([at('R', 1.9)])).toBe(`A whiff of ${a}.`);
-    expect(sentence([at('R', 2)])).toBe(`Smells of ${a}.`);
-    expect(sentence([at('R', 3.5)])).toBe(`Smells strongly of ${a}.`);
-    expect(sentence([at('R', 4.1)])).toBe(`Reeks of ${a}.`);
+  it('has a phrasing for each band, of the first thing named and of those after it', () => {
+    for (const table of [LEAD, FOLLOW]) {
+      expect(table).toHaveLength(BANDS);
+      for (const phrasing of table) expect(phrasing.split('{X}')).toHaveLength(2);
+    }
+    for (const phrasing of FOLLOW) expect(phrasing).toMatch(/^…\{with\} /);
+    for (const phrasing of LEAD) expect(phrasing).toMatch(/^[A-Z]/);
   });
 
-  it('says two, the fainter after the stronger', () => {
-    expect(sentence([at('R', 4.5), at('G', 2.6)])).toBe(`Reeks of ${a} and smells of ${b}.`);
-    expect(sentence([at('R', 3.5), at('G', 1.6)])).toBe(`Smells strongly of ${a}, with a whiff of ${b}.`);
-    expect(sentence([at('R', 2.5), at('G', 0.6)])).toBe(`Smells of ${a}, with a trace of ${b}.`);
-    expect(sentence([at('R', 1.5), at('G', 0.5)])).toBe(`A whiff of ${a} and a trace of ${b}.`);
-    // as strong as each other, they share the word
-    expect(sentence([at('R', 2.6), at('G', 2.1)])).toBe(`Smells of ${a} and ${b}.`);
-    expect(sentence([at('R', 0.6), at('G', 0.1)])).toBe(`A trace of ${a} and ${b}.`);
+  it('says one odorant by its band: flatly if it’s strong, trailing off into a question if it’s faint', () => {
+    expect(says(at('R', 0.2))).toEqual([`A trace of… ${a}?`]);
+    expect(says(at('R', 1.9))).toEqual([`A whiff of… ${a}?`]);
+    expect(says(at('R', 2))).toEqual([`Smells of ${a}.`]);
+    expect(says(at('R', 3.5))).toEqual([`Smells strongly of ${a}.`]);
+    expect(says(at('R', 4.1))).toEqual([`Reeks of ${a}.`]);
   });
 
-  it('says three', () => {
-    expect(sentence([at('R', 2.5), at('G', 1.5), at('K', 0.6)])).toBe(`Smells of ${a}, with a whiff of ${b} and a trace of ${c}.`);
-    expect(sentence([at('R', 4.5), at('G', 3.5), at('K', 2.6)])).toBe(`Reeks of ${a}, smells strongly of ${b} and smells of ${c}.`);
-    expect(sentence([at('R', 3.5), at('G', 2.5), at('K', 1.6)])).toBe(`Smells strongly of ${a} and smells of ${b}, with a whiff of ${c}.`);
-    expect(sentence([at('R', 3.2), at('G', 1.8), at('K', 1.3)])).toBe(`Smells strongly of ${a}, with a whiff of ${b} and ${c}.`);
-    expect(sentence([at('R', 1.8), at('G', 1.5), at('K', 1.2)])).toBe(`A whiff of ${a}, ${b} and ${c}.`);
-    // a comma keeps two "and"s apart
-    expect(sentence([at('R', 3.8), at('G', 3.5), at('K', 2.2)])).toBe(`Smells strongly of ${a} and ${b}, and smells of ${c}.`);
-    expect(sentence([at('R', 1.8), at('G', 1.5), at('K', 0.2)])).toBe(`A whiff of ${a} and ${b}, and a trace of ${c}.`);
+  it('says each thing after the first on a line of its own, by its own band', () => {
+    expect(says(at('R', 4.5), at('G', 2.6))).toEqual([`Reeks of ${a}.`, `…with ${b}.`]);
+    expect(says(at('R', 3.5), at('G', 1.6))).toEqual([`Smells strongly of ${a}.`, `…with a whiff of… ${b}?`]);
+    expect(says(at('R', 2.5), at('G', 1.5), at('K', 0.6))).toEqual([`Smells of ${a}.`, `…with a whiff of… ${b}?`, `…and a trace of… ${c}?`]);
+    expect(says(at('R', 4.9), at('G', 4.5), at('K', 3.6))).toEqual([`Reeks of ${a}.`, `…with a reek of ${b}.`, `…and a strong smell of ${c}.`]);
+    // as strong as each other, each is still said in full
+    expect(says(at('R', 1.8), at('G', 1.5), at('K', 1.2))).toEqual([`A whiff of… ${a}?`, `…with a whiff of… ${b}?`, `…and a whiff of… ${c}?`]);
   });
 
-  it('says so when there’s nothing', () => {
-    expect(sentence([])).toBe('Nothing.');
+  it('comes in pieces: a strong smell all at once, a faint one after a hesitation, the longer the fainter', () => {
+    const { notice, name } = PACE;
+    expect(pieces(at('R', 4.1))).toEqual([[`/Reeks of ${a}.`, notice[4]]]);
+    expect(pieces(at('R', 2.2))).toEqual([[`/Smells of ${a}.`, notice[2]]]);
+    expect(pieces(at('R', 1.2))).toEqual([['/A whiff of…', notice[1]], [`${a}?`, name[1]]]);
+    expect(pieces(at('R', 0.2))).toEqual([['/A trace of…', notice[0]], [`${a}?`, name[0]]]);
+    expect(pieces(at('R', 2.5), at('G', 1.5), at('K', 0.6))).toEqual([
+      [`/Smells of ${a}.`, notice[2]],
+      ['/…with a whiff of…', notice[1]], [`${b}?`, name[1]],
+      ['/…and a trace of…', notice[0]], [`${c}?`, name[0]],
+    ]);
+  });
+
+  it('takes longer the fainter the smell, and never long', () => {
+    for (const table of [PACE.notice, PACE.name]) {
+      expect(table).toHaveLength(BANDS);
+      for (let i = 1; i < BANDS; i++) expect(table[i]).toBeLessThan(table[i - 1]);
+    }
+    const spans = Array.from({ length: BANDS }, (_, i) => span(script([at('R', i + 0.5)])));
+    for (let i = 1; i < BANDS; i++) expect(spans[i]).toBeLessThan(spans[i - 1]);
+    expect(span(script([at('R', 4.5)]))).toBeLessThan(0.5);
+    // three, the last of them faint: a few seconds
+    const three = span(script([at('R', 2.5), at('G', 1.5), at('K', 0.6)]));
+    expect(three).toBeGreaterThan(3);
+    expect(three).toBeLessThan(5.5);
+    // and at the very longest, three as faint as can be
+    expect(span(script([at('R', 0.8), at('G', 0.5), at('K', 0.2)]))).toBeLessThan(7.5);
+    expect(span(script([at('R', 2.5), at('G', 1.5)]))).toBeCloseTo(PACE.notice[2] + PACE.notice[1] + PACE.name[1], 9);
+  });
+
+  it('says so when there’s nothing, after a short sniff', () => {
+    expect(script([])).toEqual([{ text: NOTHING, wait: PACE.nothing, line: true }]);
+    expect(says()).toEqual([NOTHING]);
+    expect(script(smell(fluid({})))).toEqual(script([]));
+    expect(PACE.nothing).toBeLessThan(1);
   });
 
   it('has no numbers, pronouns, colors or species’ names in it', () => {
     for (const o of ODORANTS)
-      for (let w = 0; w < WORDS.length; w++) {
-        const line = sentence([{ odorant: o, level: w + 0.5 }]);
-        expect(line).toMatch(/^[A-Z][a-z ]+\.$/);
-        expect(line).not.toMatch(/\b(it|its|this|that|she|her|you|your|i|my)\b/i);
-      }
+      for (let band = 0; band < BANDS; band++)
+        for (const line of [...says({ odorant: o, level: band + 0.5 }), ...says(at('K', 4.9), { odorant: o, level: band + 0.5 }, { odorant: o, level: band + 0.5 })]) {
+          expect(line).toMatch(/^(…|[A-Z])[a-z …]+[.?]$/);
+          expect(line).not.toMatch(/\b(it|its|this|that|she|her|you|your|i|my)\b/i);
+        }
   });
 });
