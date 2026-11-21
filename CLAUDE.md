@@ -37,6 +37,11 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - Pass `ignoreHTTPSErrors: true` to `browser.newContext`, or the Google font (Schibsted Grotesk) fails to load through
   the sandbox's proxy and pages render in a fallback font, hiding font-specific bugs.
 - Tools drain fast at 16×. Use slow valves, or screenshot early, to catch something mid-flow.
+- The dev server reloads the lab when a source file changes, so don't edit `src/` while a script is driving a page.
+- The shadow lamp's bench is in the front left corner (`LAMP_AREA`), the lamp's switch is `tool.lit`, and a sheet's
+  image is `tool.dose` (`SHEET.cells` a side, from its bottom row up, in sim seconds of light): print that as text to
+  see a shadow's shape and depth, which a screenshot of a dark sheet shows poorly. It only darkens while frames are
+  drawn, so in software rendering a sim second of light takes many real ones.
 - Shell gotcha: `pkill -f "port 5199"` exits 144 because the pattern matches its own shell. That's harmless; append
   `; true`.
 
@@ -214,7 +219,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 ## Design preferences
 
 - Don't give away the chemistry. The player is meant to work it out. The bond visualizer has no text, and its points are
-  unlabeled, the size sorter's screens look plain, the equipment wheels have no names, and the faucets aren't labeled (they're the five pure
+  unlabeled, the size sorter's screens look plain, nothing is written on the shadow lamp or its paper (and nothing says what dims its light), the equipment wheels have no names, and the faucets aren't labeled (they're the five pure
   atoms, the four colors and the solvent, which the user chose). A sheet of test paper has no text either, but its four sectors are outlined in black, at the user's request. The spectroscope's axes are labeled E (uB) and f (in S, with an SI prefix to suit the range, as mS), at the user's request: both on log scales with
   base-10 log-paper ticks, only the powers of ten numbered, f's ranging itself to the tallest line, and no peak labeled. It plots each bond at the size of its
   energy, a stable one as a peak above the baseline and an uphill one as a dip below it, at the user's request. Ask before adding any visual cue that reveals how a tool or reaction works.
