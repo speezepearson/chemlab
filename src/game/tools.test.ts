@@ -13,7 +13,7 @@ import { tankMouth } from './bodies';
 import { loadVessel, saveVessel } from './save';
 import {
   DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, BOND_KEYS, SPECTROSCOPE, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, STRIP, STRIP_FOOT, STRIP_RUN, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SHEET, darkness, lampLight, type Mouth, lampShot, sheetLit,
+  clockText, needleAt, STRIP, STRIP_FOOT, STRIP_RUN, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, DRIP, TRICKLE_DROPS, trickle, trickleRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SHEET, darkness, lampLight, type Mouth, lampShot, sheetLit,
 } from './tools';
 
 const R = singleOf('R');
@@ -2164,6 +2164,63 @@ describe('dripping', () => {
       // no long tail of drops that hang on and on
       expect(biggest).toBeLessThan(2.6e6);
     }
+  });
+});
+
+describe('pouring slowly', () => {
+  const h = 0.02;
+  /** A seeded random source, so the drops come the same every run. */
+  const seeded = (seed: number) => () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+
+  it('lets out TRICKLE_DROPS drops’ worth a second, whatever the flask holds, conserving atoms', () => {
+    expect(trickleRate()).toBe(TRICKLE_DROPS * DRIP.atoms);
+    // a flask of pairs: the rate goes by atoms, though fluid's moved by volume
+    const RG = SPECIES.findIndex((s) => s.size === 2);
+    const flask = filled(new Vessel(CAP), RG, CAP / 2, 2);
+    const drop = new Vessel(Infinity);
+    const rand = seeded(7);
+    let fallen = 0;
+    const steps = 500; // 10 sim s
+    for (let i = 0; i < steps; i++) fallen += trickle(flask, drop, h, rand)?.N ?? 0;
+    expect(fallen + drop.N + flask.N).toBe(CAP / 2);
+    expect(Math.abs(fallen + drop.N - steps * h * trickleRate())).toBeLessThan(0.01 * steps * h * trickleRate());
+  });
+
+  it('falls in drops a little over DRIP.atoms on average, about three a second', () => {
+    // fixed drops, so as not to depend on the panel's
+    const was = { ...DRIP };
+    Object.assign(DRIP, { atoms: 1.5e6, spread: 0.12e6 });
+    try {
+      const flask = filled(new Vessel(CAP), R, CAP, 2);
+      const drop = new Vessel(Infinity);
+      const rand = seeded(11);
+      const sizes: number[] = [];
+      for (let i = 0; i < 3000; i++) {
+        const d = trickle(flask, drop, h, rand);
+        if (d) sizes.push(d.N);
+      }
+      // 60 sim s
+      expect(sizes.length / 60).toBeGreaterThan(2.7);
+      expect(sizes.length / 60).toBeLessThan(3.6);
+      const mean = sizes.reduce((a, b) => a + b, 0) / sizes.length;
+      expect(mean).toBeGreaterThan(DRIP.atoms);
+      expect(mean).toBeLessThan(DRIP.atoms + 6 * DRIP.spread);
+      // no drop far off a drop's size either way
+      expect(Math.min(...sizes)).toBeGreaterThan(0.75 * DRIP.atoms);
+      expect(Math.max(...sizes)).toBeLessThan(DRIP.atoms + 10 * DRIP.spread);
+    } finally {
+      Object.assign(DRIP, was);
+    }
+  });
+
+  it('stops once the flask is empty, and the last drop still falls', () => {
+    const flask = filled(new Vessel(CAP), R, 3e5, 2);
+    const drop = new Vessel(Infinity);
+    expect(trickle(flask, drop, 1, () => 0.999999)).toBeNull();
+    expect(flask.N).toBe(0);
+    expect(drop.N).toBe(3e5);
+    expect(trickle(flask, drop, h, () => 0)!.N).toBe(3e5);
+    expect(drop.N).toBe(0);
   });
 });
 

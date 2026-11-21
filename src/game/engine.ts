@@ -32,7 +32,7 @@ import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
 import { BENCH, CELL, LIFT, PLANE_Z, ROOM, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, type Pose, type Vec3 } from './space';
 import {
   changeoverAt, BOND_KEYS, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
-  TANK_H, TOOL_NAMES, Blotter, dipUnder, isBlotter, isDipper, isThermometer, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
+  TANK_H, TOOL_NAMES, Blotter, dipUnder, isBlotter, isDipper, isThermometer, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, trickle, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
   type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
@@ -74,6 +74,8 @@ export interface Hud {
   label: boolean;
   /** What the right button does now, in a word, for the touch screen's button that stands in for it. */
   hand: 'Pour' | 'Flow';
+  /** Whether a flask is held, which the touch screen's Drip button pours slowly, drop by drop. */
+  flask: boolean;
   /** A brief note, like there being no room for something. */
   note: string | null;
   /** Whether the note is a tip, something the player can now do, not something they can't. */
@@ -214,6 +216,8 @@ const WHEEL_KEYS = ['1', '2'];
 
 /** How tipped a flask held to pour is: past the horizontal, mouth down. */
 const POUR_ANG = Math.PI * 0.61;
+/** How tipped a flask poured slowly (Shift) is: only a little, so it lets fluid out drop by drop (see trickle). */
+const TRICKLE_ANG = Math.PI / 4;
 /** How long a flask takes to tip to pour, or stand back up, in real seconds. */
 const TIP_S = 0.3;
 /**
@@ -360,6 +364,15 @@ export class GameEngine {
   private held: Held | null = null;
   /** Whether the right button is held: a held flask tips and pours, and a held hose lets fluid out, only while it is. */
   private rightHeld = false;
+  /**
+   * Whether Shift is held, as of the last key or pointer event; or on a touch screen, whether the hand button held is
+   * Drip: a held flask poured then pours slowly, drop by drop (see pourAng).
+   */
+  private shift = false;
+  private slowHand = false;
+  /** The drop hanging from the lip of a flask poured slowly (see trickle), and that flask. */
+  private lipDrop = new Vessel(Infinity);
+  private lipOf: Flask | null = null;
   /** A valve being turned: its lever points at the pointer for as long as the button that took hold of it is down. */
   private turning: { t: Tool; k: number; turn: Turn } | null = null;
   /**
@@ -1311,7 +1324,8 @@ export class GameEngine {
   }
 
   /** The right button, pressed or let go: it pours from a held flask, or lets fluid out of a held hose. */
-  hand(down: boolean): void {
+  hand(down: boolean, slow = false): void {
+    this.slowHand = down && slow;
     if (down) this.rightDown();
     else this.rightUp();
   }
@@ -1335,6 +1349,7 @@ export class GameEngine {
         this.fingerDown(e.pointerId);
         return;
       }
+      this.shift = e.shiftKey;
       // what it's on now, not as of the last frame
       this.retarget();
       if (e.button === 0) this.leftDown(e.shiftKey);
@@ -1346,6 +1361,7 @@ export class GameEngine {
         if (this.fingers.has(e.pointerId)) this.fingerMove(e.pointerId, at(e));
         return;
       }
+      this.shift = e.shiftKey;
       this.pointer = at(e);
       this.moved();
     });
@@ -1370,6 +1386,8 @@ export class GameEngine {
       this.zoom(e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1));
     });
     on(window, 'keydown', (e) => {
+      // (Shift pours a held flask slowly, whatever else is going on)
+      this.shift = e.shiftKey;
       if (typingIn(e.target)) return;
       // the usual keys for undo and redo
       if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.code === 'KeyZ' || e.code === 'KeyY')) {
@@ -1415,12 +1433,14 @@ export class GameEngine {
       }
     });
     on(window, 'keyup', (e) => {
+      this.shift = e.shiftKey;
       this.keys.delete(e.code);
       const wheel = WHEEL_CODES.indexOf(e.code);
       if (wheel >= 0) this.closeWheel(wheel);
     });
     on(window, 'blur', () => {
       this.keys.clear();
+      this.shift = false;
       this.wheel = null;
       this.rightUp();
       this.leftUp(true);
@@ -1985,6 +2005,7 @@ export class GameEngine {
   /** The right button came up. */
   private rightUp(): void {
     this.rightHeld = false;
+    this.slowHand = false;
     // (a drag of the view, or a turn of a valve, with the left button goes on)
     if (!this.press) this.panning = null;
     if (!this.press?.valve) this.endTurn();
@@ -2268,14 +2289,25 @@ export class GameEngine {
     this.raf = requestAnimationFrame(this.frame);
   };
 
+  /** Whether a held flask poured now would pour slowly, drop by drop: with Shift held, or the touch screen's Drip. */
+  private slow(): boolean {
+    return this.shift || this.slowHand;
+  }
+
+  /** How far a held flask tips to pour: all the way over, or poured slowly, only a little. */
+  private pourAng(): number {
+    return this.slow() ? TRICKLE_ANG : POUR_ANG;
+  }
+
   /**
-   * A held flask tips to pour while the right button's down, and stands back up when it's let go, over TIP_S real
-   * seconds either way (it's the player's own doing).
+   * A held flask tips to pour while the right button's down (all the way, or a little to pour slowly, see pourAng),
+   * and stands back up when it's let go, over TIP_S real seconds for the whole way either way (it's the player's own
+   * doing).
    */
   private tip(dt: number): void {
     const h = this.held;
     if (h?.kind !== 'flask') return;
-    const goal = this.rightHeld ? POUR_ANG : 0;
+    const goal = this.rightHeld ? this.pourAng() : 0;
     const step = (POUR_ANG * dt) / TIP_S;
     h.f.tilt = h.f.tilt < goal ? Math.min(goal, h.f.tilt + step) : Math.max(goal, h.f.tilt - step);
   }
@@ -2357,11 +2389,21 @@ export class GameEngine {
     const h = this.held;
 
     // the held flask, tipped all the way, pours from its lip into whatever's below
-    const D = h?.kind === 'flask' && this.rightHeld && h.f.tilt >= POUR_ANG * 0.97 ? h.f : null;
+    const D = h?.kind === 'flask' && this.rightHeld && !this.slow() && h.f.tilt >= POUR_ANG * 0.97 ? h.f : null;
     if (D && simDt > 0) {
       const from = flaskLip(D);
       this.pour = { from, into: mouthBelow(catching, from) };
     }
+    // or poured slowly, tipped a little, it lets out a drop at a time from its lip (see trickle)
+    const T = h?.kind === 'flask' && this.rightHeld && this.slow() && h.f.tilt >= TRICKLE_ANG * 0.97 ? h.f : null;
+    // the drop hanging from a lip goes back in once its flask is upright again, or out of hand, or once it's poured
+    // all the way, to go with the rest
+    const lip = this.lipOf;
+    if (lip && this.lipDrop.N > 0 && lip !== T && (h?.kind !== 'flask' || h.f !== lip || lip.tilt <= 0 || lip === D)) {
+      this.fill(lip, this.lipDrop);
+      this.lipDrop = new Vessel(Infinity);
+    }
+    if (T) this.lipOf = T;
 
     // a hose's nozzle in hand lets nothing out without the right button: the tool or faucet it's pulled out of stops
     let stillTool: Tool | null = null;
@@ -2421,6 +2463,11 @@ export class GameEngine {
       };
       for (let i = 0; i < sub; i++) {
         this.stepWake(step);
+        if (T) {
+          const from = flaskLip(T);
+          const fell = trickle(T, this.lipDrop, step);
+          if (fell) this.falling.push({ v: fell, x: from.x, y: from.y, z: from.z, vy: 0, trail: false });
+        }
         if (D && this.pour) {
           const out = new Vessel(Infinity);
           transfer(D, out, POUR_RATE * step);
@@ -2590,7 +2637,7 @@ export class GameEngine {
     const outlets: { at: Vec3; lip: boolean }[] = [];
     if (h.kind === 'flask') {
       mine.add(h.f);
-      outlets.push({ at: flaskLip(h.f, POUR_ANG), lip: true });
+      outlets.push({ at: flaskLip(h.f, this.pourAng()), lip: true });
     } else if (h.kind === 'tool') {
       for (const v of h.t.tanks) mine.add(v);
       // a spout with its hose out lets out at the hose's nozzle, which stays where it is (see below)
@@ -2764,6 +2811,7 @@ export class GameEngine {
       streams.push({ from: this.pour.from, toY: this.landsAt(this.pour.from, mouths), fluid: h.f, flow: POUR_RATE / CAP });
     const drops: Frame['drops'][number][] = [];
     for (const t of this.tools) t.drops.forEach((v, k) => drops.push({ at: this.outletAt(t, k), v, hanging: true }));
+    if (this.lipOf && this.lipDrop.N > 0) drops.push({ at: flaskLip(this.lipOf), v: this.lipDrop, hanging: true });
     for (const d of this.falling) drops.push({ at: d, v: d.v, hanging: false });
     const pl = this.placed;
     // each hose from its spout or faucet to its nozzle, with what's running through it
@@ -2868,7 +2916,11 @@ export class GameEngine {
       // a button pointed at takes the click
       if (this.intoCabinet()) add(['LMB'], 'put it in the cabinet');
       else if (!this.onButton()) add(['LMB'], ok ? how : `${how}: ${(this.placed?.why ?? 'no room').toLowerCase()}`, !ok);
-      if (this.rightWouldDo()) add(['RMB'], h.kind === 'flask' ? 'hold to pour' : 'hold to let it flow');
+      if (this.rightWouldDo()) {
+        add(['RMB'], h.kind === 'flask' ? 'hold to pour' : 'hold to let it flow');
+        if (h.kind === 'flask') add(['Shift', 'RMB'], 'hold to pour drop by drop');
+      } else if (h.kind === 'flask' && this.rightHeld && this.facing === 'bench')
+        add(['Shift'], this.slow() ? 'let go to pour freely' : 'hold to pour drop by drop');
       if (h.kind === 'hose') add(['Backspace'], 'roll the hose back up');
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it back in the cabinet');
       add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it back in the cabinet') : 'put it back');
@@ -3397,6 +3449,7 @@ export class GameEngine {
       right: this.rightWouldDo(),
       label: !inPod(this.wake) && !!this.targetNote(),
       hand: h?.kind === 'hose' ? 'Flow' : 'Pour',
+      flask: h?.kind === 'flask',
       note: this.flash?.text ?? null,
       tip: !!this.flash?.tip,
       actions: this.actions(),

@@ -45,8 +45,8 @@ function TouchButton({
 /**
  * On a touch screen, buttons for what a tap or drag on the view can't do, in a column at the bottom right, each only
  * while it applies: Note (Enter) when there's something to write a note about, Nap (N) when a nap can be had, Put
- * away (Backspace) and the right button, named for what it'll do, while something's held, and Sleep when the cryopod
- * could be got into.
+ * away (Backspace) and the right button, named for what it'll do, while something's held (and Drip, the right button
+ * with Shift, while a flask is), and Sleep when the cryopod could be got into.
  */
 export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudState }) {
   // (there's nothing to do with them shut in the pod, or once the game's over)
@@ -57,6 +57,9 @@ export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudSta
       {hud.nap && <TouchButton label="Nap" className="small" down={() => engine.touchNap()} />}
       {hud.holding && <TouchButton label="Put away" className="small" down={() => engine.touchPutAway()} />}
       {hud.pod && !hud.holding && <TouchButton label="Sleep" down={() => engine.board()} />}
+      {hud.holding && hud.flask && (
+        <TouchButton label="Drip" lit={hud.right} down={() => engine.hand(true, true)} up={() => engine.hand(false)} />
+      )}
       {hud.holding && (
         <TouchButton label={hud.hand} lit={hud.right} down={() => engine.hand(true)} up={() => engine.hand(false)} />
       )}
