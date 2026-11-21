@@ -1,6 +1,7 @@
 import { Fragment, useReducer, useState } from 'react';
 import { LOOK, resetLook, type ColorModel, type Look } from '../game/appearance';
 import { DEFAULT_OUTLINE, MAX_OUTLINE_WIDTH, OUTLINE, setOutline } from '../game/outline';
+import { DEFAULT_SCROLL, SCROLL, setScroll } from '../game/scroll';
 import { DragNumber } from './DragNumber';
 
 /** The numeric settings in Look, the ones a DragNumber can edit. */
@@ -29,7 +30,8 @@ const GROUPS: Group[] = [
 
 /**
  * Debug panel: live-tune the temperature appearance curves and how composition looks (see game/appearance.ts), and
- * the outline round what the pointer is on (see game/outline.ts).
+ * the outline round what the pointer is on (see game/outline.ts), and which way scrolling moves the view (see
+ * game/scroll.ts).
  */
 export function AppearancePanel() {
   const [, rerender] = useReducer((x: number) => x + 1, 0);
@@ -158,6 +160,22 @@ export function AppearancePanel() {
                 </label>
               </td>
             </tr>
+            <tr className="group">
+              <td colSpan={2}>
+                <label className="tog">
+                  <input
+                    type="checkbox"
+                    checked={SCROLL.invert}
+                    onChange={(e) => {
+                      setScroll({ invert: e.target.checked });
+                      rerender();
+                    }}
+                  />{' '}
+                  <b>Invert scroll</b>
+                </label>{' '}
+                <span>scrolling down moves the view nearer; pinching is unchanged</span>
+              </td>
+            </tr>
           </tbody>
         </table>
         <p>
@@ -168,6 +186,7 @@ export function AppearancePanel() {
             onClick={() => {
               resetLook();
               setOutline({ ...DEFAULT_OUTLINE });
+              setScroll({ ...DEFAULT_SCROLL });
               rerender();
             }}
           >

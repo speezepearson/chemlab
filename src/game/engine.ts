@@ -35,6 +35,7 @@ import {
   TANK_H, TOOL_NAMES, Blotter, dipUnder, isBlotter, isDipper, isThermometer, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, trickle, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
   type Mouth, type ToolKind,
 } from './tools';
+import { SCROLL } from './scroll';
 import { typingIn } from './typing';
 import { View, type AirlockLook, type Camera, type FaucetSpot, type Frame, type GuideLook, type Icons, type LabView, type Pick } from './view';
 import { catches, stillness, type Stillness } from './still';
@@ -1386,7 +1387,9 @@ export class GameEngine {
     on(c, 'contextmenu', (e) => e.preventDefault());
     on(c, 'wheel', (e) => {
       e.preventDefault();
-      this.zoom(e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1));
+      // a trackpad's pinch comes as the wheel with Ctrl held: it goes the way the fingers do, inverted or not
+      const flip = SCROLL.invert && !e.ctrlKey ? -1 : 1;
+      this.zoom(flip * e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1));
     });
     on(window, 'keydown', (e) => {
       // (Shift pours a held flask slowly, whatever else is going on)
