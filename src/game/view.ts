@@ -262,8 +262,9 @@ export class View implements LabView {
     const sk = new Sketch(ctx, this.base(), this.scale(), true, new Set(fr.guides.map((g) => g.v)), flash);
     drawWall(sk, this.span());
     drawCabinet(sk, fr.stock, this.specimens);
-    // the shadow lamp in the wall, with the slot behind its pane and the sheet in it (whose foot is behind the counter);
-    // and after the counter, the faucets and the alarms' button, the sheets pinned to the wall, behind hoses
+    // what's part of the wall, behind the hoses and everything in the plane: the shadow lamp, with the slot behind its
+    // pane and the sheet in it (whose foot is behind the counter); and after the counter, the faucets, the alarms'
+    // button, the supply station's whole block, and the sheets pinned to the wall
     const held = fr.held;
     const lamp = fr.tools.find((t) => t.kind === 'shadowlamp');
     const slotted = fr.tools.find((t) => t.kind === 'sheet' && t !== held && inSlot(t.pose));
@@ -276,21 +277,24 @@ export class View implements LabView {
     drawFaucets(sk, fr.faucets);
     const station = fr.tools.find((t) => t.shape.wall);
     drawAlarm(sk, alarmAt(station?.pose), fr.alarmsOff, alarmPlate());
+    if (station) this.drawTool(sk, station, fr);
     for (const t of fr.tools) if (t.shape.pinned && t !== slotted && t !== held) this.drawTool(sk, t, fr);
     drawArms(sk, fr.arms);
     drawHoses(sk, fr.hoses);
-    // the station in the wall, behind everything else in the plane; then the rest of the tools, the scales and the
-    // flasks, each with what's outlined (what's held, or what the pointer's on) over the rest of its kind
+    // then what stands free in the plane, in front of the hoses: the rest of the tools, the scales and the flasks, each
+    // with what the pointer's on over the rest of its kind; the nozzles and what's falling; and last of all, over
+    // everything, what's in hand
     const h = fr.hot;
     const up = h?.kind === 'tool' ? h.t : h?.kind === 'flask' ? h.f : h?.kind === 'scale' ? h.sc : null;
-    const order = <T extends object>(xs: readonly T[], under: (x: T) => boolean = () => false) =>
-      [...xs].sort((a, b) => Number(under(b)) - Number(under(a)) || Number(a === up) - Number(b === up));
-    const free = fr.tools.filter((t) => t.kind !== 'shadowlamp' && t !== slotted && (!t.shape.pinned || t === held));
-    for (const t of order(free, (t) => !!t.shape.wall)) this.drawTool(sk, t, fr);
+    const order = <T extends object>(xs: readonly T[]) => xs.filter((x) => x !== held).sort((a, b) => Number(a === up) - Number(b === up));
+    for (const t of order(fr.tools)) if (!this.onWall(t)) this.drawTool(sk, t, fr);
     for (const sc of order(fr.scales)) this.drawScale(sk, sc, fr);
     for (const f of order(fr.flasks)) sk.frame(f.pose.x, -f.pose.y, () => drawFlask(sk, f));
     drawNozzles(sk, fr.hoses);
     drawFlows(sk, fr);
+    for (const t of fr.tools) if (t === held) this.drawTool(sk, t, fr);
+    for (const sc of fr.scales) if (sc === held) this.drawScale(sk, sc, fr);
+    for (const f of fr.flasks) if (f === held) sk.frame(f.pose.x, -f.pose.y, () => drawFlask(sk, f));
     drawGuides(sk, fr.guides);
     this.exposure(fr);
     this.forget(fr);
