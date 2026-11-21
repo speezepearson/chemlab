@@ -1652,10 +1652,12 @@ export function separatorShares(): number[][] {
 }
 
 /**
- * What a sheet of test paper or of bond paper soaks up (see TEST_PAPER and BLOTTERS): blotting paper, which takes up what lands on it only as far
- * as it has room, however it's poured on, so it's never overfilled and nothing mixes into what it already holds: what's
- * more runs off it and is lost, as off a bare counter. Once it's soaked (see soaked) it takes up nothing at all. So it
- * holds the first of what landed on it, for good. It keeps none of its heat, as a wicking strip's paper keeps none.
+ * What a sheet of test paper or of bond paper soaks up (see TEST_PAPER and BLOTTERS): blotting paper, which takes up
+ * what lands on it only as far as it has room, however it's poured on, so it's never overfilled and nothing mixes
+ * into what it already holds: what's more runs off it, and falls on past it (see soak): onto a bare counter, where
+ * it's lost, if the sheet lies on one, or onto whatever's under a sheet held in the hand. Once it's soaked (see
+ * soaked) it takes up nothing at all. So it holds the first of what landed on it, for good. It keeps none of its
+ * heat, as a wicking strip's paper keeps none.
  */
 export class Blotter extends Vessel {
   /** Whether it's soaked: it has room for less than a trace more. */
@@ -1674,10 +1676,23 @@ export class Blotter extends Vessel {
 
   /**
    * A share of a mixture is rounded species by species, so what was taken up can come to a molecule or two more than
-   * there was room for: those run off again with the rest, so that the paper is never overfilled.
+   * there was room for: those run off again with the rest (into `back`, if that's kept), so that the paper is never
+   * overfilled.
    */
-  private trim(): void {
-    while (volume(this) > this.cap) transfer(this, null, volume(this) - this.cap);
+  private trim(back: Vessel | null = null): void {
+    while (volume(this) > this.cap) transfer(this, back, volume(this) - this.cap);
+  }
+
+  /**
+   * Take up what there's room for of a fluid that's landed on the paper, out of that fluid itself, in whole molecules
+   * (see transfer): what's left in `src` is what ran off, so between the two there's just what landed, none of it
+   * lost or made (but for a last trace of `src`, let go as transfer lets go of any).
+   */
+  soak(src: Vessel): void {
+    if (this.soaked) return;
+    transfer(src, this, Infinity);
+    this.trim(src);
+    this.Q = 0;
   }
 }
 

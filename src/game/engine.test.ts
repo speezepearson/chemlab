@@ -5,13 +5,13 @@ import { testChemParams } from '../chem/testChem';
 import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
 import { SHEET_SLOT, flaskLip, inSlot, sheetIn, slotPose, toolStands } from './bodies';
 import { STOCK } from './cabinet';
-import { CAP } from './config';
+import { CAP, TRACE } from './config';
 import type { GameEngine } from './engine';
 import { Vessel, volume, type Flask } from './flask';
 import { DEFAULT_PRESET, LAMP_POSE } from './presets';
 import type { SaveState } from './save';
 import { CELL, LIFT, toCell } from './space';
-import { INLINE_TOOLS, SHAPES, SHEET, TEST_PAPER, UNIQUE_TOOLS, bondReading, bondShares, darkness, paperReading, type Tool } from './tools';
+import { DRIP, INLINE_TOOLS, SHAPES, SHEET, TEST_PAPER, UNIQUE_TOOLS, bondReading, bondShares, darkness, paperReading, type Blotter, type Tool } from './tools';
 
 /*
  * The engine itself, with nothing to draw on and nothing to hear: the view and the sounds are stood in for, as they
@@ -483,6 +483,190 @@ describe('bond paper', () => {
     odd.tools.find((x) => x.kind === 'bondpaper')!.paper = [{ n: { 'R–G': 50 * TEST_PAPER.cap }, Q: 0 }];
     l.e.restore(odd, DEFAULT_PRESET);
     expect(volume(paperOf(l.in.tools.find((x) => x.kind === 'bondpaper')!))).toBe(TEST_PAPER.cap);
+  });
+});
+
+describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stream', (kind) => {
+  const R = singleOf('R');
+  const G = singleOf('G');
+  const RG = pairOf('R', 'G');
+  const cap = TEST_PAPER.cap;
+  /** Yet more of the engine's own things: what's on its way down, and the faucets. */
+  interface Falls {
+    falling: { v: Vessel }[];
+    faucets: { start: { start: number }; spout: { x: number; y: number; z: number } }[];
+  }
+  const falls = (l: Lab) => l.in as unknown as Falls;
+
+  /** A flask standing in the cell at SPOT, and a pipette on its stand over it, its spout `up` above the counter. */
+  function line(l: Lab, up = 220): { pip: Tool; f: Flask } {
+    holdAt(l, 'flask', { x: SPOT.x, y: LIFT + 150, z: SPOT.z, yaw: 0 });
+    const f = hands(l).held!.f!;
+    l.in.release();
+    expect([f.pose.x, f.pose.z]).toEqual([SPOT.x, SPOT.z]);
+    const pip = pipetteOver(l, SPOT.x, SPOT.z, up);
+    expect(pip.pose.y - SHAPES.pipette.spoutY).toBeGreaterThan(f.pose.y + 100);
+    return { pip, f };
+  }
+
+  /** Take a sheet in hand and hold it level, `up` above the counter, with its middle `dx` across from the spout. */
+  function wave(l: Lab, up: number, dx = 0): Tool {
+    holdAt(l, kind, { x: SPOT.x + dx, y: LIFT + up, z: SPOT.z, yaw: 0 });
+    const sheet = l.in.held!.t!;
+    expect(sheet.kind).toBe(kind);
+    return sheet;
+  }
+
+  /** How many molecules of a species there are in the pipette, hanging from it, falling, on the sheet and in the flask. */
+  const count = (l: Lab, s: number, pip: Tool, sheet: Tool, f: Flask) =>
+    pip.tanks[0].n[s] + pip.drops[0].n[s] + falls(l).falling.reduce((t, d) => t + d.v.n[s], 0) + paperOf(sheet).n[s] + f.n[s];
+
+  it('takes up what it has room for, of what the stream is made of, and the rest runs on into what is below; none is lost or made', () => {
+    const l = lab();
+    const { pip, f } = line(l);
+    const sheet = wave(l, 150);
+    const paper = paperOf(sheet);
+    // three parts R–G to one of R, which do nothing to each other
+    pip.tanks[0].setMolecules(RG, 3.75 * cap);
+    pip.tanks[0].setMolecules(R, 1.25 * cap);
+    const before = [R, RG].map((s) => count(l, s, pip, sheet, f));
+    expect(before).toEqual([1.25 * cap, 3.75 * cap]);
+    pip.valves[0] = 1;
+    run(l, 0.1);
+    // at once it's wet with what's running, and showing it; nothing has got past it yet
+    expect(volume(paper)).toBeGreaterThan(0);
+    expect(volume(paper)).toBeLessThan(0.5 * cap);
+    expect(paper.n[RG] / volume(paper)).toBeCloseTo(0.75, 2);
+    expect(f.N).toBe(0);
+    run(l, 4);
+    // soaked, with the first of the stream, and not a molecule over; and the stream has run on into the flask
+    expect(volume(paper) / cap).toBeCloseTo(1, 4);
+    expect(volume(paper)).toBeLessThanOrEqual(cap);
+    expect(paper.n[RG] / volume(paper)).toBeCloseTo(0.75, 2);
+    expect(paper.Q).toBe(0);
+    expect(volume(f)).toBeGreaterThan(cap);
+    expect(f.n[RG] / volume(f)).toBeCloseTo(0.75, 2);
+    // every molecule that left the pipette is on the sheet or in the flask (but for less than a trace of a packet,
+    // which is let go wherever fluid is moved)
+    const after = [R, RG].map((s) => count(l, s, pip, sheet, f));
+    after.forEach((n, i) => expect(Math.abs(n - before[i])).toBeLessThan(TRACE));
+    expect(after.every(Number.isInteger)).toBe(true);
+    // from then on it takes nothing more, and everything goes by it (counted in atoms, since what's in the flask reacts)
+    const held = [...paper.n];
+    const was = f.N;
+    pip.tanks[0].setMolecules(G, 2 * cap);
+    const out = () => pip.tanks[0].N + pip.drops[0].N + falls(l).falling.reduce((t, d) => t + d.v.N, 0);
+    const left = out();
+    run(l, 2);
+    expect([...paper.n]).toEqual(held);
+    expect(left - out()).toBeGreaterThan(0.2 * cap);
+    expect(Math.abs(f.N - was - (left - out()))).toBeLessThan(TRACE);
+  });
+
+  it('stays dry beside the stream, or above where it comes out: then all of it reaches what is below', () => {
+    for (const [up, dx] of [[150, TEST_PAPER.w / 2 + 2], [150, -(TEST_PAPER.w / 2 + 2)], [300, 0]]) {
+      const l = lab();
+      const { pip, f } = line(l);
+      const sheet = wave(l, up, dx);
+      pip.tanks[0].setMolecules(R, 5 * cap);
+      pip.valves[0] = 1;
+      run(l, 3);
+      expect(paperOf(sheet).N).toBe(0);
+      expect(volume(f)).toBeGreaterThan(cap);
+      expect(Math.abs(count(l, R, pip, sheet, f) - 5 * cap)).toBeLessThan(TRACE);
+    }
+    // and its edge is enough to catch it
+    const l = lab();
+    const { pip } = line(l);
+    const sheet = wave(l, 150, TEST_PAPER.w / 2 - 2);
+    pip.tanks[0].setMolecules(R, 5 * cap);
+    pip.valves[0] = 1;
+    run(l, 3);
+    expect(volume(paperOf(sheet)) / cap).toBeCloseTo(1, 4);
+  });
+
+  it('is wetted on sim time: paused, nothing lands on it, however it is held', () => {
+    const l = lab();
+    const { pip, f } = line(l);
+    const sheet = wave(l, 150);
+    pip.tanks[0].setMolecules(R, 5 * cap);
+    pip.valves[0] = 1;
+    l.e.speed = 0;
+    run(l, 5);
+    expect(paperOf(sheet).N).toBe(0);
+    expect(f.N).toBe(0);
+    expect(volume(pip.tanks[0])).toBe(5 * cap);
+    l.e.speed = 1;
+    run(l, 1);
+    expect(paperOf(sheet).N).toBeGreaterThan(0);
+  });
+
+  it('takes its share of a single drop, the rest of which falls on', () => {
+    const l = lab();
+    const { pip, f } = line(l);
+    const sheet = wave(l, 150);
+    const paper = paperOf(sheet);
+    // all but soaked, with room for about a tenth of a drop
+    const room = Math.round(DRIP.atoms / 10);
+    const wet = new Vessel(Infinity);
+    wet.setMolecules(G, cap);
+    paper.addFrom(wet, cap - room, true);
+    expect((paper as Blotter).soaked).toBe(false);
+    pip.tanks[0].setMolecules(R, 2 * cap);
+    pip.valves[0] = 0.02;
+    // until the first drop has struck the sheet and what was left of it has landed in the flask
+    for (let i = 0; i < 4000 && f.N === 0; i++) l.in.simulate(0.02);
+    expect(paper.n[R]).toBeGreaterThan(0);
+    expect(paper.n[R]).toBeLessThanOrEqual(room);
+    expect((paper as Blotter).soaked).toBe(true);
+    expect(f.n[R]).toBeGreaterThan(room);
+    expect(f.n[G]).toBe(0);
+    expect(count(l, R, pip, sheet, f)).toBe(2 * cap);
+  });
+
+  it("is wetted under a faucet, which runs on into a flask under it", () => {
+    const l = lab();
+    const [faucet] = falls(l).faucets;
+    const sp = faucet.spout;
+    holdAt(l, 'flask', { x: sp.x, y: sp.y - 80, z: sp.z, yaw: 0 });
+    const f = hands(l).held!.f!;
+    l.in.release();
+    expect([f.pose.x, f.pose.z]).toEqual([sp.x, sp.z]);
+    // held between the faucet's spout and the flask's mouth
+    expect(sp.y - f.pose.y).toBeGreaterThan(40);
+    holdAt(l, kind, { x: sp.x + 10, y: (sp.y + f.pose.y) / 2, z: sp.z - 10, yaw: 0 });
+    const paper = paperOf(l.in.held!.t!);
+    f.n.fill(0);
+    f.N = f.Q = 0;
+    run(l, 0.5);
+    expect(volume(paper) / cap).toBeCloseTo(1, 3);
+    // a faucet pours its one atom, and that's all that's on the sheet and in the flask
+    const atom = faucet.start.start;
+    expect(paper.n[atom]).toBe(volume(paper));
+    expect(f.n[atom]).toBe(volume(f));
+    expect(volume(f)).toBeGreaterThan(5 * cap);
+  });
+
+  it('is laid down afterwards as it is, wet, and lets nothing by that lands on it there', () => {
+    const l = lab();
+    const { pip, f } = line(l);
+    const sheet = wave(l, 150);
+    const paper = paperOf(sheet);
+    pip.tanks[0].setMolecules(RG, 5 * cap);
+    pip.valves[0] = 1;
+    run(l, 4);
+    pip.valves[0] = 0;
+    expect(volume(paper) / cap).toBeCloseTo(1, 4);
+    const held = [...paper.n];
+    // let go of over the flask's cell, it goes down in the next one
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    expect(where(sheet.pose)[1]).toBe(LIFT + TEST_PAPER.thick);
+    expect(Math.hypot(sheet.pose.x - f.pose.x, sheet.pose.z - f.pose.z)).toBe(CELL);
+    expect([...paper.n]).toEqual(held);
+    expect(kind === 'testpaper' ? paperReading(paper)[0].slice(0, 2) : bondReading(paper).filter((x) => x > 0)).toEqual(
+      kind === 'testpaper' ? [1, 1] : [1],
+    );
   });
 });
 

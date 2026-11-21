@@ -133,13 +133,18 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   time too.
   - Anything drawn per outlet must use totals over the whole frame. A single substep's output can be empty, for
     example when a wide-open valve drains its tank in the first substep.
-- **Landing fluid goes through `fill()`.** Anything that lands in a vessel (streams, drops, faucets, pours) must use
-  `engine.fill()`, not `addFrom`. `fill()` mixes everything in, then `overflow()` spills the excess of the mixture
-  over the vessel's `Mouth.rim` onto whatever is below, possibly in a cascade.
+- **Landing fluid goes through `land()`, and into a vessel through `fill()`.** Anything that falls into a mouth
+  (streams, faucets, pours, spills) must use `engine.land()`, which `fill()`s the mouth's vessel, never `addFrom`.
+  `fill()` mixes everything in, then `overflow()` spills the excess of the mixture over the vessel's `Mouth.rim`
+  onto whatever is below, possibly in a cascade.
   - A vessel with no rim spills straight to the sink.
-  - The face of a sheet of test paper or bond paper (the `BLOTTERS`) is a mouth too (`paperMouth`), with no rim, and what lands on it goes through
-    `fill()` like anything else; but its vessel is a `Blotter`, which takes up only what it has room for, mixing
-    nothing more in, so the rest is simply lost and there's never any excess to spill.
+  - The face of a sheet of test paper or bond paper (the `BLOTTERS`) is a mouth too (`paperMouth`), with no rim; but
+    its vessel is a `Blotter`, which takes up only what it has room for, mixing nothing more in. `land()` gives it
+    its share out of the packet itself (`Blotter.soak`, whole molecules, none lost or made) and sends the rest on
+    down from where it struck, into the next mouth below: there's none under a sheet on a counter, so there it's
+    lost; under a sheet in hand there may be. A falling drop does the same by hand, and what's left of it falls on.
+    Nothing about this is special to being held: what's held is in `mouths()` like everything else, and always
+    was. What's drawn falling (`landsAt`) goes past a soaked sheet.
   - What's on paper is out of the chemistry: `Tool.paper` (a strip's stretches, a sheet of test paper's or bond paper's one
     `Blotter`) and `Tool.bed` aren't among the engine's `vessels()`, so they neither react nor cool.
   - Sealed tools (`shape.sealed`) have no mouth at all.

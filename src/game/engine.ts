@@ -2222,16 +2222,48 @@ export class GameEngine {
     return out;
   }
 
-  /** Where something falling from p stops: the first open top under it, or else the floor or counter. */
+  /**
+   * Where something falling from p stops, for drawing it: the first open top under it, or else the floor or counter. A
+   * soaked sheet of blotting paper stops none of it (see land), so it's drawn falling on past one.
+   */
   private landsAt(p: Vec3, mouths: readonly Mouth[]): number {
-    const m = mouthBelow(mouths, p);
+    let m = mouthBelow(mouths, p);
+    while (m && m.v instanceof Blotter && m.v.soaked) m = mouthBelow(mouths, { x: p.x, y: m.y, z: p.z });
     return m ? m.y : groundAt(p.x, p.z);
   }
 
   /**
+   * What fell from `from` lands in the open top m under it: `amount` of src (by volume), which isn't depleted, as a
+   * stream (see stream), or, `drop`, as a drop (see fill). A sheet of blotting paper's face is no vessel's mouth: the
+   * sheet takes up what it has room for (see Blotter.soak), and the rest falls on from where it struck, into the next
+   * open top below, if there is one. Under a sheet lying on a counter there's none, so the rest is lost, as off the
+   * bare counter; under one held in the hand there may be, so a sheet waved through a stream is wetted, and the
+   * stream runs on into whatever it was filling.
+   */
+  private land(m: Mouth | null, from: Vec3, src: Fluid, amount = volume(src), drop = false): void {
+    while (m && m.v instanceof Blotter) {
+      // (it's heard striking the sheet, however much of it the sheet takes up)
+      if (!drop) this.inflow.set(m.v, (this.inflow.get(m.v) ?? 0) + amount);
+      if (!m.v.soaked) {
+        // a packet of its own, since src isn't to be depleted, for the sheet to take its share out of
+        const rest = new Vessel(Infinity);
+        rest.addFrom(src, amount, true);
+        m.v.soak(rest);
+        if (rest.N <= 0) return;
+        src = rest;
+        amount = volume(rest);
+      }
+      m = mouthBelow(this.open, { x: from.x, y: m.y, z: from.z });
+    }
+    if (!m) return;
+    if (drop) this.fill(m.v, src, amount);
+    else this.stream(m.v, src, amount);
+  }
+
+  /**
    * Pour `amount` of src (by volume) into v, without depleting src, however full v is. Whatever no longer
-   * fits overflows (see overflow). (A sheet of blotting paper takes up only what it has room for, and the rest is
-   * lost: see Blotter.)
+   * fits overflows (see overflow). What's falling gets here through land, which knows a sheet of blotting paper's
+   * face from a vessel's mouth.
    */
   private fill(v: Vessel, src: Fluid, amount = volume(src)): void {
     v.addFrom(src, amount, true);
@@ -2261,8 +2293,7 @@ export class GameEngine {
     let spill = this.spills.get(v);
     if (!spill) this.spills.set(v, (spill = { at: rim, v: new Vessel(Infinity) }));
     spill.v.addFrom(out, volume(out), true);
-    const below = mouthBelow(this.open, rim);
-    if (below) this.stream(below.v, out);
+    this.land(mouthBelow(this.open, rim), rim, out);
   }
 
   /* ---------------- main loop ---------------- */
@@ -2462,9 +2493,8 @@ export class GameEngine {
       // in a drop, which falls on its own time
       const pour = (drop: Vessel, out: Vessel | null, sp: Vec3, target: Mouth | null, loose: boolean): boolean => {
         const down = drip(drop, out, step);
-        if (down && down === out) {
-          if (target) this.stream(target.v, out);
-        } else if (down && !loose) this.falling.push({ v: down, x: sp.x, y: sp.y, z: sp.z, vy: 0 });
+        if (down && down === out) this.land(target, sp, out);
+        else if (down && !loose) this.falling.push({ v: down, x: sp.x, y: sp.y, z: sp.z, vy: 0 });
         return !!down && down === out;
       };
       // what leaves each outlet over the whole frame, for drawing: a single substep's can be nothing, as when a
@@ -2481,9 +2511,9 @@ export class GameEngine {
         if (D && this.pour) {
           const out = new Vessel(Infinity);
           transfer(D, out, POUR_RATE * step);
-          if (this.pour.into) this.stream(this.pour.into.v, out);
+          this.land(this.pour.into, this.pour.from, out);
         }
-        for (const { fa, m } of this.faucetFlows) this.stream(m.v, fa.output, FILL_RATE * step);
+        for (const { fa, from, m } of this.faucetFlows) this.land(m, from, fa.output, FILL_RATE * step);
         this.tools.forEach((t, j) => {
           if (t === stillTool) return;
           t.step(step).forEach((out, k) => {
@@ -2495,16 +2525,20 @@ export class GameEngine {
             tally(toolTotals[j][k], null, pour(t.drops[k], out, spouts[j][k], targets[j][k], this.loose(t, k)));
           });
         });
-        // falling drops land in the first open top they pass, or go down the sink
+        // falling drops land in the first open top they pass, or go down the sink; what's left of one that struck a
+        // sheet of blotting paper, which took up what it had room for, falls on
         this.falling = this.falling.filter((d) => {
           const from = d.y;
           d.vy += GRAVITY * step;
           d.y -= d.vy * step;
           const m = mouthBelow(mouths, { x: d.x, y: from, z: d.z });
-          const lands = !!m && m.y >= d.y;
+          let lands = !!m && m.y >= d.y;
           if (lands) {
-            this.fill(m!.v, d.v);
             this.landed.push({ x: d.x, y: m!.y, z: d.z });
+            if (m!.v instanceof Blotter) {
+              m!.v.soak(d.v);
+              lands = d.v.N <= 0;
+            } else this.fill(m!.v, d.v);
           }
           return !lands && d.y > groundAt(d.x, d.z);
         });
@@ -2881,10 +2915,10 @@ export class GameEngine {
       });
     for (const { at, v } of this.spills.values())
       if (v.N > TRACE) streams.push({ from: at, toY: this.landsAt(at, mouths), fluid: v, flow: volume(v) / (MAX_FLOW * this.spillTime) });
-    for (const { fa, from, m } of this.faucetFlows) streams.push({ from, toY: m.y, fluid: fa.output, flow: FILL_RATE / CAP });
+    for (const { fa, from } of this.faucetFlows) streams.push({ from, toY: this.landsAt(from, mouths), fluid: fa.output, flow: FILL_RATE / CAP });
     const h = this.held;
     if (this.pour && h?.kind === 'flask' && h.f.N > TRACE)
-      streams.push({ from: this.pour.from, toY: this.pour.into?.y ?? groundAt(this.pour.from.x, this.pour.from.z), fluid: h.f, flow: POUR_RATE / CAP });
+      streams.push({ from: this.pour.from, toY: this.landsAt(this.pour.from, mouths), fluid: h.f, flow: POUR_RATE / CAP });
     const drops: Frame['drops'][number][] = [];
     for (const t of this.tools) t.drops.forEach((v, k) => drops.push({ at: this.outletAt(t, k), v, hanging: true }));
     for (const d of this.falling) drops.push({ at: d, v: d.v, hanging: false });
