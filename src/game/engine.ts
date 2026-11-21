@@ -121,8 +121,9 @@ export interface Hud {
 
 /**
  * Something the player can do just now: the keys or buttons that do it, pressed together, and what it does, in a few
- * words. Keys are named as on the keyboard; 'LMB' and 'RMB' are the mouse's left and right buttons, 'Wheel' its
- * wheel, and 'Drag' moving it with the left button down. `off` if it can't be done here, though it could elsewhere.
+ * words. Keys are named as on the keyboard; 'LMB' and 'RMB' are the mouse's left and right buttons, 'Scroll' its
+ * wheel (or a trackpad's scrolling), and 'Drag' moving it with the left button down. `off` if it can't be done here,
+ * though it could elsewhere.
  */
 export interface Action {
   keys: string[];
@@ -2950,7 +2951,7 @@ export class GameEngine {
     if (!h && this.history.canUndo) add([MOD, 'Z'], 'undo');
     if (!h && this.history.canRedo) add([MOD, 'Shift', 'Z'], 'redo');
     add(['WASD'], 'move the view');
-    add(['Wheel'], 'move nearer or further');
+    add(['Scroll'], 'move nearer or further');
     add(['/'], 'hide this list');
     return out;
   }
