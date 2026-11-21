@@ -34,8 +34,10 @@ function fluid(fill: [number, number][]): Vessel {
   return v;
 }
 
-/** What a sheet reads for a fluid: how far each bond's line has darkened, by the bond's name. */
-const read = (fill: [number, number][]) => Object.fromEntries(bondReading(fluid(fill)).map((x, b) => [BOND_KEYS[b], x]));
+/** How much the sheet of these readings soaks up: the fluids below are measured against it. */
+const FULL = 1e6;
+/** What a sheet that soaks up FULL reads for a fluid: how far each bond's line has darkened, by the bond's name. */
+const read = (fill: [number, number][]) => Object.fromEntries(bondReading(fluid(fill), FULL).map((x, b) => [BOND_KEYS[b], x]));
 /** A reading with these lines darkened this far, and the rest not at all. */
 const lines = (dark: Record<string, number>) => Object.fromEntries(BOND_KEYS.map((k) => [k, dark[k] ?? 0]));
 
@@ -46,6 +48,8 @@ describe("bond paper's reading", () => {
   it('has a line for each of the six bonds', () => {
     expect(bondReading(fluid([[RG, 1e6]]))).toHaveLength(6);
     expect(BOND_KEYS).toHaveLength(6);
+    // (a sheet soaks up TEST_PAPER.cap, unless told otherwise)
+    expect(bondReading(fluid([[RG, TEST_PAPER.cap / 4]]))[bond('RG')]).toBeCloseTo(0.25, 9);
   });
 
   it('darkens nothing for single atoms, whatever their color', () => {
@@ -53,19 +57,19 @@ describe("bond paper's reading", () => {
     expect(read([[R, 0.5e6], [G, 0.5e6]])).toEqual(lines({}));
   });
 
-  it("darkens a pair's one line fully, and only that one", () => {
+  it("darkens a pair's one line fully, soaked in it, and only that one", () => {
     expect(read([[RG, 1e6]])).toEqual(lines({ RG: 1 }));
     expect(read([[RK, 1e6]])).toEqual(lines({ RK: 1 }));
     expect(read([[pairOf('B', 'K'), 1e6]])).toEqual(lines({ BK: 1 }));
   });
 
-  it("darkens all three of a ring's lines fully, and both of a chain's", () => {
+  it("darkens all three of a ring's lines fully, soaked in it, and both of a chain's", () => {
     expect(read([[TARGET, 1e6]])).toEqual(lines({ RG: 1, RB: 1, GB: 1 }));
     expect(read([[RGK, 1e6]])).toEqual(lines({ RG: 1, RK: 1, GK: 1 }));
     expect(read([[R_G_B, 1e6]])).toEqual(lines({ RG: 1, GB: 1 }));
   });
 
-  it('darkens each line by the share of the fluid, by volume, that has its bond: just what bondShares says', () => {
+  it('darkens each line by the share, by volume, of the fluid it is soaked in that has its bond: just what bondShares says', () => {
     // 60% R–G, 30% R–G–B and 10% G: nine tenths has R–G, and three tenths G–B
     const mix: [number, number][] = [[RG, 0.6e6], [R_G_B, 0.3e6], [G, 0.1e6]];
     const r = read(mix);
@@ -73,7 +77,9 @@ describe("bond paper's reading", () => {
     expect(r.GB).toBeCloseTo(0.3, 9);
     for (const k of ['RB', 'RK', 'GK', 'BK']) expect(r[k]).toBe(0);
     const f = fluid(mix);
-    expect(bondReading(f)).toEqual(bondShares(f, volume(f)));
+    expect(bondReading(f, volume(f))).toEqual(bondShares(f, volume(f)));
+    // and against what a sheet soaks up, for one that isn't soaked
+    expect(bondReading(f)).toEqual(bondShares(f, TEST_PAPER.cap));
     // half R, half R–G darkens R–G's half as far
     expect(read([[R, 0.5e6], [RG, 0.5e6]]).RG).toBeCloseTo(0.5, 9);
   });
@@ -85,10 +91,17 @@ describe("bond paper's reading", () => {
     for (const k of ['RG', 'RB', 'GB']) expect(half[k]).toBeCloseTo(0.5, 9);
   });
 
-  it('goes by shares, not by how much there is: a drop reads as a soaking does', () => {
+  it('goes by how much it holds, too: a little of a fluid darkens the lines that fluid does, only less by how little', () => {
     const mix = (v: number): [number, number][] => [[R, 0.25 * v], [RG, 0.5 * v], [S, 0.25 * v]];
-    expect(read(mix(4e3))).toEqual(read(mix(4e9)));
-    expect(read(mix(4e3)).RG).toBeCloseTo(0.5, 9);
+    expect(read(mix(FULL))).toEqual(lines({ RG: 0.5 }));
+    for (const part of [0.5, 0.1, 0.02]) expect(read(mix(part * FULL)).RG).toBeCloseTo(part * 0.5, 9);
+    // so a drop or two is much fainter than a soaking, and twice as much twice as dark
+    expect(read(mix(0.04 * FULL)).RG).toBeCloseTo(2 * read(mix(0.02 * FULL)).RG, 9);
+    expect(read([[RG, 0.03 * FULL]])).toEqual(lines({ RG: 0.03 }));
+    // it's the amount with each bond, over what the sheet soaks up
+    expect(read([[RG, 0.3 * FULL], [S, 0.7 * FULL]])).toEqual(read([[RG, 0.3 * FULL]]));
+    // never darker than fully dark
+    expect(read(mix(9 * FULL))).toEqual(lines({ RG: 1 }));
   });
 
   it('reads nothing for no fluid, and never more than fully dark', () => {
@@ -255,18 +268,22 @@ describe("bond paper's paper", () => {
     }
   });
 
-  it('reads a single drop at full strength, hardly wet', () => {
+  it('reads a single drop faintly, as hardly wet as it is, and a few drops as many times darker', () => {
     const t = new Tool('bondpaper', 0);
     const drop = new Vessel(Infinity);
     drop.addFrom(source(TARGET), DRIP.atoms / 2);
     t.paper[0].addFrom(drop, volume(drop), true);
     expect(volume(t.paper[0])).toBe(volume(drop));
-    const r = bondReading(t.paper[0]);
-    for (const k of ['RG', 'RB', 'GB']) expect(r[bond(k)]).toBe(1);
-    for (const k of ['RK', 'GK', 'BK']) expect(r[bond(k)]).toBe(0);
     const wet = wetness(volume(t.paper[0]), TEST_PAPER.cap, 1);
+    expect(wet).toBe(volume(drop) / TEST_PAPER.cap);
     expect(wet).toBeGreaterThan(0);
-    expect(wet).toBeLessThan(0.5);
+    expect(wet).toBeLessThan(0.1);
+    // all of the drop has the ring's three bonds, so their lines darken as far as the sheet is wet
+    const r = bondReading(t.paper[0]);
+    for (const k of ['RG', 'RB', 'GB']) expect(r[bond(k)]).toBe(wet);
+    for (const k of ['RK', 'GK', 'BK']) expect(r[bond(k)]).toBe(0);
+    for (let i = 0; i < 4; i++) t.paper[0].addFrom(drop, volume(drop), true);
+    expect(bondReading(t.paper[0])[bond('RG')]).toBeCloseTo(5 * wet, 9);
   });
 });
 

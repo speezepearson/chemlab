@@ -26,8 +26,10 @@ function fluid(fill: [number, number][]): Vessel {
   return v;
 }
 
-/** What a sheet's one triangle reads for a fluid: how strongly R, G, B and K are stained. */
-const read = (fill: [number, number][]) => paperReading(fluid(fill))[0];
+/** How much the sheet of these readings soaks up: the fluids below are measured against it. */
+const FULL = 1e6;
+/** What the one triangle of a sheet that soaks up FULL reads for a fluid: how strongly R, G, B and K are stained. */
+const read = (fill: [number, number][]) => paperReading(fluid(fill), FULL)[0];
 
 /** A sheet lying on a counter with its middle over (x, z), facing `yaw`. */
 const lying = (x: number, z: number, yaw = 0) => new Tool('testpaper', 0, { x, y: LIFT + TEST_PAPER.thick, z, yaw });
@@ -37,17 +39,19 @@ describe("test paper's reading", () => {
     expect(TEST_PAPER.triangles).toHaveLength(1);
     expect([...TEST_PAPER.triangles[0].sizes].sort()).toEqual([1, 2, 3, 4]);
     expect(paperReading(fluid([[R, 1e6]]))).toHaveLength(1);
+    // (a sheet soaks up TEST_PAPER.cap, unless told otherwise)
+    expect(paperReading(fluid([[R, TEST_PAPER.cap / 4]]))[0][0]).toBeCloseTo(0.25, 9);
     expect(read([[R, 1e6]])).toHaveLength(SECTOR_ATOMS.length);
   });
 
-  it('stains a single color fully, and only that one', () => {
+  it('stains a single color fully, soaked in it, and only that one', () => {
     expect(read([[R, 1e6]])).toEqual([1, 0, 0, 0]);
     expect(read([[G, 1e6]])).toEqual([0, 1, 0, 0]);
     expect(read([[B, 1e6]])).toEqual([0, 0, 1, 0]);
     expect(read([[K, 1e6]])).toEqual([0, 0, 0, 1]);
   });
 
-  it("stains each of a pair's colors fully", () => {
+  it("stains each of a pair's colors fully, soaked in it", () => {
     expect(read([[RG, 1e6]])).toEqual([1, 1, 0, 0]);
     expect(read([[pairOf('B', 'K'), 1e6]])).toEqual([0, 0, 1, 1]);
   });
@@ -57,7 +61,7 @@ describe("test paper's reading", () => {
     expect(read([[speciesIndex(['R', 'G', 'B', 'K'], 63), 1e6]])).toEqual([1, 1, 1, 1]);
   });
 
-  it('stains a mix by the share of it that has each color, whatever the size of the molecule it is in', () => {
+  it('stains by the share of a mix it is soaked in that has each color, whatever the size of the molecule it is in', () => {
     // 20% R, 20% G, 30% B and 30% R–G: half of it has an R, half a G, and three tenths a B
     const r = read([[R, 0.2e6], [G, 0.2e6], [B, 0.3e6], [RG, 0.3e6]]);
     [0.5, 0.5, 0.3, 0].forEach((want, c) => expect(r[c]).toBeCloseTo(want, 9));
@@ -74,10 +78,20 @@ describe("test paper's reading", () => {
     expect(read([[RG, 0.1e6], [S, 0.9e6]])[1]).toBeCloseTo(0.1, 9);
   });
 
-  it('goes by shares, not by how much there is: a drop reads as a soaking does', () => {
+  it('goes by how much it holds, too: a little of a fluid stains as that fluid does, only fainter by how little', () => {
     const mix = (v: number): [number, number][] => [[R, 0.25 * v], [RG, 0.5 * v], [S, 0.25 * v]];
-    expect(read(mix(4e3))).toEqual(read(mix(4e9)));
-    expect(read(mix(4e3))[0]).toBeCloseTo(0.75, 9);
+    const soaked = read(mix(FULL));
+    expect(soaked[0]).toBeCloseTo(0.75, 9);
+    expect(soaked[1]).toBeCloseTo(0.5, 9);
+    for (const part of [0.5, 0.1, 0.02]) read(mix(part * FULL)).forEach((x, c) => expect(x).toBeCloseTo(part * soaked[c], 9));
+    // so a drop or two is much fainter than a soaking, and twice as much twice as strong
+    expect(read(mix(0.04 * FULL))[0]).toBeCloseTo(2 * read(mix(0.02 * FULL))[0], 9);
+    expect(read(mix(0.02 * FULL))[0]).toBeLessThan(0.02);
+    // and it's the amount with each color, over what the sheet soaks up
+    expect(read([[R, 0.3 * FULL]])).toEqual([0.3, 0, 0, 0]);
+    expect(read([[R, 0.3 * FULL], [S, 0.7 * FULL]])).toEqual(read([[R, 0.3 * FULL]]));
+    // never more than fully stained
+    expect(read(mix(9 * FULL))).toEqual([1, 1, 0, 0]);
   });
 
   it('reads nothing for no fluid', () => {
@@ -87,12 +101,12 @@ describe("test paper's reading", () => {
   it("is the reading by size and color with the sizes put together, and is one a size with a triangle for each", () => {
     const f = fluid([[R, 0.2e6], [RG, 0.3e6], [TARGET, 0.5e6]]);
     const bySize = composition(f, volume(f));
-    paperReading(f)[0].forEach((x, c) => expect(x).toBeCloseTo(bySize[c] + bySize[4 + c] + bySize[8 + c] + bySize[12 + c], 9));
+    paperReading(f, volume(f))[0].forEach((x, c) => expect(x).toBeCloseTo(bySize[c] + bySize[4 + c] + bySize[8 + c] + bySize[12 + c], 9));
     // four triangles in a row, one per size, are only a longer list
     const one = TEST_PAPER.triangles;
     TEST_PAPER.triangles = [1, 2, 3, 4].map((w) => ({ sizes: [w] }));
     try {
-      const rows = paperReading(f);
+      const rows = paperReading(f, volume(f));
       expect(rows).toHaveLength(4);
       rows.forEach((row, w) => row.forEach((x, c) => expect(x).toBeCloseTo(bySize[4 * w + c], 9)));
       expect(rows[0][0]).toBeCloseTo(0.2, 9);
@@ -193,14 +207,18 @@ describe("test paper's paper", () => {
     return v;
   };
 
-  it('soaks up about what a wicking strip drinks, a hundredth of a flask', () => {
+  it('soaks up three hundredths of a flask, three times what a wicking strip drinks, and a score of drops', () => {
     const t = new Tool('testpaper', 0);
     expect(t.paper).toHaveLength(1);
     expect(t.paper[0]).toBeInstanceOf(Blotter);
     expect(t.paper[0].cap).toBe(TEST_PAPER.cap);
-    expect(TEST_PAPER.cap).toBe(CAP / 100);
-    expect(TEST_PAPER.cap).toBe(STRIP.cap);
+    expect(TEST_PAPER.cap / CAP).toBeCloseTo(0.03, 12);
+    expect(TEST_PAPER.cap / STRIP.cap).toBeCloseTo(3, 12);
+    expect(Number.isInteger(TEST_PAPER.cap)).toBe(true);
     expect(volume(t.paper[0])).toBe(0);
+    // a drop of single atoms is a few hundredths of it, so it takes a good many to soak it
+    expect(DRIP.atoms / TEST_PAPER.cap).toBeGreaterThan(0.02);
+    expect(DRIP.atoms / TEST_PAPER.cap).toBeLessThan(0.1);
   });
 
   it('takes up what lands on it as far as it has room, and no further, however it is poured on', () => {
@@ -233,16 +251,20 @@ describe("test paper's paper", () => {
     expect(paperReading(paper)[0]).toEqual(was);
   });
 
-  it('reads a single drop at full strength, hardly wet', () => {
+  it('reads a single drop faintly, as hardly wet as it is, and a few drops as many times stronger', () => {
     const t = new Tool('testpaper', 0);
     const drop = new Vessel(Infinity);
     drop.addFrom(source(RG), DRIP.atoms / 2);
     t.paper[0].addFrom(drop, volume(drop), true);
     expect(volume(t.paper[0])).toBe(volume(drop));
-    expect(paperReading(t.paper[0])).toEqual([[1, 1, 0, 0]]);
     const wet = wetness(volume(t.paper[0]), TEST_PAPER.cap, 1);
+    expect(wet).toBe(volume(drop) / TEST_PAPER.cap);
     expect(wet).toBeGreaterThan(0);
-    expect(wet).toBeLessThan(0.5);
+    expect(wet).toBeLessThan(0.1);
+    // all of the drop has an R and a G, so those are stained as far as the sheet is wet
+    expect(paperReading(t.paper[0])).toEqual([[wet, wet, 0, 0]]);
+    for (let i = 0; i < 4; i++) t.paper[0].addFrom(drop, volume(drop), true);
+    expect(paperReading(t.paper[0])[0][0]).toBeCloseTo(5 * wet, 9);
   });
 
   it('keeps none of the heat of what it takes up', () => {

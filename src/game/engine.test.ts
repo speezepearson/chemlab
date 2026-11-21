@@ -225,13 +225,14 @@ describe('test paper', () => {
     const sheet = lay(l);
     const pip = pipetteOver(l);
     const paper = paperOf(sheet);
-    pip.tanks[0].setMolecules(R, 5 * TEST_PAPER.cap);
+    // (a pipette holds a little over three times what a sheet soaks up)
+    pip.tanks[0].setMolecules(R, 3 * TEST_PAPER.cap);
     pip.valves[0] = 1;
     run(l, 0.1);
-    // what's landed so far already shows at full strength, though the sheet's hardly wet
+    // what's landed so far is to show already, as faintly as the sheet is wet: all of it is R
     expect(volume(paper)).toBeGreaterThan(0);
     expect(volume(paper)).toBeLessThan(0.5 * TEST_PAPER.cap);
-    expect(paperReading(paper)).toEqual([[1, 0, 0, 0]]);
+    expect(paperReading(paper)).toEqual([[volume(paper) / TEST_PAPER.cap, 0, 0, 0]]);
     run(l, 30);
     // far more left the pipette than the sheet holds
     expect(volume(pip.tanks[0])).toBeLessThan(0.1 * TEST_PAPER.cap);
@@ -240,14 +241,16 @@ describe('test paper', () => {
     const was = [...paper.n];
     // more, of something else, changes nothing
     pip.tanks[0].setMolecules(R, 0);
-    pip.tanks[0].setMolecules(G, 5 * TEST_PAPER.cap);
+    pip.tanks[0].setMolecules(G, 3 * TEST_PAPER.cap);
     run(l, 30);
     expect(volume(pip.tanks[0])).toBeLessThan(0.1 * TEST_PAPER.cap);
     expect([...paper.n]).toEqual(was);
-    expect(paperReading(paper)).toEqual([[1, 0, 0, 0]]);
+    // soaked in R, it's stained R through and through, and nothing else
+    expect(paperReading(paper)[0][0]).toBeCloseTo(1, 4);
+    expect(paperReading(paper)[0].slice(1)).toEqual([0, 0, 0]);
   });
 
-  it('shows a single drop at full strength', () => {
+  it('shows a single drop faintly, and a second as much again', () => {
     const l = lab();
     const sheet = lay(l);
     const pip = pipetteOver(l);
@@ -257,8 +260,16 @@ describe('test paper', () => {
     // until the first drop has fallen and landed
     for (let i = 0; i < 2000 && paper.N === 0; i++) l.in.simulate(0.02);
     expect(paper.N).toBeGreaterThan(0);
-    expect(volume(paper)).toBeLessThan(0.5 * TEST_PAPER.cap);
-    expect(paperReading(paper)).toEqual([[1, 1, 0, 0]]);
+    const one = volume(paper) / TEST_PAPER.cap;
+    expect(one).toBeLessThan(0.1);
+    expect(paperReading(paper)).toEqual([[one, one, 0, 0]]);
+    // and the next
+    for (let i = 0; i < 4000 && volume(paper) === one * TEST_PAPER.cap; i++) l.in.simulate(0.02);
+    const two = volume(paper) / TEST_PAPER.cap;
+    // (drops aren't all one size)
+    expect(two / one).toBeGreaterThan(1.3);
+    expect(two / one).toBeLessThan(3.5);
+    expect(paperReading(paper)).toEqual([[two, two, 0, 0]]);
   });
 
   it('takes a pour from a flask held over it', () => {
@@ -349,7 +360,8 @@ describe('test paper', () => {
     expect(paperOf(a).N).toBe(0);
     expect([...paperOf(b).n]).toEqual([...paperOf(stained).n]);
     expect(paperReading(paperOf(b))).toEqual(paperReading(paperOf(stained)));
-    expect(paperReading(paperOf(b))[0][0]).toBeCloseTo(0.5, 2);
+    // six tenths soaked in a mix half of which has an R
+    expect(paperReading(paperOf(b))[0][0]).toBeCloseTo(0.3, 2);
     expect(b.note).toBe('batch 3');
     // a save that says nothing of what it holds (or says too much) loads it blank, or with what fits
     const odd = JSON.parse(JSON.stringify(s)) as SaveState;
@@ -406,26 +418,26 @@ describe('bond paper', () => {
     const paper = paperOf(sheet);
     expect(bondReading(paper)).toEqual([0, 0, 0, 0, 0, 0]);
     // three parts R–G to one of R
-    pip.tanks[0].setMolecules(RG, 3.75 * TEST_PAPER.cap);
-    pip.tanks[0].setMolecules(R, 1.25 * TEST_PAPER.cap);
+    pip.tanks[0].setMolecules(RG, 2.25 * TEST_PAPER.cap);
+    pip.tanks[0].setMolecules(R, 0.75 * TEST_PAPER.cap);
     pip.valves[0] = 1;
     run(l, 0.1);
-    // what's landed so far already shows at full strength, though the sheet's hardly wet
+    // what's landed so far is to show already, as faintly as the sheet is wet: three quarters of it has the bond
     expect(volume(paper)).toBeGreaterThan(0);
     expect(volume(paper)).toBeLessThan(0.5 * TEST_PAPER.cap);
-    expect(bondReading(paper)[bond('RG')]).toBeCloseTo(0.75, 2);
+    expect(bondReading(paper)[bond('RG')] / (volume(paper) / TEST_PAPER.cap)).toBeCloseTo(0.75, 2);
     run(l, 30);
     expect(volume(pip.tanks[0])).toBeLessThan(0.1 * TEST_PAPER.cap);
     expect(volume(paper) / TEST_PAPER.cap).toBeCloseTo(1, 4);
     expect(volume(paper)).toBeLessThanOrEqual(TEST_PAPER.cap);
-    // each line is as dark as the share of what the sheet holds that has its bond
+    // soaked, each line is as dark as the share of what the sheet holds that has its bond
     const was = bondReading(paper);
-    expect(was).toEqual(bondShares(paper, volume(paper)));
+    expect(was).toEqual(bondShares(paper, TEST_PAPER.cap));
     expect(was[bond('RG')]).toBeCloseTo(0.75, 2);
     expect(was.filter((x) => x > 0)).toHaveLength(1);
     // more, of something else, changes nothing
     const held = [...paper.n];
-    pip.tanks[0].setMolecules(RK, 5 * TEST_PAPER.cap);
+    pip.tanks[0].setMolecules(RK, 3 * TEST_PAPER.cap);
     run(l, 30);
     expect(volume(pip.tanks[0])).toBeLessThan(0.1 * TEST_PAPER.cap);
     expect([...paper.n]).toEqual(held);
@@ -476,7 +488,8 @@ describe('bond paper', () => {
     expect([...paperOf(b).n]).toEqual([...paperOf(bonds).n]);
     expect([...paperOf(t).n]).toEqual([...paperOf(test).n]);
     expect(bondReading(paperOf(b))).toEqual(bondReading(paperOf(bonds)));
-    expect(bondReading(paperOf(b))[bond('RG')]).toBeCloseTo(0.3, 2);
+    // six tenths soaked in a mix three tenths of which has the bond
+    expect(bondReading(paperOf(b))[bond('RG')]).toBeCloseTo(0.18, 2);
     expect(b.note).toBe('batch 4');
     // a save that says too much of what it holds loads it with what fits
     const odd = JSON.parse(JSON.stringify(s)) as SaveState;
@@ -527,10 +540,10 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
     const sheet = wave(l, 150);
     const paper = paperOf(sheet);
     // three parts R–G to one of R, which do nothing to each other
-    pip.tanks[0].setMolecules(RG, 3.75 * cap);
-    pip.tanks[0].setMolecules(R, 1.25 * cap);
+    pip.tanks[0].setMolecules(RG, 2.25 * cap);
+    pip.tanks[0].setMolecules(R, 0.75 * cap);
     const before = [R, RG].map((s) => count(l, s, pip, sheet, f));
-    expect(before).toEqual([1.25 * cap, 3.75 * cap]);
+    expect(before).toEqual([0.75 * cap, 2.25 * cap]);
     pip.valves[0] = 1;
     run(l, 0.1);
     // at once it's wet with what's running, and showing it; nothing has got past it yet
@@ -538,13 +551,13 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
     expect(volume(paper)).toBeLessThan(0.5 * cap);
     expect(paper.n[RG] / volume(paper)).toBeCloseTo(0.75, 2);
     expect(f.N).toBe(0);
-    run(l, 4);
+    run(l, 8);
     // soaked, with the first of the stream, and not a molecule over; and the stream has run on into the flask
     expect(volume(paper) / cap).toBeCloseTo(1, 4);
     expect(volume(paper)).toBeLessThanOrEqual(cap);
     expect(paper.n[RG] / volume(paper)).toBeCloseTo(0.75, 2);
     expect(paper.Q).toBe(0);
-    expect(volume(f)).toBeGreaterThan(cap);
+    expect(volume(f)).toBeGreaterThan(0.5 * cap);
     expect(f.n[RG] / volume(f)).toBeCloseTo(0.75, 2);
     // every molecule that left the pipette is on the sheet or in the flask (but for less than a trace of a packet,
     // which is let go wherever fluid is moved)
@@ -568,20 +581,20 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
       const l = lab();
       const { pip, f } = line(l);
       const sheet = wave(l, up, dx);
-      pip.tanks[0].setMolecules(R, 5 * cap);
+      pip.tanks[0].setMolecules(R, 3 * cap);
       pip.valves[0] = 1;
-      run(l, 3);
+      run(l, 5);
       expect(paperOf(sheet).N).toBe(0);
       expect(volume(f)).toBeGreaterThan(cap);
-      expect(Math.abs(count(l, R, pip, sheet, f) - 5 * cap)).toBeLessThan(TRACE);
+      expect(Math.abs(count(l, R, pip, sheet, f) - 3 * cap)).toBeLessThan(TRACE);
     }
     // and its edge is enough to catch it
     const l = lab();
     const { pip } = line(l);
     const sheet = wave(l, 150, TEST_PAPER.w / 2 - 2);
-    pip.tanks[0].setMolecules(R, 5 * cap);
+    pip.tanks[0].setMolecules(R, 3 * cap);
     pip.valves[0] = 1;
-    run(l, 3);
+    run(l, 6);
     expect(volume(paperOf(sheet)) / cap).toBeCloseTo(1, 4);
   });
 
@@ -589,13 +602,13 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
     const l = lab();
     const { pip, f } = line(l);
     const sheet = wave(l, 150);
-    pip.tanks[0].setMolecules(R, 5 * cap);
+    pip.tanks[0].setMolecules(R, 3 * cap);
     pip.valves[0] = 1;
     l.e.speed = 0;
     run(l, 5);
     expect(paperOf(sheet).N).toBe(0);
     expect(f.N).toBe(0);
-    expect(volume(pip.tanks[0])).toBe(5 * cap);
+    expect(volume(pip.tanks[0])).toBe(3 * cap);
     l.e.speed = 1;
     run(l, 1);
     expect(paperOf(sheet).N).toBeGreaterThan(0);
@@ -644,7 +657,7 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
     const atom = faucet.start.start;
     expect(paper.n[atom]).toBe(volume(paper));
     expect(f.n[atom]).toBe(volume(f));
-    expect(volume(f)).toBeGreaterThan(5 * cap);
+    expect(volume(f)).toBeGreaterThan(2 * cap);
   });
 
   it('is laid down afterwards as it is, wet, and lets nothing by that lands on it there', () => {
@@ -652,9 +665,9 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
     const { pip, f } = line(l);
     const sheet = wave(l, 150);
     const paper = paperOf(sheet);
-    pip.tanks[0].setMolecules(RG, 5 * cap);
+    pip.tanks[0].setMolecules(RG, 3 * cap);
     pip.valves[0] = 1;
-    run(l, 4);
+    run(l, 5);
     pip.valves[0] = 0;
     expect(volume(paper) / cap).toBeCloseTo(1, 4);
     const held = [...paper.n];
@@ -664,9 +677,10 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
     expect(where(sheet.pose)[1]).toBe(LIFT + TEST_PAPER.thick);
     expect(Math.hypot(sheet.pose.x - f.pose.x, sheet.pose.z - f.pose.z)).toBe(CELL);
     expect([...paper.n]).toEqual(held);
-    expect(kind === 'testpaper' ? paperReading(paper)[0].slice(0, 2) : bondReading(paper).filter((x) => x > 0)).toEqual(
-      kind === 'testpaper' ? [1, 1] : [1],
-    );
+    // soaked in R–G, it reads R and G, or their bond, as strongly as it ever will
+    const shown = kind === 'testpaper' ? paperReading(paper)[0].slice(0, 2) : bondReading(paper).filter((x) => x > 0);
+    expect(shown).toHaveLength(kind === 'testpaper' ? 2 : 1);
+    for (const x of shown) expect(x).toBeCloseTo(1, 4);
   });
 });
 
@@ -708,7 +722,7 @@ describe.each(['testpaper', 'bondpaper'] as const)('what a sheet of %s shows, in
     const l = lab();
     const sheet = lay(l, SPOT.x, SPOT.z, kind);
     const pip = pipetteOver(l);
-    pip.tanks[0].setMolecules(pairOf('R', 'G'), 5 * cap);
+    pip.tanks[0].setMolecules(pairOf('R', 'G'), 3 * cap);
     pip.valves[0] = 1;
     run(l, 0.25);
     // it's already holding some, and showing less than that calls for

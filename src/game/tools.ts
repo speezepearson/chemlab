@@ -1012,11 +1012,13 @@ export function sectorInset(atom: ColorAtom, margin: number): (readonly [number,
  * A sheet of test paper (see SHAPES.testpaper): the wicking strip's blotting paper as a sheet that lies flat on a
  * counter, with a triangle printed on it in black, cut through the middles of its sides into four smaller ones, one
  * per color (see atomSector). It soaks up what lands on it, as far as it has room (see Blotter), and each small
- * triangle is stained its atom's color, as strongly as paperReading says, for good:
+ * triangle is stained its atom's color, as strongly as paperReading says, by how much of what it could hold has
+ * that color in it, for good:
  * - w and d: how far across and front to back the sheet is, and thick, how thick, in world units. It lies within
  *   one grid cell, clear of the base of a stand holding something over its middle (see STAND_BASE in bodies.ts),
  *   which starts 34 from there;
- * - cap: how much it soaks up, by volume: as much as a wicking strip's paper holds, a hundredth of a flask;
+ * - cap: how much it soaks up, by volume, before it's soaked and shows as strongly as it ever will: three
+ *   hundredths of a flask, three times what a wicking strip's paper holds, and about twenty drops (see DRIP);
  * - triangles: the triangles printed on it, in a row from its left, each for molecules of the sizes (in atoms)
  *   listed. There's one, for molecules of every size; one for each size would be four entries here;
  * - edge: how far in from the sheet's edges, and from each other, the triangles keep; line: how thick their lines
@@ -1025,7 +1027,7 @@ export function sectorInset(atom: ColorAtom, margin: number): (readonly [number,
 export const TEST_PAPER: {
   w: number; d: number; thick: number; cap: number; triangles: readonly { sizes: readonly number[] }[]; edge: number; line: number; margin: number;
 } = {
-  w: 64, d: 64, thick: 1, cap: CAP / 100,
+  w: 64, d: 64, thick: 1, cap: (3 * CAP) / 100,
   triangles: [{ sizes: [1, 2, 3, 4] }],
   edge: 4, line: 1, margin: 2,
 };
@@ -1050,12 +1052,12 @@ export function paperTriangles(): { x: number; y: number; r: number }[] {
  * same way and soaking up as much (see TEST_PAPER and Blotter), but printed differently: with four dots, one per
  * color, each in its atom's own color, placed as the colors' sectors are in a sheet of test paper's triangle (see
  * ATOM_PLACE): at the corners of a triangle standing on its base, and in its middle. Between each two of them runs a
- * line in an ink that's all but invisible dry, and that darkens, for good, by what the sheet soaks up: by the share
- * of it that has a bond between those two atoms (see bondReading):
+ * line in an ink that's all but invisible dry, and that darkens, for good, by what the sheet soaks up: by how much
+ * of what it could hold has a bond between those two atoms (see bondReading):
  * - edge: how far in from the sheet's edges the dots keep, in world units; dot: a dot's radius;
  * - line: how thick the lines between them are, and gap: how far short of each dot's rim a line stops;
  * - faint: how opaque a line's ink is dry, or wet with nothing that has its bond, and dark: how opaque it is when
- *   everything the sheet holds has it. In between, it goes evenly with the share.
+ *   the sheet is soaked and everything it holds has it. In between, it goes evenly with how much does.
  */
 export const BOND_PAPER = { edge: 5, dot: 3.5, line: 2.2, gap: 1.6, faint: 0.05, dark: 0.96 };
 
@@ -2361,7 +2363,7 @@ export class Tool {
    */
   private calledFor(): number[] {
     const held = this.paper[0];
-    return [wetness(volume(held), held.cap, 1), ...(this.kind === 'testpaper' ? paperReading(held).flat() : bondReading(held))];
+    return [wetness(volume(held), held.cap, 1), ...(this.kind === 'testpaper' ? paperReading(held, held.cap).flat() : bondReading(held, held.cap))];
   }
 
   /**
@@ -2533,8 +2535,8 @@ export class Tool {
  * in SECTOR_ATOMS order, at index (w − 1)·4 + c, how much of `cap` molecules of size w with a c atom in them make up
  * (by volume, see VOLUME). So against the sample's own volume, R is all in 1R, and R–G all in both 2R and 2G; and
  * half R, half G is half in 1R and half in 1G. There's none for the solvent, which counts nowhere, but takes up room
- * all the same, so half R, half S is half in 1R too. A sheet of test paper reads this, its sizes put together (see
- * paperReading).
+ * all the same, so half R, half S is half in 1R too. A sheet of test paper reads this, against what it soaks up, its
+ * sizes put together (see paperReading).
  */
 export function composition(f: Fluid, cap: number): number[] {
   const n = SECTOR_ATOMS.length;
@@ -2551,33 +2553,32 @@ export function composition(f: Fluid, cap: number): number[] {
 }
 
 /**
- * What a sheet of test paper shows for the fluid it holds: for each of its triangles (see TEST_PAPER.triangles), for
- * each color in SECTOR_ATOMS order, how strongly that small triangle is stained, from 0 to 1: the share, by volume
- * (see VOLUME), of the fluid that molecules of that triangle's sizes with an atom of that color in them make up (see
- * composition). So it goes by shares, not by how much there is: a drop reads as a soaking does. With one triangle for
- * every size, R stains R fully, R–G both R and G, and △RGB all three; half R, half G stains each half as strongly.
- * The solvent stains nothing but takes up room, so half R, half S stains R at half. Nothing, for no fluid.
+ * What a sheet of test paper shows for the fluid it holds, when it soaks up `cap`: for each of its triangles (see
+ * TEST_PAPER.triangles), for each color in SECTOR_ATOMS order, how strongly that small triangle is stained, from 0 to
+ * 1: how much of `cap`, by volume (see VOLUME), molecules of that triangle's sizes with an atom of that color in them
+ * make up (see composition). So it goes by how much there is of each: a soaked sheet reads the shares of what it
+ * holds, and one that's had a drop or two reads those shares that much fainter, by how full it is. With one triangle
+ * for every size, a sheet soaked in R stains R fully, in R–G both R and G, and in △RGB all three; in half R, half G,
+ * each half as strongly. The solvent stains nothing but takes up room, so soaked in half R, half S it stains R at
+ * half; and so does a sheet half soaked in R. Nothing, for no fluid.
  */
-export function paperReading(f: Fluid): number[][] {
+export function paperReading(f: Fluid, cap = TEST_PAPER.cap): number[][] {
   const n = SECTOR_ATOMS.length;
-  const v = volume(f);
-  const bySize = v > 0 ? composition(f, v) : null;
-  return TEST_PAPER.triangles.map(({ sizes }) =>
-    SECTOR_ATOMS.map((_, c) => (bySize ? Math.min(1, sizes.reduce((t, w) => t + bySize[(w - 1) * n + c], 0)) : 0)),
-  );
+  const bySize = composition(f, cap);
+  return TEST_PAPER.triangles.map(({ sizes }) => SECTOR_ATOMS.map((_, c) => Math.min(1, sizes.reduce((t, w) => t + bySize[(w - 1) * n + c], 0))));
 }
 
 /**
- * What a sheet of bond paper shows for the fluid it holds: for each bond (in BOND_KEYS order, its line's ends as
- * BOND_ENDS says), how far its line has darkened, from 0 (as faint as it's printed) to 1: the share, by volume (see
- * VOLUME), of the fluid that molecules with that bond in them make up (see bondShares). So it goes by shares, not by
- * how much there is: a drop reads as a soaking does. R–G darkens its one line fully, and △RGB all three of its; half
- * R, half R–G darkens R–G's half as far. Single atoms, the solvent's among them, darken nothing, but take up room.
- * Nothing, for no fluid.
+ * What a sheet of bond paper shows for the fluid it holds, when it soaks up `cap`: for each bond (in BOND_KEYS order,
+ * its line's ends as BOND_ENDS says), how far its line has darkened, from 0 (as faint as it's printed) to 1: how much
+ * of `cap`, by volume (see VOLUME), molecules with that bond in them make up (see bondShares). So it goes by how much
+ * there is: a soaked sheet reads the shares of what it holds, and one that's had a drop or two reads them that much
+ * fainter, by how full it is. Soaked in R–G, its one line is fully dark, and in △RGB all three of its; in half R,
+ * half R–G, R–G's is half as dark, as it is on a sheet half soaked in R–G. Single atoms, the solvent's among them,
+ * darken nothing, but take up room. Nothing, for no fluid.
  */
-export function bondReading(f: Fluid): number[] {
-  const v = volume(f);
-  return v > 0 ? bondShares(f, v).map((x) => Math.min(1, x)) : BOND_KEYS.map(() => 0);
+export function bondReading(f: Fluid, cap = TEST_PAPER.cap): number[] {
+  return bondShares(f, cap).map((x) => Math.min(1, x));
 }
 
 /**
