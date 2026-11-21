@@ -87,9 +87,10 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
   details{position:static}
   details > div{left:16px;right:16px;top:auto;margin-top:6px}
 }
-/* an equipment wheel, round the middle of the view while its key's held; smaller, in a view too small for it */
+/* an equipment wheel, round where the engine puts its middle (left and top, set inline) while its key's held;
+   smaller, in a view too small for it */
 .wheel{
-  position:absolute;left:50%;top:50%;width:468px;height:468px;max-width:calc(100% - 16px);max-height:calc(100% - 16px);
+  position:absolute;width:468px;height:468px;max-width:calc(100% - 16px);max-height:calc(100% - 16px);
   transform:translate(-50%,-50%);pointer-events:none;z-index:3;
 }
 .wheel .sector{fill:rgba(20,26,24,.76);stroke:rgba(255,255,255,.22);stroke-width:1.2}
@@ -97,23 +98,6 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .wheel .icon canvas{display:block;width:100%;height:100%}
 .wheel .none .icon{opacity:.25}
 .wheel .pointer{fill:#fff;stroke:rgba(0,0,0,.6);stroke-width:1.2}
-.crosshair{
-  position:absolute;left:50%;top:50%;width:14px;height:14px;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
-  background:
-    linear-gradient(#fff,#fff) center/2px 14px no-repeat,
-    linear-gradient(#fff,#fff) center/14px 2px no-repeat;
-  opacity:.75;mix-blend-mode:difference;
-}
-.crosshair.dim{opacity:.25}
-/* the mouse hints: at the crosshair's own height, the left button's due left of it and the right button's due right */
-.hints{position:absolute;left:50%;top:50%;pointer-events:none;z-index:2}
-.hints span{position:absolute;top:0;transform:translateY(-50%);display:flex}
-.hints .left{right:16px}
-.hints .right{left:16px}
-.hints .mouse rect{fill:rgba(238,240,235,.85);stroke:#1b2320;stroke-width:1.2}
-.hints .mouse path{fill:none;stroke:#1b2320;stroke-width:1.2}
-.hints .mouse path.lit{fill:#2f6a56;stroke:none}
-.hints .mouse{width:24px;height:34px;opacity:.85}
 .doable .mouse{width:12px;height:17px;opacity:.85}
 .doable{
   position:absolute;left:12px;bottom:12px;z-index:2;pointer-events:none;display:flex;flex-direction:column;gap:3px;
@@ -131,38 +115,37 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .doable .mouse rect{fill:rgba(238,240,235,.85);stroke:#1b2320;stroke-width:1.2}
 .doable .mouse path{fill:none;stroke:#1b2320;stroke-width:1.2}
 .doable .mouse path.lit{fill:#2f6a56;stroke:none}
-.aim{
-  position:absolute;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;pointer-events:none;z-index:2;
-  border:2px solid #fff;mix-blend-mode:difference;
-}
+/* dragging: the mouse, and an arrow pointing both ways beside it */
+.doable .drag{display:flex;align-items:center;gap:1px}
+.doable .arrows{width:10px;height:17px;opacity:.85}
+.doable .arrows path{fill:none;stroke:currentColor;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round}
 .note{
-  position:absolute;left:50%;top:calc(50% + 40px);transform:translateX(-50%);pointer-events:none;z-index:2;
+  position:absolute;left:50%;top:14%;transform:translateX(-50%);pointer-events:none;z-index:2;
   color:#f3d9d4;background:rgba(40,14,10,.6);padding:3px 10px;border-radius:6px;font-size:13px;
 }
 .note.tip{top:22%;color:#e9f1ec;background:rgba(14,30,24,.72);padding:6px 14px;font-size:14px}
+/* the walk mode's crosshair, in the middle of the view while the mouse is captured */
+.crosshair{
+  position:absolute;left:50%;top:50%;width:14px;height:14px;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
+  background:
+    linear-gradient(#fff,#fff) center/2px 14px no-repeat,
+    linear-gradient(#fff,#fff) center/14px 2px no-repeat;
+  opacity:.75;mix-blend-mode:difference;
+}
+/* and while it isn't, what a click does */
 .start-hint{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
   color:#eef0eb;background:rgba(8,12,11,.55);padding:6px 14px;border-radius:8px;font-size:15px;font-weight:600;
 }
-.stick{
-  position:absolute;bottom:24px;width:112px;height:112px;border-radius:50%;z-index:3;touch-action:none;
-  background:rgba(20,26,24,.28);border:2px solid rgba(255,255,255,.35);
-  display:flex;align-items:center;justify-content:center;user-select:none;-webkit-user-select:none;
-}
-.stick.move{left:20px}
-.stick.look{right:20px}
-.stick i{width:44px;height:44px;border-radius:50%;background:rgba(238,240,235,.55);pointer-events:none}
+/* a touch screen's buttons, in a column at the bottom right */
 .touch-buttons{
-  position:absolute;bottom:148px;display:flex;flex-direction:column;align-items:center;gap:10px;z-index:3;
+  position:absolute;right:20px;bottom:24px;display:flex;flex-direction:column;align-items:center;gap:10px;z-index:3;
 }
-.touch-buttons.left{left:48px}
-.touch-buttons.right{right:48px}
 button.touch{
   width:58px;height:58px;border-radius:50%;padding:0;touch-action:none;user-select:none;-webkit-user-select:none;
   background:rgba(238,240,235,.6);border:2px solid rgba(255,255,255,.5);color:#1b2320;font-size:12px;font-weight:600;
 }
 button.touch.small{width:46px;height:46px;font-size:10px}
-button.touch.pad{width:78px;height:58px;border-radius:14px}
 button.touch.dim{opacity:.45}
 canvas{display:block;width:100%;height:100%;touch-action:none}
 #info{

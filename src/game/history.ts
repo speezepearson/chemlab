@@ -5,7 +5,7 @@ import type { Pose, Vec3 } from './space';
 import type { Hose, Tool } from './tools';
 
 /**
- * Undo and redo, of the lab's arrangement only: what's in it, where everything is and which way it faces, tools'
+ * Undo and redo, of the lab's arrangement only: what's in it, where everything is, tools'
  * valves, hoses, scales' tares, the player's notes and the room's switches. Never what's in the vessels:
  * the lab reacts and flows on between the player's actions, so an undo puts things back where they were, holding
  * whatever they hold now. Things are kept by reference, so one taken away and brought back by an undo or a redo is
@@ -28,7 +28,7 @@ export interface Arrangement {
   flasks: { f: Flask; pose: Pose; label: string }[];
   tools: { t: Tool; pose: Pose; valves: number[]; note: string; labels: string[] }[];
   scales: { sc: Scale; pose: Pose; load: { f: Flask; dx: number }[]; tare: number; note: string }[];
-  hoses: { h: Hose; outlet: Vec3; turn: number; reach: number }[];
+  hoses: { h: Hose; outlet: Vec3 }[];
   faucets: string[];
   stock: Stock;
   alarmsOff: boolean;
@@ -46,7 +46,7 @@ export function arrangement(l: Things, sw: Switches): Arrangement {
       t, pose: { ...t.pose }, valves: [...t.valves], note: t.note, labels: t.tanks.map((v) => v.label),
     })),
     scales: l.scales.map((sc) => ({ sc, pose: { ...sc.pose }, load: sc.load.map((x) => ({ ...x })), tare: sc.tare, note: sc.note })),
-    hoses: l.hoses.map((h) => ({ h, outlet: { ...h.outlet }, turn: h.turn, reach: h.reach })),
+    hoses: l.hoses.map((h) => ({ h, outlet: { ...h.outlet } })),
     faucets: l.faucets.map((fa) => fa.note),
     stock: copyStock(l.stock),
     alarmsOff: sw.alarmsOff,
@@ -76,7 +76,7 @@ export function arrange(l: Things, a: Arrangement): void {
       return sc;
     }),
   );
-  l.hoses.splice(0, Infinity, ...a.hoses.map(({ h, outlet, turn, reach }) => Object.assign(h, { outlet: { ...outlet }, turn, reach })));
+  l.hoses.splice(0, Infinity, ...a.hoses.map(({ h, outlet }) => Object.assign(h, { outlet: { ...outlet } })));
   l.faucets.forEach((fa, i) => (fa.note = a.faucets[i] ?? ''));
   for (const k of Object.keys(a.stock) as Stocked[]) l.stock[k].splice(0, Infinity, ...a.stock[k]);
 }

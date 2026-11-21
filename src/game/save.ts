@@ -5,11 +5,17 @@ import type { ToolKind } from './tools';
 
 /**
  * A saved lab: everything in it, plus the chemistry parameters. Across and up are stored as they were on the old
- * flat bench, which is now the lab's back wall (see fromFrac), so saves from before the lab was 3D still load.
- * How far out from the wall things are, and which way they face, are optional, since those saves lack them.
+ * flat bench (see fromFrac): everything is on one wall, so that's all there is to where a thing is. A save from when
+ * the lab was a room to walk round also says how far out from the back wall things were and which way they faced;
+ * its lab is laid out afresh along the wall, still hooked up as it was (see flatten.ts).
  */
 export interface SaveState {
   v: 1;
+  /**
+   * Whether the lab is laid out on the wall, as it's been since it stopped being a room to walk round. A save without
+   * this is from before, and is laid out afresh (see flatten.ts).
+   */
+  wall?: boolean;
   /** The preset Reset goes back to. */
   preset: string;
   flasks: SavedFlask[];
@@ -17,8 +23,8 @@ export interface SaveState {
   scales: SavedScale[];
   hoses: SavedHose[];
   /**
-   * Each faucet's note, with where it was on the old flat bench. The lab's faucets are fixed to its right wall, so
-   * where is ignored; it's kept so saves still load on the old bench.
+   * Each faucet's note, with where it was on the old flat bench. The lab's faucets are fixed to the wall, so where is
+   * ignored; it's kept so saves still load on the old bench.
    */
   faucets?: { x: number; y: number; note?: string }[];
   chem?: { bonds: ChemParams['bonds']; swapA: number; heatCap: number };
@@ -37,8 +43,15 @@ export interface SaveState {
    * filled. Left out (as in saves from before the cabinet), it's full but for what's out in the lab.
    */
   cabinet?: Record<string, number[]>;
-  /** Where the player stood and looked (see GameEngine); where they start if left out. */
+  /**
+   * Where the player stands and looks in the walk mode (see ViewMode): across the room and out from the back wall,
+   * and their yaw and pitch (see GameEngine's Player); just outside the airlock if left out, or if it's somewhere they
+   * couldn't stand. A save from when the lab was a room to walk round (one without `wall`) has where they stood in
+   * that, which is ignored.
+   */
   player?: { x: number; z: number; yaw: number; pitch: number };
+  /** Where the view is (see GameEngine): across the wall, up it, and out from it; where it starts if left out. */
+  view?: { x: number; y: number; z: number };
 }
 
 /** Contents by species name (names outlast reorderings of the species list), and whole quanta of heat. */
@@ -48,7 +61,10 @@ export interface SavedVessel {
   label?: string;
 }
 
-/** How far out from the back wall something is, in world units, and which way it faces (see Pose); optional. */
+/**
+ * From when the lab was a room to walk round: how far out from the back wall something was, in world units, and
+ * which way it faced (see Pose). No longer written.
+ */
 export interface SavedDepth {
   z?: number;
   yaw?: number;
@@ -110,8 +126,8 @@ export interface SavedScale extends SavedDepth {
  */
 export interface SavedHose {
   /**
-   * Its nozzle as fractions of the home area (see HOME_W), and how far out from the back wall, which way it faces
-   * (see Hose.turn) and how far behind it its stand is (see Hose.reach), each optional.
+   * Its nozzle as fractions of the home area (see HOME_W); and from when the lab was a room to walk round, how far out
+   * from the back wall it was, which way it faced and how far behind it its stand was, no longer written.
    */
   outlet: { x: number; y: number; z?: number; yaw?: number; reach?: number };
   /** The spout (a tool by its id, and a spout) or faucet it's on; an older save's hose with neither is dropped. */

@@ -7,7 +7,7 @@ import { CAP, DELIVERY, TRACE } from './config';
 import { COOLING } from './cooling';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
-import { CELL, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
+import { CELL, LIFT, ORIGIN, PLANE_Z, WALL_PANEL, type Pose, type Vec3 } from './space';
 import { CRYOSTABILIZER, SUPPLIES, nextSupply, type Supply } from './supply';
 
 /** Capacity of each tank on a tool, in atoms. */
@@ -268,15 +268,15 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
 }
 
 /**
- * The station, built into the right wall (see STATION_POSE in presets.ts), for topping up what the ship is short of
+ * The station, built into the back wall (see STATION_POSE in presets.ts), for topping up what the ship is short of
  * (see Supply): first the antinucleant, and once there's enough of that, its block of the wall is changed for the
  * cryostabilizer's (see CHANGEOVER), the same but for what it takes and what's printed on it. It's the ship's
  * reservoir, a tall
  * column in the wall seen through a narrow glass pane, with a faucet under it; and beside it, low down, a glass funnel
  * over a diverter, which sends what drains from the funnel up into the reservoir if it's pure enough, or else down
  * and out a waste spigot under it, with a little LCD between the funnel and the spigot showing which way it's going.
- * In its own flat frame, x runs along the wall and y down from the column's top; z = 0 is over the middle of the
- * counter's row of cells nearest the wall, where the funnel and spouts are, and the wall is `out` behind it.
+ * In its own flat frame, x runs along the wall and y down from the column's top; z = 0 is the plane everything in
+ * the lab is in (see PLANE_Z), where the funnel and spouts are, and the wall is `out` behind it.
  * - paneW, paneH: the reservoir's pane, across and tall; the column behind it is as tall.
  * - out: how far the funnel and spouts stand out from the wall.
  * - top: how high the column's top is, in the room.
@@ -302,7 +302,7 @@ export const STATION = {
   paneW: 24,
   paneH: 260,
   top: STATION_TOP,
-  out: CELL / 2,
+  out: PLANE_Z,
   plate: 12,
   block: {
     x0: -CELL / 2,
@@ -319,7 +319,7 @@ export const STATION = {
   steadyScreen: { x0: 2 * CELL - 160, x1: 2 * CELL - 60, y0: -19, y1: -4 },
   /** The purity needle's dial (see needleAt), on the plate left of the diverter's LCD. */
   needle: { x0: CELL - 90, x1: CELL - 38, y0: 222, y1: 262 },
-  recess: 100,
+  recess: PLANE_Z + 50,
   door: { back: 2, thick: 6 },
   lamp: { x: -CELL / 2 + WALL_PANEL.w, y: STATION_TOP - 2 * WALL_PANEL.h - 56, r: 11 },
 };
@@ -516,7 +516,7 @@ export function restoreDefaultHeater(): void {
 
 /**
  * The heater's tube, in local units: from x0 to x1 (cut into HEATER_CELLS equal stretches), centered at y, of radius r.
- * Its taps' stretches, and its last, are a grid cell apart (see CELL), so each tap's spout and the end's can be over one.
+ * Its taps' stretches, and its last, are CELL apart, so a row of flasks can stand under its taps' spouts and its end's.
  */
 export const HEATER_TUBE = { x0: -11.5 * (CELL / 6), x1: 12.5 * (CELL / 6), y: 48, r: 7 };
 /** The middle of stretch c of the heater's tube, in local units. */
@@ -593,8 +593,8 @@ export const THERMOMETER_ROD = {
 export const BULB_Y = (THERMOMETER_ROD.bulb.y0 + THERMOMETER_ROD.bulb.y1) / 2;
 
 /**
- * The tools that are dipped (see Tool.bath): a wicking strip and the thermometers. They have no tanks; held with the
- * crosshair on an open top, one hovers upright over it, the right button lowers it in, and the left stands it in it.
+ * The tools that are dipped (see Tool.bath): a wicking strip and the thermometers. They have no tanks; one is
+ * lowered by hand into a vessel through its mouth, and can be left standing in it (see GameEngine.heldDip).
  */
 export const DIPPERS: readonly ToolKind[] = ['strip', 'thermometer', 'thermometerWide'];
 export const isDipper = (kind: ToolKind): boolean => DIPPERS.includes(kind);
@@ -606,7 +606,7 @@ export const isDipper = (kind: ToolKind): boolean => DIPPERS.includes(kind);
  * "db": their necks side by side in the middle, `gap` apart, each up from the inner edge of its bulb, with `marks`
  * graduations across both. Above the marks the necks part: each carries on as a thin tube leaning out and up,
  * `inlet.rise` higher, to a little funnel (reaching `inlet.w` either side of its middle, `inlet.h` deep) at its top,
- * the two funnels a grid cell apart, which is where each bulb is filled.
+ * the two funnels CELL apart, which is where each bulb is filled.
  */
 export const BULB = { w: 34, h: 20, sump: { w: 10, h: 5 }, neck: { w: 7, h: 90 }, marks: 20, gap: 1, inlet: { w: 7, h: 8, rise: 32 } };
 const BULB_BODY: Piece[] = [
@@ -645,7 +645,7 @@ export function neckShare(vol: number): number {
  * - paper: the paper itself, in local units, y down from the top of its clip: reaching w either side of the middle,
  *   from `top` down `len` to its foot, the last `point` of it narrowing to a point there;
  * - clip: the clip it hangs from, at its top, reaching w either side of the middle, h down from its top, d front to
- *   back: what its stand holds.
+ *   back: what the arm holding it up grips.
  */
 export const STRIP = {
   cap: CAP / 100, spot: CAP / 1000, spots: 3, time: 20, drag: 34, cells: 108, spread: 0.05, ink: 33, tint: 0.4, marks: 20,
@@ -664,16 +664,16 @@ export const STRIP_FOOT = STRIP.paper.top + STRIP.paper.len;
 export const footY = (kind: ToolKind): number => (kind === 'strip' ? STRIP_FOOT - 0.5 : BULB_Y);
 
 /**
- * How far under a fluid's surface a dipper's foot (see footY) goes when it's dipped in by hand (see dipPoses), which is
- * no further than it takes to touch it: a wicking strip's, so that the lower half of its point is in; a thermometer's,
- * so that its bulb is just covered.
+ * How far under a fluid's surface a dipper's foot (see footY) is taken to be, at least, when it's touched to it by
+ * hand: no further than it takes to touch it. A wicking strip's, so that the lower half of its point is in; a
+ * thermometer's, so that its bulb is just covered.
  */
 export const dipUnder = (kind: ToolKind): number =>
   kind === 'strip' ? STRIP.paper.point / 2 - 0.5 : (THERMOMETER_ROD.bulb.y1 - THERMOMETER_ROD.bulb.y0) / 2 + 1;
 
 /**
  * The dish (see SHAPES.dish): a shallow open glass tray, reaching w either side of its middle, h deep and d front to
- * back inside, on a little base `base` tall, for its stand to clamp.
+ * back inside, on a little base `base` tall, for the arm holding it up to grip.
  */
 export const DISH = { w: 20, h: 5, d: 16, base: 13 };
 
@@ -1045,7 +1045,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
       { name: 'B', x0: 21, x1: 79 },
     ],
     sump: { w: 14, h: 7 },
-    // the streams cross over in the exchanger, so each leaves on the other side, a grid cell apart (see CELL)
+    // the streams cross over in the exchanger, so each leaves on the other side, CELL apart
     spouts: [CELL / 2, -CELL / 2],
     valveY: 97,
     spoutY: 136,
@@ -1053,7 +1053,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   },
   separator: {
     tanks: [{ name: 'tank', x0: -30, x1: 30 }],
-    // one outlet per share of black (see SEPARATOR_OUTLET), a grid cell apart (see CELL), so a flask
+    // one outlet per share of black (see SEPARATOR_OUTLET), CELL apart, so a flask
     // or a tool's tank fits under each
     spouts: [-2 * CELL, -CELL, 0, CELL, 2 * CELL],
     sump: { w: 14, h: 7 },
@@ -1067,14 +1067,14 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tankH: 30,
     tankCap: FUNNEL_CAP,
     funnel: true,
-    // a grid cell either side of its funnel, like the separator's
+    // CELL either side of its funnel, like the separator's
     spouts: [-CELL, CELL],
     valveY: 42,
     spoutY: 84,
     box: { x0: -116, x1: 116, y0: -6, y1: 86 },
   },
   multiplexer: {
-    // the splitter turned upside down: a funnel a grid cell either side of its one spout, their stems joining over the
+    // the splitter turned upside down: a funnel CELL either side of its one spout, their stems joining over the
     // valve, which picks how much of each goes through
     tanks: [
       { name: 'A', x0: -CELL - 22, x1: -CELL + 22 },
@@ -1096,7 +1096,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tankCap: FUNNEL_CAP,
     funnel: true,
     noValve: true,
-    // a grid cell apart, like the separator's, the first a cell on from the funnel
+    // CELL apart, like the separator's, the first CELL on from the funnel
     spouts: [0, CELL, 2 * CELL, 3 * CELL],
     valveY: 30,
     spoutY: 104,
@@ -1112,7 +1112,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     funnel: true,
     valves: [...HEATER_TAPS.map((_, j) => ({ x: (j - 1) * CELL, y: 72 })), { x: 170, y: 20 }],
     dial: HEATER_TAPS.length,
-    // a grid cell apart, like the separator's, under the taps' stretches (see heaterCellX) and then the last
+    // CELL apart, like the separator's, under the taps' stretches (see heaterCellX) and then the last
     spouts: [-CELL, 0, CELL, 2 * CELL],
     valveY: 72,
     spoutY: 92,
@@ -1132,7 +1132,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   },
   receptacle: {
     // the station: a funnel, and the reservoir's column in the wall, behind a pane (see STATION); a waste
-    // spigot under the funnel and a faucet under the reservoir, a grid cell apart (see CELL)
+    // spigot under the funnel and a faucet under the reservoir, CELL apart
     tanks: [
       { name: 'funnel', x0: CELL - STATION.funnel.w, x1: CELL + STATION.funnel.w, cap: INTAKE_CAP },
       {
@@ -1166,7 +1166,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   },
   dilatometer: {
     // two swell bulbs (see BULB) pressed together like "db", necks side by side in the middle; each filled through a
-    // funnel at the top of its neck, where the necks lean apart, a grid cell from the other, and draining slowly
+    // funnel at the top of its neck, where the necks lean apart, CELL from the other, and draining slowly
     // through its own valve to a spout under that; one wire wound round both, from a box under them whose dial sets
     // its heat
     tanks: [
@@ -1202,7 +1202,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -STRIP.paper.w - 0.5, x1: STRIP.paper.w + 0.5, y0: -0.5, y1: STRIP_FOOT + 0.5 },
   },
   dish: {
-    // a shallow open glass tray (see DISH) on a little base for its stand to clamp; nothing drains from it
+    // a shallow open glass tray (see DISH) on a little base for its arm to grip; nothing drains from it
     tanks: [{ name: 'dish', x0: -DISH.w, x1: DISH.w }],
     tankH: DISH.h,
     tankCap: DISH_CAP,
@@ -1241,7 +1241,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   thermometerWide: THERMOMETER_SHAPE,
   analyzer: {
     // a glass tube straight down to a spout, and a cabinet beside it with a screen (see ANALYZER), which takes its
-    // sample from the tube's foot and lets it out a waste spout on its far side, two grid cells along
+    // sample from the tube's foot and lets it out a waste spout on its far side, twice CELL along
     tanks: [{ name: 'tube', x0: -TUBE_W / 2, x1: TUBE_W / 2 }],
     tankH: TUBE_H,
     tankCap: TUBE_CAP,
@@ -2307,19 +2307,14 @@ export const sameMount = (a: HoseMount, b: HoseMount) =>
 
 /**
  * A hose pulled out of a spout or a faucet: whatever would leave the spout comes out of the hose's nozzle instead,
- * wherever that's been set down, and falls from there. Every spout and faucet has one, rolled up inside it until it's
+ * wherever that's been left, and falls from there. Every spout and faucet has one, rolled up inside it until it's
  * pulled out.
  */
 export class Hose {
-  /** Which way its nozzle faces, about the vertical (see Pose), with the stand holding it up behind it. */
-  turn = 0;
-
   constructor(
     /** The spout or faucet it runs from. */
     readonly on: HoseMount,
     /** Its nozzle's tip, in the room. */
     public outlet: Vec3,
-    /** How far behind the nozzle its stand's rod is (see NOZZLE_REACH in bodies.ts). */
-    public reach: number,
   ) {}
 }

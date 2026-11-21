@@ -1,9 +1,9 @@
 import type { Stocked } from './cabinet';
 
 /**
- * The equipment wheels: each held open with a key, a ring of sectors round the middle of the view, one for each thing
- * it takes out of the equipment cabinet. The mouse, instead of looking around, moves a pointer out from the middle,
- * and whichever sector it's in the direction of when the key's let go is what's taken.
+ * The equipment wheels: each held open with a key, a ring of sectors round where the mouse's pointer was when it
+ * opened, one for each thing it takes out of the equipment cabinet. While it's open the mouse moves the wheel's own
+ * pointer out from its middle, and whichever sector that's in the direction of when the key's let go is what's taken.
  *
  * Lengths are in the wheel's own units, which are CSS pixels unless the view is too small for it and it's drawn
  * smaller. Its sectors go clockwise from the first, which is centered straight up.

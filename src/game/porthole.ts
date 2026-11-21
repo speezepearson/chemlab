@@ -1,7 +1,10 @@
 import { ROOM } from './space';
 
-/** The left wall, which the porthole is in: how long it is (front to back) and how tall. */
-export const PORT_WALL = { w: ROOM.z1 - ROOM.z0, h: ROOM.y1 };
+/**
+ * The stretch of the front wall (the one opposite the bench, behind the player as they work) that the porthole is in
+ * the middle of: how long it is and how tall, and where its middle is along the wall.
+ */
+export const PORT_WALL = { w: 3000, h: ROOM.y1, x: ROOM.x0 + 5400 };
 /** How close the porthole comes to the wall's edges, and its corners' tightest radius once it's as big as it gets. */
 const PORT_MARGIN = 60;
 const PORT_CORNER = 40;
@@ -58,5 +61,5 @@ export function porthole(frac: number): Porthole {
   return { ...p, cy };
 }
 
-/** How much of the left wall the porthole takes up, by area (see porthole). */
+/** How much of its stretch of the wall (see PORT_WALL) the porthole takes up, by area (see porthole). */
 export const PORT_FRAC = 0.25;

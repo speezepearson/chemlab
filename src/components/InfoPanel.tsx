@@ -27,7 +27,7 @@ function usePlacement(info: Inspection) {
 }
 
 /**
- * The readout for the vessel looked at, in god mode (outside it, there's none): its temperature, fill, species pie and
+ * The readout for the vessel pointed at, in god mode (outside it, there's none): its temperature, fill, species pie and
  * top species.
  */
 export function InfoPanel({ info }: { info: Inspection }) {

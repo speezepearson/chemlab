@@ -7,25 +7,38 @@ import { NS, SOLVENT_SPECIES, SPECIES, pairOf } from '../chem/species';
 import { pairKey } from '../chem/atoms';
 import { CAP } from './config';
 import { Vessel } from './flask';
-import { FAUCETS, WALL_FAUCETS, describeFaucet, faucetIndex, faucetOutput, faucetTarget, type Faucet } from './faucets';
-import { COUNTERS } from './space';
+import { COLOR_FAUCETS, FAUCETS, FAUCET_X, describeFaucet, faucetIndex, faucetOutput, faucetTarget, type Faucet } from './faucets';
+import { BENCH, CELL } from './space';
 import type { Mouth } from './tools';
 
 describe('faucets', () => {
   const net = new ReactionNetwork(testChemParams());
 
-  it("are the four colors' on the wall, in the order R, G, B, K, then the solvent S's, one on each island", () => {
+  it("are the four colors', in the order R, G, B, K, then the solvent S's", () => {
     const starts = FAUCETS.map((fa) => SPECIES[fa.start]);
-    const islands = COUNTERS.filter((c) => c.island).length;
-    expect(starts.map((s) => s.name)).toEqual(['R', 'G', 'B', 'K', ...Array(islands).fill('S')]);
-    expect(WALL_FAUCETS).toBe(4);
+    expect(COLOR_FAUCETS).toBe(4);
+    expect(starts.map((s) => s.name)).toEqual(['R', 'G', 'B', 'K', ...Array(FAUCETS.length - COLOR_FAUCETS).fill('S')]);
+    expect(FAUCETS.length).toBeGreaterThan(COLOR_FAUCETS + 1);
     expect(starts.every((s) => s.size === 1)).toBe(true);
   });
 
-  it('pours pure solvent from the islands, which nothing changes', () => {
-    const out = faucetOutput(FAUCETS[WALL_FAUCETS], net);
-    expect(out.n[SOLVENT_SPECIES]).toBe(1);
-    expect(out.N).toBe(1);
+  it("stand along the bench: the colors' and the first solvent's in a row a CELL apart, the rest further on, left to right", () => {
+    expect(FAUCET_X).toHaveLength(FAUCETS.length);
+    for (let i = 1; i <= COLOR_FAUCETS; i++) expect(FAUCET_X[i] - FAUCET_X[i - 1]).toBe(CELL);
+    for (let i = COLOR_FAUCETS + 2; i < FAUCET_X.length; i++) expect(FAUCET_X[i] - FAUCET_X[i - 1]).toBe(900);
+    expect(FAUCET_X[COLOR_FAUCETS + 1] - FAUCET_X[COLOR_FAUCETS]).toBeGreaterThan(CELL);
+    for (const x of FAUCET_X) {
+      expect(x).toBeGreaterThan(BENCH.x0);
+      expect(x).toBeLessThan(BENCH.x1);
+    }
+  });
+
+  it('pours pure solvent from the rest, which nothing changes', () => {
+    for (const fa of FAUCETS.slice(COLOR_FAUCETS)) {
+      const out = faucetOutput(fa, net);
+      expect(out.n[SOLVENT_SPECIES]).toBe(1);
+      expect(out.N).toBe(1);
+    }
   });
 
   // faucets of pairs are gone from the lab, but faucetOutput still settles them, as it would anything
@@ -92,8 +105,8 @@ describe('faucetIndex', () => {
 
   const [R, G, B, K] = ['R', 'G', 'B', 'K'].map((a) => FAUCETS.findIndex((fa) => SPECIES[fa.start].name === a));
 
-  it("finds the colors' faucets, and the first island's for the solvent's, among a save's five from when it was on the wall", () => {
-    expect(Array.from({ length: 5 }, (_, i) => faucetIndex(i, 5))).toEqual([R, G, B, K, WALL_FAUCETS]);
+  it("finds the colors' faucets, and the first of the solvent's, among a save's five from when the solvent had only the one", () => {
+    expect(Array.from({ length: 5 }, (_, i) => faucetIndex(i, 5))).toEqual([R, G, B, K, COLOR_FAUCETS]);
   });
 
   it("finds R, G, B and K's faucets among a save's four from before the solvent", () => {
