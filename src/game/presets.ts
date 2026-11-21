@@ -3,9 +3,9 @@ import { T_ROOM } from '../chem/params';
 import { SPECIES, TARGET, singleOf } from '../chem/species';
 import { CAP } from './config';
 import type { Vessel } from './flask';
-import { PLANE_Z, ROOM, WALL_PANEL, type Pose } from './space';
+import { LIFT, PLANE_Z, ROOM, WALL_PANEL, type Pose } from './space';
 import { CRYOSTABILIZER } from './supply';
-import { STATION, type ToolKind } from './tools';
+import { LAMP, STATION, type ToolKind } from './tools';
 
 /** Starting contents of one shelf slot. */
 export interface FlaskFill {
@@ -24,16 +24,10 @@ export interface Spot {
 }
 
 /**
- * Where the one and only composition analyzer starts, unless a preset places it itself: there's always exactly one. It
- * hangs over the counter, past the supply station, its spouts high enough for a flask under them.
+ * Where the one and only spectroscope starts, unless a preset places it itself: there's always exactly one. It
+ * hangs over the counter, past the supply station and the shadow lamp, its spout high enough for a flask under it.
  */
-export const ANALYZER_AT: Spot = { at: [2.56, 0.5] };
-
-/** Where the one and only spectroscope starts, the same way: past the composition analyzer. */
 export const SPECTROSCOPE_AT: Spot = { at: [2.86, 0.5] };
-
-/** Where the one and only bond visualizer starts, the same way: past the spectroscope. */
-export const VISUALIZER_AT: Spot = { at: [3.16, 0.5] };
 
 /**
  * Where the station is (see STATION in tools.ts): built into the back wall, past the first row of faucets, its block
@@ -45,6 +39,14 @@ export const STATION_POSE: Pose = { x: ROOM.x0 + 12 * WALL_PANEL.w - STATION.blo
 
 /** Where a preset's flasks stand, along the counter: the first one's middle, across the wall; the rest follow a CELL apart. */
 export const PRESET_FLASKS_X = 3600;
+
+/**
+ * Where the shadow lamp is (see LAMP in tools.ts): built into the back wall over the counter, past the supply station
+ * where the composition analyzer used to hang, its frame's foot on the counter, so the foot of its pane, which the
+ * light falls through, is level with the counter's top, and a flask stood on the counter in front of it is all in
+ * its light. Every lab has it, always here.
+ */
+export const LAMP_POSE: Pose = { x: 2620, y: LIFT + LAMP.h, z: PLANE_Z, yaw: 0 };
 
 /**
  * What the cryostabilizer's reservoir starts with: the hundred flasks of the target left on board (see VOYAGE). It's

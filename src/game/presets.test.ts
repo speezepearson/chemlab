@@ -10,7 +10,7 @@ import { boxesOverlap, type Box } from './physics';
 import { BENCH, CELL, LIFT, PLANE_Z, fromFrac } from './space';
 import { FLASK_H } from './flaskShape';
 import {
-  ANALYZER_AT, DEFAULT_PRESET, PRESETS, PRESET_FLASKS_X, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, fillAtoms,
+  DEFAULT_PRESET, LAMP_POSE, PRESETS, PRESET_FLASKS_X, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, applyFill, fillAtoms,
   type FlaskFill, type Preset, type Spot,
 } from './presets';
 
@@ -20,13 +20,8 @@ const hang = (kind: ToolKind, spot: Spot, id = 0) => new Tool(kind, id, { ...fro
 /** A preset's tools, hung where it says. */
 const toolsOf = (p: Preset) => (p.tools ?? []).map((spec, i) => hang(spec.kind, spec, i));
 
-/** The station, and the unique instruments where they start. */
-const fixtures = () => [
-  new Tool('receptacle', 100, STATION_POSE),
-  hang('analyzer', ANALYZER_AT, 101),
-  hang('spectroscope', SPECTROSCOPE_AT, 102),
-  hang('visualizer', VISUALIZER_AT, 103),
-];
+/** The station, the shadow lamp, and the spectroscope where it starts. */
+const fixtures = () => [new Tool('receptacle', 100, STATION_POSE), new Tool('shadowlamp', 101, LAMP_POSE), hang('spectroscope', SPECTROSCOPE_AT, 102)];
 
 const faucetBoxes = () => faucetPipes().map((p) => faucetBox(p.spout));
 

@@ -3,12 +3,12 @@ import { CAP, HOME_H, HOME_W } from './config';
 import { Flask } from './flask';
 import { COLOR_FAUCETS, FAUCETS, faucetIndex } from './faucets';
 import { boxesOverlap, type Box } from './physics';
-import { STATION_POSE } from './presets';
+import { LAMP_POSE, STATION_POSE } from './presets';
 import type { SaveState, SavedFlask, SavedHose, SavedScale, SavedTool } from './save';
 import { Scale, SCALE_SHAPE } from './scale';
 import { BENCH, CELL, LIFT, PLANE_Z, ROOM, fromFrac, toFrac, type Pose, type Vec3 } from './space';
 import { INLINE_TOOLS, SHAPES, STRIP_FOOT, Tool, UNIQUE_TOOLS, footY, isDipper, overMouth, type Mouth, type ToolKind } from './tools';
-import { faucetBox, faucetPipes, flaskBox, flaskMouth, footAt, nozzleBox, onScale, scaleBox, spoutAt, tankFluid, tankMouth, toolBox } from './bodies';
+import { SHEET_SLOT, faucetBox, faucetPipes, flaskBox, flaskMouth, footAt, nozzleBox, onScale, scaleBox, spoutAt, tankFluid, tankMouth, toolBox } from './bodies';
 
 /**
  * Laying out afresh, along the wall, a lab saved when it was a room to walk round. Such a save put tools, flasks,
@@ -45,6 +45,23 @@ export interface Lab {
 const OLD_Z = 150;
 /** Where the supply station was built into the room's right wall, whatever a save from then says. */
 const OLD_STATION: Pose = { x: 2250, y: 820, z: 1150, yaw: -Math.PI / 2 };
+/**
+ * Where a sheet of shadow paper stood in the shadow lamp's slot, at the end of its trough on its own bench in the
+ * room's front left corner (facing either way along the trough). One there is in the lamp's slot on the wall now (see
+ * SHEET_SLOT), and the lamp, built into the wall, is always where it is (see LAMP_POSE).
+ */
+const OLD_SLOT = { x: -597.5, y: 534, z: 2750 };
+
+/** Whether a tool in a save from the room was a sheet of shadow paper in the shadow lamp's slot (see OLD_SLOT). */
+const oldSlotted = (t: Tool) => t.kind === 'sheet' && Math.hypot(t.pose.x - OLD_SLOT.x, t.pose.y - OLD_SLOT.y, t.pose.z - OLD_SLOT.z) < 1;
+
+/** Where a tool that's always in the same place goes, whatever the save says: the station, the lamp, a sheet in its slot. */
+function fixedPose(t: Tool, wall: boolean): Pose | null {
+  if (t.kind === 'receptacle') return { ...STATION_POSE };
+  if (t.kind === 'shadowlamp') return { ...LAMP_POSE };
+  if (!wall && oldSlotted(t)) return { ...SHEET_SLOT };
+  return null;
+}
 
 /**
  * Where faucet i's spout was in the room: the four colors' in a row along the right wall, and the solvent's in the
@@ -216,7 +233,7 @@ const LAB_X = 3400;
 /** Where the one-of-a-kind instruments go, in a row, if there's room: past the supply station. */
 const INSTRUMENTS_X = { x0: 2440, x1: LAB_X };
 /** The one-of-a-kind instruments, in the order they're laid out in their row (the station is always where it is). */
-const INSTRUMENTS: readonly ToolKind[] = UNIQUE_TOOLS.filter((k) => k !== 'receptacle');
+const INSTRUMENTS: readonly ToolKind[] = UNIQUE_TOOLS.filter((k) => k !== 'receptacle' && k !== 'shadowlamp');
 /** How far apart along the wall the places tried for a tool are; for what stands on the counter, twice this. */
 const STEP_X = CELL / 4;
 /** How far apart up the wall the places tried for a tool are. */
@@ -449,9 +466,17 @@ export function flatten(s: SaveState): SaveState {
     const key = outletKey({ faucet: i });
     if (!hosed.has(key)) lay.outlets.push({ p, expect: null, bare: key, under: -Infinity });
   });
-  // the station, where it always is (or where the game will put one, if the save has none)
+  // the station, where it always is (or where the game will put one, if the save has none); the shadow lamp, built
+  // into the wall; and a sheet of shadow paper that was in its slot, in it still
   const station = old.tools.find((t) => t.kind === 'receptacle') ?? new Tool('receptacle', -1, STATION_POSE);
   lay.add(cluster({ tool: station }, { ...STATION_POSE }), 0, 0);
+  const fixed = new Map<number, Pose>();
+  for (const t of old.tools) {
+    const p = t.kind === 'receptacle' ? null : fixedPose(t, false);
+    if (!p) continue;
+    fixed.set(t.id, p);
+    lay.add(cluster({ tool: t }, p), 0, 0);
+  }
 
   // the order things are laid out in: linked things together, upstream first, groups by where they were
   const things = order(old, links, stood);
@@ -462,7 +487,7 @@ export function flatten(s: SaveState): SaveState {
   for (const t of instruments) placeTool(lay, t.tool, cluster, INSTRUMENTS_X, true, parkedSpouts);
   for (const t of things) {
     if ('tool' in t) {
-      if (INSTRUMENTS.includes(t.tool.kind) || isDipper(t.tool.kind) || t.tool.kind === 'receptacle') continue;
+      if (INSTRUMENTS.includes(t.tool.kind) || isDipper(t.tool.kind) || t.tool.kind === 'receptacle' || fixed.has(t.tool.id)) continue;
       if (!shelve(lay, t.tool, cluster, shelf)) placeTool(lay, t.tool, cluster, { x0: LAB_X, x1: BENCH.x1 }, false, parkedSpouts);
     } else {
       placeOnCounter(lay, t, cluster, near(lay, t, old, links));

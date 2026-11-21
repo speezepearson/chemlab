@@ -6,14 +6,15 @@ import {
   alarmAt, alarmPlate, drawAlarm, drawArms, drawCabinet, drawCounter, drawFaucets, drawFlows, drawGuides, drawHoses, drawNozzles, drawSpecimen,
   drawWall, specimens, type Span,
 } from './flatRoom';
-import { drawFlask, drawScale, drawTool, scaleDisplay, type ToolArt } from './flatTools';
+import { drawFlask, drawLampSlot, drawScale, drawTool, scaleDisplay, type ToolArt } from './flatTools';
 import { OUTLINE } from './outline';
 import type { Scale } from './scale';
 import { messageCanvas, MSG_PAD, MSG_PX, OK_PX, okCanvas, type Board } from './screens';
 import { boxThrough, FLASH, hits, Sketch, type Region } from './sketch';
 import { PLANE_Z, type Vec3 } from './space';
+import { inSlot } from './bodies';
 import { thingOf } from './thing';
-import { SHAPES, THERMOMETER_ROD, type Hose, type Tool } from './tools';
+import { LAMP, SHAPES, SHEET, THERMOMETER_ROD, type Hose, type Tool } from './tools';
 import { WHEEL, WHEELS } from './wheel';
 
 /**
@@ -29,7 +30,8 @@ export interface Camera {
 /** What the pointer is on. */
 export type Pick =
   | { kind: 'flask'; f: Flask }
-  | { kind: 'tool'; t: Tool; part: 'body' | 'tank' | 'valve' | 'spout'; k: number }
+  /** A tool, or a part of it: a tank, a valve, a spout, or a button (the shadow lamp's). */
+  | { kind: 'tool'; t: Tool; part: 'body' | 'tank' | 'valve' | 'spout' | 'button'; k: number }
   | { kind: 'scale'; sc: Scale; part: 'body' | 'tare' }
   /** A hose's nozzle. */
   | { kind: 'hose'; h: Hose }
@@ -104,6 +106,8 @@ export interface Frame {
   /** Whether the alarms are silenced, which their button shows. */
   alarmsOff: boolean;
   airlock: AirlockLook;
+  /** What's in hand (a flask, tool, scale or hose), drawn over everything else in the lab. */
+  held: object | null;
 }
 
 export type GuideLook = 'solid' | 'snap';
@@ -160,6 +164,10 @@ const BAD_OUTLINE = '#ff3b2f';
 const FOV = 45;
 /** How much of the view the pod's message may cover, at most, each way; and how wide it's drawn, at most, in CSS pixels. */
 const MESSAGE_FIT = { share: 0.9, w: 820 };
+/** How many pixels a side each of a sheet of shadow paper's cells is drawn over, before it's averaged down to one (see View.shadows). */
+const SHADOW_OVERSAMPLE = 2;
+/** How much of its picture a sheet of paper's icon fills, of what anything else's would (see iconFrame). */
+const PAPER_ICON = 0.72;
 /** An icon's margin, as a share of its side. */
 const ICON_MARGIN = 0.04;
 
@@ -194,6 +202,9 @@ export class View implements LabView {
   /** The OK button's faces, unlit and lit. */
   private okFaces = [okCanvas(false), okCanvas(true)];
   private drawnIcons: Icons | null = null;
+  /** The canvases the shadow lamp's shadows are worked out on (see shadows). */
+  private shadeCanvas: HTMLCanvasElement | null = null;
+  private shadeSmall: HTMLCanvasElement | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -251,10 +262,21 @@ export class View implements LabView {
     const sk = new Sketch(ctx, this.base(), this.scale(), true, new Set(fr.guides.map((g) => g.v)), flash);
     drawWall(sk, this.span());
     drawCabinet(sk, fr.stock, this.specimens);
+    // the shadow lamp in the wall, with the slot behind its pane and the sheet in it (whose foot is behind the counter);
+    // and after the counter, the faucets and the alarms' button, the sheets pinned to the wall, behind hoses
+    const held = fr.held;
+    const lamp = fr.tools.find((t) => t.kind === 'shadowlamp');
+    const slotted = fr.tools.find((t) => t.kind === 'sheet' && t !== held && inSlot(t.pose));
+    if (lamp) {
+      sk.frame(lamp.pose.x, -lamp.pose.y, () => drawLampSlot(sk, lamp));
+      if (slotted) this.drawTool(sk, slotted, fr);
+      this.drawTool(sk, lamp, fr);
+    }
     drawCounter(sk);
     drawFaucets(sk, fr.faucets);
     const station = fr.tools.find((t) => t.shape.wall);
     drawAlarm(sk, alarmAt(station?.pose), fr.alarmsOff, alarmPlate());
+    for (const t of fr.tools) if (t.shape.pinned && t !== slotted && t !== held) this.drawTool(sk, t, fr);
     drawArms(sk, fr.arms);
     drawHoses(sk, fr.hoses);
     // the station in the wall, behind everything else in the plane; then the rest of the tools, the scales and the
@@ -263,19 +285,91 @@ export class View implements LabView {
     const up = h?.kind === 'tool' ? h.t : h?.kind === 'flask' ? h.f : h?.kind === 'scale' ? h.sc : null;
     const order = <T extends object>(xs: readonly T[], under: (x: T) => boolean = () => false) =>
       [...xs].sort((a, b) => Number(under(b)) - Number(under(a)) || Number(a === up) - Number(b === up));
-    for (const t of order(fr.tools, (t) => !!t.shape.wall)) sk.frame(t.pose.x, -t.pose.y, () => drawTool(sk, t, this.artOf(t), fr.clock, fr.energies));
-    for (const sc of order(fr.scales)) {
-      const hot = h?.kind === 'scale' && h.sc === sc && h.part === 'tare';
-      sk.frame(sc.pose.x, -sc.pose.y, () => drawScale(sk, sc, this.displayOf(sc), fr.tarePress === sc, hot));
-    }
+    const free = fr.tools.filter((t) => t.kind !== 'shadowlamp' && t !== slotted && (!t.shape.pinned || t === held));
+    for (const t of order(free, (t) => !!t.shape.wall)) this.drawTool(sk, t, fr);
+    for (const sc of order(fr.scales)) this.drawScale(sk, sc, fr);
     for (const f of order(fr.flasks)) sk.frame(f.pose.x, -f.pose.y, () => drawFlask(sk, f));
     drawNozzles(sk, fr.hoses);
     drawFlows(sk, fr);
     drawGuides(sk, fr.guides);
+    this.exposure(fr);
     this.forget(fr);
     this.regions = sk.regions;
     this.outline(fr.hot, fr.bad);
     this.pod(fr);
+  }
+
+  /** Whether a tool is part of the wall, drawn with it, behind hoses: the station, the shadow lamp and the pinned sheets. */
+  private onWall(t: Tool): boolean {
+    return !!(t.shape.wall || t.shape.pinned || t.kind === 'shadowlamp');
+  }
+
+  private drawTool(sk: Sketch, t: Tool, fr: Frame): void {
+    sk.frame(t.pose.x, -t.pose.y, () => drawTool(sk, t, this.artOf(t), fr.clock, fr.energies));
+  }
+
+  private drawScale(sk: Sketch, sc: Scale, fr: Frame): void {
+    const h = fr.hot;
+    const hot = h?.kind === 'scale' && h.sc === sc && h.part === 'tare';
+    sk.frame(sc.pose.x, -sc.pose.y, () => drawScale(sk, sc, this.displayOf(sc), fr.tarePress === sc, hot));
+  }
+
+  /**
+   * The shadow lamp's light, for as long as the sheet in its slot is owed it (see Tool.owed): the sheet is darkened,
+   * cell by cell, by as much of it as gets past whatever's in front of the pane just now, and nothing's owed any more.
+   * What's in front casts its shadow the same size as itself, since the light is a beam square on to the wall (see
+   * LAMP): it's drawn again, as what casts a shadow (see Sketch.shade), square on over the pane, onto a picture with a
+   * pixel to each of the sheet's cells, and softened by LAMP.soft; the arms out of the wall, and the wall and what's
+   * built into it, cast none. A sheet that's as dark as it gets all over has nothing left to show, so what it's owed
+   * is just dropped.
+   */
+  private exposure(fr: Frame): void {
+    for (const lamp of fr.tools) {
+      if (lamp.kind !== 'shadowlamp' || !(lamp.owed > 0)) continue;
+      const sheet = lamp.sheet;
+      if (!sheet) continue;
+      if (!sheet.spent) sheet.expose(this.shadows(lamp, fr), lamp.owed);
+      lamp.owed = 0;
+    }
+  }
+
+  /**
+   * How much of the shadow lamp's light reaches each cell of the sheet in its slot, from 0 to 1, in the order of
+   * Tool.dose (rows from the bottom up, each from the left), as things stand in front of its pane now (see exposure).
+   */
+  private shadows(lamp: Tool, fr: Frame): Float32Array {
+    const n = SHEET.cells;
+    const over = SHADOW_OVERSAMPLE * n;
+    const side = 2 * LAMP.pane.r;
+    const [x0, top] = [lamp.pose.x - LAMP.pane.r, lamp.pose.y - LAMP.pane.y];
+    const big = (this.shadeCanvas ??= document.createElement('canvas'));
+    big.width = big.height = over;
+    const ctx = big.getContext('2d')!;
+    ctx.clearRect(0, 0, over, over);
+    const k = over / side;
+    const sk = new Sketch(ctx, new DOMMatrix([k, 0, 0, k, -k * x0, k * top]), k, false);
+    sk.shade = true;
+    for (const t of fr.tools) if (!this.onWall(t) || (t === fr.held && !t.shape.wall && t.kind !== 'shadowlamp')) this.drawTool(sk, t, fr);
+    for (const sc of fr.scales) this.drawScale(sk, sc, fr);
+    for (const f of fr.flasks) sk.frame(f.pose.x, -f.pose.y, () => drawFlask(sk, f));
+    drawHoses(sk, fr.hoses);
+    drawNozzles(sk, fr.hoses);
+    drawFlows(sk, fr);
+    // softened as the light's stray rays soften a shadow's edge, onto a pixel a cell
+    const small = (this.shadeSmall ??= document.createElement('canvas'));
+    small.width = small.height = n;
+    const s = small.getContext('2d', { willReadFrequently: true })!;
+    s.clearRect(0, 0, n, n);
+    s.filter = `blur(${(LAMP.soft / 2) * (n / side)}px)`;
+    s.drawImage(big, 0, 0, n, n);
+    s.filter = 'none';
+    const px = s.getImageData(0, 0, n, n).data;
+    const light = new Float32Array(n * n);
+    for (let i = 0; i < light.length; i++) {
+      const [row, col] = [Math.floor(i / n), i % n];
+      light[i] = 1 - px[4 * ((n - 1 - row) * n + col) + 3] / 255;
+    }
+    return light;
   }
 
   /** What's kept of a tool between frames, made the first time it's drawn. */
@@ -480,6 +574,7 @@ function iconFrame(k: Stocked, n: number): [DOMMatrix, number] {
     k === 'flask' ? { x0: -28, x1: 28, y0: -1, y1: 70 }
     : k === 'scale' ? { x0: -92, x1: 92, y0: -2, y1: 42 }
     : SHAPES[k].box;
-  const s = fit / Math.max(b.x1 - b.x0, b.y1 - b.y0);
+  // (a sheet of paper, square and solid, would look bigger than the rest filling its picture: it fills less of it)
+  const s = ((k !== 'flask' && k !== 'scale' && SHAPES[k].pinned ? PAPER_ICON : 1) * fit) / Math.max(b.x1 - b.x0, b.y1 - b.y0);
   return [new DOMMatrix().translate(n / 2, n / 2).scale(s).translate(-(b.x0 + b.x1) / 2, -(b.y0 + b.y1) / 2), s];
 }

@@ -4,7 +4,7 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { BLINDED_S, RISE_S, WAKE_S, ease, inPod, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
-  FLASK_CENTER, NOZZLE_H, SCALE_SLOTS, aimValve, dippedIn, docked, faucetBox, faucetPipes, flaskArm, flaskBox, flaskLip, flaskMouth, footAt, insideVessel, isDocked,
+  FLASK_CENTER, NOZZLE_H, SCALE_SLOTS, SHEET_SLOT, aimValve, dippedIn, docked, inSlot, paperFace, sheetIn, slotted, faucetBox, faucetPipes, flaskArm, flaskBox, flaskLip, flaskMouth, footAt, insideVessel, isDocked,
   nozzleArm, nozzleBox, onScale, onTool, scaleArm, scaleBox, scaleCenter, scaleSpot, spoutAt, spoutNear, tankMouth, tankNoteY, toolArms, toolBox, toolCenter, valveNear, valveZ,
 } from './bodies';
 import { CABINET, endless, isStocked, putIn, stockWith, takeFrom, takeSlot, type Stock, type Stocked } from './cabinet';
@@ -20,8 +20,8 @@ import { Flask, Vessel, roomFor, sustenance, transfer, volume, volumeUnit } from
 import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
-import { ANALYZER_AT, DEFAULT_PRESET, PRESET_FLASKS_X, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, VISUALIZER_AT, applyFill, type Preset, type Spot } from './presets';
-import { rumble, type Rumble } from './rumble';
+import { DEFAULT_PRESET, LAMP_POSE, PRESET_FLASKS_X, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
+import { script, smell, span, type Fragment } from './smell';
 import { CRYOSTABILIZER, FIRST_SUPPLY, litresOf, type Supply } from './supply';
 import { shatter } from './shatter';
 import { WHEEL, WHEELS, wheelMove, wheelPick, type WheelAim } from './wheel';
@@ -30,8 +30,8 @@ import { SCALE_SHAPE, Scale, glassGrams } from './scale';
 import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
 import { BENCH, CELL, LIFT, PLANE_Z, ROOM, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, type Pose, type Vec3 } from './space';
 import {
-  changeoverAt, ANALYZER_HUM, BOND_KEYS, INSTRUMENT, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
-  TANK_H, TOOL_NAMES, dipUnder, isDipper, isThermometer, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
+  changeoverAt, BOND_KEYS, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
+  TANK_H, TOOL_NAMES, Blotter, dipUnder, isBlotter, isDipper, isThermometer, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
   type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
@@ -106,6 +106,14 @@ export interface Hud {
   nap: boolean;
   /** Whether the airlock stands open, and the player could get into the cryopod (see GameEngine.board). */
   pod: boolean;
+  /**
+   * What the last sniff smelled of (see script in smell.ts), until SMELL_MS after the last of it came up: its lines,
+   * each the pieces it's said in; how many of those pieces, counted through the lines in order, have come up so far;
+   * whether it's fading `out`, over the last SMELL_FADE_MS; and `at`, where on the view the pointer was when F was
+   * pressed, in CSS pixels, which it comes up under. `n` counts the sniffs, so the same thing twice running shows as
+   * new. Otherwise null.
+   */
+  smell: { n: number; lines: string[][]; shown: number; out: boolean; at: { x: number; y: number } } | null;
 }
 
 /**
@@ -273,6 +281,18 @@ const MOD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator
 export const TOUCH = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 /** How long a note stays up, in ms. */
 const NOTE_MS = 1600;
+/**
+ * How long what a sniff smelled of stays up once the last of it has come up, in ms, and how long it takes to fade
+ * out, at the end of that (it's on the display, not in the lab).
+ */
+const SMELL_MS = 5000;
+export const SMELL_FADE_MS = 1100;
+/**
+ * How long a sniff (see GameEngine.sniff) takes to get to the smell, in real seconds (it's the player's own doing):
+ * the time it took her head to lean in to a vessel's rim, when the lab was walked round. What she says of it starts
+ * coming up then.
+ */
+const SNIFF_S = 0.45;
 /** How long the note that she can nap stays up, in ms: long enough to read. */
 const NAP_HINT_MS = 9000;
 /** Real seconds the player's eyes take to close for a nap, and to open again as they wake (see GameEngine.nap). */
@@ -287,6 +307,15 @@ const spotPose = (s: Spot): Pose => ({ ...fromFrac({ x: s.at[0], y: s.at[1] }), 
 
 /** A pose on the bench's plane (see PLANE_Z), at (x, y). */
 const onPlane = (x: number, y: number): Pose => ({ x, y, z: PLANE_Z, yaw: 0 });
+
+/** A sheet of blotting paper that falling fluid wets (see GameEngine.wettable): what it soaks up, and its face on the wall. */
+interface Wettable {
+  v: Blotter;
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+}
 
 /** Owns the lab: what's in it, the view of it, input, the simulation loop, and the View that draws it. */
 export class GameEngine {
@@ -344,13 +373,15 @@ export class GameEngine {
   private open: Mouth[] = [];
   /** Those falling fluid lands in, as of then: all of them but what's in hand's, until it's been held still (see catching). */
   private catch: Mouth[] = [];
+  /** The sheets of blotting paper falling fluid wets, as of the start of this frame's run (see wettable). */
+  private sheets: Wettable[] = [];
   /** How still what's in hand has been held, in real time (see still.ts): it catches falling fluid only once it's been still long enough. */
   private still: Stillness | null = null;
   /** What overflowed each vessel this frame, and where it spilled from, for drawing (see fill). */
   private spills = new Map<Vessel, { at: Vec3; v: Vessel }>();
   private spillTime = 1;
   /** Drops that have let go of an outlet and are on their way down. */
-  private falling: { v: Vessel; x: number; y: number; z: number; vy: number; trail: boolean }[] = [];
+  private falling: { v: Vessel; x: number; y: number; z: number; vy: number; trail: boolean; wet?: Set<Blotter> }[] = [];
   /** The faucets pouring into something this frame: where from (the faucet, or its hose's nozzle), and into what. */
   private faucetFlows: { fa: FaucetSpot; from: Vec3; m: Mouth }[] = [];
   /**
@@ -371,6 +402,19 @@ export class GameEngine {
   private cursorNow = '';
   /** A brief note on the display, like there being no room for something (see say). */
   private flash: { text: string; until: number; tip?: boolean } | null = null;
+  /**
+   * The sniff on its way (see sniff): what's sniffed, the real time she smells it, and where on the view the pointer
+   * was, in CSS pixels.
+   */
+  private sniffing: { v: Vessel; when: number; at: { x: number; y: number } } | null = null;
+  /**
+   * What the last sniff smelled of (see sniff), until it's faded from the display: what she says of it, piece by piece
+   * (see script); the real time she smelled it, which its pieces come up after; how many of them had come up when it
+   * was cut short, if it was, since no more do then; the real time it's gone; and where on the view it's shown. And
+   * how many sniffs there have been.
+   */
+  private smelled: { script: Fragment[]; n: number; from: number; cut: number | null; until: number; at: { x: number; y: number } } | null = null;
+  private sniffs = 0;
   /** Whether the alarms are silenced, by their button (see hushAlarms). Saved, and kept through Reset. */
   private alarmsOff = false;
   /** Where the player is in waking up in the airlock (see Wake), and how many sim seconds it's been there. */
@@ -423,7 +467,6 @@ export class GameEngine {
   private nextToolId = 0;
   private viewW = 0;
   private viewH = 0;
-  private rumbles = new Map<Tool, Rumble>();
   private water = new WaterSounds();
   /** This frame's streams, for their sound: how much ran into each vessel, by volume. */
   private inflow = new Map<Vessel, number>();
@@ -458,7 +501,6 @@ export class GameEngine {
     this.pumper.port1.close();
     this.resizeObserver.disconnect();
     for (const c of this.cleanups) c();
-    for (const r of this.rumbles.values()) r.stop();
     this.water.stop();
     this.view.dispose();
   }
@@ -615,6 +657,7 @@ export class GameEngine {
     this.changing = null;
     this.falling = [];
     this.held = this.turning = this.tarePress = this.press = this.panning = null;
+    this.sniffing = this.smelled = null;
     this.history.clear();
   }
 
@@ -684,6 +727,7 @@ export class GameEngine {
         ...(t.tube.length ? { tube: t.tube.map(saveVessel) } : {}),
         ...(t.note ? { note: t.note } : {}),
         ...(t.memory ? { memory: t.memory } : {}),
+        ...(t.image ? { image: t.image } : {}),
         ...(t.paper.length ? { paper: t.paper.map(saveVessel) } : {}),
         ...(t.bed.length ? { bed: t.bed.map(saveVessel) } : {}),
       })),
@@ -740,6 +784,7 @@ export class GameEngine {
         t.tube.forEach((v, k) => st.tube?.[k] && loadVessel(v, st.tube[k]));
         if (typeof st.note === 'string') t.note = st.note;
         t.remember(st.memory);
+        t.develop(st.image);
         t.paper.forEach((v, k) => st.paper?.[k] && loadVessel(v, st.paper[k]));
         t.bed.forEach((v, k) => st.bed?.[k] && loadVessel(v, st.bed[k]));
         // an older save's strip stood in a tray, posed at the tray's top, 4 above its paper's foot: it's bare paper now,
@@ -752,7 +797,9 @@ export class GameEngine {
         }
         return t;
       });
-    this.nextToolId = Math.max(-1, ...this.tools.map((t) => t.id)) + 1;
+    // (past every saved tool's id, those of kinds there no longer are included, so that a tool added below doesn't get
+    // a dropped one's id, and with it the hoses that were on its spouts)
+    this.nextToolId = Math.max(-1, ...s.tools.map((st) => st.id).filter(Number.isFinite)) + 1;
     // the scales and hoses before the tools a save lacks, which keep clear of them (see roomy)
     this.scales = s.scales.map((ss) => {
       const sc = new Scale(pose(fromFrac({ x: ss.fx, y: ss.fy })));
@@ -815,11 +862,12 @@ export class GameEngine {
   }
 
   /**
-   * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a composition analyzer, a
-   * spectroscope, a bond visualizer and a station: if there's none, one is added where it starts, or as
-   * near there as it has room (see roomy), the station fitted for the cryostabilizer, its reservoir holding what's
-   * left on board (see Tool.stock), as a save from before it was fitted for anything else would have it. The
-   * station is built into the wall, so it's always where it is, whatever a save says.
+   * Keep at most one of each unique tool (see UNIQUE_TOOLS), the first. There's always a spectroscope, a station and a
+   * shadow lamp: if there's none, one is added where it starts, or as near there as it has room (see roomy), the
+   * station fitted for the cryostabilizer, its reservoir holding what's left on board (see Tool.stock), as a save from
+   * before it was fitted for anything else would have it. The station and the shadow lamp are built into the wall, so
+   * they're always where they are, whatever a save says. A shadow lamp that's added has a new sheet of shadow paper in
+   * its slot, unless one's there already: so a new lab's has, and a save's from before there was a lamp.
    */
   private uniqueTools(): void {
     for (const kind of UNIQUE_TOOLS) {
@@ -830,15 +878,17 @@ export class GameEngine {
       if (this.tools.some((t) => t.kind === kind)) return;
       const t = new Tool(kind, this.nextToolId++, at);
       if (kind === 'receptacle') t.stock(CRYOSTABILIZER);
-      else t.pose = this.roomy(t);
+      else if (!t.shape.fixed) t.pose = this.roomy(t);
       this.tools.push(t);
+      // a new shadow lamp comes with a sheet of shadow paper in its slot, which shows what goes there
+      if (kind === 'shadowlamp' && !sheetIn(this.tools)) this.tools.push(new Tool('sheet', this.nextToolId++, { ...SHEET_SLOT }));
     };
-    // the station first, since it's always where it is, for the others to keep clear of
+    // the station and the shadow lamp first, since they're always where they are, for the others to keep clear of
     add('receptacle', STATION_POSE);
     this.station().pose = { ...STATION_POSE };
-    add('analyzer', spotPose(ANALYZER_AT));
+    add('shadowlamp', LAMP_POSE);
+    this.tools.find((t) => t.kind === 'shadowlamp')!.pose = { ...LAMP_POSE };
     add('spectroscope', spotPose(SPECTROSCOPE_AT));
-    add('visualizer', spotPose(VISUALIZER_AT));
   }
 
   /**
@@ -1072,13 +1122,22 @@ export class GameEngine {
 
   /** Where the box of what's held would be with it at pose p. */
   private boxAt(h: Held, p: Pose): Box {
+    // (a sheet of shadow paper is further back in the shadow lamp's slot: see toolParts)
+    if (h.kind === 'tool' && h.t.kind === 'sheet') {
+      const was = h.t.pose;
+      h.t.pose = p;
+      const b = toolBox(h.t);
+      h.t.pose = was;
+      return b;
+    }
     const c = toWorld(p, this.anchor(h));
     return { ...this.heldBox(h), ...c, yaw: 0 };
   }
 
   /**
    * Everything on the bench but what's held (and what rides on it), and what's built into it: the faucets, the
-   * supply station and the cabinet. A held tool's own hoses' nozzles don't get in its way, since one left at its
+   * supply station and the cabinet. (A sheet pinned to the wall is against it, behind the plane everything else is in,
+   * so it's in the way only of another sheet and of what's built into the wall: see PIN_Z.) A held tool's own hoses' nozzles don't get in its way, since one left at its
    * spout (see keepPouring) is rolled back up if it's left there again (see setDown), nor do the hoses following it
    * (see gather). Nor are the tool `away`, about to be picked up, and the hoses `skip`.
    */
@@ -1305,6 +1364,7 @@ export class GameEngine {
         this.leftUp(false);
       }
       if (e.code === 'KeyQ' || e.code === 'Escape') this.putBack();
+      if (e.code === 'KeyF') this.sniff();
       if (e.code === 'Enter') {
         // the note's text box opens at once, and this Enter mustn't be taken as finishing it
         e.preventDefault();
@@ -1386,6 +1446,10 @@ export class GameEngine {
     if (p?.kind === 'scale' && p.part === 'tare') {
       this.change(() => p.sc.zero());
       this.tarePress = p.sc;
+      return;
+    }
+    if (p?.kind === 'tool' && p.part === 'button') {
+      this.change(() => p.t.press());
       return;
     }
     if (this.facing === 'bench') {
@@ -1948,15 +2012,11 @@ export class GameEngine {
     return placement(h.x, h.y, h.z);
   }
 
-  /** Where a tool's machinery sounds from: the middle of its cabinet, or the supply station's display. */
+  /** Where a tool's machinery sounds from: the supply station's display. */
   private machineAt(t: Tool): Vec3 {
     if (t.shape.wall) {
       const d = STATION.display;
       return onTool(t, (d.x0 + d.x1) / 2, (d.y0 + d.y1) / 2, -STATION.out);
-    }
-    if (t.kind === 'analyzer') {
-      const b = INSTRUMENT.body;
-      return onTool(t, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
     }
     return onTool(t, 0, 60);
   }
@@ -2056,6 +2116,44 @@ export class GameEngine {
   }
 
   /**
+   * The faces of the sheets of blotting paper (see BLOTTERS) that falling fluid wets just now, in the room: every one
+   * pinned to the wall, and one in hand only once it's been held still (see catches), so a sheet swept through a stream
+   * stays clean. Each is the sheet's Blotter, and where its face reaches across and up the wall.
+   */
+  private wettable(): Wettable[] {
+    const h = this.held;
+    const out: Wettable[] = [];
+    for (const t of this.tools) {
+      const v = t.paper[0];
+      if (!isBlotter(t.kind) || !(v instanceof Blotter) || v.soaked) continue;
+      if (h?.kind === 'tool' && h.t === t && !catches(this.still)) continue;
+      out.push({ v, ...paperFace(t) });
+    }
+    return out;
+  }
+
+  /**
+   * Fluid falling at x from height `top` down to `bottom` (`amount` of src, by volume, which isn't depleted) wets every
+   * sheet of blotting paper in `sheets` whose face it passes in front of: each takes a copy of what passes, as much as
+   * it has room for (see Blotter.soak), in whole molecules. The fluid itself goes on as if the sheet weren't there:
+   * it loses nothing, and lands where it would have. That's a breach of conservation, small and on purpose (a sheet
+   * soaks up a few hundredths of a flask, once): it makes paper a probe that never disturbs what it probes. Returns
+   * the sheets it passed in front of.
+   */
+  private wet(sheets: readonly Wettable[], x: number, top: number, bottom: number, src: Fluid, amount = volume(src)): Blotter[] {
+    const passed: Blotter[] = [];
+    for (const w of sheets) {
+      if (x < w.x0 || x > w.x1 || top < w.y0 || bottom > w.y1) continue;
+      passed.push(w.v);
+      if (w.v.soaked || amount <= 0) continue;
+      const copy = new Vessel(Infinity);
+      copy.addFrom(src, amount, true);
+      w.v.soak(copy);
+    }
+    return passed;
+  }
+
+  /**
    * Pour `amount` of src (by volume) into v, without depleting src, however full v is. Whatever no longer
    * fits overflows (see overflow).
    */
@@ -2088,6 +2186,7 @@ export class GameEngine {
     if (!spill) this.spills.set(v, (spill = { at: rim, v: new Vessel(Infinity) }));
     spill.v.addFrom(out, volume(out), true);
     const below = mouthBelow(this.catch, rim);
+    this.wet(this.sheets, rim.x, rim.y, below ? below.y : groundAt(rim.x, rim.z), out);
     if (below) this.stream(below.v, out);
   }
 
@@ -2123,6 +2222,7 @@ export class GameEngine {
     if (this.arrival && this.wake !== 'pod') this.stepWake(dt);
     if (this.riseT !== null) this.riseT = this.riseT + dt >= RISE_S ? null : this.riseT + dt;
     this.render(dt);
+    this.stepSniff(now);
     this.inspect(now);
     this.hud(now);
     this.cursor();
@@ -2214,6 +2314,7 @@ export class GameEngine {
     this.clock += simDt;
     const mouths = this.reopen();
     const catching = this.catch;
+    const sheets = (this.sheets = this.wettable());
     const h = this.held;
 
     // the held flask, tipped all the way, pours from its lip into whatever's below
@@ -2249,6 +2350,7 @@ export class GameEngine {
     // what each thermometer's bulb and each strip's foot is in (see dipping)
     const whole = this.tools.map((t) => !t.broken);
     this.dipping(quiet ? 0 : dt);
+    this.slotting();
     if (simDt > 0) {
       const sub = Math.ceil(simDt / 0.02);
       const step = simDt / sub;
@@ -2265,6 +2367,7 @@ export class GameEngine {
       const pour = (drop: Vessel, out: Vessel | null, sp: Vec3, target: Mouth | null, loose: boolean, trail: boolean): boolean => {
         const down = drip(drop, out, step);
         if (down && down === out) {
+          this.wet(sheets, sp.x, sp.y, target ? target.y : groundAt(sp.x, sp.z), out);
           if (target) this.stream(target.v, out);
         } else if (down && !loose) this.falling.push({ v: down, x: sp.x, y: sp.y, z: sp.z, vy: 0, trail });
         return !!down && down === out;
@@ -2282,9 +2385,14 @@ export class GameEngine {
         if (D && this.pour) {
           const out = new Vessel(Infinity);
           transfer(D, out, POUR_RATE * step);
-          if (this.pour.into) this.stream(this.pour.into.v, out);
+          const { from, into } = this.pour;
+          this.wet(sheets, from.x, from.y, into ? into.y : groundAt(from.x, from.z), out);
+          if (into) this.stream(into.v, out);
         }
-        for (const { fa, m } of this.faucetFlows) this.stream(m.v, fa.output, FILL_RATE * step);
+        for (const { fa, from, m } of this.faucetFlows) {
+          this.wet(sheets, from.x, from.y, m.y, fa.output, FILL_RATE * step);
+          this.stream(m.v, fa.output, FILL_RATE * step);
+        }
         this.tools.forEach((t, j) => {
           if (t === stillTool) return;
           t.step(step).forEach((out, k) => {
@@ -2296,18 +2404,22 @@ export class GameEngine {
             tally(toolTotals[j][k], null, pour(t.drops[k], out, spouts[j][k], targets[j][k], this.loose(t, k), trailing[j][k]));
           });
         });
-        // falling drops land in the first open top they pass, or go down the sink
+        // falling drops land in the first open top they pass, or go down the sink, wetting each sheet of blotting
+        // paper they pass in front of on the way, once (see wet)
         this.falling = this.falling.filter((d) => {
           const from = d.y;
           d.vy += GRAVITY * step;
           d.y -= d.vy * step;
           const m = mouthBelow(d.trail ? mouths : catching, { x: d.x, y: from, z: d.z });
           const lands = !!m && m.y >= d.y;
+          const ground = groundAt(d.x, d.z);
+          const fresh = d.wet ? sheets.filter((w) => !d.wet!.has(w.v)) : sheets;
+          for (const v of this.wet(fresh, d.x, from, Math.max(lands ? m!.y : d.y, ground), d.v)) (d.wet ??= new Set()).add(v);
           if (lands) {
             this.fill(m!.v, d.v);
             this.landed.push({ x: d.x, y: m!.y, z: d.z });
           }
-          return !lands && d.y > groundAt(d.x, d.z);
+          return !lands && d.y > ground;
         });
         for (const v of vessels) {
           let lag = this.lags.get(v);
@@ -2335,21 +2447,6 @@ export class GameEngine {
         t.streaming.fill(false);
       }
       return;
-    }
-
-    // an analyzer hums quietly while it has something to read, on sim time, so silent while paused
-    for (const t of this.tools) {
-      if (t.kind !== 'analyzer' || !t.reading || this.rumbles.has(t)) continue;
-      this.rumbles.set(t, rumble(this.hear(this.machineAt(t))));
-    }
-    for (const [t, r] of this.rumbles) {
-      if (!this.tools.includes(t) || !t.reading) {
-        r.stop(); // done, put away, or the lab was replaced
-        this.rumbles.delete(t);
-        continue;
-      }
-      r.place(this.hear(this.machineAt(t)));
-      r.level(simDt > 0 ? ANALYZER_HUM : 0);
     }
 
     // the station's diverter goes by sim time too: a clunk as it swings
@@ -2509,7 +2606,10 @@ export class GameEngine {
       if (gap < SETTLE) q = { ...q, y: q.y - gap };
     }
     if (h.kind === 'hose') q = docked(q, this.tools.filter((t) => !('tool' in h.h.on && h.h.on.tool === t)));
-    if (!scale) q = this.magnet(h, q);
+    // a sheet of shadow paper let go of over the shadow lamp's pane goes into the slot behind it (see slotted)
+    const slot = h.kind === 'tool' && h.t.kind === 'sheet' && inSlot(slotted(h.t, p, this.tools));
+    if (slot) q = { ...SHEET_SLOT };
+    else if (!scale) q = this.magnet(h, q);
     const why = this.blocked(h, q);
     if (why) return { pose: p, rest: null, why };
     const follow = this.followRests(h, q);
@@ -2619,10 +2719,10 @@ export class GameEngine {
       });
     for (const { at, v } of this.spills.values())
       if (v.N > TRACE) streams.push({ from: at, toY: this.landsAt(at, mouths), fluid: v, flow: volume(v) / (MAX_FLOW * this.spillTime) });
-    for (const { fa, from, m } of this.faucetFlows) streams.push({ from, toY: m.y, fluid: fa.output, flow: FILL_RATE / CAP });
+    for (const { fa, from } of this.faucetFlows) streams.push({ from, toY: this.landsAt(from, mouths), fluid: fa.output, flow: FILL_RATE / CAP });
     const h = this.held;
     if (this.pour && h?.kind === 'flask' && h.f.N > TRACE)
-      streams.push({ from: this.pour.from, toY: this.pour.into?.y ?? groundAt(this.pour.from.x, this.pour.from.z), fluid: h.f, flow: POUR_RATE / CAP });
+      streams.push({ from: this.pour.from, toY: this.landsAt(this.pour.from, mouths), fluid: h.f, flow: POUR_RATE / CAP });
     const drops: Frame['drops'][number][] = [];
     for (const t of this.tools) t.drops.forEach((v, k) => drops.push({ at: this.outletAt(t, k), v, hanging: true }));
     for (const d of this.falling) drops.push({ at: d, v: d.v, hanging: false });
@@ -2640,7 +2740,7 @@ export class GameEngine {
       tarePress: this.tarePress, hot: this.hot(), bad: !!h && !pl?.rest && !this.intoCabinet(), dt, clock: this.clock,
       energies: BOND_KEYS.map((k) => this.chem.params.bonds[k].E), alarmsOff: this.alarmsOff,
       airlock: this.airlockLook(),
-      guides: this.guides(pl), arms: this.arms(),
+      guides: this.guides(pl), arms: this.arms(), held: this.heldObject(),
     });
   }
 
@@ -2722,7 +2822,10 @@ export class GameEngine {
     }
     if (h) {
       const ok = !!this.placed?.rest;
-      const how = h.kind === 'hose' ? 'leave the hose’s end here' : 'leave it here';
+      const how =
+        h.kind === 'hose' ? 'leave the hose’s end here'
+        : ok && h.kind === 'tool' && h.t.kind === 'sheet' && inSlot(this.placed!.pose) ? 'slot it into the lamp'
+        : 'leave it here';
       // a button pointed at takes the click
       if (this.intoCabinet()) add(['LMB'], 'put it in the cabinet');
       else if (!this.onButton()) add(['LMB'], ok ? how : `${how}: ${(this.placed?.why ?? 'no room').toLowerCase()}`, !ok);
@@ -2734,7 +2837,8 @@ export class GameEngine {
       if (this.valveGrabbed()) add(['Drag'], 'turn the valve');
       add([WHEEL_KEYS.join(', ')], 'hold to grab equipment');
     }
-    if (this.pressable()) add(['LMB'], 'press it');
+    if (p?.kind === 'tool' && p.part === 'button') add(['LMB'], p.t.lit ? 'put the lamp out' : 'light the lamp');
+    else if (this.pressable()) add(['LMB'], 'press it');
     const m = h || this.valveGrabbed() ? null : this.mountAimed();
     if (m) add(['LMB'], this.hoseOn(m) ? 'take hold of its hose' : 'pull out its hose');
     else if (!h && p?.kind === 'hose') add(['LMB'], 'take hold of it');
@@ -2744,6 +2848,10 @@ export class GameEngine {
     }
     const id = this.targetNote();
     if (id) add(['Enter'], this.god && /^(f\d+|t\d+\.\d+)$/.test(id) ? 'edit it (god mode)' : 'write a note about it');
+    const nose = this.sniffAim();
+    if (this.saying(performance.now())) add(['F'], 'stop sniffing');
+    else if (nose === 'sealed') add(['F'], 'sniff it: it’s sealed', true);
+    else if (nose) add(['F'], h?.kind === 'flask' && nose === h.f ? 'sniff what’s in hand' : 'sniff it', this.handBusy());
     if (this.canNap()) add(['N'], 'nap');
     if (this.wake === 'open' && !h) add(['P'], 'get into the cryopod');
     if (!h && this.history.canUndo) add([MOD, 'Z'], 'undo');
@@ -2763,7 +2871,7 @@ export class GameEngine {
   private onButton(): boolean {
     const p = this.target;
     return (
-      (p?.kind === 'scale' && p.part === 'tare') ||
+      (p?.kind === 'scale' && p.part === 'tare') || (p?.kind === 'tool' && p.part === 'button') ||
       p?.kind === 'alarm' || p?.kind === 'wake'
     );
   }
@@ -2876,8 +2984,6 @@ export class GameEngine {
    */
   private fallAsleep(): void {
     this.water.update(0.1, [], new Map());
-    for (const r of this.rumbles.values()) r.stop();
-    this.rumbles.clear();
     for (const d of this.diverters.values()) d.stop();
     this.diverters.clear();
     this.changing?.sound.stop();
@@ -2928,6 +3034,12 @@ export class GameEngine {
       skip: (dt) => {
         this.clock += dt;
         this.station().steady += dt;
+        // (and the shadow lamp, if it's lit, shines on through it, for as long as its exposure has left; and a sheet
+        // of blotting paper that was still developing goes on developing)
+        for (const t of this.tools) {
+          if (t.kind === 'shadowlamp') t.shine(dt);
+          if (isBlotter(t.kind)) t.step(dt);
+        }
       },
     };
   }
@@ -3126,6 +3238,16 @@ export class GameEngine {
     return d && d.v === this.entered ? d : null;
   }
 
+  /**
+   * Tell the shadow lamp which sheet is in its slot, if any (see Tool.sheet), from where things are now. One in
+   * hand isn't in it, though it's still where it was picked up until it's moved.
+   */
+  private slotting(): void {
+    const h = this.held;
+    const sheet = sheetIn(this.tools, h?.kind === 'tool' ? h.t : null);
+    for (const t of this.tools) if (t.kind === 'shadowlamp') t.sheet = sheet;
+  }
+
   /** Whether fluid would leave a tool's spouts if it ran. */
   private wouldFlow(t: Tool): boolean {
     // the station's reservoir through its faucet, or its funnel through the diverter, unless its block is away
@@ -3142,8 +3264,92 @@ export class GameEngine {
     return { name: supply.name, litres: Math.floor(100 * litresOf(tanks[1].n[supply.species])) / 100, goalL: supply.goalL };
   }
 
+  /**
+   * What F would sniff: the flask or tank the pointer is on, if it's open on top (see mouths), or 'sealed' if it isn't,
+   * since nothing can be smelled through glass; or, with the pointer on neither, the flask in hand (though F does
+   * nothing while it's pouring: see handBusy). Null if there's nothing to sniff, as when the station's block is back
+   * in the wall.
+   */
+  private sniffAim(): Vessel | 'sealed' | null {
+    const p = this.target;
+    const v = p?.kind === 'flask' ? p.f : p?.kind === 'tool' && p.part === 'tank' && !p.t.away ? p.t.tanks[p.k] : null;
+    if (v) return this.open.some((m) => m.v === v) ? v : 'sealed';
+    return this.held?.kind === 'flask' ? this.held.f : null;
+  }
+
+  /** Whether what's held is being poured or let flow, with the right button: there's no sniffing meanwhile. */
+  private handBusy(): boolean {
+    return !!this.held && this.rightHeld;
+  }
+
+  /** Whether what the last sniff smelled of is still coming up, piece by piece (see said). */
+  private saying(now: number): boolean {
+    const s = this.smelled;
+    return !!this.sniffing || (!!s && s.cut === null && this.said(now) < s.script.length);
+  }
+
+  /**
+   * F: sniff what's in the vessel the pointer is on, or in the flask in hand (see sniffAim). Nothing moves: SNIFF_S
+   * later (as long as her head once took to lean in to the rim) she smells what's in it, as it is just then, by what
+   * it's made of and how warm it is, and says what she makes of it, a piece at a time, under where the pointer is now
+   * (see stepSniff). F again while she's still saying it cuts it short. It's her own doing, so it goes in real time,
+   * and works while the lab's paused. Not while what's in her hand is pouring or flowing.
+   */
+  private sniff(): void {
+    const now = performance.now();
+    if (this.saying(now)) {
+      this.endSniff(now);
+      return;
+    }
+    if (this.dozing() || inPod(this.wake) || this.turning || this.wheel) return;
+    const v = this.sniffAim();
+    if (!v) return;
+    if (v === 'sealed') {
+      this.say('It’s sealed');
+      return;
+    }
+    if (this.handBusy()) return;
+    const at = this.pointer ?? { x: this.viewW / 2, y: this.viewH / 2 };
+    this.smelled = null;
+    this.sniffing = { v, when: now + 1000 * SNIFF_S, at: { x: Math.max(120, Math.min(this.viewW - 120, at.x)), y: at.y } };
+  }
+
+  /** Cut a sniff short: she says no more of it than she has, which stays up as long as it would have. */
+  private endSniff(now: number): void {
+    this.sniffing = null;
+    const said = this.smelled;
+    if (!said || said.cut !== null) return;
+    said.cut = this.said(now);
+    if (!said.cut) this.smelled = null;
+    else if (said.cut < said.script.length) said.until = now + SMELL_MS;
+  }
+
+  /** How many pieces of what the last sniff smelled of have come up by real time `now` (see smelled). */
+  private said(now: number): number {
+    const s = this.smelled;
+    if (!s) return 0;
+    if (s.cut !== null) return s.cut;
+    let k = 0;
+    for (let t = s.from; k < s.script.length && (t += 1000 * s.script[k].wait) <= now; k++);
+    return k;
+  }
+
+  /**
+   * At real time `now`, a sniff on its way gets to the smell: she smells what's in the vessel then (see script), and
+   * what she says of it comes up on the display a piece at a time from then on, in real time, fading SMELL_MS after
+   * the last of it.
+   */
+  private stepSniff(now: number): void {
+    const s = this.sniffing;
+    if (!s || now < s.when) return;
+    this.sniffing = null;
+    const says = script(smell(s.v.n, temperature(s.v)));
+    this.smelled = { script: says, n: ++this.sniffs, from: now, cut: null, until: now + 1000 * span(says) + SMELL_MS, at: s.at };
+  }
+
   private hud(now: number): void {
     if (this.flash && now > this.flash.until) this.flash = null;
+    if (this.smelled && now > this.smelled.until) this.smelled = null;
     const h = this.held;
     const hud: Hud = {
       inPod: inPod(this.wake),
@@ -3177,6 +3383,13 @@ export class GameEngine {
       napping: this.dozing(),
       nap: this.canNap(),
       pod: this.wake === 'open',
+      smell: this.smelled && {
+        n: this.smelled.n,
+        lines: this.smelled.script.reduce<string[][]>((ls, f) => (f.line || !ls.length ? [...ls, [f.text]] : [...ls.slice(0, -1), [...ls[ls.length - 1], f.text]]), []),
+        shown: this.said(now),
+        out: now > this.smelled.until - SMELL_FADE_MS,
+        at: { ...this.smelled.at },
+      },
     };
     const key = JSON.stringify(hud);
     if (key === this.lastHud) return;

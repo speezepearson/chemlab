@@ -1,19 +1,18 @@
-import { openingOf, tankInside, tankNoteY, tankRect, valveLocal } from './bodies';
+import { TOOL_DEPTH, openingOf, tankInside, tankNoteY, tankRect, valveLocal } from './bodies';
 import { DELIVERY, TRACE } from './config';
 import { Vessel, fluidColor, fluidRGB, volume, type Flask } from './flask';
-import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
+import { FLASK_H, FLASK_OUTLINE, fillLevel, flaskRadius } from './flaskShape';
 import { SCALE_SHAPE, type Scale } from './scale';
 import {
-  board, CAPILLARY_X, cultureLook, drawAnalysis, drawBonds, drawColumn, drawCulture, drawDiverter, drawMeter, drawNeedle, drawScaleReading,
-  drawSpectroscope, drawStrip, drawThermometerScale, phosphor, printedCanvas, SEGMENT_COLORS, TAPE, tapeCanvas, wireColor, type Board,
-  type CultureLook,
+  board, CAPILLARY_X, drawBondPaper, drawColumn, drawDiverter, drawMeter, drawNeedle, drawScaleReading, drawSheet, drawSpectroscope, drawStrip,
+  drawTestPaper, drawThermometerScale, paperBoard, phosphor, printedCanvas, SEGMENT_COLORS, sheetBoard, TAPE, tapeCanvas, wireColor, type Board,
 } from './screens';
-import { bound, boundPts, circle, INK, LABEL_H, line, poly, rect, type Sketch } from './sketch';
+import { bound, boundPts, circle, INK, LABEL_H, line, poly, rect, type Deep, type Sketch } from './sketch';
 import { litresOf, type Supply } from './supply';
 import {
-  ANALYZER, BULB, changeoverAt, chuteY, clockText, COLUMN, DIVERTER_HOLD, FUNNEL_TIP, gaugeSegments, HEATER, HEATER_BOX, HEATER_CELLS,
+  BULB, changeoverAt, chuteY, clockText, COLUMN, DIVERTER_HOLD, FUNNEL_TIP, gaugeSegments, HEATER, HEATER_BOX, HEATER_CELLS,
   HEATER_TUBE, HELIX, INLINE_TOOLS, INSTRUMENT, isThermometer, levelIn, METER_BODY, SORTER_CHUTE, STATION, STATION_FUNNEL, STRIP, SUMP_TIP,
-  TANK_H, tankX, THERMOMETER, THERMOMETER_ROD, thermometerAt, type ThermometerKind, type Tool,
+  LAMP, SHEET, TANK_H, tankX, TEST_PAPER, THERMOMETER, THERMOMETER_ROD, thermometerAt, type ThermometerKind, type Tool,
 } from './tools';
 import type { Pick } from './view';
 
@@ -33,14 +32,13 @@ const DIAL = { ticks: 11.75, knob: 8, from: 1.5, to: 7 };
 
 /**
  * What the view keeps of a tool between frames: the boards its screens and printed parts are drawn on (see
- * screens.ts), made as it needs them, and a culture's cells as they've been seen to die.
+ * screens.ts), made as they're needed: a sheet of paper's face is its `screen`.
  */
 export interface ToolArt {
   screen?: Board;
   steady?: Board;
   diverter?: Board;
   needle?: Board;
-  culture?: CultureLook;
   /** The station's reservoir's name, printed for the supply it was last printed for. */
   plate?: { supply: Supply; c: HTMLCanvasElement };
 }
@@ -61,17 +59,14 @@ function trap(x: number, y0: number, y1: number, wTop: number, wBot: number): nu
 /** Everything a tool shows, in its own frame (the frame in force), at sim time `clock`. */
 export function drawTool(sk: Sketch, t: Tool, art: ToolArt, clock: number, energies: readonly number[]): void {
   if (t.shape.wall) return drawStation(sk, t, art, clock);
+  if (t.kind === 'shadowlamp') return drawLamp(sk, t);
+  if (t.shape.pinned) return drawPaper(sk, t, art);
   const sh = t.shape;
   const pk = (part: 'body' | 'tank' | 'valve' | 'spout', k = 0): Pick => ({ kind: 'tool', t, part, k });
   const body = pk('body');
   const TH = sh.tankH ?? TANK_H;
   const floor = TH + (sh.sump?.h ?? 0);
 
-  // behind the glass: a culture's dark backing
-  if (t.kind === 'culture') {
-    const r = tankRect(t, 0);
-    sk.box(r.x0 - 2.5, r.x1 + 2.5, r.y0, r.y1 + 2.5, INK.dark, body, 0.6);
-  }
   // the pipes, from the tanks down to the spouts
   if (t.kind === 'exchanger')
     sh.tanks.forEach((tk, k) => {
@@ -103,17 +98,11 @@ export function drawTool(sk: Sketch, t: Tool, art: ToolArt, clock: number, energ
     const { body: b, inY } = INSTRUMENT;
     sk.pipe([[0, TH], [0, sh.spoutY - 4]], 2, body);
     if (t.kind !== 'meter') sk.pipe([[0, inY], [b.x0 + 2, inY]], 1.3, body);
-    if (t.kind === 'analyzer') {
-      const x = sh.spouts[1];
-      sk.pipe([[b.x1 - 2, ANALYZER.wasteY], [x, ANALYZER.wasteY], [x, sh.spoutY - 4]], 2, body);
-    }
   } else if (sh.neck) sh.neck.bodies.forEach((bx, k) => sk.pipe([[bx, floor], [bx, floor + 4], [sh.spouts[k], floor + 4], [sh.spouts[k], sh.spoutY - 4]], 2, body));
-  else if (t.kind === 'dish') sk.box(-12, 12, TH + 0.6, sh.box.y1, INK.dark, body, 1);
   else if (t.kind === 'column') {
     sk.pipe([[0, TH], [0, COLUMN.tube.y0]], 2, body);
     sk.pipe([[0, COLUMN.tube.y1], [0, sh.spoutY - 4]], 2, body);
-  } else if (t.kind === 'culture') sk.pipe([[0, floor + 2.5], [0, sh.spoutY - 4]], 2, body);
-  else if (t.kind !== 'strip' && !isThermometer(t.kind)) sk.pipe([[0, floor], [0, sh.spoutY - 4]], 2, body);
+  } else if (t.kind !== 'strip' && !isThermometer(t.kind)) sk.pipe([[0, floor], [0, sh.spoutY - 4]], 2, body);
 
   // what's behind the tanks' fronts, or part of the tool's frame
   if (t.kind === 'dilatometer') bulbsHeating(sk, t, false);
@@ -125,7 +114,6 @@ export function drawTool(sk: Sketch, t: Tool, art: ToolArt, clock: number, energ
 
   // the tanks, each with its fluid
   t.tanks.forEach((v, k) => tank(sk, t, k, v));
-  if (t.kind === 'culture') culture(sk, t, art, clock);
   if (t.kind === 'dilatometer') bulbsHeating(sk, t, true);
   if (t.kind === 'exchanger') helix(sk, t);
   if (INLINE_TOOLS.includes(t.kind)) {
@@ -195,6 +183,9 @@ function tank(sk: Sketch, t: Tool, k: number, v: Vessel): void {
   if (sh.neck) return bulb(sk, t, k, v, top, pick);
   let inside: Path2D;
   let outline: Path2D;
+  // how deep it is front to back, for its fluid's shadow (see Sketch.shade): a box as deep as its tanks, a funnel round
+  // and narrowing, and anything else round
+  let deep: Deep | undefined = sh.round || sh.cup ? undefined : { flat: TOOL_DEPTH[t.kind].tank };
   if (sh.cup) {
     const pts = [[o.x0, o.y], [r.x0, r.y0], [r.x0, r.y1], [r.x1, r.y1], [r.x1, r.y0], [o.x1, o.y]];
     inside = poly(pts);
@@ -203,6 +194,8 @@ function tank(sk: Sketch, t: Tool, k: number, v: Vessel): void {
     const pts = [[r.x0, r.y0], [cx - FUNNEL_TIP / 2, r.y1], [cx + FUNNEL_TIP / 2, r.y1], [r.x1, r.y0]];
     inside = poly(pts);
     outline = line(pts);
+    const [w0, w1] = [(r.x1 - r.x0) / 2, FUNNEL_TIP / 2];
+    deep = { round: (y) => w0 + ((w1 - w0) * (y - r.y0)) / Math.max(1, r.y1 - r.y0) };
   } else {
     const s = sh.sump;
     const pts = s
@@ -213,12 +206,12 @@ function tank(sk: Sketch, t: Tool, k: number, v: Vessel): void {
   }
   const x0 = Math.min(r.x0, o.x0) - 1;
   const x1 = Math.max(r.x1, o.x1) + 1;
-  sk.fluid(inside, v, top, bottom + 1, x0, x1);
+  sk.fluid(inside, v, top, bottom + 1, x0, x1, deep);
   sk.glass(inside, pick, v, outline);
   // a thin metal rim round the top of a box or a cylinder
   if (!sh.cup && !sh.funnel) sk.box(r.x0 - 1.2, r.x1 + 1.2, -0.8, 0.8, INK.pipe, pick, 0.6, INK.pipeEdge);
   // the big tank's ten faint lines, and the pipette's ten marks up its left wall
-  if (t.kind === 'tank')
+  if (t.kind === 'tank' && !sk.shade)
     for (let i = 1; i <= 10; i++) {
       const y = bottom - levelIn(pieces, i / 10);
       sk.stroke(line([[r.x0, y], [r.x1, y]]), 'rgba(214, 236, 242, 0.45)', sk.w(0.6, 1));
@@ -252,8 +245,10 @@ function bulb(sk: Sketch, t: Tool, k: number, v: Vessel, top: number, pick: Pick
   // the inlet's funnel and the thin tube from it
   const { h: ih, y: iy } = neck.inlet;
   const iw = sh.tanks[k].x1 - sh.tanks[k].x0;
-  sk.stroke(line([[ix, iy + ih], [nx, -neck.h]]), INK.glassShade, 3.6, pick);
-  sk.stroke(line([[ix, iy + ih], [nx, -neck.h]]), 'rgba(236, 248, 251, 0.7)', 2.2);
+  if (!sk.shade) {
+    sk.stroke(line([[ix, iy + ih], [nx, -neck.h]]), INK.glassShade, 3.6, pick);
+    sk.stroke(line([[ix, iy + ih], [nx, -neck.h]]), 'rgba(236, 248, 251, 0.7)', 2.2);
+  }
   const funnel = trap(ix, iy, iy + ih, iw, 3);
   sk.glass(poly(funnel), pick, v, line(funnel));
   sk.fluid(inside, v, top, H + s.h + 1, bx - rr - 1, bx + rr + 1);
@@ -329,7 +324,7 @@ function wire(sk: Sketch, dialAt: number, pts: readonly [number, number, number]
   }
   const { ctx } = sk;
   const glow = Math.min(1, 1.3 * dialAt);
-  if (glow > 0.05) {
+  if (glow > 0.05 && !sk.shade) {
     ctx.shadowColor = color;
     ctx.shadowBlur = 1.5 * glow * ctx.getTransform().a;
   }
@@ -358,8 +353,8 @@ function helix(sk: Sketch, t: Tool): void {
       const tank = t.tanks[k];
       const from = tank.N > TRACE ? tank : out;
       const g = sk.ctx.createLinearGradient(pts[0][0], 0, pts[n][0], 0);
-      g.addColorStop(0, fluidColor(from) === 'transparent' ? fluidColor(out) : fluidColor(from));
-      g.addColorStop(1, fluidColor(out));
+      g.addColorStop(0, fluidColor(from) === 'transparent' ? sk.ink(out, 3.6) : sk.ink(from, 3.6));
+      g.addColorStop(1, sk.ink(out, 3.6));
       paint = g;
     }
     return { pts, paint };
@@ -378,8 +373,10 @@ function helix(sk: Sketch, t: Tool): void {
         p.lineTo(pts[i][0], pts[i][1]);
         on = true;
       }
-      sk.stroke(p, INK.glassShade, 6.8, body);
-      sk.stroke(p, 'rgba(232, 246, 250, 0.55)', 5.6);
+      if (!sk.shade) {
+        sk.stroke(p, INK.glassShade, 6.8, body);
+        sk.stroke(p, 'rgba(232, 246, 250, 0.55)', 5.6);
+      }
       if (paint) sk.stroke(p, paint, 3.6);
     }
 }
@@ -400,7 +397,7 @@ function chute(sk: Sketch, t: Tool): void {
     for (const v of t.out.slice(k)) if (v) on.addFrom(v, volume(v));
     if (on.N <= 0) continue;
     const [a, b] = [stops[k], stops[k + 1]];
-    sk.stroke(line([[a, chuteY(a) - 1], [b, chuteY(b) - 1]]), fluidColor(on), sk.w(2, 2));
+    sk.stroke(line([[a, chuteY(a) - 1], [b, chuteY(b) - 1]]), sk.ink(on, 2 * HELIX.r), sk.w(2, 2));
   }
   const floor = poly([[c.x0, c.y0], [c.x1, c.y1], [c.x1, c.y1 + 3], [c.x0, c.y0 + 3]]);
   sk.fill(floor, INK.pipe, body);
@@ -427,7 +424,7 @@ function heater(sk: Sketch, t: Tool): void {
     const a = c === 0 ? x0 - r : x0 + c * w;
     const b = c === HEATER_CELLS - 1 ? x1 + r : x0 + (c + 1) * w;
     const d = Math.max(0.3, 2 * r * Math.min(1, volume(v) / full));
-    sk.ctx.fillStyle = fluidColor(v);
+    sk.ctx.fillStyle = sk.ink(v, 2 * r);
     sk.ctx.fillRect(a, y + r - d, b - a + 0.2, d);
   });
   sk.ctx.restore();
@@ -449,7 +446,7 @@ function thread(sk: Sketch, t: Tool, h: number): void {
   const through = new Vessel(Infinity);
   for (const v of t.out) if (v) through.addFrom(v, volume(v));
   if (through.N <= 0 || !fluidRGB(through)) return;
-  sk.stroke(line([[0, 0], [0, h]]), fluidColor(through), 2.4);
+  sk.stroke(line([[0, 0], [0, h]]), sk.ink(through, 2.4), 2.4);
 }
 
 /** An inline instrument's cabinet beside its tube, with its old green-on-black screen (see screens.ts). */
@@ -465,9 +462,7 @@ function instrument(sk: Sketch, t: Tool, art: ToolArt, energies: readonly number
     sc.ctx.fillStyle = '#000';
     sc.ctx.fillRect(0, 0, sc.canvas.width, sc.canvas.height);
   }
-  if (t.kind === 'analyzer') drawAnalysis(sc, t);
   if (t.kind === 'spectroscope') drawSpectroscope(sc, t, energies);
-  if (t.kind === 'visualizer') drawBonds(sc, t);
   sk.image(sc.canvas, s.x0, s.x1, s.y0, s.y1, body);
 }
 
@@ -496,7 +491,7 @@ function thermometer(sk: Sketch, t: Tool): void {
   sk.image(sc.canvas, -b.w / 2, b.w / 2, b.y0, b.y1);
   const capTop = foot - THERMOMETER.burst * (foot - top);
   const capillary = 'rgba(214, 236, 242, 0.85)';
-  sk.stroke(line([[CAPILLARY_X, capTop], [CAPILLARY_X, t.broken ? snap : bl.y0 + 1]]), capillary, 1.1);
+  if (!sk.shade) sk.stroke(line([[CAPILLARY_X, capTop], [CAPILLARY_X, t.broken ? snap : bl.y0 + 1]]), capillary, 1.1);
   const spirit = '#c92f27';
   if (!t.broken) {
     const T = t.reads;
@@ -570,15 +565,77 @@ function columnBoard(t: Tool): Board {
   return sc;
 }
 
-/** A sleeper culture's cells over its plate's front, and the frame round the plate (see drawCulture). */
-function culture(sk: Sketch, t: Tool, art: ToolArt, clock: number): void {
-  const r = tankRect(t, 0);
+/**
+ * A sheet pinned to the wall (see ToolShape.pinned), face on: a sheet of test paper or bond paper, its face as far as
+ * what it shows has come up (see drawTestPaper and drawBondPaper), held up by a pin in each top corner; or a sheet of
+ * shadow paper, its image (see drawSheet) under the dark bar clipped along its top, which pins it. All of it is hit
+ * as it.
+ */
+function drawPaper(sk: Sketch, t: Tool, art: ToolArt): void {
   const body: Pick = { kind: 'tool', t, part: 'body', k: 0 };
-  const sc = (art.screen ??= board(r.x1 - r.x0, r.y1 - r.y0, 10));
-  drawCulture(sc, t, r, (art.culture ??= cultureLook()), clock);
-  sk.ctx.drawImage(sc.canvas, r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
-  for (const x of [r.x0 - 2.5, r.x1 + 0.5]) sk.box(x, x + 2, r.y0, r.y1 + 2.5, INK.dark, body, 0.6);
-  sk.box(r.x0 - 2.5, r.x1 + 2.5, r.y1 + 0.5, r.y1 + 2.5, INK.dark, body, 0.6);
+  const edge = 'rgba(120, 112, 92, 0.6)';
+  if (t.kind === 'sheet') {
+    const { side, top, clip } = SHEET;
+    const sc = (art.screen ??= sheetBoard());
+    drawSheet(sc, t);
+    sk.image(sc.canvas, -side / 2, side / 2, top, top + side, body);
+    sk.stroke(rect(-side / 2, side / 2, top, top + side), edge, sk.px(1));
+    const b = t.shape.box;
+    sk.box(b.x0, b.x1, 0, clip.h, INK.dark, body, 1.2, INK.darkEdge);
+  } else {
+    const { w, h } = TEST_PAPER;
+    const sc = (art.screen ??= paperBoard());
+    if (t.kind === 'testpaper') drawTestPaper(sc, t);
+    else drawBondPaper(sc, t);
+    sk.image(sc.canvas, -w / 2, w / 2, 0, h, body);
+    sk.stroke(rect(-w / 2, w / 2, 0, h), edge, sk.px(1));
+    for (const x of [-w / 2 + 4, w / 2 - 4]) {
+      sk.fill(circle(x, 4, 1.6), '#9a3a32', body);
+      sk.fill(circle(x - 0.5, 3.5, 0.5), 'rgba(255, 255, 255, 0.6)');
+    }
+  }
+  sk.text(t.note, 0, -8);
+}
+
+/** The colors of the shadow lamp's frame: its steel, its edge, the glow of its pane while it's lit, and its button's. */
+const LAMP_INK = { frame: '#3c4447', edge: '#20262a', glow: 'rgba(255, 244, 214, 0.22)', on: '#ffd27a', off: '#8a5a1c' };
+
+/**
+ * The shadow lamp's slot, behind its pane (see LAMP): dark, but for a sheet of shadow paper in it, which is drawn over
+ * this, and then the lamp's frame over that (see drawLamp).
+ */
+export function drawLampSlot(sk: Sketch, t: Tool): void {
+  const { pane } = LAMP;
+  sk.box(-pane.r, pane.r, pane.y, LAMP.h, INK.recess, { kind: 'tool', t, part: 'body', k: 0 });
+}
+
+/**
+ * The shadow lamp, built into the wall (see LAMP): a steel frame round its pane, and on the frame's right its dial
+ * (how long it shines) and its button, lit while the lamp is; the pane's square washed with its light while it
+ * shines. The slot behind the pane, and the sheet in it, are drawn before this (see drawLampSlot). Nothing is
+ * written on it.
+ */
+function drawLamp(sk: Sketch, t: Tool): void {
+  const body: Pick = { kind: 'tool', t, part: 'body', k: 0 };
+  const { pane, button: bt } = LAMP;
+  const b = t.shape.box;
+  const frame = new Path2D();
+  frame.addPath(rect(b.x0, b.x1, b.y0, b.y1, 3));
+  frame.addPath(rect(-pane.r, pane.r, pane.y, LAMP.h + 1));
+  sk.ctx.fillStyle = LAMP_INK.frame;
+  sk.ctx.fill(frame, 'evenodd');
+  // (hit only on the frame itself, not on its hole, so the sheet behind it can be taken out)
+  for (const [x0, x1, y0, y1] of [[b.x0, -pane.r, b.y0, b.y1], [pane.r, b.x1, b.y0, b.y1], [-pane.r, pane.r, b.y0, pane.y]])
+    sk.hit(rect(x0, x1, y0, y1), body);
+  sk.stroke(rect(b.x0, b.x1, b.y0, b.y1 + 4, 3), LAMP_INK.edge, sk.px(1));
+  sk.stroke(rect(-pane.r, pane.r, pane.y, LAMP.h + 4), LAMP_INK.edge, sk.w(1.2, 1));
+  if (t.lit) sk.box(-pane.r, pane.r, pane.y, LAMP.h, LAMP_INK.glow);
+  dial(sk, valveLocal(t, 0), t.valves[0], { kind: 'tool', t, part: 'valve', k: 0 });
+  const button: Pick = { kind: 'tool', t, part: 'button', k: 0 };
+  sk.fill(circle(bt.x, bt.y, bt.r + 2), LAMP_INK.edge, button);
+  sk.fill(circle(bt.x, bt.y, bt.r), t.lit ? LAMP_INK.on : LAMP_INK.off, button);
+  sk.fill(circle(bt.x - bt.r * 0.35, bt.y - bt.r * 0.35, bt.r * 0.3), t.lit ? 'rgba(255, 252, 236, 0.9)' : 'rgba(255, 220, 160, 0.25)');
+  sk.text(t.note, (b.x0 + b.x1) / 2, b.y0 - 8);
 }
 
 /**
@@ -766,7 +823,7 @@ export function drawFlask(sk: Sketch, f: Flask): void {
     ctx.rotate(f.tilt);
     ctx.clip(FLASK_INSIDE);
     ctx.rotate(-f.tilt);
-    sk.fluid(rect(-90, 90, -90, 90), f, top, 90, -90, 90);
+    sk.fluid(rect(-90, 90, -90, 90), f, top, 90, -90, 90, { round: flaskRadius });
     ctx.restore();
   }
   sk.frame(0, 0, () => sk.glass(FLASK_INSIDE, pick, f, FLASK_GLASS), f.tilt);

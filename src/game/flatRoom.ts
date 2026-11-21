@@ -1,7 +1,7 @@
 import { NOZZLE_H } from './bodies';
 import { CABINET, CABINET_BUILD, type Stock, type Stocked } from './cabinet';
 import { CAP } from './config';
-import { Flask, fluidAlpha, fluidColor, fluidRGB } from './flask';
+import { Flask, fluidAlpha, fluidRGB } from './flask';
 import { drawFlask, drawScale, drawTool, scaleDisplay, type ToolArt } from './flatTools';
 import { STATION_POSE } from './presets';
 import { Scale } from './scale';
@@ -312,9 +312,12 @@ export function drawHoses(sk: Sketch, hoses: Frame['hoses']): void {
     const p = new Path2D();
     p.moveTo(ax, ay);
     p.bezierCurveTo(ax, ay + 70, bx, by - 70, bx, by);
-    sk.stroke(p, 'rgba(70, 82, 78, 0.55)', 7.6);
-    sk.stroke(p, 'rgba(160, 172, 167, 0.55)', 6.2);
-    if (fluid && fluid.N > 0 && fluidRGB(fluid)) sk.stroke(p, fluidColor(fluid), 4);
+    // (its tube is see-through, and casts no shadow; what's in it does, as fluid does)
+    if (!sk.shade) {
+      sk.stroke(p, 'rgba(70, 82, 78, 0.55)', 7.6);
+      sk.stroke(p, 'rgba(160, 172, 167, 0.55)', 6.2);
+    }
+    if (fluid && fluid.N > 0 && fluidRGB(fluid)) sk.stroke(p, sk.ink(fluid, 4), 4);
   }
 }
 
@@ -338,13 +341,13 @@ export function drawFlows(sk: Sketch, fr: Frame): void {
   for (const s of fr.streams) {
     if (!fluidRGB(s.fluid)) continue;
     const w = STREAM_WIDTH * Math.sqrt(s.flow);
-    sk.ctx.fillStyle = fluidColor(s.fluid);
+    sk.ctx.fillStyle = sk.ink(s.fluid, w);
     sk.ctx.fillRect(s.from.x - w / 2, -s.from.y, w, Math.max(0.1, s.from.y - s.toY));
   }
   for (const d of fr.drops) {
     if (d.v.N <= 0 || !fluidRGB(d.v)) continue;
     const r = DROP_R * Math.cbrt(d.v.N / DROP_R_ATOMS);
-    sk.fill(circle(d.at.x, -(d.hanging ? d.at.y - r : d.at.y), r), fluidColor(d.v));
+    sk.fill(circle(d.at.x, -(d.hanging ? d.at.y - r : d.at.y), r), sk.ink(d.v, 2 * r));
   }
 }
 

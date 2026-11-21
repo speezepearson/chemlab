@@ -2,7 +2,7 @@ import { FLASK_CENTER, FLASK_R, scaleBox, toolBox } from './bodies';
 import { FLASK_H } from './flaskShape';
 import { Scale } from './scale';
 import { CABINET_AREA, type Pose, type Vec3 } from './space';
-import { Tool, type ToolKind } from './tools';
+import { SHAPES, SHEET, Tool, type ToolKind } from './tools';
 
 /**
  * The equipment cabinet: open steel shelving against the back wall (CABINET_AREA), holding the lab's stock of
@@ -12,10 +12,10 @@ import { Tool, type ToolKind } from './tools';
  */
 
 /** What the cabinet stocks: every kind of thing the equipment wheels make. */
-export type Stocked = 'flask' | 'scale' | Exclude<ToolKind, 'receptacle' | 'analyzer' | 'spectroscope' | 'visualizer'>;
+export type Stocked = 'flask' | 'scale' | Exclude<ToolKind, 'receptacle' | 'spectroscope' | 'shadowlamp'>;
 
 /** The consumables: stacked deep in the cabinet, more than anyone could use, so taking one never empties it. */
-export const ENDLESS: readonly Stocked[] = ['thermometer', 'thermometerWide', 'strip', 'culture'];
+export const ENDLESS: readonly Stocked[] = ['thermometer', 'thermometerWide', 'strip', 'sheet', 'testpaper', 'bondpaper'];
 
 /** Whether the cabinet's supply of a kind never runs out. */
 export const endless = (k: Stocked) => ENDLESS.includes(k);
@@ -23,9 +23,9 @@ export const endless = (k: Stocked) => ENDLESS.includes(k);
 /** How many of each kind the cabinet holds, full: thirty flasks, and eight of everything else (see ENDLESS). */
 export const STOCK: Record<Stocked, number> = {
   flask: 30, scale: 8, dispenser: 8, pipette: 8, exchanger: 8, separator: 8, splitter: 8, multiplexer: 8, sorter: 8,
-  heater: 8, tank: 8, meter: 8, dilatometer: 8, column: 8, dish: 8,
+  heater: 8, tank: 8, meter: 8, dilatometer: 8, column: 8,
   // drawn as this many, but endless
-  thermometer: 16, thermometerWide: 16, strip: 16, culture: 8,
+  thermometer: 16, thermometerWide: 16, strip: 16, sheet: 16, testpaper: 16, bondpaper: 16,
 };
 
 /**
@@ -59,12 +59,18 @@ const BAYS: readonly (readonly (readonly Compartment[])[])[] = [
     [{ kind: 'exchanger', cols: 2, high: 1, deep: 4 }],
     [{ kind: 'splitter', cols: 1, high: 2, deep: 4 }, { kind: 'pipette', cols: 2, high: 1, deep: 4 }],
     [{ kind: 'dilatometer', cols: 2, high: 1, deep: 4 }],
-    [{ kind: 'column', cols: 1, high: 1, deep: 8 }, { kind: 'meter', cols: 1, high: 1, deep: 8 }, { kind: 'dish', cols: 1, high: 2, deep: 4 }],
+    [{ kind: 'column', cols: 1, high: 1, deep: 8 }, { kind: 'meter', cols: 1, high: 1, deep: 8 }],
   ],
   [
-    [{ kind: 'dispenser', cols: 2, high: 1, deep: 4 }, { kind: 'culture', cols: 2, high: 1, deep: 4 }],
-    [{ kind: 'strip', cols: 8, high: 1, deep: 2 }],
+    [{ kind: 'dispenser', cols: 2, high: 1, deep: 4 }],
+    // (the sheets of test paper in one stack, standing on edge one behind another, and the sheets of bond paper in
+    // another)
+    [
+      { kind: 'strip', cols: 8, high: 1, deep: 2 }, { kind: 'testpaper', cols: 1, high: 1, deep: 16 },
+      { kind: 'bondpaper', cols: 1, high: 1, deep: 16 },
+    ],
     [{ kind: 'thermometer', cols: 8, high: 1, deep: 2 }, { kind: 'thermometerWide', cols: 8, high: 1, deep: 2 }],
+    [{ kind: 'sheet', cols: 1, high: 1, deep: 16 }],
   ],
 ];
 
@@ -80,6 +86,8 @@ export const CABINET_BUILD = { base: 120, side: 8, board: 4, clear: 10, back: 4,
 function sizeOf(k: Stocked): { w: number; h: number; d: number; c: Vec3 } {
   if (k === 'flask') return { w: 2 * FLASK_R, h: FLASK_H, d: 2 * FLASK_R, c: FLASK_CENTER };
   const b = k === 'scale' ? scaleBox(new Scale()) : toolBox(new Tool(k, 0));
+  // a sheet of paper is as thick as its bar, though its box reaches back to the wall it's pinned to (see PIN_Z)
+  if (k !== 'scale' && SHAPES[k].pinned) return { w: 2 * b.hx, h: 2 * b.hy, d: SHEET.clip.d, c: { x: b.x, y: b.y, z: 0 } };
   return { w: 2 * b.hx, h: 2 * b.hy, d: 2 * b.hz, c: { x: b.x, y: b.y, z: b.z } };
 }
 

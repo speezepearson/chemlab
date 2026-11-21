@@ -1,6 +1,7 @@
 import type { Fluid } from '../chem/reactions';
 import { TRACE } from './config';
 import { fluidAlpha, fluidColor, fluidRGB } from './flask';
+import { lampLight, ringShare } from './tools';
 import type { Pick } from './view';
 
 /**
@@ -90,6 +91,13 @@ export const FLASH = { hz: 1.5, lo: 0.05, hi: 0.22 };
 /** Height of each line of a label or note, in world units. */
 export const LABEL_H = 10;
 
+/**
+ * How deep a body of fluid is front to back, for how much of the shadow lamp's light it lets through (see
+ * Sketch.shade): `flat`, the same all across, as in a box of a tank; or `round`, a round body whose radius at each
+ * height y (y down, in the frame in force) it gives, as in a flask, so that it's deepest down its middle.
+ */
+export type Deep = { flat: number } | { round: (y: number) => number };
+
 export class Sketch {
   readonly regions: Region[] = [];
   /**
@@ -97,6 +105,12 @@ export class Sketch {
    * one in the lab would be, but it's all the one thing in its slot.
    */
   as: Pick | null = null;
+  /**
+   * Whether it's drawing what casts a shadow in the shadow lamp's light (see View.exposure), rather than how things
+   * look: then what's opaque is drawn as it is, of which only how opaque it is counts; glass, labels and notes not at
+   * all; and fluid as dark as it dims the light (see lampLight), by its share of rings and how deep it is.
+   */
+  shade = false;
   private inv: DOMMatrix;
 
   /**
@@ -185,6 +199,8 @@ export class Sketch {
 
   /** Glass in the shape of `p`: a faint fill and pale edges, flashing green while `v` is one of the targets. */
   glass(p: Path2D, pick?: Pick | null, v?: object, outline: Path2D = p): void {
+    // (glass casts no shadow)
+    if (this.shade) return;
     this.fill(p, INK.glass, pick);
     if (v && this.targets.has(v) && this.flash > 0) this.fill(p, `rgba(${INK.flash}, ${this.flash})`);
     this.stroke(outline, INK.glassShade, this.w(1.4, 1.6));
@@ -196,8 +212,9 @@ export class Sketch {
    * across x0..x1: its color, as see-through as it is, with a bright line along its surface where it's clear, so even
    * clear solvent reads as fluid with a surface. Nothing for a trace.
    */
-  fluid(inside: Path2D, f: Fluid, top: number, bottom: number, x0: number, x1: number): void {
+  fluid(inside: Path2D, f: Fluid, top: number, bottom: number, x0: number, x1: number, deep?: Deep): void {
     if (f.N <= TRACE || top >= bottom) return;
+    if (this.shade) return this.shadeFluid(inside, f, top, bottom, x0, x1, deep);
     const { ctx } = this;
     ctx.save();
     ctx.clip(inside);
@@ -222,11 +239,54 @@ export class Sketch {
   }
 
   /**
+   * Fluid's shadow (see shade): as dark as it dims the lamp's light, through as deep a body of it as `deep` says, or,
+   * if that's left out, a round one as wide as x0..x1.
+   */
+  private shadeFluid(inside: Path2D, f: Fluid, top: number, bottom: number, x0: number, x1: number, deep?: Deep): void {
+    const ring = ringShare(f);
+    if (ring <= 0) return;
+    const { ctx } = this;
+    ctx.save();
+    ctx.clip(inside);
+    if (deep && 'flat' in deep) {
+      ctx.fillStyle = dimness(ring, deep.flat);
+      ctx.fillRect(x0, top, x1 - x0, bottom - top);
+    } else {
+      const cx = (x0 + x1) / 2;
+      const radius = deep && 'round' in deep ? deep.round : () => (x1 - x0) / 2;
+      // a band at a time, each as deep as a round body that wide is through each line of sight across it
+      const step = 1;
+      for (let y = top; y < bottom; y += step) {
+        const R = radius(y + step / 2);
+        if (!(R > 0)) continue;
+        const g = ctx.createLinearGradient(cx - R, 0, cx + R, 0);
+        for (let i = 0; i <= 8; i++) {
+          const u = -1 + i / 4;
+          g.addColorStop(i / 8, dimness(ring, 2 * R * Math.sqrt(Math.max(0, 1 - u * u))));
+        }
+        ctx.fillStyle = g;
+        ctx.fillRect(cx - R, y, 2 * R, step + 0.05);
+      }
+    }
+    ctx.restore();
+  }
+
+  /**
+   * What to paint fluid `f` with, `depth` deep front to back: its color; or, drawing what casts a shadow (see shade),
+   * as dark as it dims the lamp's light.
+   */
+  ink(f: Fluid, depth: number): string {
+    return this.shade ? dimness(ringShare(f), depth) : fluidColor(f);
+  }
+
+  /**
    * A label or note: lines of text centered on (x, y), LABEL_H tall each, dark with a pale halo so it reads over
    * whatever's behind it; or pale over a dark halo, if `light`. It's never hit.
    */
   text(lines: string | readonly string[], x: number, y: number, h = LABEL_H, light = false): void {
     const ls = typeof lines === 'string' ? [lines] : lines;
+    // (a label isn't a thing, and casts no shadow)
+    if (this.shade) return;
     if (!ls.length || (ls.length === 1 && !ls[0])) return;
     const { ctx } = this;
     ctx.font = `500 ${h * 0.8}px "Schibsted Grotesk", sans-serif`;
@@ -247,6 +307,11 @@ export class Sketch {
     this.ctx.drawImage(c, x0, y0, x1 - x0, y1 - y0);
     this.hit(rect(x0, x1, y0, y1), pick);
   }
+}
+
+/** Black, as opaque as fluid `depth` deep with `ring` of its molecules ringed takes the lamp's light away (see lampLight). */
+function dimness(ring: number, depth: number): string {
+  return `rgba(0, 0, 0, ${1 - lampLight(ring, depth)})`;
 }
 
 /** A box x0..x1 by y0..y1 as a path, its corners rounded by r. */

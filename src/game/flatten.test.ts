@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { HOME_W } from './config';
-import { faucetBox, faucetPipes, flaskBox, footAt, nozzleBox, scaleBox, tankMouth, toolBox } from './bodies';
+import { SHEET_SLOT, faucetBox, faucetPipes, flaskBox, footAt, inSlot, nozzleBox, scaleBox, tankMouth, toolBox } from './bodies';
+import { LAMP_POSE } from './presets';
 import { FAUCETS } from './faucets';
 import { FLASK_H } from './flaskShape';
 import { flatten, outletKey, plumbing, readLab, standing, type Lab } from './flatten';
@@ -78,7 +79,9 @@ function check(s: SaveState): { flat: SaveState; lab: Lab } {
   const hostOf = (id: number) => stands[id]?.in.match(/^tank (-?\d+)\./)?.[1];
   for (let i = 0; i < all.length; i++) {
     const a = all[i];
-    if (!a.name.startsWith('faucet')) {
+    // (a sheet of shadow paper in the lamp's slot reaches down behind the counter)
+    const slotted = a.name.includes('(sheet)') && inSlot(lab.tools.find((t) => a.name.startsWith(`tool ${t.id} `))!.pose);
+    if (!a.name.startsWith('faucet') && !slotted) {
       expect(a.box.x - a.box.hx, a.name).toBeGreaterThanOrEqual(BENCH.x0);
       expect(a.box.x + a.box.hx, a.name).toBeLessThanOrEqual(BENCH.x1);
       expect(a.box.y - a.box.hy, a.name).toBeGreaterThanOrEqual(LIFT - 1e-6);
@@ -109,6 +112,26 @@ function check(s: SaveState): { flat: SaveState; lab: Lab } {
 const nozzle = (lab: Lab, key: string) => lab.hoses.find((h) => outletKey(h.on) === key)?.outlet;
 
 describe('flatten', () => {
+  test("hangs a sheet of test paper or bond paper that lay on a counter on the wall, and puts the shadow lamp, and a sheet in its slot, where they always are", () => {
+    const s = room({
+      tools: [
+        tool('testpaper', 1, 300, 420.4, 950, Math.PI / 2), tool('bondpaper', 2, 1500, 420.4, 350),
+        // the lamp on its bench in the front left corner, a sheet in its slot facing it, and another on a stand
+        tool('shadowlamp', 3, -450, 520, 2750, Math.PI), tool('sheet', 4, -597.5, 534, 2750, Math.PI / 2), tool('sheet', 5, 900, 700, 300),
+      ],
+    });
+    const { lab } = check(s);
+    const of = (id: number) => lab.tools.find((t) => t.id === id)!;
+    expect(of(3).pose).toEqual(LAMP_POSE);
+    expect(of(4).pose).toEqual(SHEET_SLOT);
+    expect(inSlot(of(5).pose)).toBe(false);
+    for (const id of [1, 2, 5]) {
+      const b = toolBox(of(id));
+      expect(b.x - b.hx).toBeGreaterThanOrEqual(BENCH.x0);
+      expect(b.y - b.hy).toBeGreaterThanOrEqual(LIFT);
+    }
+  });
+
   test('leaves a save that is already on the wall as it is', () => {
     const s: SaveState = { ...room({}), wall: true };
     expect(flatten(s)).toBe(s);
@@ -183,8 +206,8 @@ describe('flatten', () => {
     const pose: Pose = { x: 1000, y: 800, z: 1800, yaw: Math.PI / 2 };
     const m = mouthOf('meter', pose);
     const s = room({
-      tools: [tool('dispenser', 1, 300, 900, 1500), tool('meter', 2, pose.x, pose.y, pose.z, pose.yaw), tool('analyzer', 3, 1500, 800, 1800)],
-      hoses: [hose({ tool: 1, spout: 0 }, { x: m.x, y: m.y + 1, z: m.z }), hose({ tool: 2, spout: 0 }, { ...mouthOf('analyzer', { x: 1500, y: 800, z: 1800, yaw: 0 }), y: mouthOf('analyzer', { x: 1500, y: 800, z: 1800, yaw: 0 }).y + 30 })],
+      tools: [tool('dispenser', 1, 300, 900, 1500), tool('meter', 2, pose.x, pose.y, pose.z, pose.yaw), tool('spectroscope', 3, 1500, 800, 1800)],
+      hoses: [hose({ tool: 1, spout: 0 }, { x: m.x, y: m.y + 1, z: m.z }), hose({ tool: 2, spout: 0 }, { ...mouthOf('spectroscope', { x: 1500, y: 800, z: 1800, yaw: 0 }), y: mouthOf('spectroscope', { x: 1500, y: 800, z: 1800, yaw: 0 }).y + 30 })],
     });
     const { lab } = check(s);
     const into = tankMouth(lab.tools.find((t) => t.id === 2)!, 0);
@@ -239,7 +262,7 @@ describe('flatten', () => {
   });
 
   test('hangs many tools without a spout over anything', () => {
-    const kinds: ToolKind[] = ['dispenser', 'separator', 'heater', 'sorter', 'tank', 'exchanger', 'splitter', 'multiplexer', 'dish', 'pipette', 'column', 'culture', 'dilatometer'];
+    const kinds: ToolKind[] = ['dispenser', 'separator', 'heater', 'sorter', 'tank', 'exchanger', 'splitter', 'multiplexer', 'pipette', 'column', 'testpaper', 'dilatometer'];
     const tools = Array.from({ length: 60 }, (_, i) => tool(kinds[i % kinds.length], i, 200 + (i % 10) * 200, 900, 600 + Math.floor(i / 10) * 300, (i % 4) * (Math.PI / 2)));
     const s = room({ tools, flasks: Array.from({ length: 12 }, (_, i) => flask(200 + i * 150, 490, 300)) });
     check(s);

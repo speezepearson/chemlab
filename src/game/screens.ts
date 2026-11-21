@@ -1,17 +1,19 @@
+import { ATOM_RGB } from '../chem/atoms';
 import { SPECIES } from '../chem/species';
 import type { Block } from '../intro/notice';
 import { GOAL_PURITY } from './config';
 import { volume } from './flask';
 import { SCALE_SHAPE, type Scale } from './scale';
 import {
-  ANALYZER, analyzerSector, BOND_ENDS, bondPoint, COLUMN, columnInk, cultureCells, INSTRUMENT, METER_BODY, METER_DIGITS, meterText, needleAt,
-  SECTOR_ATOMS, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, STATION, STRIP, stripInk,
-  THERMOMETER_ROD, THERMOMETERS, wetness, type ThermometerKind, type Tool,
+  atomSector, BOND_ENDS, BOND_PAPER, bondDots, COLUMN, columnInk, darkness, INSTRUMENT, METER_BODY, METER_DIGITS, meterText, needleAt,
+  paperTriangles, SECTOR_ATOMS, SHEET, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, STATION, STRIP, stripInk,
+  TEST_PAPER, THERMOMETER_ROD, THERMOMETERS, sectorInset, wetness, type ThermometerKind, type Tool,
 } from './tools';
 
 /**
  * What's drawn on the lab's screens and printed surfaces, onto plain 2D canvases, with nothing three-dimensional about
- * it: the instruments' screens, the strip's and the column's inks, a thermometer's scale, a sleeper culture's cells,
+ * it: the instruments' screens, the strip's and the column's inks, a thermometer's scale, the faces of the sheets of
+ * test paper, bond paper and shadow paper,
  * the seven-segment readouts, the station's needle, diverter and readouts, the pod's message, and the plates and
  * tape round the lab, which the view (view.ts) draws onto its own canvas, each where it goes.
  */
@@ -293,9 +295,6 @@ export function drawThermometerScale(sc: Board, kind: ThermometerKind): void {
   sc.changed();
 }
 
-/** How long a sleeper culture's cell is shown dying, swollen and amber, in sim seconds. */
-export const DYING = 1.2;
-
 /** How far the station's needle swings, from its left stop to its right, in radians, about straight up. */
 export const NEEDLE_SWEEP = (140 * Math.PI) / 180;
 
@@ -349,98 +348,6 @@ export function drawNeedle(sc: Board, u: number): void {
   ctx.arc(cx, cy, 2.2, 0, 2 * Math.PI);
   ctx.fillStyle = '#17161a';
   ctx.fill();
-  sc.changed();
-}
-
-/**
- * A composition analyzer's screen: a triangle per molecule size (1 to 4 atoms), each cut into four smaller ones, one
- * per color (see analyzerSector): its three corners, and the upside-down one in the middle. Each glows as bright as its
- * share of what it's reading, and is dark while it has nothing to read. No words, no lines between the sectors: reading
- * it is part of the game.
- */
-export function drawAnalysis(sc: Board, t: Tool): void {
-  const key = t.reading?.map((x) => x.toFixed(2)).join(',') ?? '';
-  if (key === sc.key) return;
-  sc.key = key;
-  const { ctx, ppu } = sc;
-  const { screen: s } = INSTRUMENT;
-  const { triangles } = ANALYZER;
-  const n = SECTOR_ATOMS.length;
-  const sectors = SECTOR_ATOMS.map(analyzerSector);
-  const outline = (['G', 'B', 'R'] as const).map((a) => analyzerSector(a)[0]);
-  const green = (a: number) => `rgba(${PHOSPHOR}, ${a})`;
-  ctx.setTransform(ppu, 0, 0, ppu, -s.x0 * ppu, -s.y0 * ppu);
-  ctx.fillStyle = '#040a06';
-  ctx.fillRect(s.x0, s.y0, s.x1 - s.x0, s.y1 - s.y0);
-  triangles.xs.forEach((cx, w) => {
-    const { y: cy, r } = triangles;
-    const path = (ps: readonly (readonly [number, number])[]) => {
-      ctx.beginPath();
-      for (const [dx, dy] of ps) ctx.lineTo(cx + r * dx, cy + r * dy);
-      ctx.closePath();
-    };
-    if (t.reading)
-      for (let j = 0; j < n; j++) {
-        const b = Math.min(1, t.reading[w * n + j]);
-        if (b <= 0) continue;
-        ctx.fillStyle = ctx.shadowColor = green(b);
-        ctx.shadowBlur = 5 * ppu;
-        path(sectors[j]);
-        ctx.fill();
-      }
-    ctx.shadowColor = green(0.85);
-    ctx.shadowBlur = 2 * ppu;
-    ctx.strokeStyle = green(0.85);
-    ctx.lineWidth = 0.9;
-    path(outline);
-    ctx.stroke();
-  });
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-  for (let y = s.y0; y < s.y1; y += 1.5) ctx.fillRect(s.x0, y, s.x1 - s.x0, 0.6);
-  sc.changed();
-}
-
-/**
- * A bond visualizer's screen: four points, one per atom, at the corners and the middle of a triangle (see bondPoint), and a line between two of them
- * for each bond between those atoms going by, glowing as bright as the share of what's passing that has that bond (see
- * bondShares); just the points while it has nothing to read. No words: reading it is part of the game.
- */
-export function drawBonds(sc: Board, t: Tool): void {
-  const key = t.links?.map((x) => x.toFixed(2)).join(',') ?? '';
-  if (key === sc.key) return;
-  sc.key = key;
-  const { ctx, ppu } = sc;
-  const s = INSTRUMENT.screen;
-  const green = (a: number) => `rgba(${PHOSPHOR}, ${a})`;
-  ctx.setTransform(ppu, 0, 0, ppu, -s.x0 * ppu, -s.y0 * ppu);
-  ctx.fillStyle = '#040a06';
-  ctx.fillRect(s.x0, s.y0, s.x1 - s.x0, s.y1 - s.y0);
-  ctx.lineCap = 'round';
-  ctx.lineWidth = 1.6;
-  if (t.links)
-    BOND_ENDS.forEach(([i, j], b) => {
-      const a = Math.min(1, t.links![b]);
-      if (a <= 0) return;
-      const [p, q] = [bondPoint(i), bondPoint(j)];
-      ctx.strokeStyle = ctx.shadowColor = green(a);
-      ctx.shadowBlur = 4 * ppu;
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
-      ctx.lineTo(q.x, q.y);
-      ctx.stroke();
-    });
-  ctx.fillStyle = ctx.shadowColor = green(0.85);
-  ctx.shadowBlur = 2 * ppu;
-  for (let i = 0; i < SECTOR_ATOMS.length; i++) {
-    const p = bondPoint(i);
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 1.8, 0, 2 * Math.PI);
-    ctx.fill();
-  }
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-  for (let y = s.y0; y < s.y1; y += 1.5) ctx.fillRect(s.x0, y, s.x1 - s.x0, 0.6);
   sc.changed();
 }
 
@@ -726,61 +633,6 @@ export function messageCanvas(blocks: readonly Block[]): HTMLCanvasElement {
   return c;
 }
 /**
- * A sleeper culture's cells, and the sim time each was first seen dead, so it can be shown dying; those dead when the
- * plate was first drawn (as when a save loads) are just dead (see drawCulture).
- */
-export interface CultureLook {
-  cells: ReturnType<typeof cultureCells>;
-  died: number[];
-  seen: boolean;
-}
-
-/** A new culture's look, none of its cells yet seen dead. */
-export const cultureLook = (): CultureLook => ({ cells: cultureCells(), died: [], seen: false });
-
-/**
- * A sleeper culture's cells, on a board covering its plate (its tank's walls, see tankRect) at sim time `clock`: each
- * a pale blue dot with a bright middle while it's alive; swollen and amber for DYING sim seconds from when it dies;
- * and a small brown dot from then on.
- */
-export function drawCulture(sc: Board, t: Tool, r: { x0: number; x1: number; y0: number; y1: number }, cu: CultureLook, clock: number): void {
-  const dead = t.dead!;
-  let dying = false;
-  let count = 0;
-  cu.cells.forEach((_, i) => {
-    if (!dead[i]) return;
-    count++;
-    cu.died[i] ??= cu.seen ? clock : -Infinity;
-    if (clock - cu.died[i] < DYING) dying = true;
-  });
-  cu.seen = true;
-  const key = dying ? `dying ${clock.toFixed(2)}` : `${count}`;
-  if (key === sc.key) return;
-  sc.key = key;
-  const { ctx, ppu } = sc;
-  ctx.setTransform(ppu, 0, 0, ppu, -r.x0 * ppu, -r.y0 * ppu);
-  ctx.clearRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
-  const dot = (x: number, y: number, rad: number, color: string) => {
-    ctx.beginPath();
-    ctx.arc(x, y, rad, 0, 2 * Math.PI);
-    ctx.fillStyle = color;
-    ctx.fill();
-  };
-  cu.cells.forEach((c, i) => {
-    const since = dead[i] ? clock - cu.died[i] : -1;
-    if (since < 0) {
-      dot(c.x, c.y, 1.15, 'rgba(150, 214, 255, 0.92)');
-      dot(c.x - 0.3, c.y - 0.3, 0.42, 'rgba(240, 250, 255, 0.95)');
-    } else if (since < DYING) {
-      // it swells, amber, then shrinks to what's left of it
-      const u = since / DYING;
-      dot(c.x, c.y, 1.15 + 0.75 * Math.sin(Math.PI * Math.min(1, 1.4 * u)), `rgba(242, 176, 58, ${0.95 - 0.3 * u})`);
-    } else dot(c.x, c.y, 0.8, 'rgba(92, 58, 34, 0.95)');
-  });
-  sc.changed();
-}
-
-/**
  * A flow meter's display, on a board covering it (see METER_BODY.display): its reading (see meterText) in small
  * seven-segment digits like the scale's.
  */
@@ -917,4 +769,213 @@ export function printedCanvas(text: string, h: number, ppu: number): HTMLCanvasE
     at += ctx.measureText(ch).width + spacing;
   }
   return c;
+}
+
+/* ---------------- the sheets of paper ---------------- */
+
+/** Blotting paper's cream, as the wicking strip's is, and the sheets of test paper and bond paper. */
+export const PAPER = '#e6dfc8';
+/** How blotting paper darkens where it's wet: toward `rgb`, `alpha` of the way where it's wet through (see wetness). */
+const WET = { rgb: '96, 92, 78', alpha: 0.28 };
+
+/**
+ * How a sheet of test paper is printed and stained, in world units: its lines' black; `soft`, how far a stain's edge
+ * fades over (the blur's standard deviation); and `rough`, how far, at most, a stain's edge strays in or out along
+ * its length, and `steps`, into how many stretches each side is cut to stray by.
+ */
+const TEST_PRINT = { ink: 'rgba(22, 20, 18, 0.94)', soft: 0.45, rough: 0.4, steps: 7 };
+
+/**
+ * How a sheet of bond paper's lines are inked, in world units: `ink`, their near-black (as opaque as BOND_PAPER's
+ * `faint` and `dark` say); `soft`, how far a line's edge fades over (the blur's standard deviation); and `rough`, how
+ * far, at most, each edge strays in or out along its length, and `steps`, into how many stretches it's cut to stray by.
+ */
+const BOND_PRINT = { ink: '22, 20, 18', soft: 0.3, rough: 0.28, steps: 9 };
+
+/**
+ * A seeded random in [0, 1) (mulberry32): each sheet of test paper's stains, and each sheet of bond paper's lines, have
+ * edges of their own, the same every time.
+ */
+function seeded(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** A board for a sheet of test paper's or bond paper's face (see TEST_PAPER), for drawTestPaper or drawBondPaper. */
+export const paperBoard = (): Board => board(TEST_PAPER.w, TEST_PAPER.h, 8);
+
+/**
+ * A sheet of blotting paper's bare face (see BLOTTERS), as it hangs on the wall: cream, all of it darker by how soaked
+ * it is (`wet`, see wetness), as a strip's paper is. It leaves the board drawn on in world units from the sheet's
+ * middle, x right and y down, for what's printed on it and what shows of what it holds.
+ */
+function blotting(sc: Board, wet: number): void {
+  const { ctx, ppu } = sc;
+  const { w, h } = TEST_PAPER;
+  ctx.setTransform(ppu, 0, 0, ppu, (w / 2) * ppu, (h / 2) * ppu);
+  ctx.fillStyle = PAPER;
+  ctx.fillRect(-w / 2, -h / 2, w, h);
+  if (wet > 0) {
+    ctx.fillStyle = `rgba(${WET.rgb}, ${WET.alpha * wet})`;
+    ctx.fillRect(-w / 2, -h / 2, w, h);
+  }
+}
+
+/**
+ * A sheet of test paper's face (see blotting), as far as it's come up (see Tool.showing): each small triangle of each
+ * of its triangles (see paperTriangles) stained its atom's color, as opaque as its stain is so far, inside a margin
+ * that keeps it clear of the lines (see sectorInset), its edge soft and a little uneven; and over that, printed in
+ * black, each triangle's outline and the three lines that cut it in four. No words: reading it is part of the game.
+ */
+export function drawTestPaper(sc: Board, t: Tool): void {
+  const [wet, ...stains] = t.showing;
+  const n = SECTOR_ATOMS.length;
+  const reading = TEST_PAPER.triangles.map((_, i) => stains.slice(i * n, (i + 1) * n));
+  const key = t.showing.map((x) => x.toFixed(3)).join();
+  if (key === sc.key) return;
+  sc.key = key;
+  const { ctx, ppu } = sc;
+  const { line, margin } = TEST_PAPER;
+  const { ink, soft, rough, steps } = TEST_PRINT;
+  blotting(sc, wet);
+  const rnd = seeded(t.id + 1);
+  // (drawn far off to the left, so that only its shadow, which is the stain, soft-edged, lands on the paper)
+  const OFF = 4 * sc.canvas.width;
+  paperTriangles().forEach(({ x: cx, y: cy, r }, i) => {
+    SECTOR_ATOMS.forEach((atom, c) => {
+      const corners = sectorInset(atom, margin / r).map(([dx, dy]) => [cx + r * dx, cy + r * dy] as const);
+      // each side in stretches, each joint strayed a little in or out (the same for this sheet whatever's on it)
+      const edge: (readonly [number, number])[] = [];
+      corners.forEach((p, k) => {
+        const q = corners[(k + 1) % 3];
+        const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+        const [nx, ny] = [(q[1] - p[1]) / len, -(q[0] - p[0]) / len];
+        for (let j = 0; j < steps; j++) {
+          const off = j ? rough * (2 * rnd() - 1) : 0;
+          edge.push([p[0] + ((q[0] - p[0]) * j) / steps + nx * off, p[1] + ((q[1] - p[1]) * j) / steps + ny * off]);
+        }
+      });
+      const a = reading[i][c];
+      if (a <= 0) return;
+      ctx.save();
+      ctx.shadowColor = `rgba(${ATOM_RGB[atom].join(', ')}, ${a})`;
+      ctx.shadowBlur = 2 * soft * ppu;
+      ctx.shadowOffsetX = OFF;
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      for (const [px, py] of edge) ctx.lineTo(px - OFF / ppu, py);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    });
+    // printed on the paper, so over what's soaked into it: the triangle, and the one upside down in its middle
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = line;
+    ctx.lineJoin = 'miter';
+    for (const ps of [(['G', 'B', 'R'] as const).map((a) => atomSector(a)[0]), atomSector('K')]) {
+      ctx.beginPath();
+      for (const [dx, dy] of ps) ctx.lineTo(cx + r * dx, cy + r * dy);
+      ctx.closePath();
+      ctx.stroke();
+    }
+  });
+  sc.changed();
+}
+
+/**
+ * A sheet of bond paper's face (see blotting): a line between each two of its four dots (see bondDots and BOND_ENDS),
+ * stopping short of them, as faint as it's printed where the sheet holds nothing with that bond, and darker by how far
+ * it's darkened so far (see Tool.showing and bondReading), its edges soft and a little uneven, in their own way on each
+ * sheet; and over them the dots, each printed in its atom's own color. No words: reading it is part of the game.
+ */
+export function drawBondPaper(sc: Board, t: Tool): void {
+  const [wet, ...reading] = t.showing;
+  const key = t.showing.map((x) => x.toFixed(3)).join();
+  if (key === sc.key) return;
+  sc.key = key;
+  const { ctx, ppu } = sc;
+  const { dot, line, gap, faint, dark } = BOND_PAPER;
+  const { ink, soft, rough, steps } = BOND_PRINT;
+  blotting(sc, wet);
+  const dots = bondDots();
+  const rnd = seeded(t.id + 1);
+  // (drawn far off to the left, so that only its shadow, which is the line, soft-edged, lands on the paper)
+  const OFF = 4 * sc.canvas.width;
+  BOND_ENDS.forEach(([i, j], b) => {
+    const [p, q] = [dots[i], dots[j]];
+    const len = Math.hypot(q.x - p.x, q.y - p.y);
+    const [ux, uy] = [(q.x - p.x) / len, (q.y - p.y) / len];
+    const [a0, a1] = [dot + gap, len - dot - gap];
+    // out along one edge and back along the other, each in stretches, each joint strayed a little in or out (the
+    // same for this sheet whatever's on it)
+    const outline: [number, number][] = [];
+    for (const side of [1, -1])
+      for (let k = 0; k <= steps; k++) {
+        const along = side > 0 ? a0 + ((a1 - a0) * k) / steps : a1 - ((a1 - a0) * k) / steps;
+        const off = side * (line / 2 + rough * (2 * rnd() - 1));
+        outline.push([p.x + ux * along - uy * off, p.y + uy * along + ux * off]);
+      }
+    ctx.save();
+    ctx.shadowColor = `rgba(${ink}, ${faint + (dark - faint) * reading[b]})`;
+    ctx.shadowBlur = 2 * soft * ppu;
+    ctx.shadowOffsetX = OFF;
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    for (const [px, py] of outline) ctx.lineTo(px - OFF / ppu, py);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  });
+  SECTOR_ATOMS.forEach((atom, i) => {
+    ctx.fillStyle = `rgb(${ATOM_RGB[atom].join(', ')})`;
+    ctx.beginPath();
+    ctx.arc(dots[i].x, dots[i].y, dot, 0, 2 * Math.PI);
+    ctx.fill();
+  });
+  sc.changed();
+}
+
+/** Shadow paper's cream, new, and the dark purple-brown it goes as dark as it gets to, 0–255 a channel. */
+const SHEET_COLORS = { fresh: [230, 223, 200], dark: [46, 29, 41] } as const;
+
+/** A board for a sheet of shadow paper's paper (see SHEET), a pixel to each of its cells (see drawSheet). */
+export function sheetBoard(): Board {
+  const margin = SHEET.margin * (SHEET.cells / (SHEET.side - 2 * SHEET.margin));
+  const n = Math.round(SHEET.cells + 2 * margin);
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = n;
+  return { canvas, ctx: canvas.getContext('2d')!, ppu: n / SHEET.side, key: '', changed: () => {} };
+}
+
+/**
+ * A sheet of shadow paper's paper, if the light it's had has changed since it was last drawn (see Tool.dosed): each
+ * cell of the square the light falls on as dark as it is (see darkness), the margin round it as new.
+ */
+export function drawSheet(sc: Board, t: Tool): void {
+  const key = String(t.dosed);
+  if (key === sc.key) return;
+  sc.key = key;
+  const { canvas, ctx } = sc;
+  const n = SHEET.cells;
+  const edge = Math.round((canvas.width - n) / 2);
+  const img = ctx.createImageData(canvas.width, canvas.height);
+  const { fresh, dark } = SHEET_COLORS;
+  for (let p = 0; p < img.data.length; p += 4) {
+    for (let c = 0; c < 3; c++) img.data[p + c] = fresh[c];
+    img.data[p + 3] = 255;
+  }
+  // (the dose's rows run from the bottom up, and the board's from the top down)
+  t.dose.forEach((dose, i) => {
+    const d = darkness(dose);
+    const at = 4 * ((edge + n - 1 - Math.floor(i / n)) * canvas.width + edge + (i % n));
+    for (let c = 0; c < 3; c++) img.data[at + c] = Math.round(fresh[c] + (dark[c] - fresh[c]) * d);
+  });
+  ctx.putImageData(img, 0, 0);
+  sc.changed();
 }

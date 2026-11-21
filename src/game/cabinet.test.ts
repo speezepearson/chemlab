@@ -5,7 +5,7 @@ import { Flask } from './flask';
 import { boxesOverlap, type Box } from './physics';
 import { Scale } from './scale';
 import { CABINET_AREA, COUNTERS, ROOM, type Pose } from './space';
-import { Tool } from './tools';
+import { SHAPES, SHEET, Tool } from './tools';
 
 const KINDS = Object.keys(STOCK) as Stocked[];
 
@@ -16,7 +16,10 @@ function boxAt(k: Stocked, pose: Pose): Box {
     f.pose = pose;
     return flaskBox(f);
   }
-  return k === 'scale' ? scaleBox(new Scale(pose)) : toolBox(new Tool(k, 0, pose));
+  if (k === 'scale') return scaleBox(new Scale(pose));
+  const b = toolBox(new Tool(k, 0, pose));
+  // a sheet of paper is as thick as its bar, there, though pinned to the wall its box reaches back to it
+  return SHAPES[k].pinned ? { ...b, z: pose.z, hz: SHEET.clip.d / 2, parts: undefined } : b;
 }
 
 describe('the equipment cabinet', () => {

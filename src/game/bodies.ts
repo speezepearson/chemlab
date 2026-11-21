@@ -1,11 +1,12 @@
 import { volume, type Flask, type Vessel } from './flask';
 import { FLASK_H, fillLevel, flaskRadius } from './flaskShape';
 import { placeBox, type Box, type Part } from './physics';
+import { LAMP_POSE } from './presets';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { FAUCET_X } from './faucets';
 import { CELL, LIFT, PLANE_Z, toLocal, toWorld, type Pose, type Vec3 } from './space';
 import {
-  ANALYZER, HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, METER_BODY, SHAPES, STATION, STRIP, TANK_H, THERMOMETER_ROD, footY, isThermometer, levelIn,
+  HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, LAMP, METER_BODY, SHAPES, SHEET, STATION, STRIP, TANK_H, TEST_PAPER, THERMOMETER_ROD, footY, isThermometer, levelIn,
   tankDepth, tankPieces, tankX, overMouth, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
 } from './tools';
 
@@ -17,7 +18,21 @@ import {
  */
 
 /** How deep a tool's cabinet is front to back, for the tools that have one deeper than their tanks. */
-const CABINET_DEPTH: Partial<Record<ToolKind, number>> = { analyzer: 50, spectroscope: 50, visualizer: 50 };
+const CABINET_DEPTH: Partial<Record<ToolKind, number>> = { spectroscope: 50 };
+
+/**
+ * How far out from the back wall the middle of a sheet pinned to it is (see ToolShape.pinned), though its pose is in
+ * the plane everything's in, like anything's: just in front of the wall, as thick as a sheet of shadow paper's bar.
+ * And where a sheet of shadow paper in the shadow lamp's slot is, in the wall behind the lamp's frame (see LAMP_FRAME
+ * and SHEET_SLOT). So, front to back, the plane is clear of them, and they're in the way only of each other and of
+ * what's built into the wall.
+ */
+export const PIN_Z = SHEET.clip.d / 2;
+export const SLOT_Z = -SHEET.clip.d / 2 - 1;
+/** How thick the shadow lamp's frame is, out from the wall. */
+export const LAMP_FRAME = SHEET.clip.d + 1;
+/** How far behind the plane (see PLANE_Z) the back of what's in or on the wall reaches. */
+const SLOT_BACK = SHEET.clip.d + 1;
 
 /**
  * How deep each tool is front to back, all told, and how deep its tanks are inside: as deep as they need to be to
@@ -28,6 +43,8 @@ const CABINET_DEPTH: Partial<Record<ToolKind, number>> = { analyzer: 50, spectro
 export const TOOL_DEPTH = Object.fromEntries(
   (Object.keys(SHAPES) as ToolKind[]).map((kind) => {
     if (SHAPES[kind].wall) return [kind, { tank: STATION.plate - 3, body: 2 * STATION.out }];
+    // (what's in the wall or pinned to it reaches back to the wall from the plane: see PIN_Z)
+    if (kind === 'shadowlamp' || SHAPES[kind].pinned) return [kind, { tank: 0, body: 2 * (PLANE_Z + SLOT_BACK) }];
     const tank = tankDepth(kind);
     const cup = SHAPES[kind].cup;
     return [kind, { tank, body: Math.max(CABINET_DEPTH[kind] ?? 0, tank + 4, cup ? 2 * cup.w + 2 : 0) }];
@@ -107,10 +124,14 @@ export function tankNoteY(t: Tool, k: number): number {
  * reaching `hz` either side of `z` (its middle, if left out) front to back: its tanks (round, for a round tank), and
  * under them the pipes, valves and spouts there, across only as far as they reach. The supply station's are
  * its funnel, the plate in the wall, and its spouts' pipes out from it. An inline instrument's are its
- * tube and the pipe down from it, and the cabinet beside them, and any pipe on to a spout past the cabinet, or the
+ * tube and the pipe down from it, and the cabinet beside them, or the
  * flow meter's readout round the pipe; the tube's top is flush with its opening, for a nozzle to snap onto (see
  * INLINE_DOCK). A dipper's (see DIPPERS) is only its top, where the arm holding it up grips it: a thermometer's rod's, or
- * a wicking strip's clip; the rest of it bumps into nothing, so it can stand down in a flask or a tank.
+ * a wicking strip's clip; the rest of it bumps into nothing, so it can stand down in a flask or a tank. A sheet pinned
+ * to the wall (see ToolShape.pinned: test paper, bond paper and shadow paper) is all of itself, its bar and its paper,
+ * but against the wall, behind the plane everything else is in, so it's in nothing's way but another sheet's and
+ * what's built into the wall (see PIN_Z); in the shadow lamp's slot, further back still (see SHEET_SLOT). The shadow
+ * lamp's is its frame, in the wall too (see LAMP), so whatever's in front of its pane is in its light.
  */
 export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean }[] {
   const sh = t.shape;
@@ -127,6 +148,8 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
       ...sh.spouts.map((x) => ({ x0: x - 8, x1: x + 8, y0: H + 10, y1: sh.spoutY, hz: (out + 8) / 2, z: (8 - out) / 2 })),
     ];
   }
+  // the shadow lamp's frame, flush with the wall, round its pane and the slot behind it
+  if (t.kind === 'shadowlamp') return [{ x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, hz: LAMP_FRAME / 2, z: LAMP_FRAME / 2 - t.pose.z }];
   if (isThermometer(t.kind)) {
     const r = THERMOMETER_ROD.r;
     return [{ x0: -r, x1: r, y0: b.y0, y1: 24, hz: r, round: true }];
@@ -134,6 +157,17 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
   if (t.kind === 'strip') {
     // its clip, and the top of the paper it holds
     return [{ x0: b.x0, x1: b.x1, y0: b.y0, y1: Math.max(STRIP.clip.h, 24), hz: STRIP.clip.d / 2 }];
+  }
+  // all of a sheet pinned to the wall, as thick as the bar clipped along a sheet of shadow paper's top: against the
+  // wall, or in the shadow lamp's slot behind its frame (see PIN_Z)
+  if (sh.pinned) {
+    const hz = SHEET.clip.d / 2;
+    const z = (t.kind === 'sheet' && inSlot(t.pose) ? SLOT_Z : PIN_Z) - t.pose.z;
+    if (t.kind !== 'sheet') return [{ x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, hz, z }];
+    return [
+      { x0: b.x0, x1: b.x1, y0: b.y0, y1: SHEET.clip.h, hz, z },
+      { x0: -SHEET.side / 2, x1: SHEET.side / 2, y0: SHEET.clip.h, y1: b.y1, hz, z },
+    ];
   }
   const D = TOOL_DEPTH[t.kind];
   const bottom = (sh.tankH ?? TANK_H) + (sh.sump?.h ?? 0);
@@ -148,12 +182,7 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
       const m = METER_BODY;
       return [...tube, { x0: m.x0, x1: m.x1, y0: m.y0, y1: m.y1, hz: m.hz }];
     }
-    const past = sh.spouts.filter((x) => x > c.x1);
-    return [
-      ...tube,
-      { x0: c.x0, x1: c.x1, y0: c.y0, y1: c.y1, hz: D.body / 2 },
-      ...past.map((x) => ({ x0: c.x1, x1: x + 6, y0: ANALYZER.wasteY - 6, y1: b.y1, hz: 6 })),
-    ];
+    return [...tube, { x0: c.x0, x1: c.x1, y0: c.y0, y1: c.y1, hz: D.body / 2 }];
   }
   const x0s = sh.tanks.map((k) => (sh.cup ? Math.min(k.x0, tankX(k) - sh.cup.w) : k.x0));
   const x1s = sh.tanks.map((k) => (sh.cup ? Math.max(k.x1, tankX(k) + sh.cup.w) : k.x1));
@@ -257,6 +286,15 @@ function inTank(t: Tool, k: number, p: Vec3): number | null {
   if (up === null) return null;
   const level = levelIn(tankInside(t, k).pieces, fullness(v));
   return up <= level ? level - up : null;
+}
+
+/**
+ * The face of a sheet of test paper or bond paper (see BLOTTERS) pinned to the wall, in the room: across from x0 to x1,
+ * and up from y0 to y1. Whatever falls past it, anywhere across it, wets it (see GameEngine.wet).
+ */
+export function paperFace(t: Tool): { x0: number; x1: number; y0: number; y1: number } {
+  const { x, y } = t.pose;
+  return { x0: x - TEST_PAPER.w / 2, x1: x + TEST_PAPER.w / 2, y0: y - TEST_PAPER.h, y1: y };
 }
 
 /** Where a dipper's foot is, in the room (see footY): a thermometer's bulb, or a wicking strip's paper's tip. */
@@ -445,6 +483,50 @@ export function isDocked(h: Hose, tools: readonly Tool[]): boolean {
   return tools.some((t) => INLINE_TOOLS.includes(t.kind) && Math.abs(h.outlet.x - tankMouth(t, 0).x) < 0.5 && Math.abs(h.outlet.y - tankMouth(t, 0).y - 1) < 0.5);
 }
 
+/* ---------------- the shadow lamp's slot ---------------- */
+
+/**
+ * Where a sheet of shadow paper stands in the shadow lamp's slot (see LAMP), seen and lit through its pane: its
+ * paper's middle behind the pane's, the margin round the lit square behind the frame, and the bar along its top just
+ * showing above the frame, to take it out by; and further back than a sheet pinned anywhere else, in the wall behind
+ * the frame (see PIN_Z). The lamp never moves (see LAMP_POSE), so nor does this.
+ */
+export const SHEET_SLOT: Pose = {
+  x: LAMP_POSE.x,
+  y: LAMP_POSE.y - LAMP.pane.y + SHEET.margin + SHEET.top,
+  z: PLANE_Z,
+  yaw: 0,
+};
+
+/**
+ * How near the slot a sheet let go of has to be held to go into it (see slotted): its middle no further than `x`
+ * from the slot's across the wall, and its top no further than `y` from where it would stand.
+ */
+export const SLOT_REACH = { x: 0.5 * CELL, y: 0.5 * CELL };
+
+/** Whether a pose is a sheet's in the shadow lamp's slot (see SHEET_SLOT). */
+export function inSlot(p: Pose): boolean {
+  const s = SHEET_SLOT;
+  return Math.hypot(p.x - s.x, p.y - s.y, p.z - s.z) < 1;
+}
+
+/** The sheet of shadow paper among `tools` that's in the shadow lamp's slot (see inSlot), if any, but for `but`. */
+export function sheetIn(tools: readonly Tool[], but: Tool | null = null): Tool | null {
+  return tools.find((t) => t.kind === 'sheet' && t !== but && inSlot(t.pose)) ?? null;
+}
+
+/**
+ * A sheet of shadow paper `t` at p, snapped into the shadow lamp's slot (see SHEET_SLOT) if it's held near enough it
+ * (see SLOT_REACH) and there's no sheet among `tools` in it already. Otherwise just p. In the spirit of docked, a
+ * hose's nozzle onto an instrument's tube.
+ */
+export function slotted(t: Tool, p: Pose, tools: readonly Tool[]): Pose {
+  const s = SHEET_SLOT;
+  if (Math.abs(p.x - s.x) > SLOT_REACH.x || Math.abs(p.y - s.y) > SLOT_REACH.y) return p;
+  if (!tools.some((u) => u.kind === 'shadowlamp') || sheetIn(tools, t)) return p;
+  return { ...s };
+}
+
 /** How tall a hose's nozzle is, up from its tip, and how far it reaches either side of its middle. */
 export const NOZZLE_H = 10;
 export const NOZZLE_R = 5;
@@ -490,7 +572,7 @@ const TWO_ARMS = 300;
  * there; a wide one near each end, by whichever is highest there.
  */
 export function toolArms(t: Tool): Vec3[] {
-  if (t.shape.wall) return [];
+  if (t.shape.wall || t.shape.fixed || t.shape.pinned) return [];
   const b = t.shape.box;
   const parts = toolParts(t);
   const xs = b.x1 - b.x0 > TWO_ARMS ? [b.x0 + 60, b.x1 - 60] : [(b.x0 + b.x1) / 2];

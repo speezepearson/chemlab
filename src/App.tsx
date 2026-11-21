@@ -214,7 +214,7 @@ export function App() {
           {/* the chemistry, and what the machines are called, are for god mode */}
           {god && <ChemistryPanel key={chemVersion} network={network} />}
           {god && <AppearancePanel />}
-          <SoundPanel god={god} />
+          <SoundPanel />
           <button
             className="replay"
             onClick={() => {

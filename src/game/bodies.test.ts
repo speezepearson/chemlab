@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   FAUCET_NECK, FAUCET_Y, FLASK_R, NOZZLE_R, SCALE_SLOTS, TOOL_DEPTH, aimValve, bathAt, dippedIn, docked, faucetBox, faucetPipes, flaskArm, flaskBox,
   flaskFluid, flaskLip, flaskMouth, footAt, insideVessel, isDocked, nozzleArm, nozzleBox, onScale, scaleArm, scaleBox, scaleSpot, spoutAt, spoutNear,
-  tankFluid, tankMouth, toolArms, toolBox, valveLocal, valveNear,
+  tankFluid, tankMouth, toolArms, toolBox, valveLocal, valveNear, SHEET_SLOT, SLOT_REACH, inSlot, sheetIn, slotted,
 } from './bodies';
+import { LAMP_POSE } from './presets';
 import { singleOf } from '../chem/species';
 import { CAP } from './config';
 import { FAUCET_X } from './faucets';
@@ -12,7 +13,7 @@ import { FLASK_H } from './flaskShape';
 import { boxesOverlap, solids } from './physics';
 import { Scale } from './scale';
 import { CELL, LIFT, PLANE_Z, fromFrac, toFrac } from './space';
-import { BULB_Y, Hose, INLINE_DOCK, SHAPES, STRIP_FOOT, THERMOMETER_ROD, Tool, footY, mouthBelow, tankX, type ToolKind } from './tools';
+import { BULB_Y, Hose, INLINE_DOCK, LAMP, SHAPES, SHEET, STRIP_FOOT, THERMOMETER_ROD, Tool, footY, mouthBelow, tankX, type ToolKind } from './tools';
 
 const at = (x: number, y: number, z: number, yaw = 0) => ({ x, y, z, yaw });
 
@@ -179,7 +180,7 @@ describe('scaleSpot', () => {
 
 describe('docking', () => {
   it("snaps a nozzle down onto an inline instrument's tube it's over, from not too far above, and nothing else", () => {
-    const a = new Tool('analyzer', 0, at(450, 800, PLANE_Z));
+    const a = new Tool('spectroscope', 0, at(450, 800, PLANE_Z));
     const d = new Tool('dispenser', 1, at(750, 800, PLANE_Z));
     const top = tankMouth(a, 0);
     const over = (dy: number, x = top.x) => ({ x, y: top.y + dy, z: top.z, yaw: 0 });
@@ -194,7 +195,7 @@ describe('docking', () => {
   });
 
   it("centers a nozzle over the tube it snaps onto", () => {
-    const a = new Tool('analyzer', 0, at(450, 800, PLANE_Z));
+    const a = new Tool('spectroscope', 0, at(450, 800, PLANE_Z));
     const top = tankMouth(a, 0);
     const off = top.hx / 2;
     const p = docked({ x: top.x + off, y: top.y + 50, z: top.z, yaw: 0 }, [a]);
@@ -213,7 +214,7 @@ describe('docking', () => {
   });
 
   it("tells a nozzle snapped onto a tube from one left near it", () => {
-    const a = new Tool('analyzer', 0, at(450, 800, PLANE_Z));
+    const a = new Tool('spectroscope', 0, at(450, 800, PLANE_Z));
     const d = new Tool('dispenser', 1, at(750, 800, PLANE_Z));
     const top = tankMouth(a, 0);
     const h = new Hose({ faucet: 0 }, docked({ x: top.x + 2, y: top.y + 30, z: top.z, yaw: 0 }, [a, d]));
@@ -502,5 +503,47 @@ describe('insideVessel', () => {
       expect(insideVessel(p, [], [r])).toBeNull();
       expect(bathAt(p, [], [r])).toBeNull();
     }
+  });
+});
+
+describe("the shadow lamp's slot", () => {
+  const lamp = () => new Tool('shadowlamp', 0, { ...LAMP_POSE });
+
+  it("stands a sheet of shadow paper behind the lamp's pane, its margin behind the frame and its bar showing above it", () => {
+    const s = new Tool('sheet', 1, { ...SHEET_SLOT });
+    // the paper's lit square is the pane, exactly
+    const paperTop = SHEET_SLOT.y - SHEET.top;
+    expect(paperTop - SHEET.margin).toBeCloseTo(LAMP_POSE.y - LAMP.pane.y, 9);
+    expect(SHEET_SLOT.x).toBe(LAMP_POSE.x);
+    // its bar is above the frame's top, to take it out by
+    expect(SHEET_SLOT.y).toBeGreaterThan(LAMP_POSE.y);
+    // in the wall behind the frame, so in neither's way
+    expect(boxesOverlap(toolBox(s), toolBox(lamp()))).toBe(false);
+    // where a sheet pinned to the wall anywhere else would be in the frame's way
+    expect(boxesOverlap(toolBox(new Tool('sheet', 2, { ...SHEET_SLOT, y: SHEET_SLOT.y + 1 })), toolBox(lamp()))).toBe(true);
+    expect(inSlot(s.pose)).toBe(true);
+    expect(sheetIn([lamp(), s])).toBe(s);
+    expect(sheetIn([lamp(), s], s)).toBeNull();
+  });
+
+  it('takes a sheet let go of near it, if the lamp is there and its slot is empty', () => {
+    const near = { ...SHEET_SLOT, x: SHEET_SLOT.x + SLOT_REACH.x - 1, y: SHEET_SLOT.y - SLOT_REACH.y + 1 };
+    const s = new Tool('sheet', 1, near);
+    expect(slotted(s, near, [lamp()])).toEqual(SHEET_SLOT);
+    // too far from it, or with no lamp, or a sheet in it already, it's just where it's held
+    const far = { ...near, x: SHEET_SLOT.x + SLOT_REACH.x + 1 };
+    expect(slotted(s, far, [lamp()])).toEqual(far);
+    expect(slotted(s, near, [])).toEqual(near);
+    expect(slotted(s, near, [lamp(), new Tool('sheet', 2, { ...SHEET_SLOT })])).toEqual(near);
+  });
+
+  it("leaves the lamp's frame and what's pinned to the wall out of the way of what's in the plane in front of them", () => {
+    const f = new Flask(CAP);
+    f.pose = { x: LAMP_POSE.x, y: LIFT + FLASK_H, z: PLANE_Z, yaw: 0 };
+    expect(boxesOverlap(flaskBox(f), toolBox(lamp()))).toBe(false);
+    expect(boxesOverlap(flaskBox(f), toolBox(new Tool('sheet', 1, { ...SHEET_SLOT })))).toBe(false);
+    expect(boxesOverlap(flaskBox(f), toolBox(new Tool('testpaper', 1, { x: LAMP_POSE.x + 300, y: LIFT + 70, z: PLANE_Z, yaw: 0 })))).toBe(false);
+    expect(toolArms(lamp())).toEqual([]);
+    expect(toolArms(new Tool('sheet', 1, { x: 4000, y: 900, z: PLANE_Z, yaw: 0 }))).toEqual([]);
   });
 });
