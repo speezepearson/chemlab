@@ -2672,10 +2672,10 @@ export class GameEngine {
   }
 
   /**
-   * Every arm out of the back wall, with what it holds up: each tool's, and those of the flasks, scales and hoses'
-   * nozzles left in the air; but none for what's in hand, nor for a nozzle snapped onto an instrument's tube.
+   * Every clamp stand, with what it holds up: each tool's, and those of the flasks, scales and hoses' nozzles left in
+   * the air; but none for what's in hand, nor for a nozzle snapped onto an instrument's tube.
    */
-  private arms(): Frame['arms'] {
+  private stands(): Frame['stands'] {
     const out: { at: Vec3; of: Pick }[] = [];
     const held = this.heldObject();
     const riders = this.standing();
@@ -2740,7 +2740,7 @@ export class GameEngine {
       tarePress: this.tarePress, hot: this.hot(), bad: !!h && !pl?.rest && !this.intoCabinet(), dt, clock: this.clock,
       energies: BOND_KEYS.map((k) => this.chem.params.bonds[k].E), alarmsOff: this.alarmsOff,
       airlock: this.airlockLook(),
-      guides: this.guides(pl), arms: this.arms(), held: this.heldObject(),
+      guides: this.guides(pl), stands: this.stands(), held: this.heldObject(),
     });
   }
 

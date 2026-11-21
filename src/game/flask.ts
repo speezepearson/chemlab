@@ -96,7 +96,7 @@ export function sustenance(f: Fluid, species = TARGET): number {
   return f.N > 0 && t > GOAL_PURITY * f.N ? t : 0;
 }
 
-/** A flask. Wherever it's let go of, an arm from the ceiling holds it, unless it's standing on a scale. */
+/** A flask. Wherever it's let go of, it stands on the counter or a scale, or a clamp stand holds it up. */
 export class Flask extends Vessel {
   /** Where its mouth's center is in the room, and which way it faces (see space.ts). */
   pose: Pose = { ...ORIGIN };

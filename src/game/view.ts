@@ -3,7 +3,7 @@ import { arrival, notice } from '../intro/notice';
 import type { Stock, Stocked } from './cabinet';
 import type { Flask, Vessel } from './flask';
 import {
-  alarmAt, alarmPlate, drawAlarm, drawArms, drawCabinet, drawCounter, drawFaucets, drawFlows, drawGuides, drawHoses, drawNozzles, drawSpecimen,
+  alarmAt, alarmPlate, drawAlarm, drawStands, drawCabinet, drawCounter, drawFaucets, drawFlows, drawGuides, drawHoses, drawNozzles, drawSpecimen,
   drawWall, specimens, type Span,
 } from './flatRoom';
 import { drawFlask, drawLampSlot, drawScale, drawTool, scaleDisplay, type ToolArt } from './flatTools';
@@ -86,10 +86,10 @@ export interface Frame {
     v: Vessel;
   }[];
   /**
-   * Every arm out of the back wall holding something up where it was left (see the arms in bodies.ts): where it grips
-   * what it holds, from where it runs straight back to the wall, and what that is, to grab it by its arm.
+   * Every clamp stand holding something up where it was left (see the grips in bodies.ts): where its clamp grips what
+   * it holds, straight above where its base stands on the counter, and what that is, to grab it by its stand.
    */
-  arms: readonly { at: Vec3; of: Pick }[];
+  stands: readonly { at: Vec3; of: Pick }[];
   drops: readonly { at: Vec3; v: Vessel; hanging: boolean }[];
   /** The scale whose tare key is held down. */
   tarePress: Scale | null;
@@ -279,7 +279,7 @@ export class View implements LabView {
     drawAlarm(sk, alarmAt(station?.pose), fr.alarmsOff, alarmPlate());
     if (station) this.drawTool(sk, station, fr);
     for (const t of fr.tools) if (t.shape.pinned && t !== slotted && t !== held) this.drawTool(sk, t, fr);
-    drawArms(sk, fr.arms);
+    drawStands(sk, fr.stands);
     drawHoses(sk, fr.hoses);
     // then what stands free in the plane, in front of the hoses: the rest of the tools, the scales and the flasks, each
     // with what the pointer's on over the rest of its kind; the nozzles and what's falling; and last of all, over
@@ -323,7 +323,7 @@ export class View implements LabView {
    * cell by cell, by as much of it as gets past whatever's in front of the pane just now, and nothing's owed any more.
    * What's in front casts its shadow the same size as itself, since the light is a beam square on to the wall (see
    * LAMP): it's drawn again, as what casts a shadow (see Sketch.shade), square on over the pane, onto a picture with a
-   * pixel to each of the sheet's cells, and softened by LAMP.soft; the arms out of the wall, and the wall and what's
+   * pixel to each of the sheet's cells, and softened by LAMP.soft; the clamp stands, and the wall and what's
    * built into it, cast none. A sheet that's as dark as it gets all over has nothing left to show, so what it's owed
    * is just dropped.
    */

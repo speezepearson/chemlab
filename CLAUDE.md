@@ -74,7 +74,7 @@ The view is 2D canvas drawing with no unit tests, so verify drawing and interact
     the camera, and says what the pointer is on (`pick`) from what it drew; `project` goes the other way. `LabView`
     is what the engine asks of it, and `Frame` and `Pick` are what passes between them. `flatTools.ts` draws every
     tool kind, flasks and scales from their flat outlines, `flatRoom.ts` the wall, counter, cabinet, faucets and their
-    supply line, the alarms' button, the arms out of the wall, hoses, streams and guides, and `sketch.ts` is the
+    supply line, the alarms' button, the clamp stands, hoses, streams and guides, and `sketch.ts` is the
     drawing kit, which keeps each shape drawn with what it's part of, for picking. `screens.ts` draws what goes on
     canvases of its own (the instruments' screens, inks, scales, readouts, the pod's message, the alarms' plate), and
     `thing.ts` says what a pick is part of, for outlining. The view also draws the equipment wheels' icons
@@ -86,7 +86,7 @@ The view is 2D canvas drawing with no unit tests, so verify drawing and interact
     dipper's foot (a thermometer's bulb, a wicking strip's tip) is in (`dippedIn`, `bathAt`) and what vessel it's
     inside at all (`insideVessel`), from which the engine works out what each one is in every frame (`dipping` and
     `heldDip`) and hands it on (`Tool.bath`, or for a strip `Tool.dipIn`, which also says whether it may drink); where
-    the arms out of the back wall grip what they hold up (`toolArms`, `flaskArm`, `scaleArm`, `nozzleArm`); where a
+    the clamp stands grip what they hold up (`toolArms`, `flaskArm`, `scaleArm`, `nozzleArm`); where a
     hose's nozzle snaps onto an instrument's tube (`docked`); where a sheet of test paper or bond paper's face is
     (`paperFace`); and where a sheet of shadow paper stands in the shadow lamp's slot (`SHEET_SLOT`, `slotted`).
   - `physics.ts` is the collisions: boxes square to the room and upright cylinders, and whether two overlap
@@ -188,10 +188,11 @@ The view is 2D canvas drawing with no unit tests, so verify drawing and interact
   - Presets and saves store across and up as fractions of the old 1000 × 620 home area (`fromFrac` and `toFrac` in
     `space.ts`), which is now the back wall.
   - Nothing turns, except a flask tipped to pour, and nothing falls: whatever the player lets go of stands on the
-    counter or a scale, or is snapped onto an instrument's tube, or else is held up by arms out of the back wall
-    (`toolArms` and friends in `bodies.ts`, `drawArms` in `flatRoom.ts`), or stays in hand. Keep it that way, or
+    counter or a scale, or is snapped onto an instrument's tube, or else is held up by clamp stands behind it
+    (where they grip is `toolArms` and friends in `bodies.ts`; `drawStands` in `flatRoom.ts` draws them, and they're
+    only drawn, in nothing's way), or stays in hand. Keep it that way, or
     `physics.ts` won't do. The sheets of test paper, bond paper and shadow paper (`ToolShape.pinned`) are pinned flat
-    to the wall wherever they're left, with no arm: their pose is in the plane like anything's, but their part is
+    to the wall wherever they're left, with no clamp stand: their pose is in the plane like anything's, but their part is
     against the wall (`PIN_Z` in `bodies.ts`; in the shadow lamp's slot, further back, `SLOT_Z`), so they're in the
     way only of each other and what's built into the wall, and they're drawn with the wall, behind hoses.
   - **Placing** has no grid: what's held goes where the pointer is, kept on the bench, settled onto the counter or a
@@ -202,8 +203,8 @@ The view is 2D canvas drawing with no unit tests, so verify drawing and interact
   spout's fluid leaves at its hose's nozzle if it's out, so wherever fluid leaves a spout or faucet, use the engine's
   `outletAt` and `faucetOutlet`, not `spoutAt` or `fa.spout`.
 - **What's drawn is what's hit.** Every shape the view draws with a `Pick` is kept, as it was drawn, as part of that
-  thing for the pointer (`Sketch`'s regions), so empty space inside something's bounds isn't it, and an arm's shapes
-  are part of what it holds up. Give a shape a pick of its own only to make it a specific part (a tank, valve or
+  thing for the pointer (`Sketch`'s regions), so empty space inside something's bounds isn't it, and a clamp stand's
+  shapes are part of what it holds up. Give a shape a pick of its own only to make it a specific part (a tank, valve or
   button); labels and notes aren't hit.
 - **What's drawn is what casts a shadow.** The shadow lamp's light (`View.shadows`) goes by what's drawn in front of
   its pane, drawn again with the `Sketch` in `shade` mode: opaque fills and strokes as they are, `glass()` and
@@ -226,7 +227,7 @@ The view is 2D canvas drawing with no unit tests, so verify drawing and interact
   - Its place in the equipment cabinet: `STOCK` and a compartment in `BAYS` (`cabinet.ts`), and `ENDLESS` if it's
     used up. `cabinet.test.ts` checks it fits.
   - If it has state of its own that a save should keep, `Tool.memory` and `Tool.remember`.
-  - Its arms come from `toolParts` (`toolArms` grips near the top of the highest part, at its middle, or 60 in from
+  - Its clamp stands come from `toolParts` (`toolArms` grips near the top of the highest part, at its middle, or 60 in from
     each end if it's over 300 across); check they hold it somewhere sensible.
   - Tests and the README.
   - A tool needn't have tanks at all: the thermometers and the wicking strip (the `DIPPERS`), a sheet of shadow paper,
@@ -239,7 +240,7 @@ The view is 2D canvas drawing with no unit tests, so verify drawing and interact
 - **Unique tools** (`UNIQUE_TOOLS`: the spectroscope, the receptacle and the shadow lamp) aren't on
   an equipment wheel and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
   whole supply station (`STATION` in `tools.ts`): its tanks are the funnel and the ship's reservoir, in that
-  order. It's `fixed` and `wall`: built into the back wall at `STATION_POSE`, with no arm, never moved. The
+  order. It's `fixed` and `wall`: built into the back wall at `STATION_POSE`, with no clamp stand, never moved. The
   `shadowlamp` (`LAMP` in `tools.ts`) is `fixed` too, but not `wall` (that's only the station): built into the back
   wall at `LAMP_POSE`, a frame round the pane its light falls on, with the slot for a sheet of shadow paper behind it;
   its button is a part of its own for the pointer (`'button'`), and its dial is its one valve. A new lamp brings a

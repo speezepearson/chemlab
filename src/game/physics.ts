@@ -2,7 +2,7 @@ import { toWorld, type Pose, type Vec3 } from './space';
 
 /**
  * Collisions in the lab. Nothing falls (whatever the player lets go of stays where it's left, on the counter or held
- * out from the wall by an arm), nothing turns, and everything is in one upright plane (see PLANE_Z), so every body is
+ * up by a clamp stand), nothing turns, and everything is in one upright plane (see PLANE_Z), so every body is
  * a box square to the room, or an upright cylinder, or made of several such parts. What the player holds passes
  * through everything, and is only checked for room where it's let go, so there's nothing to this but whether two
  * bodies overlap.

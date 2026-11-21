@@ -15,7 +15,7 @@ import type { FaucetSpot, Frame, GuideLook, Pick } from './view';
  * How the view draws the room and what isn't a tool, flask or scale (see view.ts), in the wall's frame (x
  * along the wall, y down from the floor: the room's height negated): the back wall's panels, the counter along its
  * foot, the equipment cabinet and what's in it, the faucets and their supply line, the alarms' silence button, the
- * arms out of the wall, hoses, streams, drops and the guides.
+ * clamp stands, hoses, streams, drops and the guides.
  */
 
 /** Height of the dark kick strip along the foot of the walls, the counter and the cabinet. */
@@ -37,8 +37,21 @@ const GUIDE_LOOKS: Record<GuideLook, { stream: string; rim: string }> = {
 const GUIDE_W = 3.2;
 const GUIDE_DASH = [9, 7];
 const RIM_W = 1.6;
-/** An arm's plate on the back wall, and its clamp on the back of what it holds, across and up. */
-const ARM = { plate: { w: 22, h: 26 }, jaw: { w: 14, h: 10 } };
+/**
+ * A clamp stand's parts, across and up: its base plate on the counter, with the foot of its rod; the rod, its radius
+ * and how far it runs on above the grip; the boss clamped round the rod at the grip, with its thumbscrew out to one
+ * side; and the jaws closed on what it holds.
+ */
+const STAND = {
+  base: { w: 72, h: 9 },
+  foot: { w: 14, h: 6 },
+  rod: { r: 2, over: 22 },
+  boss: { w: 12, h: 16 },
+  screw: { w: 7, h: 4, r: 2.6 },
+  jaw: { w: 20, h: 7 },
+};
+/** A clamp stand's steel: muted, a little darker than the wall, so a row of them stays in the background. */
+const STEEL = { fill: '#949d9a', edge: 'rgba(76, 86, 84, 0.75)', dark: '#7e8785', shine: 'rgba(255, 255, 255, 0.18)' };
 
 /**
  * The alarms' silence button: on the back wall, 160 above the supply station's warning lamp, its plate drawn at
@@ -289,14 +302,40 @@ let alarmFace: HTMLCanvasElement | null = null;
 export const alarmPlate = () => (alarmFace ??= alarmPlateCanvas());
 
 /**
- * A faint mark for each arm out of the back wall (see Frame.arms), seen end on: its plate on the wall behind, and its
- * clamp on the back of what it holds, both mostly hidden behind that, and hit as it.
+ * A clamp stand behind each grip on what's held up in the air (see Frame.stands): a low base plate standing on the
+ * counter straight below the grip, a thin rod up from it to a little above the grip, and on the rod at the grip a boss
+ * with its thumbscrew, and the jaws closed on the back of what it holds, mostly hidden behind that. All of it is hit
+ * as what it holds. It's only drawn: it stands behind the plane everything's in, so it's in nothing's way.
  */
-export function drawArms(sk: Sketch, arms: Frame['arms']): void {
-  const { plate: p, jaw: j } = ARM;
-  for (const { at, of } of arms) {
-    sk.box(at.x - p.w / 2, at.x + p.w / 2, -at.y - p.h / 2, -at.y + p.h / 2, 'rgba(48, 55, 58, 0.22)', of, 2, 'rgba(27, 32, 34, 0.3)');
-    sk.box(at.x - j.w / 2, at.x + j.w / 2, -at.y - j.h / 2, -at.y + j.h / 2, 'rgba(48, 55, 58, 0.4)', of, 1);
+export function drawStands(sk: Sketch, stands: Frame['stands']): void {
+  const { base, foot, rod, boss, screw, jaw } = STAND;
+  const edge = sk.px(1);
+  for (const { at, of } of stands) {
+    const { x } = at;
+    const grip = -at.y;
+    const top = Math.min(grip - rod.over, -(LIFT + base.h + foot.h + 4));
+    // the rod, from its foot up past the grip, with a shine down it
+    sk.box(x - rod.r, x + rod.r, top, -(LIFT + base.h), STEEL.fill, of, rod.r, STEEL.edge);
+    sk.box(x - rod.r * 0.35, x + rod.r * 0.15, top + 1, -(LIFT + base.h) - 1, STEEL.shine);
+    // the base plate on the counter, bevelled up to a boss the rod's screwed into
+    const plate = new Path2D();
+    const [b0, b1] = [-(LIFT + base.h), -LIFT];
+    plate.moveTo(x - base.w / 2, b1);
+    plate.lineTo(x - base.w / 2 + 3, b0);
+    plate.lineTo(x + base.w / 2 - 3, b0);
+    plate.lineTo(x + base.w / 2, b1);
+    plate.closePath();
+    bound(plate, x - base.w / 2, b0, x + base.w / 2, b1);
+    sk.fill(plate, STEEL.dark, of);
+    sk.stroke(plate, STEEL.edge, edge);
+    sk.box(x - foot.w / 2, x + foot.w / 2, b0 - foot.h, b0 + 0.5, STEEL.fill, of, 1.5, STEEL.edge);
+    // the boss at the grip, its thumbscrew out to the right, and the jaws
+    sk.box(x + boss.w / 2 - 1, x + boss.w / 2 + screw.w, grip - screw.h / 2, grip + screw.h / 2, STEEL.dark, of, 1, STEEL.edge);
+    const knob = circle(x + boss.w / 2 + screw.w + screw.r - 1, grip, screw.r);
+    sk.fill(knob, STEEL.dark, of);
+    sk.stroke(knob, STEEL.edge, edge);
+    sk.box(x - jaw.w / 2, x + jaw.w / 2, grip - jaw.h / 2, grip + jaw.h / 2, STEEL.dark, of, 2, STEEL.edge);
+    sk.box(x - boss.w / 2, x + boss.w / 2, grip - boss.h / 2, grip + boss.h / 2, STEEL.fill, of, 2, STEEL.edge);
   }
 }
 

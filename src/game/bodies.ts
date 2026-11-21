@@ -126,7 +126,7 @@ export function tankNoteY(t: Tool, k: number): number {
  * its funnel, the plate in the wall, and its spouts' pipes out from it. An inline instrument's are its
  * tube and the pipe down from it, and the cabinet beside them, or the
  * flow meter's readout round the pipe; the tube's top is flush with its opening, for a nozzle to snap onto (see
- * INLINE_DOCK). A dipper's (see DIPPERS) is only its top, where the arm holding it up grips it: a thermometer's rod's, or
+ * INLINE_DOCK). A dipper's (see DIPPERS) is only its top, where the clamp stand holding it up grips it: a thermometer's rod's, or
  * a wicking strip's clip; the rest of it bumps into nothing, so it can stand down in a flask or a tank. A sheet pinned
  * to the wall (see ToolShape.pinned: test paper, bond paper and shadow paper) is all of itself, its bar and its paper,
  * but against the wall, behind the plane everything else is in, so it's in nothing's way but another sheet's and
@@ -555,19 +555,20 @@ export function spoutNear(t: Tool, x: number, y: number): number | null {
   return best;
 }
 
-/* ---------------- arms ---------------- */
+/* ---------------- clamp stands ---------------- */
 
 /**
- * Whatever's left in the air is held there by an arm out of the back wall, straight behind it: a rod from the wall to
- * a clamp on the back of what it holds. These say where each thing is gripped, in the room; the arm runs from there
- * straight back to the wall. What stands on the counter, or on a scale, needs none.
+ * Whatever's left in the air is held there by a clamp stand behind it: a base on the counter straight below the grip,
+ * a rod up from it, and a clamp on the back of what it holds (drawn by drawStands in flatRoom.ts; it's only drawn, and
+ * is in nothing's way). These say where each thing is gripped, in the room; they keep the name arm. What stands on
+ * the counter, or on a scale, needs none.
  */
 
-/** A tool wider than this is held by two arms, one near each end, rather than one in the middle. */
+/** A tool wider than this is held by two clamp stands, one near each end, rather than one in the middle. */
 const TWO_ARMS = 300;
 
 /**
- * Where the arms holding up a tool grip it, unless it's built into the wall: at the back of one of its solid parts
+ * Where the clamp stands holding up a tool grip it, unless it's built into the wall: at the back of one of its solid parts
  * (see toolParts), near that part's top. A narrow tool is gripped in the middle, by whichever of its parts is highest
  * there; a wide one near each end, by whichever is highest there.
  */
@@ -585,13 +586,13 @@ export function toolArms(t: Tool): Vec3[] {
   });
 }
 
-/** Where the arm holding up a flask left in the air grips it: round the back of its neck. */
+/** Where the clamp stand holding up a flask left in the air grips it: round the back of its neck. */
 export const flaskArm = (f: Flask): Vec3 => toWorld({ ...f.pose, yaw: 0 }, { x: 0, y: -11, z: -12 });
 
-/** Where the arm holding up a scale left in the air grips it: the back of its body. */
+/** Where the clamp stand holding up a scale left in the air grips it: the back of its body. */
 export const scaleArm = (sc: Scale): Vec3 => toWorld(sc.pose, { x: 0, y: -SCALE_SHAPE.body.y1 / 2, z: -SCALE_SHAPE.depth });
 
-/** Where the arm holding up a hose's nozzle grips it: the back of it, halfway up. */
+/** Where the clamp stand holding up a hose's nozzle grips it: the back of it, halfway up. */
 export const nozzleArm = (h: Hose): Vec3 => ({ x: h.outlet.x, y: h.outlet.y + NOZZLE_H / 2, z: h.outlet.z - NOZZLE_R });
 
 /* ---------------- valves ---------------- */

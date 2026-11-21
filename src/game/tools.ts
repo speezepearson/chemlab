@@ -640,7 +640,7 @@ export function neckShare(vol: number): number {
  * - paper: the paper itself, in local units, y down from the top of its clip: reaching w either side of the middle,
  *   from `top` down `len` to its foot, the last `point` of it narrowing to a point there;
  * - clip: the clip it hangs from, at its top, reaching w either side of the middle, h down from its top, d front to
- *   back: what the arm holding it up grips.
+ *   back: what the clamp stand holding it up grips.
  */
 export const STRIP = {
   cap: CAP / 100, spot: CAP / 1000, spots: 3, time: 20, drag: 34, cells: 108, spread: 0.05, ink: 33, tint: 0.4, marks: 20,
@@ -1095,7 +1095,7 @@ export interface ToolShape {
   /** Whether it's built into a wall, with no stand: only the supply station (see STATION). */
   wall?: boolean;
   /**
-   * Whether it's a sheet pinned flat to the wall, face on, behind everything else and with no arm: a sheet of test
+   * Whether it's a sheet pinned flat to the wall, face on, behind everything else and with no clamp stand: a sheet of test
    * paper, bond paper or shadow paper. It's in nothing's way but another such sheet's.
    */
   pinned?: boolean;
