@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   FAUCET_NECK, FAUCET_Y, FLASK_R, NOZZLE_R, SCALE_SLOTS, TOOL_DEPTH, bathAt, dippedIn, docked, faucetBox, faucetPipes, flaskArm, flaskBox,
   flaskFluid, flaskLip, flaskMouth, footAt, insideVessel, isDocked, nozzleArm, nozzleBox, onScale, scaleArm, scaleBox, scaleSpot, spoutAt, spoutNear,
-  tankFluid, tankMouth, toolArms, toolBox, turnValve, newTurn, leverAt, setLever, valveLocal, valveNear, SHEET_SLOT, SLOT_REACH, inSlot, sheetIn, slotted,
+  tankFluid, tankMouth, toolArms, toolBox, turnValve, newTurn, leverAt, setLever, valveLocal, valveNear, SHEET_SLOT, SLOT_REACH, inSlot, sheetIn, slotted, FLASK_LIP, lipAt, tiltToLip,
 } from './bodies';
 import { LAMP_POSE, STATION_POSE } from './presets';
 import { singleOf } from '../chem/species';
 import { CAP } from './config';
 import { COLOR_FAUCETS, FAUCET_X } from './faucets';
 import { Flask } from './flask';
-import { FLASK_H } from './flaskShape';
+import { FLASK_H, fillLevel } from './flaskShape';
 import { boxesOverlap, solids } from './physics';
 import { Scale } from './scale';
 import { BENCH, CELL, LIFT, PLANE_Z, fromFrac, toFrac } from './space';
@@ -634,5 +634,27 @@ describe("the shadow lamp's slot", () => {
     expect(boxesOverlap(flaskBox(f), toolBox(new Tool('testpaper', 1, { x: LAMP_POSE.x + 300, y: LIFT + 70, z: PLANE_Z, yaw: 0 })))).toBe(false);
     expect(toolArms(lamp())).toEqual([]);
     expect(toolArms(new Tool('sheet', 1, { x: 4000, y: 900, z: PLANE_Z, yaw: 0 }))).toEqual([]);
+  });
+});
+
+describe('tiltToLip', () => {
+  const [lo, hi] = [0.1, 1.9];
+  it("tips a flask just far enough for its fluid to reach its lip, less the fuller it is, within the bounds it's given", () => {
+    let last = lo;
+    for (const frac of [0.9, 0.6, 0.3, 0.15, 0.05]) {
+      const t = tiltToLip(frac, lo, hi);
+      expect(t).toBeGreaterThanOrEqual(last);
+      last = t;
+      if (t > lo && t < hi) expect(fillLevel(t, frac)).toBeCloseTo(-FLASK_LIP * Math.sin(t), 0);
+    }
+    expect(tiltToLip(1, lo, hi)).toBe(lo);
+    expect(tiltToLip(0, lo, hi)).toBeGreaterThanOrEqual(last);
+  });
+
+  it('puts the lip of a flask with its mouth at a pose where flaskLip puts it', () => {
+    const f = new Flask(CAP);
+    f.pose = at(300, 500, PLANE_Z);
+    f.tilt = 1.2;
+    expect(lipAt(f.pose, 1.2)).toEqual(flaskLip(f));
   });
 });

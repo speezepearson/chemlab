@@ -194,24 +194,19 @@ function fall(drop: Vessel, h: number, rand: () => number): Vessel | null {
 }
 
 /**
- * How many drops' worth (DRIP.atoms) a second a flask poured slowly (Shift) lets out from its lip. By default drops
- * then fall about every third of a sim second, each a little over DRIP.atoms (see trickle).
+ * How fast a flask poured slowly (Shift) lets fluid out, in atoms per sim second: twice the flow below which an
+ * outlet drips (DRIP_FLOW), so it's still an unbroken stream, just a thin one.
  */
-export const TRICKLE_DROPS = 4;
-
-/** How fast a flask poured slowly lets fluid out, in atoms per sim second: TRICKLE_DROPS drops' worth. */
-export function trickleRate(): number {
-  return TRICKLE_DROPS * DRIP.atoms;
-}
+export const SLOW_POUR = 2 * DRIP_FLOW;
 
 /**
- * One sim step of `h` seconds of a flask poured slowly: trickleRate() atoms a second of what's in `from` (fewer if
- * it hasn't that many) gather in the drop hanging from its lip, which falls just as an outlet's drop does (see
- * dropRate), however fast that is, rather than streaming. Returns the fallen drop, or null.
+ * One sim step of `h` seconds of a flask poured slowly: SLOW_POUR atoms a second of what's in `from` (fewer if it
+ * hasn't that many), moved by volume in whole molecules (see transfer), returned as what's left its lip.
  */
-export function trickle(from: Vessel, drop: Vessel, h: number, rand = Math.random): Vessel | null {
-  if (from.N > 0) transfer(from, drop, (Math.min(from.N, trickleRate() * h) * volume(from)) / from.N);
-  return fall(drop, h, rand);
+export function slowPour(from: Vessel, h: number): Vessel {
+  const out = new Vessel(Infinity);
+  if (from.N > 0) transfer(from, out, (Math.min(from.N, SLOW_POUR * h) * volume(from)) / from.N);
+  return out;
 }
 
 /** How much a splitter's or multiplexer's funnel holds, in atoms: just a buffer, like a hose's. */

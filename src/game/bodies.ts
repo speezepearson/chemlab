@@ -1,5 +1,5 @@
 import { volume, type Flask, type Vessel } from './flask';
-import { FLASK_H, fillLevel, flaskRadius } from './flaskShape';
+import { FLASK_H, fillLevel, flaskRadius, fracBelow } from './flaskShape';
 import { placeBox, type Box, type Part } from './physics';
 import { LAMP_POSE } from './presets';
 import { SCALE_SHAPE, type Scale } from './scale';
@@ -358,7 +358,37 @@ export const FLASK_CENTER: Vec3 = { x: 0, y: -FLASK_H / 2, z: 0 };
 
 /** A flask's lip on its right, where it pours from, tipped by its tilt (or `tilt`) about its mouth (see Flask.tilt). */
 export function flaskLip(f: Flask, tilt = f.tilt): Vec3 {
-  return toWorld(f.pose, { x: FLASK_LIP * Math.cos(tilt), y: -FLASK_LIP * Math.sin(tilt), z: 0 });
+  return lipAt(f.pose, tilt);
+}
+
+/** Where the lip of a flask with its mouth at `pose` is, tipped by `tilt` about its mouth (see flaskLip). */
+export function lipAt(pose: Pose, tilt: number): Vec3 {
+  return toWorld(pose, { x: FLASK_LIP * Math.cos(tilt), y: -FLASK_LIP * Math.sin(tilt), z: 0 });
+}
+
+/** How many tilts tiltToLip's table has, from its least to its most. */
+const LIP_STEPS = 64;
+let lipTable = { lo: NaN, hi: NaN, frac: new Float64Array(0) };
+
+/**
+ * How far a flask filled to fraction `frac` of its capacity (by volume, as it's drawn) has to be tipped about its mouth
+ * for its fluid to just reach its lip: from `lo` (for one so full it's there at once) to `hi` (for one too empty to
+ * reach it before then). The share of a flask that lies below its lip at each of LIP_STEPS tilts from lo to hi is
+ * worked out once, the first time, and looked up after that.
+ */
+export function tiltToLip(frac: number, lo: number, hi: number): number {
+  if (lipTable.lo !== lo || lipTable.hi !== hi) {
+    const at = Float64Array.from({ length: LIP_STEPS + 1 }, (_, i) => {
+      const t = lo + ((hi - lo) * i) / LIP_STEPS;
+      return fracBelow(t, -FLASK_LIP * Math.sin(t));
+    });
+    lipTable = { lo, hi, frac: at };
+  }
+  const fr = lipTable.frac;
+  if (frac >= fr[0]) return lo;
+  for (let i = 1; i <= LIP_STEPS; i++)
+    if (fr[i] <= frac) return lo + ((hi - lo) * (i - 1 + (fr[i - 1] - frac) / (fr[i - 1] - fr[i]))) / LIP_STEPS;
+  return hi;
 }
 
 /**

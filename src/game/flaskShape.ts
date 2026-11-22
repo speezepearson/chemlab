@@ -108,6 +108,41 @@ let levelCache = { tilt: NaN, heights: new Float64Array(0), below: new Float64Ar
  * it spans, tipped, so the level rises smoothly with the fill, a trace included, rather than a slab's row at a time.
  */
 export function fillLevel(tilt: number, frac: number): number {
+  const { heights: h, below } = levels(tilt);
+  const f = Math.max(0, Math.min(1, frac));
+  if (f <= below[0]) return h[0];
+  if (f >= below[below.length - 1]) return h[h.length - 1];
+  // the last height with no more than f below it, and the next, which has more
+  let lo = 0;
+  let hi = below.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (below[mid] <= f) lo = mid;
+    else hi = mid;
+  }
+  return h[lo] + ((h[hi] - h[lo]) * (f - below[lo])) / (below[hi] - below[lo]);
+}
+
+/**
+ * The other way round from fillLevel: the fraction of a flask's volume that lies below height `y` above its mouth,
+ * tipped by `tilt`.
+ */
+export function fracBelow(tilt: number, y: number): number {
+  const { heights: h, below } = levels(tilt);
+  if (y <= h[0]) return 0;
+  if (y >= h[h.length - 1]) return 1;
+  let lo = 0;
+  let hi = h.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (h[mid] <= y) lo = mid;
+    else hi = mid;
+  }
+  return h[hi] > h[lo] ? below[lo] + ((below[hi] - below[lo]) * (y - h[lo])) / (h[hi] - h[lo]) : below[lo];
+}
+
+/** The volume below each height in a flask tipped by `tilt`, worked out once for the last tilt asked about. */
+function levels(tilt: number): typeof levelCache {
   if (levelCache.tilt !== tilt) {
     const c = Math.cos(tilt);
     const s = Math.sin(tilt);
@@ -134,17 +169,5 @@ export function fillLevel(tilt: number, frac: number): number {
     for (let k = 0; k < 2 * n; k++) below[k] /= acc;
     levelCache = { tilt, heights, below };
   }
-  const { heights: h, below } = levelCache;
-  const f = Math.max(0, Math.min(1, frac));
-  if (f <= below[0]) return h[0];
-  if (f >= below[below.length - 1]) return h[h.length - 1];
-  // the last height with no more than f below it, and the next, which has more
-  let lo = 0;
-  let hi = below.length - 1;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if (below[mid] <= f) lo = mid;
-    else hi = mid;
-  }
-  return h[lo] + ((h[hi] - h[lo]) * (f - below[lo])) / (below[hi] - below[lo]);
+  return levelCache;
 }
