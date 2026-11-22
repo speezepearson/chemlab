@@ -13,8 +13,8 @@ import { tankMouth } from './bodies';
 import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, BOND_KEYS, SPECTROSCOPE, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, STRIP, STRIP_FOOT, STRIP_RUN, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SHEET, darkness, lampLight, type Mouth, lampShot, sheetLit,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, BOND_KEYS, SPECTROSCOPE, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
+  clockText, needleAt, STRIP, STRIP_FOOT, STRIP_RUN, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SCREEN, lampLight, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -91,15 +91,33 @@ describe('resistive heater', () => {
     }
     return { ht, out, fed };
   }
-  const dial = (d: number, taps = [0, 0, 0]) => [...taps, d];
+  /** Its end's spout comes after its tap's. */
+  const END = HEATER_TAPS.length;
+  const dial = (d: number, taps = [0]) => [...taps, d];
   const held = (ht: Tool) => [...ht.tanks, ...ht.tube].reduce((n, v) => n + v.N, 0);
 
-  it('has three taps and a dial, all starting at 0', () => {
+  it('has one tap and a dial, both starting at 0, and two spouts: its tap\'s and its end\'s', () => {
     const ht = new Tool('heater', 0);
-    expect(ht.valves).toEqual([0, 0, 0, 0]);
-    expect(ht.shape.dial).toBe(3);
-    expect(ht.shape.spouts.length).toBe(4);
+    expect(END).toBe(1);
+    expect(ht.valves).toEqual([0, 0]);
+    expect(ht.shape.dial).toBe(1);
+    expect(ht.shape.spouts.length).toBe(2);
     expect(ht.tube.length).toBe(HEATER_CELLS);
+  });
+
+  it('is three grid cells along: its funnel, its tap\'s spout a cell on under the middle of its tube, and its end\'s another', () => {
+    const sh = SHAPES.heater;
+    const x = tankX(sh.tanks[0]);
+    expect(sh.spouts).toEqual([x + CELL, x + 2 * CELL]);
+    expect(heaterCellX(HEATER_TAPS[0])).toBeCloseTo(sh.spouts[0]);
+    expect(heaterCellX(HEATER_CELLS - 1)).toBeCloseTo(sh.spouts[1]);
+    expect(sh.valves![0].x).toBe(sh.spouts[0]);
+    // the tap draws from the end of the tube's first half
+    expect(HEATER_TAPS[0] + 1).toBe(HEATER_CELLS / 2);
+    // its box is no more than those three cells and a little over, the dial's box within it
+    expect(sh.box.x1 - sh.box.x0).toBeLessThan(3 * CELL);
+    expect(HEATER_BOX.x1).toBeLessThan(sh.box.x1);
+    expect(HEATER_BOX.x0).toBeGreaterThan(sh.tanks[0].x1);
   });
 
   it('carries fluid the length of its tube in about HEATER.transit, and out the end', () => {
@@ -108,25 +126,25 @@ describe('resistive heater', () => {
     // the first of it gets out a little early, as the stretches mix; most takes about the transit
     let t = 0;
     let out = 0;
-    for (; out < CAP / 200 && t < 20; t += 0.02) out += ht.step(0.02)[3]?.N ?? 0;
+    for (; out < CAP / 200 && t < 20; t += 0.02) out += ht.step(0.02)[END]?.N ?? 0;
     expect(t).toBeGreaterThan(0.8 * HEATER.transit);
     expect(t).toBeLessThan(1.2 * HEATER.transit);
   });
 
-  it('loses nothing but traces, and with the taps shut lets it all out the end', () => {
+  it('loses nothing but traces, and with the tap shut lets it all out the end', () => {
     const { ht, out, fed } = run(dial(0.5));
-    expect(out[0].N + out[1].N + out[2].N).toBe(0);
+    expect(out[0].N).toBe(0);
     // transfer drops a trace left behind (see TRACE), as the front of the stream spreads along the tube
-    expect(1 - (out[3].N + held(ht)) / fed).toBeLessThan(1e-4);
+    expect(1 - (out[END].N + held(ht)) / fed).toBeLessThan(1e-4);
   });
 
   it("doesn't heat with the dial at 0", () => {
     const { out } = run(dial(0));
-    expect(temperature(out[3])).toBeCloseTo(1, 6);
+    expect(temperature(out[END])).toBeCloseTo(1, 6);
   });
 
   it('heats more with the dial further up', () => {
-    const T = [0.2, 0.5, 0.8].map((d) => temperature(run(dial(d)).out[3]));
+    const T = [0.2, 0.5, 0.8].map((d) => temperature(run(dial(d)).out[END]));
     expect(T[0]).toBeGreaterThan(1.05);
     expect(T[1]).toBeGreaterThan(T[0]);
     expect(T[2]).toBeGreaterThan(T[1]);
@@ -134,10 +152,10 @@ describe('resistive heater', () => {
     expect(T[2]).toBeLessThan(wireTemperature(0.8));
   });
 
-  it('heats fluid more the longer it has been along the tube, so each tap runs hotter than the last', () => {
-    const { out } = run(dial(0.5, [0.05, 0.05, 0.05]));
+  it('heats fluid more the longer it has been along the tube, so the end runs hotter than the tap', () => {
+    const { out } = run(dial(0.5, [0.05]));
     const T = out.map((v) => temperature(v));
-    for (let k = 1; k < 4; k++) expect(T[k]).toBeGreaterThan(T[k - 1]);
+    expect(T[END]).toBeGreaterThan(T[0]);
     // roughly as far toward the wire as its time in the tube says
     const wire = wireTemperature(0.5);
     HEATER_TAPS.forEach((c, k) => {
@@ -149,10 +167,9 @@ describe('resistive heater', () => {
   });
 
   it('lets everything out of a wide-open tap, so none goes further', () => {
-    const { out } = run(dial(0.5, [0, 1, 0]));
-    expect(out[0].N).toBe(0);
-    expect(out[1].N).toBeGreaterThan(0);
-    expect(out[2].N + out[3].N).toBe(0);
+    const { out } = run(dial(0.5, [1]));
+    expect(out[0].N).toBeGreaterThan(0);
+    expect(out[END].N).toBe(0);
   });
 
   it('feeds its tube from its funnel in proportion to how high the fluid stands in it', () => {
@@ -2012,37 +2029,49 @@ describe('separator', () => {
     }
   };
 
-  it('gives each molecule its own outlet by its share of black atoms: none, ¼, ⅓, ½, all', () => {
-    expect(SEPARATOR_OUTLET[R]).toBe(0);
-    expect(SEPARATOR_OUTLET[SOLVENT_SPECIES]).toBe(0);
-    expect(SEPARATOR_OUTLET[tri('△RGB')]).toBe(0);
-    expect(SEPARATOR_OUTLET[pair('R–G')]).toBe(0);
-    expect(SEPARATOR_OUTLET[tri('⊠RGBK')]).toBe(1);
-    expect(SEPARATOR_OUTLET[tri('R–G–B–K')]).toBe(1);
-    expect(SEPARATOR_OUTLET[tri('△RGK')]).toBe(2);
-    expect(SEPARATOR_OUTLET[pair('R–K')]).toBe(3);
-    expect(SEPARATOR_OUTLET[K]).toBe(4);
+  /** Some of each: with no black atom, and with one. */
+  const without = [R, SOLVENT_SPECIES, tri('△RGB'), pair('R–G')];
+  const withK = [tri('⊠RGBK'), tri('R–G–B–K'), tri('△RGK'), pair('R–K'), K];
+
+  it('has two spouts, a grid cell either side of its tank', () => {
+    const t = new Tool('separator', 0);
+    expect(SEPARATOR_OUTLETS).toBe(2);
+    expect(t.shape.spouts).toEqual([-CELL, CELL]);
+    expect(tankX(t.shape.tanks[0])).toBe(0);
   });
 
-  it('sends most of each molecule out its own outlet, the rest mostly next door, and more so the sharper it is', () => {
+  it('is symmetrical, as the splitter and the multiplexer are: each one\'s inlets and outlets are about its middle', () => {
+    for (const kind of ['separator', 'splitter', 'multiplexer'] as const) {
+      const sh = SHAPES[kind];
+      const xs = [...sh.tanks.map(tankX), ...sh.spouts].sort((a, b) => a - b);
+      expect(xs, kind).toEqual([-CELL, 0, CELL]);
+    }
+  });
+
+  it('gives each molecule its outlet by whether it has a black atom: the left with none, the right with any', () => {
+    for (const s of without) expect(SEPARATOR_OUTLET[s]).toBe(0);
+    for (const s of withK) expect(SEPARATOR_OUTLET[s]).toBe(1);
+    expect(SPECIES.every((sp) => SEPARATOR_OUTLET[sp.i] === +sp.atoms.includes('K'))).toBe(true);
+  });
+
+  it('sends most of each molecule out its own outlet and the rest out the other, more so the sharper it is', () => {
     const f = new Vessel(Infinity);
-    for (const sp of [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K]) f.n[sp] = CAP;
+    for (const sp of [...without, ...withK]) f.n[sp] = CAP;
     f.N = atomTotal(f);
-    let last = 0;
+    let last = 0.5;
     for (const k of [1, 3, 6]) {
       withSharpness(k, () => {
         const out = separate(f);
         expect(out).toHaveLength(SEPARATOR_OUTLETS);
-        const ownShare = out[2].n[tri('△RGK')] / CAP;
+        const ownShare = out[1].n[K] / CAP;
+        expect(ownShare).toBeCloseTo(1 / (1 + Math.exp(-k)), 4);
         expect(ownShare).toBeGreaterThan(last);
         last = ownShare;
-        [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K].forEach((sp, own) => {
+        for (const sp of [...without, ...withK]) {
           const shares = out.map((v) => v.n[sp] / CAP);
-          expect(Math.max(...shares)).toBe(shares[own]);
-          for (let j = 0; j < SEPARATOR_OUTLETS; j++)
-            if (Math.abs(j - own) > 1) expect(shares[j]).toBeLessThan(shares[own - Math.sign(own - j)] + 1e-9);
-          expect(shares.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 12);
-        });
+          expect(shares[SEPARATOR_OUTLET[sp]]).toBeGreaterThan(shares[1 - SEPARATOR_OUTLET[sp]]);
+          expect(shares[0] + shares[1]).toBeCloseTo(1, 12);
+        }
       });
     }
   });
@@ -2050,16 +2079,14 @@ describe('separator', () => {
   it('sorts perfectly from SEPARATOR_PERFECT up', () => {
     withSharpness(SEPARATOR_PERFECT, () => {
       const f = new Vessel(Infinity);
-      for (const sp of [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K]) f.n[sp] = CAP;
+      for (const sp of [...without, ...withK]) f.n[sp] = CAP;
       f.N = atomTotal(f);
       const out = separate(f);
-      [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K].forEach((sp, own) =>
-        out.forEach((v, j) => expect(v.n[sp]).toBe(j === own ? CAP : 0)),
-      );
+      for (const sp of [...without, ...withK]) out.forEach((v, j) => expect(v.n[sp]).toBe(j === SEPARATOR_OUTLET[sp] ? CAP : 0));
     });
   });
 
-  it('splits everything evenly five ways at sharpness 0', () => {
+  it('splits everything evenly two ways at sharpness 0', () => {
     withSharpness(0, () => {
       const f = filled(new Vessel(Infinity), R, CAP, 1);
       for (const v of separate(f)) expect(v.n[R] / CAP).toBeCloseTo(1 / SEPARATOR_OUTLETS, 4);
@@ -2075,7 +2102,7 @@ describe('separator', () => {
     for (const v of out) if (v.N > 1e6) expect(temperature(v)).toBeCloseTo(temperature(f), 3);
   });
 
-  it('drains its tank at the valve rate times its level, out of all five spouts', () => {
+  it('drains its tank at the valve rate times its level, out of both spouts', () => {
     const x = new Tool('separator', 0, undefined, [0.5]);
     filled(x.tanks[0], singleOf('B'), CAP, 3);
     x.tanks[0].setMolecules(K, CAP);
@@ -2164,159 +2191,185 @@ describe('dripping', () => {
 });
 
 describe('the shadow lamp', () => {
-  it('is one of a kind, fixed where it is, with no tanks or spouts, and one valve, its dial', () => {
+  const N = SCREEN.cells;
+  /** Light on every cell: `at(i, j)` of the lamp's, i across and j up. */
+  const light = (at: (i: number, j: number) => number) => Float32Array.from({ length: N * N }, (_, k) => at(k % N, Math.floor(k / N)));
+  const all = light(() => 1);
+
+  it('is one of a kind, fixed where it is, with no tanks, spouts or valves', () => {
     const t = new Tool('shadowlamp', 0);
     expect(UNIQUE_TOOLS).toContain('shadowlamp');
     expect(t.shape.fixed).toBe(true);
     expect(t.shape.wall).toBeUndefined();
-    expect([t.tanks.length, t.shape.spouts.length, t.valves.length]).toEqual([0, 0, 1]);
-    expect(t.shape.dial).toBe(0);
-    // the dial starts halfway, and is where a save or a preset says
-    expect(t.valves[0]).toBe(0.5);
-    expect(new Tool('shadowlamp', 1, undefined, [0.25]).valves[0]).toBe(0.25);
+    expect([t.tanks.length, t.shape.spouts.length, t.valves.length]).toEqual([0, 0, 0]);
+    expect(t.shape.dial).toBeUndefined();
+    // (a save from when it had a dial gave it a valve, which it has no use for)
+    expect(new Tool('shadowlamp', 1, undefined, [0.25]).valves).toEqual([]);
     expect(t.step(0.02)).toEqual([]);
-    // the dial and the button are on the enclosure's front, clear of each other and of its edges
-    const { dial, button, box, h } = LAMP;
-    for (const c of [dial, button]) {
-      expect(c.x - 14).toBeGreaterThan(box.x0);
-      expect(c.x + 14).toBeLessThan(box.x1);
-      expect(c.y - 14).toBeGreaterThan(0);
-      expect(c.y + 14).toBeLessThan(h);
-    }
-    expect(button.x - button.r - (dial.x + 14)).toBeGreaterThan(5);
+    // the button is on the enclosure's front, clear of its edges
+    const { button, box, h } = LAMP;
+    expect(button.x - 14).toBeGreaterThan(box.x0);
+    expect(button.x + 14).toBeLessThan(box.x1);
+    expect(button.y - 14).toBeGreaterThan(0);
+    expect(button.y + 14).toBeLessThan(h);
   });
 
-  it('shines for as long as its dial says, from a flash to as long as darkens a sheet all the way, each step doubling it', () => {
-    expect(lampShot(0)).toBeCloseTo(LAMP.shot.min);
-    expect(lampShot(1)).toBeCloseTo(LAMP.shot.max);
-    expect(LAMP.shot.max).toBe(SHEET.full);
-    // the shortest barely tints the sheet, and the longest leaves it as dark as it gets
-    expect(darkness(lampShot(0))).toBeGreaterThan(0.05);
-    expect(darkness(lampShot(0))).toBeLessThan(0.15);
-    // the dial has seven ticks, six steps apart
-    for (let i = 0; i < 6; i++) expect(lampShot((i + 1) / 6) / lampShot(i / 6)).toBeCloseTo(2);
-    // about what shows a faint shadow best is within its range, with room either side
-    expect(lampShot(0.2)).toBeLessThan(SHEET.tau);
-    expect(lampShot(0.8)).toBeGreaterThan(SHEET.tau);
-    expect(lampShot(-1)).toBe(lampShot(0));
-    expect(lampShot(2)).toBe(lampShot(1));
-  });
-
-  it('lights at a press of its button, shines that long on sim time, and goes out by itself', () => {
+  it('lights at a press of its button and stays lit, however long, until it is pressed again', () => {
     const t = new Tool('shadowlamp', 0);
-    expect([t.lit, t.left]).toEqual([false, 0]);
-    t.valves[0] = 1 / 3;
-    const shot = lampShot(1 / 3);
+    expect(t.lit).toBe(false);
     t.press();
-    expect([t.lit, t.left]).toEqual([true, shot]);
-    // turning the dial once it's lit changes nothing about the exposure under way
-    t.valves[0] = 1;
-    const steps = Math.floor(shot / 0.02);
-    for (let i = 0; i < steps - 1; i++) t.step(0.02);
     expect(t.lit).toBe(true);
-    expect(t.left).toBeCloseTo(shot - (steps - 1) * 0.02);
-    t.step(0.02);
-    t.step(0.02);
-    expect([t.lit, t.left]).toEqual([false, 0]);
-    // no time, no change: paused, it holds
+    for (let i = 0; i < 500; i++) t.step(0.02);
+    t.shine(3600);
+    expect(t.lit).toBe(true);
     t.press();
-    t.step(0);
-    expect([t.lit, t.left]).toEqual([true, lampShot(1)]);
+    expect(t.lit).toBe(false);
+    t.step(100);
+    expect(t.lit).toBe(false);
     // nothing else has a button
     const d = new Tool('dispenser', 1);
     d.press();
     expect(d.lit).toBe(false);
   });
 
-  it('is put out by a press while it is lit, and only lights again for a whole new exposure', () => {
+  it("is saved with whether it's lit, and a save from when it made exposures loads as lit or out too", () => {
     const t = new Tool('shadowlamp', 0);
+    expect(t.memory).toEqual([0]);
     t.press();
-    t.step(0.1);
-    const left = t.left;
-    t.press();
-    expect(t.lit).toBe(false);
-    t.step(1);
-    expect(t.left).toBe(left);
-    // an undo puts it back lit, for what it had left
-    t.lit = true;
-    expect(t.lit).toBe(true);
-    t.step(left + 0.02);
-    expect([t.lit, t.left]).toEqual([false, 0]);
-    // but one that's shone itself out stays out
-    t.lit = true;
-    expect(t.lit).toBe(false);
-    t.press();
-    expect(t.left).toBe(lampShot(t.valves[0]));
-  });
-
-  it("is saved with whether it's lit and how long it has left", () => {
-    const t = new Tool('shadowlamp', 0);
-    expect(t.memory).toEqual([0, 0]);
-    t.press();
-    t.step(0.1);
-    expect(t.memory).toEqual([1, t.left]);
+    expect(t.memory).toEqual([1]);
     const u = new Tool('shadowlamp', 1);
     u.remember(JSON.parse(JSON.stringify(t.memory)));
-    expect([u.lit, u.left]).toEqual([true, t.left]);
-    u.remember([0, 0.3]);
-    expect([u.lit, u.left]).toEqual([false, 0.3]);
-    // lit with nothing left is out, and it never has more left than its longest exposure
-    u.remember([1, 0]);
+    expect(u.lit).toBe(true);
+    u.remember([0]);
     expect(u.lit).toBe(false);
-    u.remember([1, 1e9]);
-    expect([u.lit, u.left]).toEqual([true, LAMP.shot.max]);
-    // anything else is ignored, a save from when it had a switch included
-    for (const bad of [undefined, 'on', [], [1], [1, 2, 3], [NaN, 1]]) u.remember(bad);
-    expect([u.lit, u.left]).toEqual([true, LAMP.shot.max]);
+    // (an older save's kept how long its exposure had left, too)
+    u.remember([1, 0.3]);
+    expect(u.lit).toBe(true);
+    u.remember([0, 0.3]);
+    expect(u.lit).toBe(false);
+    // anything else is ignored
+    u.press();
+    for (const bad of [undefined, 'on', [], [0, 2, 3], [NaN]]) u.remember(bad);
+    expect(u.lit).toBe(true);
   });
 
-  it('owes the sheet in its slot its light, sim second for sim second, while it shines', () => {
+  it('has a screen that is dark to start with, a cell for each of its cells, which nothing else has', () => {
     const t = new Tool('shadowlamp', 0);
-    const sheet = new Tool('sheet', 1);
-    t.valves[0] = 1;
-    // lit, with nothing in its slot, it shines on nothing
-    t.press();
+    expect(t.glow).toHaveLength(N * N);
+    expect(Math.max(...t.glow)).toBe(0);
+    expect(new Tool('strip', 1).glow).toHaveLength(0);
+  });
+
+  it("owes its screen the sim time that goes by while it's lit, for whoever knows what's in the way to settle", () => {
+    const t = new Tool('shadowlamp', 0);
+    // out and dark, there's nothing to catch up with
     for (let i = 0; i < 50; i++) t.step(0.02);
     expect(t.owed).toBe(0);
-    expect(t.left).toBeCloseTo(LAMP.shot.max - 1);
-    t.sheet = sheet;
+    t.press();
     for (let i = 0; i < 25; i++) t.step(0.02);
     expect(t.owed).toBeCloseTo(0.5);
-    // in bigger steps it comes to the same
+    // in bigger steps it comes to the same; and no time, no change: paused, it holds
     t.step(0.25);
+    t.step(0);
     expect(t.owed).toBeCloseTo(0.75);
-    // put out, the sheet is still owed what fell on it, and no more
+    // the lamp never lights its screen itself
+    expect(Math.max(...t.glow)).toBe(0);
+    // settled, nothing's owed
+    t.fluoresce(all);
+    expect(t.owed).toBe(0);
+    // and it's never owed more than brings it all the way, through the longest sleep
+    t.shine(3600);
+    expect(t.owed).toBe(SCREEN.most);
+    expect(Math.exp(-SCREEN.most / SCREEN.tau)).toBeLessThan(SCREEN.still);
+  });
+
+  it('has each spot of its screen approach the light on it over a couple of sim seconds', () => {
+    const t = new Tool('shadowlamp', 0);
     t.press();
+    // the right half in half shadow
+    const half = light((i) => (i < N / 2 ? 1 : 0.5));
+    t.shine(SCREEN.tau);
+    t.fluoresce(half);
+    expect(t.glow[0]).toBeCloseTo(1 - 1 / Math.E);
+    expect(t.glow[N - 1]).toBeCloseTo(0.5 * (1 - 1 / Math.E));
+    expect(t.glowed).toBe(1);
+    // most of the way there in a second, and all but there in two
+    const u = new Tool('shadowlamp', 1);
+    u.press();
+    for (let i = 0; i < 50; i++) {
+      u.step(0.02);
+      u.fluoresce(all);
+    }
+    expect(u.glow[0]).toBeGreaterThan(0.7);
+    expect(u.glow[0]).toBeLessThan(0.9);
+    for (let i = 0; i < 50; i++) {
+      u.step(0.02);
+      u.fluoresce(all);
+    }
+    expect(u.glow[0]).toBeGreaterThan(0.93);
+    expect(u.glow[0]).toBeLessThan(1);
+    // however the time is cut up, it comes to the same
+    const v = new Tool('shadowlamp', 2);
+    v.press();
+    v.shine(2);
+    v.fluoresce(all);
+    expect(v.glow[0]).toBeCloseTo(u.glow[0], 5);
+    // and in the end it's just the light on it, and stops changing
+    for (let i = 0; i < 20; i++) {
+      u.step(1);
+      u.fluoresce(half);
+    }
+    expect([u.glow[0], u.glow[N - 1]]).toEqual([1, 0.5]);
+    const n = u.glowed;
+    u.step(1);
+    u.fluoresce(half);
+    expect(u.glowed).toBe(n);
+  });
+
+  it('has a spot fade as slowly when a shadow falls on it, or the lamp goes out, and then has nothing more to do', () => {
+    const t = new Tool('shadowlamp', 0);
+    t.press();
+    t.shine(60);
+    t.fluoresce(all);
+    expect(t.glow[0]).toBe(1);
+    // something's put in the way of its left half
+    const shadowed = light((i) => (i < N / 2 ? 0 : 1));
+    t.shine(SCREEN.tau);
+    t.fluoresce(shadowed);
+    expect(t.glow[0]).toBeCloseTo(1 / Math.E);
+    expect(t.glow[N - 1]).toBe(1);
+    // put out, all of it fades, on sim time
+    t.press();
+    t.fluoresce(null);
+    expect(t.glow[N - 1]).toBe(1);
+    t.step(SCREEN.tau);
+    expect(t.owed).toBeCloseTo(SCREEN.tau);
+    t.fluoresce(null);
+    expect(t.glow[N - 1]).toBeCloseTo(1 / Math.E);
+    for (let i = 0; i < 20; i++) {
+      t.step(1);
+      t.fluoresce(null);
+    }
+    expect(Math.max(...t.glow)).toBe(0);
+    // dark and out, it's owed nothing
     t.step(1);
-    expect(t.owed).toBeCloseTo(0.75);
-    // the lamp never darkens the sheet itself: that's for whoever knows what's in the way
-    expect(Math.max(...sheet.dose)).toBe(0);
-    // taken out, the sheet is owed nothing
-    t.sheet = null;
-    t.step(0.02);
     expect(t.owed).toBe(0);
   });
 
-  it('owes no more light than its exposure had left, however long a step, and never more than darkens a sheet all the way', () => {
+  it('takes light that is never more than all of the lamp\'s nor less than none, and none meant for some other screen', () => {
     const t = new Tool('shadowlamp', 0);
-    t.sheet = new Tool('sheet', 1);
-    t.valves[0] = 0.5;
     t.press();
-    t.shine(3600);
-    expect(t.owed).toBeCloseTo(lampShot(0.5));
-    expect(t.lit).toBe(false);
-    // exposure after exposure, what's owed stops at what darkens it all the way
-    t.valves[0] = 1;
-    for (let i = 0; i < 3; i++) {
-      t.press();
-      t.shine(3600);
-    }
-    expect(t.owed).toBe(SHEET.full);
+    t.shine(60);
+    t.fluoresce(light((i) => (i % 2 ? 7 : -7)));
+    expect([t.glow[0], t.glow[1]]).toEqual([0, 1]);
+    t.shine(60);
+    t.fluoresce(new Float32Array(10));
+    expect([t.glow[0], t.glow[1]]).toEqual([0, 1]);
   });
 
-  it("is a trough as tall as a sheet's paper, with a channel a grid cell wide and a whole number of cells long", () => {
+  it('is a trough a grid cell tall, with a channel a grid cell wide and a whole number of cells long', () => {
     const { h, wall, box, channel: ch } = LAMP;
-    expect(h).toBe(SHEET.side);
+    expect(h).toBe(CELL);
     expect(2 * ch.z).toBe(CELL);
     expect((ch.x1 - ch.x0) / CELL).toBe(Math.round((ch.x1 - ch.x0) / CELL));
     expect(ch.x1 - ch.x0).toBeGreaterThanOrEqual(2 * CELL);
@@ -2327,145 +2380,20 @@ describe('the shadow lamp', () => {
     expect([b.x0, b.x1, b.y0, b.y1]).toEqual([box.x0, ch.x1 + wall, 0, h]);
   });
 
-  it('sends its light out as a beam the size of the square in the middle of the sheet, straying little', () => {
+  it('sends its light out as a beam the size of its screen, straying little', () => {
     const { h, channel: ch, window: win, spread } = LAMP;
-    // a sheet in the slot has its paper from the top of the walls down: the window is square on to the middle of it,
-    // and as big as the square the light falls on, so the margin round that is never lit
-    expect(win.r).toBe(sheetLit() / 2);
-    expect(win.y).toBe(h - SHEET.side / 2);
-    expect(sheetLit()).toBe(SHEET.side - 2 * SHEET.margin);
+    // the window is as big as the screen, straight across from it, within the end wall's face above the floor
+    expect(win.r).toBe(SCREEN.side / 2);
+    expect(win.y - win.r).toBeGreaterThan(0);
+    expect(win.r).toBeLessThan(ch.z);
     // its lower edge is level with the top of the channel's floor, so what stands there casts all of its shadow
     expect(win.y + win.r).toBe(h - LAMP.floor);
-    expect(LAMP.floor).toBe(SHEET.margin);
-    // nor are the channel's walls, even by the rays that stray most
+    // nor are the channel's walls in its light, even by the rays that stray most
     expect(win.r + spread * (ch.x1 - ch.x0)).toBeLessThan(ch.z);
     // a shadow's edge from the far end of the channel is a few units wide: soft, but no wider than a flask's neck
     const edge = 2 * spread * (ch.x1 - ch.x0);
     expect(edge).toBeGreaterThan(2);
     expect(edge).toBeLessThan(12);
-  });
-});
-
-describe('shadow paper', () => {
-  const N = SHEET.cells;
-  /** Light on every cell: `at(i, j)` of the lamp's, i across and j up. */
-  const light = (at: (i: number, j: number) => number) => Float32Array.from({ length: N * N }, (_, k) => at(k % N, Math.floor(k / N)));
-  const all = light(() => 1);
-
-  it("is a square of paper a grid cell on a side, with no tanks, spouts or valves, which fits across the lamp's channel", () => {
-    const t = new Tool('sheet', 0);
-    expect([t.tanks.length, t.shape.spouts.length, t.valves.length]).toEqual([0, 0, 0]);
-    expect(t.step(0.02)).toEqual([]);
-    expect(UNIQUE_TOOLS).not.toContain('sheet');
-    expect(SHEET.side).toBe(CELL);
-    expect(SHEET.side).toBe(2 * LAMP.channel.z);
-    // the bar along its top is a little wider than the paper, which starts where the bar ends
-    const b = t.shape.box;
-    expect(b.x1 - b.x0).toBeGreaterThan(SHEET.side);
-    expect(b.x1 - b.x0).toBeLessThan(SHEET.side + 2 * LAMP.wall);
-    expect(SHEET.top).toBe(SHEET.clip.h);
-    expect(b.y1 - b.y0).toBe(SHEET.clip.h + SHEET.side);
-    // the light falls on the square in its middle, a margin of about a tenth of its side left all round; its image
-    // is of that square only, in cells a whole number of which make the margin's width
-    expect(SHEET.margin / SHEET.side).toBeGreaterThan(0.08);
-    expect(SHEET.margin / SHEET.side).toBeLessThan(0.15);
-    const edge = (SHEET.margin * N) / sheetLit();
-    expect(edge).toBe(Math.round(edge));
-    expect(t.dose).toHaveLength(N * N);
-    expect(new Tool('strip', 1).dose).toHaveLength(0);
-  });
-
-  it('darkens quickly at first and ever more slowly: most of the way in a second, all but all in two', () => {
-    expect(darkness(0)).toBe(0);
-    expect(darkness(SHEET.tau)).toBeCloseTo(1 - 1 / Math.E);
-    expect(darkness(1)).toBeGreaterThan(0.8);
-    expect(darkness(2)).toBeGreaterThan(0.97);
-    expect(darkness(2)).toBeLessThan(1);
-    expect(darkness(-1)).toBe(0);
-    // as dark as it gets is as dark as a save's byte can say
-    expect(Math.round(255 * darkness(SHEET.full))).toBe(255);
-    expect(Math.round(255 * darkness(SHEET.full / 2))).toBeLessThan(255);
-  });
-
-  it('takes light cell by cell, by how much of it reaches each', () => {
-    const t = new Tool('sheet', 0);
-    // the right half in half shadow
-    t.expose(light((i) => (i < N / 2 ? 1 : 0.5)), 0.4);
-    expect(t.dose[0]).toBeCloseTo(0.4);
-    expect(t.dose[N - 1]).toBeCloseTo(0.2);
-    expect(t.dosed).toBe(1);
-    // no time, or light for some other sheet, is nothing
-    t.expose(all, 0);
-    t.expose(new Float32Array(10).fill(1), 1);
-    expect(t.dosed).toBe(1);
-    expect(t.dose[0]).toBeCloseTo(0.4);
-  });
-
-  it('only ever darkens, so lit twice it shows both, and no cell takes more than its fill', () => {
-    const t = new Tool('sheet', 0);
-    t.expose(light((i) => (i < N / 2 ? 1 : 0)), 0.5);
-    t.expose(light((_, j) => (j < N / 2 ? 1 : 0)), 0.5);
-    const at = (i: number, j: number) => t.dose[j * N + i];
-    expect([at(0, 0), at(N - 1, 0), at(0, N - 1), at(N - 1, N - 1)].map((d) => +d.toFixed(3))).toEqual([1, 0.5, 0.5, 0]);
-    // it's spent only once every cell has had its fill
-    expect(t.spent).toBe(false);
-    for (let k = 0; k < 20; k++) t.expose(all, 1);
-    expect(Math.max(...t.dose)).toBeCloseTo(SHEET.full);
-    expect(t.spent).toBe(true);
-    // and it's still spent out of a save
-    const saved = new Tool('sheet', 2);
-    saved.develop(t.image);
-    expect(saved.spent).toBe(true);
-    expect(new Tool('sheet', 3).spent).toBe(false);
-    expect(new Tool('strip', 4).spent).toBe(false);
-    // light is never more than all of the lamp's, nor less than none
-    const u = new Tool('sheet', 1);
-    u.expose(light((i) => (i % 2 ? 7 : -7)), 1);
-    expect([u.dose[0], u.dose[1]]).toEqual([0, 1]);
-  });
-
-  it('keeps its image through a save, to within a byte a cell of how dark it is', () => {
-    const t = new Tool('sheet', 0);
-    expect(t.image).toBeUndefined();
-    expect(t.memory).toBeUndefined();
-    // a soft-edged shadow across the middle, and a corner lit until it's as dark as it gets
-    t.expose(light((i) => Math.max(0, Math.min(1, Math.abs(i - N / 2) / 10 - 0.5))), 0.7);
-    t.expose(light((i, j) => (i < 10 && j < 10 ? 1 : 0)), 50);
-    const u = new Tool('sheet', 1);
-    u.develop(JSON.parse(JSON.stringify(t.image)));
-    expect(u.dosed).toBe(1);
-    t.dose.forEach((d, k) => expect(Math.abs(darkness(u.dose[k]) - darkness(d))).toBeLessThanOrEqual(0.5 / 255 + 1e-6));
-    expect(u.dose[0]).toBe(t.dose[0]);
-    // and saved again it's just the same
-    expect(u.image).toBe(t.image);
-  });
-
-  it('saves compactly: a small fraction of a byte a cell for a picture of flat shades, and never much more than one', () => {
-    const flat = new Tool('sheet', 0);
-    flat.expose(light((i, j) => (Math.hypot(i - N / 2, j - N / 3) < N / 5 ? 0 : 1)), 1);
-    expect(flat.image!.length).toBeLessThan(N * N / 8);
-    // one with no two cells alike in a row, which runs can't shorten, is kept byte for byte
-    const noisy = new Tool('sheet', 1);
-    noisy.expose(light((i, j) => ((i * 7 + j * 13) % 32) / 32), 0.5);
-    expect(noisy.image!.length).toBeLessThan((N * N * 4) / 3 + 8);
-    const back = new Tool('sheet', 2);
-    back.develop(noisy.image);
-    noisy.dose.forEach((d, k) => expect(Math.abs(darkness(back.dose[k]) - darkness(d))).toBeLessThanOrEqual(0.5 / 255 + 1e-6));
-  });
-
-  it("leaves a sheet as it is when a save's image isn't one, or is some other size", () => {
-    const t = new Tool('sheet', 0);
-    t.expose(all, 0.3);
-    const was = Array.from(t.dose);
-    const short = new Tool('sheet', 1);
-    short.expose(all, 1);
-    for (const bad of [undefined, 7, '', '!!!', btoa('\x01\x05\x09'), btoa('\x00abc'), btoa('\x02' + 'a'.repeat(N * N)), short.image!.slice(0, 4)]) t.develop(bad);
-    expect(Array.from(t.dose)).toEqual(was);
-    expect(t.dosed).toBe(1);
-    // and other tools have no image at all
-    const strip = new Tool('strip', 2);
-    strip.develop(short.image);
-    expect(strip.image).toBeUndefined();
   });
 });
 
@@ -2526,17 +2454,14 @@ describe("the shadow lamp's light through fluid", () => {
     const light = lampLight(ringShare(thin), across);
     expect(light).toBeGreaterThan(0.6);
     expect(light).toBeLessThan(0.85);
-    // which still shows on the sheet: lit for a second, it's a good twenty shades lighter there, of the 255 from new
-    // to as dark as it gets; and fainter the longer the lamp's left on, as the sheet round it has less left to darken
-    const paler = (s: number) => Math.round(255 * (darkness(s) - darkness(s * light)));
-    expect(paler(1)).toBeGreaterThanOrEqual(20);
-    expect(paler(SHEET.tau)).toBeGreaterThanOrEqual(paler(1));
-    expect(paler(2)).toBeLessThan(paler(1) / 2);
-    // ten in a hundred is plainly paler through the flask's middle than through a third as much of it, toward its edge
+    // which still shows on the screen: it's a good forty shades dimmer there, of the 255 from dark to as bright as
+    // it gets
+    expect(Math.round(255 * (1 - light))).toBeGreaterThanOrEqual(40);
+    // ten in a hundred is plainly brighter through a third as much of it, toward its edge, than through its middle
     const tenth = new Vessel(CAP);
     tenth.setMolecules(TARGET, 1e8);
     tenth.setMolecules(SOLVENT_SPECIES, 9e8);
-    const [mid, edge] = [across, across / 3].map((L) => darkness(lampLight(ringShare(tenth), L)));
+    const [mid, edge] = [across, across / 3].map((L) => lampLight(ringShare(tenth), L));
     expect(Math.round(255 * (edge - mid))).toBeGreaterThanOrEqual(40);
     // and a flask of chains of the same atoms, or of anything else with no ring, casts none at all
     const chains = new Vessel(CAP);

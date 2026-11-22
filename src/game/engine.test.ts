@@ -3,7 +3,7 @@ import { BOND_KEYS } from '../chem/atoms';
 import { ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
-import { SHEET_SLOT, flaskLip, inSlot, scaleBox, sheetIn, slotPose, standBase, toolBox, toolStands } from './bodies';
+import { flaskLip, scaleBox, standBase, toolBox, toolStands } from './bodies';
 import { boxesOverlap } from './physics';
 import { STOCK } from './cabinet';
 import { WHEELS } from './wheel';
@@ -14,7 +14,7 @@ import { FLASK_H } from './flaskShape';
 import { DEFAULT_PRESET, LAMP_POSE } from './presets';
 import type { SaveState } from './save';
 import { CELL, LAMP_FLOOR, LIFT, counterUnder, toCell, toWorld } from './space';
-import { DRIP, INLINE_TOOLS, PAPER_TAU, SHAPES, SHEET, TEST_PAPER, UNIQUE_TOOLS, bondReading, bondShares, darkness, lampShot, paperReading, type Blotter, type Tool } from './tools';
+import { DRIP, INLINE_TOOLS, PAPER_TAU, SCREEN, SHAPES, TEST_PAPER, UNIQUE_TOOLS, bondReading, bondShares, paperReading, type Blotter, type Tool } from './tools';
 
 /*
  * The engine itself, with nothing to draw on and nothing to hear: the view and the sounds are stood in for, as they
@@ -1058,7 +1058,7 @@ describe('the bond visualizer, which is gone', () => {
     s.tools.push({ kind: 'visualizer', id: 0, fx: 1.75, fy: 0.5, z: 150, valves: [], tanks: [none], drops: [none] } as unknown as SaveState['tools'][number]);
     s.hoses.push({ outlet: { x: 0.25, y: 0.6, z: 750, yaw: 0, reach: 50 }, on: { tool: 0, spout: 0 } });
     l.e.restore(s, DEFAULT_PRESET);
-    expect(kinds(l.in).sort()).toEqual(['receptacle', 'shadowlamp', 'sheet', 'spectroscope']);
+    expect(kinds(l.in).sort()).toEqual(['receptacle', 'shadowlamp', 'spectroscope']);
     expect((l.in as unknown as { hoses: unknown[] }).hoses).toEqual([]);
     expect(l.in.tools.every((t) => t.id > 0)).toBe(true);
   });
@@ -1161,13 +1161,14 @@ function look(l: { e: GameEngine; in: Inside }, x: number, z: number, tx: number
 const lampOf = (l: Inside) => l.tools.filter((t) => t.kind === 'shadowlamp');
 
 describe('the shadow lamp', () => {
-  it('is in every new lab, on its bench, out, its dial halfway', () => {
+  it('is in every new lab, on its bench, out, its screen dark', () => {
     const l = lab();
     const lamps = lampOf(l.in);
     expect(lamps).toHaveLength(1);
     expect(lamps[0].pose).toEqual(LAMP_POSE);
     expect(lamps[0].lit).toBe(false);
-    expect(lamps[0].valves).toEqual([0.5]);
+    expect(lamps[0].valves).toEqual([]);
+    expect(Math.max(...lamps[0].glow)).toBe(0);
   });
 
   it('is added to a save from before there was one, and only ever one, always on its bench', () => {
@@ -1186,71 +1187,63 @@ describe('the shadow lamp', () => {
     expect(lampOf(l.in)[0].pose).toEqual(LAMP_POSE);
   });
 
-  it('is lit with the left button on its button, for as long as its dial says, and put out with it again; a save keeps it and undo takes a press back', () => {
+  it('is lit with the left button on its button, and stays lit until it is put out with it again; a save keeps it and undo takes a press back', () => {
     const l = lab();
     const [lamp] = lampOf(l.in);
-    lamp.valves[0] = 1;
     l.in.target = { kind: 'tool', t: lamp, part: 'button', k: 0, point: { x: 0, y: 0, z: 0 }, distance: 100 };
     l.in.leftDown(false);
-    expect([lamp.lit, lamp.left]).toEqual([true, lampShot(1)]);
-    // it shines on the lab's time: paused it holds, and it goes out by itself when its time is up
-    l.in.simulate(0.1);
-    expect(lamp.left).toBeCloseTo(lampShot(1) - 0.1);
-    l.e.speed = 0;
-    l.in.simulate(0.1);
-    expect(lamp.left).toBeCloseTo(lampShot(1) - 0.1);
+    expect(lamp.lit).toBe(true);
+    l.e.speed = 16;
+    for (let i = 0; i < 20; i++) l.in.simulate(0.05);
     l.e.speed = 1;
+    expect(lamp.lit).toBe(true);
     const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
-    // pressed again, it's out; undo puts it back lit, with what it had left, and undo again takes back the first press
+    // pressed again, it's out; undo puts it back lit, and undo again takes back the first press
     l.in.leftDown(false);
     expect(lamp.lit).toBe(false);
     l.e.undo();
     expect(lamp.lit).toBe(true);
-    expect(lamp.left).toBeCloseTo(lampShot(1) - 0.1);
     l.e.undo();
     expect(lamp.lit).toBe(false);
     l.e.undo(true);
     expect(lamp.lit).toBe(true);
-    l.e.speed = 16;
-    for (let i = 0; i < 5; i++) l.in.simulate(0.05);
-    expect([lamp.lit, lamp.left]).toEqual([false, 0]);
-    // and once it's shone itself out, an undo of something else doesn't light it again
-    l.e.undo();
-    expect(lamp.lit).toBe(false);
     l.e.restore(s, DEFAULT_PRESET);
     const [saved] = lampOf(l.in);
     expect(saved.lit).toBe(true);
-    expect(saved.left).toBeCloseTo(lampShot(1) - 0.1);
-    expect(saved.valves).toEqual([1]);
+    // (its screen comes up from dark)
+    expect(Math.max(...saved.glow)).toBe(0);
   });
 
-  it('has its dial turned like any valve, which undo takes back', () => {
+  it("owes its screen the lab's time while it's lit: none paused, sixteen times as much at 16×, and no end of it through a sleep", () => {
     const l = lab();
     const [lamp] = lampOf(l.in);
-    l.in.target = { kind: 'tool', t: lamp, part: 'valve', k: 0, point: { x: 0, y: 0, z: 0 }, distance: 100 };
-    expect(l.in.valveAimed()).toEqual({ t: lamp, k: 0 });
-    // (with no view to say where the mouse points, the dial is turned by hand)
-    l.in.viewW = 0;
-    l.in.rightDown();
-    lamp.valves[0] = 0.8;
-    l.in.endTurn();
-    l.e.undo();
-    expect(lamp.valves[0]).toBe(0.5);
-    l.e.undo(true);
-    expect(lamp.valves[0]).toBe(0.8);
+    l.in.simulate(0.1);
+    expect(lamp.owed).toBe(0);
+    lamp.press();
+    l.in.simulate(0.1);
+    expect(lamp.owed).toBeCloseTo(0.1);
+    l.e.speed = 0;
+    l.in.simulate(0.1);
+    expect(lamp.owed).toBeCloseTo(0.1);
+    l.e.speed = 16;
+    l.in.simulate(0.05);
+    expect(lamp.owed).toBeCloseTo(0.9);
+    // with nothing drawing the lab, what's owed just waits, the screen as it was; and it's never more than brings
+    // it all the way
+    expect(Math.max(...lamp.glow)).toBe(0);
+    l.in.sleeper().skip(100000);
+    expect(lamp.owed).toBe(SCREEN.most);
+    expect(lamp.lit).toBe(true);
   });
 
-  it("can't be picked up, and its button and dial don't answer the key that picks things up at all", () => {
+  it("can't be picked up, and its button doesn't answer the key that picks things up at all", () => {
     const l = lab();
     const [lamp] = lampOf(l.in);
     const on = (part: string) => (l.in.target = { kind: 'tool', t: lamp, part, k: 0, point: { x: 0, y: 0, z: 0 }, distance: 100 });
-    // the button is for pressing, with the left button, and the dial for turning, with the right: the key neither
-    // works them nor says anything
-    for (const part of ['button', 'valve']) {
-      on(part);
-      l.in.grabOrRelease(false);
-      expect([l.in.held, lamp.lit, l.in.flash]).toEqual([null, false, null]);
-    }
+    // the button is for pressing, with the left button: the key neither works it nor says anything
+    on('button');
+    l.in.grabOrRelease(false);
+    expect([l.in.held, lamp.lit, l.in.flash]).toEqual([null, false, null]);
     // anywhere else on it, the key says why nothing's picked up
     on('body');
     l.in.grabOrRelease(false);
@@ -1276,11 +1269,11 @@ describe('the shadow lamp', () => {
     expect(l.in.held).toBeNull();
     expect([f.pose.x, f.pose.z].map((v) => +v.toFixed(6))).toEqual([mid.x, mid.z].map((v) => +v.toFixed(6)));
     expect(f.pose.y).toBeCloseTo(LAMP_FLOOR.y + FLASK_H);
-    // a dispenser held too low in the cell by the sheet, facing the sheet, comes up to stand over the floor, its
+    // a dispenser held too low in the cell by the screen, facing the screen, comes up to stand over the floor, its
     // stand's base on the floor behind it
     expect(l.e.spawn('dispenser')).toBe(true);
     const d = l.in.held!.t!;
-    // (whoever holds it is looking across the channel, the sheet's end on their right)
+    // (whoever holds it is looking across the channel, the screen's end on their right)
     l.in.held!.relYaw = Math.PI / 2;
     l.in.held!.dist = Math.hypot(160, LIFT + 40 - 620);
     look(l, mid.x - CELL, mid.z - 160, mid.x - CELL, LIFT + 40, mid.z);
@@ -1319,181 +1312,76 @@ describe('the shadow lamp', () => {
   });
 });
 
-describe('shadow paper', () => {
-  /** A lab with the sheet its lamp starts with gone from the slot, as if taken out and put away. */
-  function emptied(): { e: GameEngine; in: Inside } {
+describe('a heater from when it had three taps', () => {
+  it("loads with its middle tap as its tap and its dial as its dial, its hoses on the spouts those became", () => {
     const l = lab();
-    (l.in as unknown as { tools: Tool[] }).tools = l.in.tools.filter((t) => t.kind !== 'sheet');
-    return l;
-  }
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    const none = { n: {}, Q: 0 };
+    const drop = (n: number) => ({ n: { R: n }, Q: n });
+    s.tools.push({
+      kind: 'heater', id: 900, fx: 0.5, fy: 0.5, z: 750, valves: [0.1, 0.2, 0.3, 0.6], tanks: [none], drops: [drop(1), drop(2), drop(3), drop(4)],
+    } as unknown as SaveState['tools'][number]);
+    const outlet = (x: number) => ({ x, y: 0.6, z: 750, yaw: 0, reach: 50 });
+    s.hoses.push(
+      { outlet: outlet(0.2), on: { tool: 900, spout: 0 } },
+      { outlet: outlet(0.3), on: { tool: 900, spout: 1 } },
+      { outlet: outlet(0.4), on: { tool: 900, spout: 2 } },
+      { outlet: outlet(0.5), on: { tool: 900, spout: 3 } },
+    );
+    l.e.restore(s, DEFAULT_PRESET);
+    const ht = l.in.tools.find((t) => t.kind === 'heater')!;
+    expect(ht.valves).toEqual([0.2, 0.6]);
+    expect(ht.drops.map((d) => d.N)).toEqual([2, 4]);
+    const hoses = (l.in as unknown as { hoses: { on: { tool?: Tool; spout?: number }; outlet: { x: number } }[] }).hoses.filter((h) => h.on.tool === ht);
+    expect(hoses.map((h) => h.on.spout)).toEqual([0, 1]);
+    expect(hoses[0].outlet.x).toBeLessThan(hoses[1].outlet.x);
+    // saved again and loaded, it's as it is now
+    l.e.restore(JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState, DEFAULT_PRESET);
+    const again = l.in.tools.find((t) => t.kind === 'heater')!;
+    expect(again.valves).toEqual([0.2, 0.6]);
+    expect((l.in as unknown as { hoses: { on: { tool?: Tool; spout?: number } }[] }).hoses.filter((h) => h.on.tool === again).map((h) => h.on.spout)).toEqual([0, 1]);
+  });
+});
 
-  it("starts in the slot of a lamp that's new: a new lab's, and an older save's that had no lamp, but not one whose sheet was taken out", () => {
+describe('shadow paper, which is gone', () => {
+  /** A lab's save with a sheet of shadow paper in the lamp's slot, with an image on it, and another on a stand, as labs had. */
+  function withSheets(l: { e: GameEngine; in: Inside }): SaveState {
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    const lamp = s.tools.find((t) => t.kind === 'shadowlamp')!;
+    const sheet = { ...lamp, kind: 'sheet', valves: [], tanks: [], drops: [], memory: undefined };
+    s.tools.unshift(
+      { ...sheet, id: 901, fx: 0.1, fy: 0.2, z: 2650, yaw: Math.PI / 2, image: btoa('\x01\xff\x80') } as unknown as SaveState['tools'][number],
+      { ...sheet, id: 902, fx: 0.5, fy: 0.5, z: 750, yaw: 0 } as unknown as SaveState['tools'][number],
+    );
+    // (and its lamp had a dial, and was part-way through an exposure)
+    Object.assign(lamp, { valves: [0.75], memory: [1, 0.4] });
+    return s;
+  }
+  const kinds = (l: Inside) => l.tools.map((t) => t.kind as string);
+
+  it('is no kind of tool, and the cabinet and the wheels have none', () => {
     const l = lab();
-    const sheets = () => l.in.tools.filter((t) => t.kind === 'sheet');
-    expect(sheets()).toHaveLength(1);
-    expect(sheets()[0].pose).toEqual(slotPose(SHEET_SLOT.yaw));
-    expect(inSlot(sheets()[0].pose)).toBe(true);
-    expect(sheets()[0].dose.every((d) => d === 0)).toBe(true);
-    // a save from before there was a lamp gets one, with its sheet
-    l.e.restore(bare(), DEFAULT_PRESET);
-    expect(sheets()).toHaveLength(1);
-    expect(inSlot(sheets()[0].pose)).toBe(true);
-    // one that has a lamp, and nothing in its slot, is left that way
-    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
-    s.tools = s.tools.filter((t) => t.kind !== 'sheet');
-    l.e.restore(s, DEFAULT_PRESET);
-    expect(sheets()).toHaveLength(0);
+    expect(kinds(l.in)).not.toContain('sheet');
+    expect(Object.keys(SHAPES)).not.toContain('sheet');
+    expect(Object.keys(STOCK)).not.toContain('sheet');
+    expect(WHEELS.flat() as string[]).not.toContain('sheet');
   });
 
-  /**
-   * Take a sheet out of the cabinet, by the wheel, standing out in the room in front of the lamp's bench, with the
-   * sheet held up over the end of the lamp's channel: turned to face the lamp, or with its back to it.
-   */
-  function sheetAtSlot(l: { e: GameEngine; in: Inside }, facing = true): Tool {
-    const at = () => look(l, SHEET_SLOT.x, SHEET_SLOT.z - 240, SHEET_SLOT.x, SHEET_SLOT.y - 150, SHEET_SLOT.z);
-    at();
-    expect(l.e.spawn('sheet')).toBe(true);
-    // (whoever holds it is looking across the channel, the lamp on their left)
-    l.in.held!.relYaw = facing ? -Math.PI / 2 : Math.PI / 2;
-    at();
-    return l.in.held!.t!;
-  }
-
-  it('comes out of the cabinet as often as wanted, and is thrown away when put away', () => {
-    const l = emptied();
-    for (let i = 0; i < STOCK.sheet + 3; i++) {
-      expect(l.e.spawn('sheet')).toBe(true);
-      expect(l.in.held?.t?.kind).toBe('sheet');
-      l.in.putAway();
-      expect(l.in.held).toBeNull();
-    }
-    expect(l.in.tools.some((t) => t.kind === 'sheet')).toBe(false);
-    expect(l.in.stock.sheet.every(Boolean)).toBe(true);
-  });
-
-  it("goes into the lamp's slot when it's let go of there, with no stand, and out again when it's picked up", () => {
-    const l = emptied();
-    const sheet = sheetAtSlot(l);
-    // in hand it has no stand, and where it would go is the slot
-    expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(false);
-    const pl = l.in.placement(l.in.held);
-    expect('rest' in pl && pl.rest.pose).toEqual(SHEET_SLOT);
-    l.in.release();
-    expect(l.in.held).toBeNull();
-    expect(sheet.pose).toEqual(SHEET_SLOT);
-    expect(sheetIn(l.in.tools)).toBe(sheet);
-    expect(toolStands(sheet)).toEqual([]);
-    expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(false);
-    // a second sheet held there has to go somewhere else: on a stand, over the bench
-    const second = sheetAtSlot(l);
-    const pl2 = l.in.placement(l.in.held);
-    if ('rest' in pl2) expect(inSlot(pl2.rest.pose)).toBe(false);
-    l.in.putAway();
-    expect(l.in.tools).not.toContain(second);
-    // picked up with the crosshair on it, and set down on an island, it's on a stand like any tool
-    l.in.target = { kind: 'tool', t: sheet, part: 'body', k: 0, point: { ...SHEET_SLOT }, distance: 200 };
-    l.in.leftDown(false);
-    expect(l.in.held?.t).toBe(sheet);
-    look(l, 100, 1200, 100, 700, 800);
-    l.in.release();
-    expect(l.in.held).toBeNull();
-    expect(sheetIn(l.in.tools)).toBeNull();
-    expect(toolStands(sheet)).toHaveLength(1);
-    expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(true);
-    // undo puts it back in the slot, and Q puts back one picked up from there
-    l.e.undo();
-    expect(sheet.pose).toEqual(SHEET_SLOT);
-    l.in.leftDown(false);
-    look(l, 100, 1200, 100, 700, 800);
-    l.in.putBack();
-    expect(sheet.pose).toEqual(SHEET_SLOT);
-  });
-
-  it('goes in with its back to the lamp, if that is how it is held', () => {
-    const l = emptied();
-    const sheet = sheetAtSlot(l, false);
-    l.in.release();
-    expect(sheet.pose).toEqual(slotPose(SHEET_SLOT.yaw + Math.PI));
-    expect(Math.cos(sheet.pose.yaw - SHEET_SLOT.yaw)).toBeCloseTo(-1);
-    expect(sheetIn(l.in.tools)).toBe(sheet);
-  });
-
-  it('keeps its image, and its place in the slot, through a save', () => {
-    const l = emptied();
-    const sheet = sheetAtSlot(l);
-    l.in.release();
-    const N = SHEET.cells;
-    sheet.expose(Float32Array.from({ length: N * N }, (_, k) => (k % N < N / 3 ? 0 : 1)), 0.6);
-    const loose = sheetAtSlot(l);
-    look(l, 100, 1200, 100, 700, 800);
-    l.in.release();
-    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
-    expect(s.tools.filter((t) => t.kind === 'sheet').map((t) => typeof t.image)).toEqual(['string', 'undefined']);
-    l.e.restore(s, DEFAULT_PRESET);
-    const [a, b] = l.in.tools.filter((t) => t.kind === 'sheet');
-    expect(a.pose).toEqual(SHEET_SLOT);
-    expect(sheetIn(l.in.tools)).toBe(a);
-    expect(darkness(a.dose[N - 1])).toBeCloseTo(darkness(0.6), 2);
-    expect(a.dose[0]).toBe(0);
-    expect(b.pose.x).toBeCloseTo(loose.pose.x);
-    expect(b.pose.z).toBeCloseTo(loose.pose.z);
-    expect(Math.max(...b.dose)).toBe(0);
-  });
-
-  it("is owed the lamp's light while it's in the slot with the lamp lit, on sim time", () => {
-    const l = emptied();
+  it('is lost from an older save as it loads, without error; its lamp loads lit, with no dial', () => {
+    const l = lab();
+    const before = l.in.tools.map((t) => [t.kind, t.id]);
+    const s = withSheets(l);
+    expect(() => l.e.restore(s, DEFAULT_PRESET)).not.toThrow();
+    expect(kinds(l.in)).not.toContain('sheet');
+    expect(l.in.tools.map((t) => [t.kind, t.id])).toEqual(before);
     const [lamp] = lampOf(l.in);
-    lamp.valves[0] = 1;
-    const press = () => {
-      l.in.target = { kind: 'tool', t: lamp, part: 'button', k: 0, point: { x: 0, y: 0, z: 0 }, distance: 100 };
-      l.in.leftDown(false);
-      l.in.target = null;
-    };
-    // lit, with no sheet in, nothing happens
-    press();
-    l.in.simulate(0.1);
-    expect([lamp.lit, lamp.sheet, lamp.owed]).toEqual([true, null, 0]);
-    // a sheet in hand at the slot isn't in it yet; let go of there, it is, and the light's time is the lab's
-    const sheet = sheetAtSlot(l);
-    l.in.simulate(0.1);
-    expect([lamp.sheet, lamp.owed]).toEqual([null, 0]);
-    l.in.release();
-    l.in.simulate(0.1);
-    expect(lamp.sheet).toBe(sheet);
-    expect(lamp.owed).toBeCloseTo(0.1);
-    // paused, none; at 16×, sixteen times as much
-    l.e.speed = 0;
-    l.in.simulate(0.1);
-    expect(lamp.owed).toBeCloseTo(0.1);
-    l.e.speed = 16;
-    l.in.simulate(0.05);
-    expect(lamp.owed).toBeCloseTo(0.9);
-    // put out, no more; and with nothing drawing the lab, what's owed just waits, the sheet as it was
-    press();
-    l.e.speed = 1;
-    l.in.simulate(0.1);
-    expect(lamp.owed).toBeCloseTo(0.9);
-    expect(Math.max(...sheet.dose)).toBe(0);
-    // picked up, it's out of the slot, and owed nothing
-    l.in.target = { kind: 'tool', t: sheet, part: 'body', k: 0, point: { ...SHEET_SLOT }, distance: 200 };
-    l.in.leftDown(false);
-    l.in.simulate(0.1);
-    expect([lamp.sheet, lamp.owed]).toEqual([null, 0]);
-  });
-
-  it('is owed no more than the exposure had left, through the longest sleep', () => {
-    const l = emptied();
-    const [lamp] = lampOf(l.in);
-    sheetAtSlot(l);
-    l.in.release();
-    lamp.valves[0] = 0.75;
-    lamp.press();
-    l.in.simulate(0.1, true);
-    expect(lamp.owed).toBeCloseTo(0.1);
-    l.in.sleeper().skip(100000);
-    expect(lamp.owed).toBeCloseTo(lampShot(0.75));
-    expect(lamp.lit).toBe(false);
-    l.in.simulate(0.1, true);
-    expect(lamp.owed).toBeCloseTo(lampShot(0.75));
+    expect([lamp.lit, lamp.valves]).toEqual([true, []]);
+    expect(() => {
+      for (let i = 0; i < 40; i++) l.in.simulate(0.05);
+    }).not.toThrow();
+    // saved again, there's no trace of it
+    const again = JSON.stringify(l.e.snapshot());
+    expect(again).not.toContain('sheet');
+    expect(again).not.toContain('image');
   });
 });
