@@ -211,7 +211,19 @@ type Held = (
   made?: Hose[];
   /** The hoses pouring into what's carried, which go along with it (see gather). */
   follow?: Follower[];
+  /**
+   * Moved by a ghost (see GameEngine.ghostMoves): where it's held, while the thing itself stays where it was, in the
+   * lab and running, until it's set down; or, one just made, out of the lab until then.
+   */
+  ghost?: { pose: Pose };
 };
+
+/**
+ * Whether what's held is moved by a ghost when ghost moves are on (see GameEngine.ghostMoves): what stands on the
+ * bench on stands, a scale, and a sheet of shadow paper; not what's used while it's held (a flask, a dipper, a sheet
+ * of blotting paper, a hose's nozzle).
+ */
+const ghostly = (h: Held) => h.kind === 'scale' || (h.kind === 'tool' && !isDipper(h.t.kind) && !isBlotter(h.t.kind));
 
 /**
  * The keys that, held, open the equipment wheels (see WHEELS), in their order: let go, the key of the wheel that's
@@ -357,6 +369,13 @@ interface Gaze {
 export class GameEngine {
   speed = 1;
   god = true;
+  /**
+   * Whether what stands on the bench on stands, a scale, or a sheet of shadow paper is moved by a ghost of it: picked
+   * up, it stays where it is, running, and what's carried is a ghost drawn where it would come to rest, until it's set
+   * down there, when it moves at once (see Held.ghost). Taken up at the next pick-up. Flasks, dippers, sheets of
+   * blotting paper and hoses' nozzles are carried in hand either way, since they're used while held.
+   */
+  ghostMoves = false;
 
   private view: View;
   private flasks: Flask[] = [];
@@ -792,6 +811,11 @@ export class GameEngine {
   /** Everything in the lab, plus the chemistry parameters, for saving. */
   snapshot(): SaveState {
     const depth = (p: Pose) => ({ z: p.z, yaw: p.yaw });
+    // a ghost of something just made isn't in the lab yet, so it's saved as still in the cabinet
+    const h = this.held;
+    const stock = Object.fromEntries(Object.entries(this.stock).map(([k, v]) => [k, [...v]])) as Stock;
+    const fresh = h && !this.inLab(h) ? (h.kind === 'tool' ? h.t.kind : h.kind) : null;
+    if (fresh && isStocked(fresh)) putIn(stock, fresh);
     return {
       v: 1,
       preset: this.preset.id,
@@ -820,7 +844,7 @@ export class GameEngine {
       // where they started on the old flat bench, so the save still loads there, with their notes
       faucets: this.faucets.map((fa, i, all) => ({ x: (i + 0.5) / all.length, y: 30 / HOME_H, ...(fa.note ? { note: fa.note } : {}) })),
       cabinet: Object.fromEntries(
-        (Object.keys(this.stock) as Stocked[]).filter((k) => !endless(k)).map((k) => [k, this.stock[k].flatMap((on, i) => (on ? [i] : []))]),
+        (Object.keys(stock) as Stocked[]).filter((k) => !endless(k)).map((k) => [k, stock[k].flatMap((on, i) => (on ? [i] : []))]),
       ),
       ...(this.alarmsOff ? { alarmsOff: true } : {}),
       ...(this.blindsShut ? { blindsShut: true } : {}),
@@ -1108,10 +1132,12 @@ export class GameEngine {
     }
     this.mark();
     const held = this.fresh(kind, takeFrom(this.stock, kind)!);
+    this.ghostIf(held);
     held.dist = this.holdDist(held);
     this.placeHeld(held, this.gripPose(held));
     held.dist = this.clampDist(held, held.dist);
-    this.enter(held);
+    // (a ghost of something new is all there is of it until it's set down)
+    if (!held.ghost) this.enter(held);
     this.held = held;
     return true;
   }
@@ -1150,10 +1176,11 @@ export class GameEngine {
     this.mark();
     takeSlot(this.stock, kind, slot);
     const held = this.fresh(kind, slot);
+    this.ghostIf(held);
     this.placeHeld(held, CABINET.slots[kind][slot]);
     held.relYaw = held.kind === 'flask' ? 0 : wrapAngle(this.heldPose(held).yaw - this.player.yaw);
     held.follow = [];
-    this.enter(held);
+    if (!held.ghost) this.enter(held);
     this.holdInPlace(held);
     this.held = held;
   }
@@ -1170,6 +1197,21 @@ export class GameEngine {
     const t = new Tool(kind, this.nextToolId++, undefined);
     // what lies flat is held low, so its face is seen, not its edge
     return { kind: 'tool', t, relYaw: 0, dist: 0, ...(t.shape.flat ? { dir: { ...FLAT_HOLD } } : {}) };
+  }
+
+  /**
+   * Make what's just been taken hold of move by a ghost (see Held.ghost), if ghost moves are on and it's moved that
+   * way (see ghostly), starting where it is.
+   */
+  private ghostIf(h: Held): void {
+    if (this.ghostMoves && ghostly(h)) h.ghost = { pose: { ...this.objPose(h) } };
+  }
+
+  /** Whether what's held is in the lab: all of it is, but a ghost of something just made (see Held.ghost). */
+  private inLab(h: Held): boolean {
+    if (h.kind === 'tool') return this.tools.includes(h.t);
+    if (h.kind === 'scale') return this.scales.includes(h.sc);
+    return true;
   }
 
   /** Bring something just made (see fresh) into the lab. */
@@ -1194,10 +1236,10 @@ export class GameEngine {
     this.unfollow(h);
     if (h.kind === 'flask') this.flasks.splice(this.flasks.indexOf(h.f), 1);
     if (h.kind === 'tool') {
-      this.tools.splice(this.tools.indexOf(h.t), 1);
+      this.tools = this.tools.filter((t) => t !== h.t);
       this.hoses = this.hoses.filter((hose) => !('tool' in hose.on && hose.on.tool === h.t));
     }
-    if (h.kind === 'scale') this.scales.splice(this.scales.indexOf(h.sc), 1);
+    if (h.kind === 'scale') this.scales = this.scales.filter((sc) => sc !== h.sc);
     const kind = h.kind === 'tool' ? h.t.kind : h.kind;
     if (isStocked(kind)) putIn(this.stock, kind);
     if (h.kind === 'hose') this.hoses.splice(this.hoses.indexOf(h.h), 1);
@@ -1232,16 +1274,30 @@ export class GameEngine {
     return (Math.hypot(b.hx, b.hz) + 90) * (h.kind === 'flask' ? FLASK_HOLD : 1);
   }
 
-  /** Where it's held from: its own pose, or for a hose, its nozzle's tip (which doesn't turn). */
+  /** Where it's held from: its own pose, or for a hose, its nozzle's tip (which doesn't turn); or its ghost's. */
   private heldPose(h: Held): Pose {
+    return h.ghost ? h.ghost.pose : this.objPose(h);
+  }
+
+  /** Where what's held itself is: as heldPose, but for one moved by a ghost, where it's been left. */
+  private objPose(h: Held): Pose {
     if (h.kind === 'flask') return h.f.pose;
     if (h.kind === 'tool') return h.t.pose;
     if (h.kind === 'scale') return h.sc.pose;
     return { ...h.h.outlet, yaw: 0 };
   }
 
-  /** Put what's held at a pose, with whatever goes along with it. */
+  /** Hold what's held at a pose, with whatever goes along with it; or its ghost (see Held.ghost). */
   private placeHeld(h: Held, p: Pose): void {
+    if (h.ghost) h.ghost.pose = p;
+    else this.putAt(h, p);
+  }
+
+  /**
+   * Put what's held itself at a pose, with whatever goes along with it, ghost or not: to set it down, or for a
+   * moment, to see what would be if it were there.
+   */
+  private putAt(h: Held, p: Pose): void {
     if (h.kind === 'flask') h.f.pose = p;
     else if (h.kind === 'tool') h.t.pose = p;
     else if (h.kind === 'scale') {
@@ -1656,6 +1712,7 @@ export class GameEngine {
       this.holdHose(p.h);
       return;
     }
+    this.ghostIf(h);
     h.relYaw = h.kind === 'flask' ? 0 : wrapAngle(this.heldPose(h).yaw - this.player.yaw);
     h.follow = linked ? this.gather(h) : [];
     this.holdInPlace(h);
@@ -1774,12 +1831,12 @@ export class GameEngine {
    */
   private followRests(h: Held, r: Rest): Rest[] | string {
     const fs = h.follow ?? [];
-    const at = this.heldPose(h);
+    const at = this.objPose(h);
     const tilt = h.kind === 'flask' ? h.f.tilt : 0;
     const saved = fs.map((f) => ({ outlet: f.hose.outlet, turn: f.hose.turn, reach: f.hose.reach }));
     // put it there, upright, for a moment, to see; and each hose there in turn, for the next to go round
     if (h.kind === 'flask') h.f.tilt = 0;
-    this.placeHeld(h, r.pose);
+    this.putAt(h, r.pose);
     const mouths = this.mouths();
     const frame = this.carryFrame(h, r.pose);
     const unplaced = new Set(fs.map((f) => f.hose));
@@ -1812,7 +1869,7 @@ export class GameEngine {
       ({ turn: f.hose.turn, reach: f.hose.reach } = res.hose!);
     }
     fs.forEach((f, i) => Object.assign(f.hose, saved[i]));
-    this.placeHeld(h, at);
+    this.putAt(h, at);
     if (h.kind === 'flask') h.f.tilt = tilt;
     return why ?? out;
   }
@@ -1961,12 +2018,21 @@ export class GameEngine {
     if (!h.from) return this.putAway();
     this.hoses = this.hoses.filter((x) => !h.made?.includes(x));
     this.unfollow(h);
+    // one moved by a ghost was never moved: it's just let go of, as it is
+    if (h.ghost) {
+      this.held = null;
+      this.pinned = null;
+      this.commit();
+      return;
+    }
     this.setDown(h, h.from);
   }
 
   /** Let go of what's held, at rest (see rest): standing on a scale, for a flask, and for a nozzle, with its stand there. */
   private setDown(h: Held, rest: Rest): void {
-    this.placeHeld(h, rest.pose);
+    // (one moved by a ghost goes there at once; one just made comes into the lab)
+    if (!this.inLab(h)) this.enter(h);
+    this.putAt(h, rest.pose);
     // a tool's hose whose nozzle is right where its spout now is, as one left there when it was picked up and it's
     // put back, is rolled back up
     if (h.kind === 'tool')
@@ -2408,6 +2474,16 @@ export class GameEngine {
     return out;
   }
 
+  /**
+   * Every open top (see mouths), and what's held's own, if it's a ghost of something not yet in the lab (see
+   * Held.ghost), to see where it would line up.
+   */
+  private mouthsWith(h: Held): Mouth[] {
+    const out = this.mouths();
+    if (h.kind === 'tool' && !this.inLab(h)) h.t.tanks.forEach((_, k) => h.t.isOpen(k) && out.push(tankMouth(h.t, k)));
+    return out;
+  }
+
   /** Every open top that falling fluid can land in. A flask tipped to pour has none. */
   private mouths(): Mouth[] {
     const out: Mouth[] = [];
@@ -2517,7 +2593,7 @@ export class GameEngine {
     // nodding off, they stand where they are
     if (!nap || nap.waking) this.move(dt);
     if (this.wake === 'settling') this.settleIn(dt);
-    if (this.held) this.follow(this.held);
+    if (this.held && !this.held.ghost) this.follow(this.held);
     const zoomed = this.keys.has('KeyZ') && !this.sniffing ? 1 : 0;
     this.zoom = Math.max(0, Math.min(1, this.zoom + (zoomed ? dt : -dt) / ZOOM.s));
     const g = this.gaze();
@@ -2558,7 +2634,8 @@ export class GameEngine {
       const dx = (-Math.sin(p.yaw) * fwd + Math.cos(p.yaw) * side) * sp;
       const dz = (-Math.cos(p.yaw) * fwd - Math.sin(p.yaw) * side) * sp;
       const body = { x: p.x, z: p.z, r: PLAYER_R, y0: 0, y1: EYE + 20 };
-      const r = walk(body, dx, dz, this.obstacles(h));
+      // (what's moved by a ghost is still where it was, in the way like anything)
+      const r = walk(body, dx, dz, this.obstacles(h?.ghost ? null : h));
       p.x = r.x;
       p.z = r.z;
       // walking into the open pod is getting into it, to sleep
@@ -2608,7 +2685,7 @@ export class GameEngine {
    * nothing it's carried over catches it.
    */
   private loose(t: Tool, j: number): boolean {
-    return this.held?.kind === 'tool' && this.held.t === t && !this.hoseOn({ tool: t, spout: j });
+    return this.held?.kind === 'tool' && this.held.t === t && !this.held.ghost && !this.hoseOn({ tool: t, spout: j });
   }
 
   /** The thing the player holds, as the view knows it. */
@@ -2625,7 +2702,8 @@ export class GameEngine {
 
   private heldObject(): object | null {
     const h = this.held;
-    if (!h) return null;
+    // (what's moved by a ghost is still there to be seen and aimed at)
+    if (!h || h.ghost) return null;
     if (h.kind === 'flask') return h.f;
     if (h.kind === 'tool') return h.t;
     if (h.kind === 'scale') return h.sc;
@@ -2943,10 +3021,10 @@ export class GameEngine {
    * hose following what's held goes with it, so it's neither.
    */
   private magnets(h: Held, p: Pose): { mine: Magnets; others: Magnets } {
-    const at = this.heldPose(h);
+    const at = this.objPose(h);
     const tilt = h.kind === 'flask' ? h.f.tilt : 0;
     if (h.kind === 'flask') h.f.tilt = 0;
-    this.placeHeld(h, p);
+    this.putAt(h, p);
     const vs = new Set<Vessel>();
     const mouths: Mouth[] = [];
     const outlets: Vec3[] = [];
@@ -2960,7 +3038,7 @@ export class GameEngine {
       for (const { f } of h.sc.load) vs.add(f);
       mouths.push(...this.emptyPlaces(h.sc));
     } else outlets.push({ ...h.h.outlet });
-    const all = this.mouths();
+    const all = this.mouthsWith(h);
     mouths.push(...all.filter((m) => vs.has(m.v)));
     const theirs: Vec3[] = [];
     const following = new Set(h.follow?.map((f) => f.hose));
@@ -2973,7 +3051,7 @@ export class GameEngine {
     for (const t of this.tools)
       if (!t.away) t.shape.spouts.forEach((_, j) => foreign({ tool: t, spout: j }) && theirs.push(this.outletAt(t, j)));
     const out = { mine: { outlets, mouths }, others: { outlets: theirs, mouths: all.filter((m) => !vs.has(m.v)) } };
-    this.placeHeld(h, at);
+    this.putAt(h, at);
     if (h.kind === 'flask') h.f.tilt = tilt;
     return out;
   }
@@ -3144,7 +3222,7 @@ export class GameEngine {
     const held = this.held;
     for (const t of this.tools) {
       // a strip, a thermometer or a sheet of shadow paper in hand is just itself: its stand is there once it's set down
-      if (held?.kind === 'tool' && held.t === t && (isDipper(t.kind) || t.kind === 'sheet')) continue;
+      if (held?.kind === 'tool' && held.t === t && !held.ghost && (isDipper(t.kind) || t.kind === 'sheet')) continue;
       for (const s of toolStands(t)) out.push({ s, of: { kind: 'tool', t, part: 'body', k: 0 } });
     }
     const pl = this.placed;
@@ -3182,14 +3260,14 @@ export class GameEngine {
     const out = this.aims(h, this.open).filter((a) => a.held === 'lip').map((a) => guide(a, 'solid'));
     if (pl && 'rest' in pl) {
       // what it'll line up with once let go: put it there, upright, for a moment, to see
-      const at = this.heldPose(h);
+      const at = this.objPose(h);
       const tilt = h.kind === 'flask' ? h.f.tilt : 0;
       if (h.kind === 'flask') h.f.tilt = 0;
-      this.placeHeld(h, pl.rest.pose);
+      this.putAt(h, pl.rest.pose);
       // (a scale's empty places too, as if flasks stood there)
       const places = h.kind === 'scale' ? this.emptyPlaces(h.sc) : [];
-      for (const a of this.aims(h, [...this.mouths(), ...places])) if (a.held !== 'lip') out.push(guide(a, 'snap'));
-      this.placeHeld(h, at);
+      for (const a of this.aims(h, [...this.mouthsWith(h), ...places])) if (a.held !== 'lip') out.push(guide(a, 'snap'));
+      this.putAt(h, at);
       if (h.kind === 'flask') h.f.tilt = tilt;
     }
     return out;
@@ -3216,6 +3294,21 @@ export class GameEngine {
     const y = ok ? b.y - b.hy : groundAt(b.x, b.z);
     const square = h.kind === 'tool' && !!h.t.shape.flat;
     return [{ x: b.x, y, z: b.z, hx: b.hx, hz: b.hz, yaw: b.yaw, ok, ...(square ? { square } : {}) }, ...follow];
+  }
+
+  /**
+   * The ghost of what's being moved by one (see Held.ghost), for the view: where it would come to rest, with its
+   * stands there, or where it's held, red, if it can't be set down.
+   */
+  private ghostFrame(pl: ReturnType<GameEngine['placement']> | null): Frame['ghost'] {
+    const h = this.held;
+    if (!h?.ghost || !pl || this.sniffing || (h.kind !== 'tool' && h.kind !== 'scale')) return null;
+    const ok = 'rest' in pl;
+    const pose = ok ? pl.rest.pose : this.heldPose(h);
+    const stands = this.standsAt(h, pose, ok ? pl.rest : undefined).map((s) => ({
+      s, y: (ok ? counterUnder(standBase(s, 0)) : null) ?? groundAt(s.x, s.z),
+    }));
+    return { ...(h.kind === 'tool' ? { tool: h.t } : { scale: h.sc }), pose, ok, stands };
   }
 
   private render(dt: number): void {
@@ -3250,7 +3343,7 @@ export class GameEngine {
       tarePress: this.tarePress, hot: this.hot(), dt, clock: this.clock,
       energies: BOND_KEYS.map((k) => this.chem.params.bonds[k].E), alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
       airlock: this.airlockLook(),
-      guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(),
+      guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(), ghost: this.ghostFrame(pl),
     });
   }
 
@@ -3339,6 +3432,8 @@ export class GameEngine {
       const how = h.kind === 'hose' ? 'set the hose’s end down'
         : h.kind === 'tool' && isDipper(h.t.kind) && this.mouthAimed() ? 'stand it in it'
         : ok && h.kind === 'tool' && h.t.kind === 'sheet' && 'rest' in this.placed! && inSlot(this.placed.rest.pose) ? 'slot it into the lamp'
+        // (what's moved by a ghost hasn't left where it was)
+        : h.ghost && h.from ? 'move it here'
         : 'set it down';
       // a button looked at takes the click
       if (this.intoCabinet()) add(['LMB'], 'put it in the cabinet');
@@ -3360,7 +3455,7 @@ export class GameEngine {
       if (!TOUCH) add(['Alt'], 'hold to set it down just as it’s held');
       if (h.kind === 'hose') add(['Backspace'], 'roll the hose back up');
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it back in the cabinet');
-      add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it back in the cabinet') : 'put it back');
+      add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it back in the cabinet') : h.ghost ? 'leave it where it is' : 'put it back');
     } else {
       if (this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
       add([WHEEL_KEYS.join(', ')], 'hold to grab equipment');
@@ -3776,7 +3871,7 @@ export class GameEngine {
    */
   private slotting(): void {
     const h = this.held;
-    const sheet = sheetIn(this.tools, h?.kind === 'tool' ? h.t : null);
+    const sheet = sheetIn(this.tools, h?.kind === 'tool' && !h.ghost ? h.t : null);
     for (const t of this.tools) if (t.kind === 'shadowlamp') t.sheet = sheet;
   }
 

@@ -1364,6 +1364,186 @@ describe('setting things down', () => {
   });
 });
 
+describe('ghost moves', () => {
+  interface Ghosting {
+    ghostMoves: boolean;
+    held: { kind: string; t?: Tool; sc?: Scale; f?: Flask; ghost?: { pose: Tool['pose'] } } | null;
+    hoses: { on: object; outlet: { x: number; y: number; z: number } }[];
+    scales: Scale[];
+    flasks: Flask[];
+    faucets: { spout: { x: number; y: number; z: number }; start: { start: number } }[];
+    history: { canUndo: boolean };
+    target: unknown;
+    grabOrRelease(linked: boolean): void;
+  }
+  const g = (l: Lab) => l.in as unknown as Ghosting;
+  /** Where what's held would come to rest. */
+  const restAt = (l: Lab) => {
+    const p = l.in.placement(l.in.held);
+    expect('rest' in p, 'why' in p ? p.why : '').toBe(true);
+    return 'rest' in p ? p.rest.pose : P;
+  };
+  const P = { x: SPOT.x + 0.3 * CELL, y: LIFT + 260, z: SPOT.z - 0.2 * CELL, yaw: 0 };
+  /** A lab with ghost moves on, a dispenser set down at P with a flask under its spout, and R in its tank. */
+  function rig(): { l: Lab; d: Tool; f: Flask } {
+    const l = lab();
+    holdAt(l, 'dispenser' as 'pipette', P);
+    const d = l.in.held!.t!;
+    l.in.release();
+    const sp = spoutAt(d, 0);
+    holdAt(l, 'flask', { x: sp.x, y: LIFT + 100, z: sp.z, yaw: 0 });
+    const f = l.in.held!.f!;
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    d.tanks[0].setMolecules(singleOf('R'), CAP / 2);
+    g(l).ghostMoves = true;
+    return { l, d, f };
+  }
+  /** Pick up a tool with the crosshair on it, standing back from it. */
+  const pick = (l: Lab, t: Tool, linked = false) => {
+    l.e.debug({ x: t.pose.x, z: t.pose.z + 300, yaw: 0, pitch: -0.2 });
+    l.in.target = { kind: 'tool', t, part: 'body', k: 0, point: { ...t.pose }, distance: 300 };
+    g(l).grabOrRelease(linked);
+    l.in.target = null;
+    expect(l.in.held?.t).toBe(t);
+  };
+
+  it('leaves what is picked up where it is, still pouring, until it is set down, and then moves it at once, as one step', () => {
+    const { l, d, f } = rig();
+    const was = { ...d.pose };
+    d.valves[0] = 1;
+    pick(l, d);
+    expect(g(l).held!.ghost).toBeDefined();
+    const to = { ...P, x: P.x + 3 * CELL };
+    hands(l).placeHeld(l.in.held, to);
+    run(l, 1);
+    expect(d.pose).toEqual(was);
+    expect(f.N).toBeGreaterThan(0);
+    // what's held stays where it was, so it's still poured from, and nothing of it goes down the drain
+    const caught = f.N;
+    run(l, 1);
+    expect(f.N).toBeGreaterThan(caught);
+    expect(where(restAt(l))).toEqual(where(to));
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    expect(where(d.pose)).toEqual(where(to));
+    // undone in one step
+    l.e.undo();
+    expect(d.pose).toEqual(was);
+  });
+
+  it('can be nudged into space it partly takes up itself, its stand too', () => {
+    const { l, d } = rig();
+    pick(l, d);
+    const to = { ...P, x: P.x + MAGNET + 2 };
+    hands(l).placeHeld(l.in.held, to);
+    expect(where(restAt(l))).toEqual(where(to));
+  });
+
+  it('carries hoses following it along only when it is set down', () => {
+    const l = lab();
+    g(l).ghostMoves = true;
+    const fa = g(l).faucets[0];
+    // a scale with a flask on it under a faucet, which pours into it
+    holdAt(l, 'scale' as 'pipette', { x: fa.spout.x, y: LIFT + 100, z: fa.spout.z + 30, yaw: Math.PI / 2 });
+    const sc = (l.in.held as unknown as { sc: Scale }).sc;
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    const place = onScale(sc, SCALE_SLOTS[1]);
+    holdAt(l, 'flask', { x: place.x, y: place.y + 40, z: place.z, yaw: 0 });
+    const f = l.in.held!.f!;
+    l.in.release();
+    expect(sc.load.map((x) => x.f)).toEqual([f]);
+    expect(Math.hypot(place.x - fa.spout.x, place.z - fa.spout.z)).toBeLessThan(1e-6);
+    run(l, 0.2);
+    expect(f.N).toBeGreaterThan(0);
+    const before = g(l).history.canUndo;
+    // picked up hooked up, its faucet's hose comes out to go with it, but neither moves until it's set down
+    l.e.debug({ x: sc.pose.x - 300, z: sc.pose.z, yaw: -Math.PI / 2, pitch: -0.3 });
+    l.in.target = { kind: 'scale', sc, part: 'body', point: { ...sc.pose }, distance: 300 };
+    g(l).grabOrRelease(true);
+    l.in.target = null;
+    expect(g(l).held!.ghost).toBeDefined();
+    expect(g(l).hoses).toHaveLength(1);
+    const was = { ...sc.pose };
+    const to = { ...sc.pose, z: sc.pose.z + 3 * CELL };
+    hands(l).placeHeld(l.in.held, to);
+    run(l, 0.2);
+    expect(sc.pose).toEqual(was);
+    expect(g(l).hoses[0].outlet.z).toBeCloseTo(fa.spout.z, 6);
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    expect(sc.pose.z).toBeCloseTo(to.z, 6);
+    expect(f.pose.z).toBeCloseTo(onScale(sc, SCALE_SLOTS[1]).z, 6);
+    expect(g(l).hoses[0].outlet.z).toBeCloseTo(f.pose.z, 6);
+    // one step: undone, the scale's back, and the hose rolled back up
+    l.e.undo();
+    expect(sc.pose).toEqual(was);
+    expect(g(l).hoses).toHaveLength(0);
+    expect(g(l).history.canUndo).toBe(before);
+  });
+
+  it('leaves it just as it was if Q is pressed, with no step to undo', () => {
+    const { l, d } = rig();
+    const was = { ...d.pose };
+    l.e.undo();
+    l.e.undo();
+    // (nothing left to undo, so a step would show)
+    expect(g(l).history.canUndo).toBe(false);
+    holdAt(l, 'dispenser' as 'pipette', { ...P, x: P.x + 4 * CELL });
+    l.in.release();
+    expect(g(l).history.canUndo).toBe(true);
+    l.e.undo();
+    expect(g(l).history.canUndo).toBe(false);
+    pick(l, d);
+    hands(l).placeHeld(l.in.held, { ...P, x: P.x + 3 * CELL });
+    l.in.putBack();
+    expect(l.in.held).toBeNull();
+    expect(d.pose).toEqual(was);
+    expect(g(l).history.canUndo).toBe(false);
+  });
+
+  it('makes something new only a ghost until it is set down, and puts it back in the cabinet if it is not', () => {
+    const l = lab();
+    g(l).ghostMoves = true;
+    const left = l.in.stock.dispenser.filter(Boolean).length;
+    l.e.debug({ x: SPOT.x, z: SPOT.z + 200, yaw: 0, pitch: -0.3 });
+    l.in.move(0);
+    expect(l.e.spawn('dispenser')).toBe(true);
+    const t = l.in.held!.t!;
+    expect(l.in.tools).not.toContain(t);
+    expect(l.in.stock.dispenser.filter(Boolean).length).toBe(left - 1);
+    // saved meanwhile, it's still in the cabinet
+    expect(l.e.snapshot().cabinet!.dispenser).toHaveLength(left);
+    l.in.putBack();
+    expect(l.in.held).toBeNull();
+    expect(l.in.tools).not.toContain(t);
+    expect(l.in.stock.dispenser.filter(Boolean).length).toBe(left);
+    // set down, it's there
+    expect(l.e.spawn('dispenser')).toBe(true);
+    const u = l.in.held!.t!;
+    hands(l).placeHeld(l.in.held, P);
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    expect(l.in.tools).toContain(u);
+    expect(where(u.pose)).toEqual(where(P));
+  });
+
+  it('still puts a flask, a dipper or a sheet of test paper in hand', () => {
+    const l = lab();
+    g(l).ghostMoves = true;
+    for (const kind of ['flask', 'thermometer', 'testpaper'] as const) {
+      l.e.debug({ x: SPOT.x, z: SPOT.z + 200, yaw: 0, pitch: -0.3 });
+      l.in.move(0);
+      expect(l.e.spawn(kind)).toBe(true);
+      expect(g(l).held!.ghost, kind).toBeUndefined();
+      const thing = g(l).held!.f ?? g(l).held!.t!;
+      expect([...g(l).flasks, ...l.in.tools]).toContain(thing);
+      l.in.putAway();
+    }
+  });
+});
+
 describe('the shadow lamp', () => {
   it('is in every new lab, on its bench, out, its dial halfway', () => {
     const l = lab();

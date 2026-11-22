@@ -78,7 +78,13 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     a mouth hovers and dips (`dipPoses`), and where a sheet of shadow paper stands in the shadow lamp's slot
     (`SHEET_SLOT`, `slotted`).
   - `physics.ts` is the collisions: yawed boxes, the player's cylinder and `walk`. What's held collides with nothing; only
-    where it would be set down is checked (the engine's `placement` and `rest`).
+    where it would be set down is checked (the engine's `placement` and `rest`). With ghost moves on
+    (`GameEngine.ghostMoves`, the top bar's checkbox), what stands on stands, a scale and a sheet of shadow paper are
+    moved by a ghost (`Held.ghost`): the thing itself stays in the lab where it was, running, solid to the player and
+    aimed at, though not in the way of its own move, while `heldPose`/`placeHeld` work on the ghost's pose. Code that
+    puts what's held somewhere for a moment, to see what would be (guides, magnets, followers), uses `objPose`/`putAt`,
+    which move the thing itself; and one just made is out of the lab (`inLab`) until set down, so its own mouths come
+    from `mouthsWith`. The view draws the ghost (`GhostView`, `Frame.ghost`) on a layer of its own, `GHOST_LAYER`.
   - `space.ts` is the room, poses, and the mapping from the old flat bench to its back wall.
   - `tools.ts` holds tool shapes (flat outlines, y down) and per-step logic, plus drips and the instruments' readings (the spectroscope's graph is `spectroscopeAt`, a sheet of test paper's stains are `paperReading`, a sheet of bond paper's lines are `bondReading`, both against what a sheet soaks up, `TEST_PAPER.cap`, so they go by how much it holds as well as by what), `Bed`, the cell-by-cell carrying that the wicking strip's paper and the column's bed share, and `Blotter`, what a sheet of test paper or bond paper (the `BLOTTERS`) soaks up.
   - `flask.ts` has `Vessel`, `transfer`, volume and colors.
@@ -94,7 +100,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     their maps arrive, and gives geometry texture coordinates in world units (`boxUV`, `planeUV`).
   - `history.ts` is undo and redo of the lab's arrangement (never fluids). An action that changes the arrangement calls
     the engine's `mark()` as it starts and `commit()` as it ends (or `change()` around it, if it's instant); a carry is
-    marked at pick-up and committed at set-down.
+    marked at pick-up and committed at set-down (a ghost move too; one let go of with Q changes nothing, so it leaves no
+    step).
   - `wheel.ts` is the two equipment wheels: what's on each (`WHEELS`), where the mouse puts the pointer while a
     wheel's key (1 or 2) is held, and which sector that picks. The engine holds the open one's state (`wheel`,
     `openWheel`, `closeWheel`) and `Wheel` in `Hud.tsx` draws it.
