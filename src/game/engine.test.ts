@@ -3,17 +3,19 @@ import { BOND_KEYS } from '../chem/atoms';
 import { ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
-import { SHEET_SLOT, flaskLip, inSlot, scaleBox, sheetIn, slotPose, standBase, toolBox, toolStands } from './bodies';
+import { FLASK_R, MAGNET, NEAR, NEAR_STEP, SCALE_SLOTS, SHEET_SLOT, flaskLip, onScale, spoutAt, tankMouth, inSlot, scaleBox, sheetIn, slotPose, standBase, toolBox, toolStands } from './bodies';
 import { boxesOverlap } from './physics';
 import { STOCK } from './cabinet';
 import { WHEELS } from './wheel';
 import { CAP, TRACE } from './config';
 import type { GameEngine } from './engine';
 import { Vessel, volume, type Flask } from './flask';
+import type { Scale } from './scale';
 import { FLASK_H } from './flaskShape';
 import { DEFAULT_PRESET, LAMP_POSE } from './presets';
 import type { SaveState } from './save';
-import { CELL, LAMP_FLOOR, LIFT, counterUnder, toCell, toWorld } from './space';
+import { CELL, LAMP_FLOOR, LIFT, counterUnder, toWorld } from './space';
+import { toCell } from './testLayout';
 import { DRIP, INLINE_TOOLS, PAPER_TAU, SHAPES, SHEET, TEST_PAPER, UNIQUE_TOOLS, bondReading, bondShares, darkness, lampShot, paperReading, type Blotter, type Tool } from './tools';
 
 /*
@@ -71,6 +73,7 @@ interface Inside {
   sleeper(): { skip(dt: number): void };
   placement(h: unknown): { rest: { pose: Tool['pose'] } } | { why: string };
   stands(): { of: { t?: Tool } }[];
+  keys: Set<string>;
 }
 
 let Engine: typeof GameEngine;
@@ -127,9 +130,9 @@ const paperOf = (t: Tool) => t.paper[0];
 const where = (p: Tool['pose']) => [p.x, p.y, p.z, p.yaw].map((v) => Math.round(v * 1e6) / 1e6 + 0);
 const flat = (x: number, z: number, yaw = 0) => [x, LIFT + TEST_PAPER.thick, z, yaw];
 
-/** Take a sheet out of the cabinet, by the wheel, and lay it down in the cell at (x, z). */
+/** Take a sheet out of the cabinet, by the wheel, and lay it down with its middle at (x, z). */
 function lay(l: Lab, x = SPOT.x, z = SPOT.z, kind: Sheet = 'testpaper'): Tool {
-  // looking a little down, the sheet is held low in front, over the cell
+  // looking a little down, the sheet is held low in front, about there; and then just there
   const there = () => {
     l.e.debug({ x, z: z + 96, yaw: 0, pitch: (-20 * Math.PI) / 180 });
     l.in.move(0);
@@ -138,6 +141,7 @@ function lay(l: Lab, x = SPOT.x, z = SPOT.z, kind: Sheet = 'testpaper'): Tool {
   expect(l.e.spawn(kind)).toBe(true);
   there();
   const t = l.in.held!.t!;
+  hands(l).placeHeld(l.in.held, { ...t.pose, x, z });
   l.in.release();
   expect(l.in.held, `at ${x}, ${z}: ${l.in.flash?.text}`).toBeNull();
   return t;
@@ -204,11 +208,14 @@ describe('test paper', () => {
     const l = lab();
     const sheet = lay(l);
     const cell = (p: { x: number; z: number }) => [toCell(p.x), toCell(p.z)];
-    // another sheet held over it goes down in the next cell
+    // another sheet held over it goes down beside it instead, as near where it's held as it can, no further than NEAR
     holdAt(l, 'testpaper', { x: SPOT.x - 10, y: LIFT + 150, z: SPOT.z, yaw: 0 });
     const sh = l.in.placement(l.in.held);
-    expect('rest' in sh && cell(sh.rest.pose)).not.toEqual(cell(SPOT));
-    expect('rest' in sh && Math.hypot(sh.rest.pose.x - SPOT.x, sh.rest.pose.z - SPOT.z)).toBe(CELL);
+    expect('rest' in sh).toBe(true);
+    const to = 'rest' in sh ? sh.rest.pose : sheet.pose;
+    expect(Math.max(Math.abs(to.x - SPOT.x), Math.abs(to.z - SPOT.z))).toBeGreaterThanOrEqual(TEST_PAPER.w);
+    expect(Math.hypot(to.x - (SPOT.x - 10), to.z - SPOT.z)).toBeLessThanOrEqual(NEAR + 1e-9);
+    expect(Math.hypot(to.x - (SPOT.x - 10), to.z - SPOT.z)).toBeGreaterThan(TEST_PAPER.w - 10 - NEAR_STEP);
     l.in.putAway();
     // a pipette on its stand goes right over it, its spout over the sheet's middle, its stand's base behind
     const pip = pipetteOver(l);
@@ -789,12 +796,11 @@ describe.each(['testpaper', 'bondpaper'] as const)('what stands on a sheet of %s
   it('is set down on it as if it were not there: a flask, a scale, a thermometer or a strip on its stand', () => {
     const l = lab();
     const sheet = lay(l, SPOT.x, SPOT.z, kind);
-    // a flask held over it goes straight down onto the counter in its cell
+    // a flask held over it goes straight down onto the counter, just where it's held
     holdAt(l, 'flask', { x: SPOT.x + 10, y: LIFT + 150, z: SPOT.z - 5, yaw: 0 });
     const f = hands(l).held!.f!;
-    expect(cell(rests(l)!)).toEqual(cell(SPOT));
     l.in.release();
-    expect(where(f.pose)).toEqual([SPOT.x, LIFT + 70, SPOT.z, where(f.pose)[3]]);
+    expect(where(f.pose)).toEqual([SPOT.x + 10, LIFT + 70, SPOT.z - 5, 0]);
     expect(where(sheet.pose)).toEqual(flat(SPOT.x, SPOT.z));
     // and so do a scale, and the dippers on their stands, each over a sheet
     for (const what of ['scale', 'thermometer', 'strip'] as const) {
@@ -809,9 +815,9 @@ describe.each(['testpaper', 'bondpaper'] as const)('what stands on a sheet of %s
       const was = h.kind === 'scale' ? scaleBox(h.sc as never) : toolBox(h.t!);
       const to = rests(l)!;
       expect(to).not.toBeNull();
-      // it comes down where it's held, moved across no further than onto the grid
-      expect(Math.abs(to.x - x)).toBeLessThan(CELL);
-      expect(Math.abs(to.z - SPOT.z)).toBeLessThan(CELL);
+      // it comes straight down where it's held
+      expect(to.x).toBeCloseTo(x, 9);
+      expect(to.z).toBeCloseTo(SPOT.z, 9);
       l.in.release();
       expect(l.in.held, `${what}: ${l.in.flash?.text}`).toBeNull();
       const now = h.kind === 'scale' ? scaleBox(h.sc as never) : toolBox(h.t!);
@@ -832,6 +838,8 @@ describe.each(['testpaper', 'bondpaper'] as const)('what stands on a sheet of %s
     let onSheets = 0;
     for (const k of kinds) {
       const l = lab();
+      // (with Alt held, so that no magnet pulls a spout over a sheet's middle)
+      l.in.keys.add('AltLeft');
       holdAt(l, k as 'pipette', { x: 450, y: LIFT + 260, z: 950, yaw: 0 });
       const t = l.in.held!.t!;
       const bare = rests(l);
@@ -1041,7 +1049,7 @@ describe('the bond visualizer, which is gone', () => {
     const hoses = (l.in as unknown as { hoses: { on: { tool?: Tool }; outlet: { x: number } }[] }).hoses;
     expect(hoses).toHaveLength(1);
     expect(hoses[0].on.tool).toBe(pip);
-    expect(hoses[0].outlet.x).toBeCloseTo(toCell(1750), 6);
+    expect(hoses[0].outlet.x).toBeCloseTo(1750, 6);
     // and the lab runs: what the hose lets out falls to the counter
     expect(() => {
       for (let i = 0; i < 40; i++) l.in.simulate(0.05);
@@ -1160,6 +1168,185 @@ function look(l: { e: GameEngine; in: Inside }, x: number, z: number, tx: number
 }
 
 const lampOf = (l: Inside) => l.tools.filter((t) => t.kind === 'shadowlamp');
+
+describe('setting things down', () => {
+  /** More of the engine's own things: the faucets, the scales, and where things are made to face. */
+  interface More {
+    faucets: { start: { start: number }; spout: { x: number; y: number; z: number } }[];
+    scales: Scale[];
+    flasks: Flask[];
+    player: { x: number; z: number; yaw: number; pitch: number };
+  }
+  const more = (l: Lab) => l.in as unknown as More;
+  type Kind = Parameters<GameEngine['spawn']>[0];
+  /** Take one of a kind out of the cabinet, hold it at a pose, and let go of it there; what it was. */
+  function setAt(l: Lab, kind: Kind, p: Tool['pose']): Tool | Flask | Scale {
+    holdAt(l, kind as 'pipette', p);
+    const h = l.in.held as unknown as { t?: Tool; f?: Flask; sc?: Scale };
+    const it = h.t ?? h.f ?? h.sc!;
+    l.in.release();
+    expect(l.in.held, `${kind}: ${l.in.flash?.text}`).toBeNull();
+    return it;
+  }
+  /** Where what's held would come to rest, or why not. */
+  const rests = (l: Lab) => {
+    const p = l.in.placement(l.in.held);
+    return 'rest' in p ? p.rest : null;
+  };
+  /** Somewhere on the first island, between cells' middles. */
+  const ODD = { x: SPOT.x + 0.37 * CELL, z: SPOT.z - 0.29 * CELL };
+
+  it('sets what is let go of down just where it is held, and a save keeps it there', () => {
+    const l = lab();
+    const d = setAt(l, 'dispenser', { x: ODD.x, y: LIFT + 260, z: ODD.z, yaw: Math.PI / 2 }) as Tool;
+    expect(where(d.pose)).toEqual(where({ x: ODD.x, y: LIFT + 260, z: ODD.z, yaw: Math.PI / 2 }));
+    const f = setAt(l, 'flask', { x: ODD.x + 2 * CELL + 7, y: LIFT + 150, z: ODD.z + 3, yaw: 0 }) as Flask;
+    expect(where(f.pose)).toEqual([ODD.x + 2 * CELL + 7, LIFT + FLASK_H, ODD.z + 3, 0].map((v) => Math.round(v * 1e6) / 1e6));
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    l.e.restore(s, DEFAULT_PRESET);
+    const d2 = l.in.tools.find((t) => t.kind === 'dispenser')!;
+    for (const [a, b] of [[d2.pose, d.pose], [more(l).flasks[0].pose, f.pose]])
+      for (const k of ['x', 'y', 'z', 'yaw'] as const) expect(a[k]).toBeCloseTo(b[k], 6);
+  });
+
+  it('pulls a flask under a faucet when it is held within MAGNET of it, and not when it is further', () => {
+    const l = lab();
+    const sp = more(l).faucets[0].spout;
+    const off = (d: number) => ({ x: sp.x + d * 0.8, y: LIFT + 150, z: sp.z - d * 0.6, yaw: 0 });
+    holdAt(l, 'flask', off(MAGNET - 1));
+    expect([rests(l)!.pose.x, rests(l)!.pose.z]).toEqual([sp.x, sp.z]);
+    l.in.putAway();
+    holdAt(l, 'flask', off(MAGNET + 1));
+    const far = rests(l)!.pose;
+    expect(far.x).toBeCloseTo(off(MAGNET + 1).x, 9);
+    expect(far.z).toBeCloseTo(off(MAGNET + 1).z, 9);
+    // and with Alt held, not at all
+    l.in.putAway();
+    l.in.keys.add('AltLeft');
+    holdAt(l, 'flask', off(MAGNET - 1));
+    expect(rests(l)!.pose.x).toBeCloseTo(off(MAGNET - 1).x, 9);
+  });
+
+  it('lines up all five of a separator’s spouts over a row of five tanks at its pitch, or the best it can over a row at another', () => {
+    for (const pitch of [CELL, CELL + 9]) {
+      const l = lab();
+      // (set down with Alt held, as they're placed, so nothing pulls them into line)
+      l.in.keys.add('AltLeft');
+      const ds = [-2, -1, 0, 1, 2].map((i) => setAt(l, 'dispenser', { x: SPOT.x + i * pitch, y: LIFT + 230, z: SPOT.z, yaw: 0 }) as Tool);
+      l.in.keys.delete('AltLeft');
+      // held facing the other way, high over them, a little off
+      holdAt(l, 'separator' as 'pipette', { x: SPOT.x + 5, y: LIFT + 480, z: SPOT.z + 3, yaw: Math.PI });
+      const t = l.in.held!.t!;
+      const mouths = ds.map((d) => tankMouth(d, 0));
+      const apart = (j: number, m: { x: number; z: number }) => Math.hypot(spoutAt(t, j).x - m.x, spoutAt(t, j).z - m.z);
+      // the nearest any spout is to any tank's middle, as it's held
+      const nearest = Math.min(...t.shape.spouts.flatMap((_, j) => mouths.map((m) => apart(j, m))));
+      const to = rests(l)!.pose;
+      const moved = Math.hypot(to.x - (SPOT.x + 5), to.z - (SPOT.z + 3));
+      t.pose = to;
+      const lined = t.shape.spouts.filter((_, j) => mouths.some((m) => apart(j, m) < 1e-6)).length;
+      if (pitch === CELL) {
+        expect(lined).toBe(5);
+        expect([to.x, to.z].map((v) => +v.toFixed(6))).toEqual([SPOT.x, SPOT.z]);
+      } else {
+        // no two line up at once, so just the pair nearest lining up does
+        expect(lined).toBe(1);
+        expect(moved).toBeCloseTo(nearest, 6);
+      }
+      expect(moved).toBeLessThanOrEqual(MAGNET);
+    }
+  });
+
+  it('with Alt held, sets a tool down turned just as it is held, and a flask is pulled under its spout all the same', () => {
+    const l = lab();
+    const p = more(l).player;
+    l.e.debug({ x: ODD.x, z: ODD.z + 150, yaw: 0, pitch: -0.3 });
+    l.in.move(0);
+    expect(l.e.spawn('dispenser')).toBe(true);
+    const d = l.in.held!.t!;
+    l.in.held!.relYaw = Math.PI / 6;
+    l.in.move(0);
+    // without Alt it faces the nearest of the four ways; with it, as it's held
+    expect(d.pose.yaw).toBeCloseTo(0, 9);
+    l.in.keys.add('AltLeft');
+    l.in.move(0);
+    expect(d.pose.yaw).toBeCloseTo(p.yaw + Math.PI / 6, 9);
+    const pl0 = l.in.placement(l.in.held);
+    expect(pl0, JSON.stringify(d.pose)).toHaveProperty("rest");
+    const want = rests(l)!.pose;
+    l.in.release();
+    expect(l.in.held, l.in.flash?.text).toBeNull();
+    expect(where(d.pose)).toEqual(where(want));
+    expect(d.pose.yaw).toBeCloseTo(Math.PI / 6, 9);
+    // on its stand, which stands on the counter behind it, turned with it
+    const [st] = toolStands(d);
+    expect(st.yaw).toBeCloseTo(Math.PI / 6, 9);
+    expect(counterUnder(standBase(st, 0))).toBe(LIFT);
+    // a flask held near under its spout is pulled under it, and catches what it lets out
+    l.in.keys.delete('AltLeft');
+    const sp = spoutAt(d, 0);
+    holdAt(l, 'flask', { x: sp.x + 9, y: LIFT + 100, z: sp.z - 7, yaw: 0 });
+    const f = l.in.held!.f!;
+    l.in.release();
+    expect(l.in.held, l.in.flash?.text).toBeNull();
+    expect(f.pose.x).toBeCloseTo(sp.x, 9);
+    expect(f.pose.z).toBeCloseTo(sp.z, 9);
+    d.tanks[0].setMolecules(singleOf('R'), CAP);
+    d.valves[0] = 1;
+    run(l, 2);
+    expect(f.N).toBeGreaterThan(0);
+    // and a save keeps it turned so
+    l.e.restore(JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState, DEFAULT_PRESET);
+    expect(l.in.tools.find((t) => t.kind === 'dispenser')!.pose.yaw).toBeCloseTo(Math.PI / 6, 6);
+    // so is a flask under the end spout of a separator turned so, out to one side of where it's held from
+    l.in.keys.add('AltLeft');
+    const sep = setAt(l, 'separator', { x: 1300, y: LIFT + 300, z: 800, yaw: Math.PI / 6 }) as Tool;
+    l.in.keys.delete('AltLeft');
+    expect(sep.pose.yaw).toBeCloseTo(Math.PI / 6, 9);
+    const end = spoutAt(sep, sep.shape.spouts.length - 1);
+    const g = setAt(l, 'flask', { x: end.x - 6, y: LIFT + 100, z: end.z + 11, yaw: 0 }) as Flask;
+    expect(g.pose.x).toBeCloseTo(end.x, 9);
+    expect(g.pose.z).toBeCloseTo(end.z, 9);
+  });
+
+  it('sets what has no room where it is held down as near as there is room, no further than NEAR, or not at all', () => {
+    const l = lab();
+    const f = setAt(l, 'flask', { x: ODD.x, y: LIFT + 150, z: ODD.z, yaw: 0 }) as Flask;
+    holdAt(l, 'flask', { x: ODD.x + 5, y: LIFT + 150, z: ODD.z, yaw: 0 });
+    const to = rests(l)!.pose;
+    const gone = Math.hypot(to.x - (ODD.x + 5), to.z - ODD.z);
+    expect(gone).toBeGreaterThan(0);
+    expect(gone).toBeLessThanOrEqual(NEAR + 1e-9);
+    expect(Math.hypot(to.x - f.pose.x, to.z - f.pose.z)).toBeGreaterThanOrEqual(2 * FLASK_R);
+    l.in.putAway();
+    // off the front of the island by more than that, it can't be set down
+    const front = 16 * CELL;
+    holdAt(l, 'flask', { x: ODD.x, y: LIFT + 150, z: front - FLASK_R + NEAR + 1, yaw: 0 });
+    expect('why' in l.in.placement(l.in.held)).toBe(true);
+    l.in.putAway();
+    holdAt(l, 'flask', { x: ODD.x, y: LIFT + 150, z: front - FLASK_R + NEAR - 1, yaw: 0 });
+    expect(rests(l)!.pose.z).toBeLessThanOrEqual(front - FLASK_R + 1e-9);
+  });
+
+  it('pulls an empty scale under two faucets side by side, its places for a flask under them, and both flasks on it catch', () => {
+    const l = lab();
+    const [a, b] = more(l).faucets.map((fa) => fa.spout);
+    expect(Math.hypot(a.x - b.x, a.z - b.z)).toBeCloseTo(SCALE_SLOTS[1] - SCALE_SLOTS[0], 6);
+    const mid = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
+    const yaw = Math.atan2(-(b.z - a.z), b.x - a.x);
+    const sc = setAt(l, 'scale', { x: mid.x - 6, y: LIFT + 100, z: mid.z + 8, yaw }) as Scale;
+    const places = SCALE_SLOTS.map((dx) => onScale(sc, dx));
+    for (const [p, s] of [[places[0], a], [places[1], b]]) {
+      expect(p.x).toBeCloseTo(s.x, 6);
+      expect(p.z).toBeCloseTo(s.z, 6);
+    }
+    const fs = places.map((p) => setAt(l, 'flask', { ...p, y: p.y + 40, x: p.x + 4 }) as Flask);
+    expect(sc.load.map((x) => x.f)).toEqual(fs);
+    run(l, 1);
+    expect(fs[0].n[more(l).faucets[0].start.start]).toBeGreaterThan(0);
+    expect(fs[1].n[more(l).faucets[1].start.start]).toBeGreaterThan(0);
+  });
+});
 
 describe('the shadow lamp', () => {
   it('is in every new lab, on its bench, out, its dial halfway', () => {
@@ -1306,6 +1493,8 @@ describe('the shadow lamp', () => {
     expect(l.e.spawn('testpaper')).toBe(true);
     const p = l.in.held!.t!;
     hold(LAMP_FLOOR.y + 20);
+    // (it's held low in front, a little nearer: just over the middle, then)
+    hands(l).placeHeld(l.in.held, { ...p.pose, x: mid.x, z: mid.z });
     l.in.release();
     expect(l.in.held).toBeNull();
     expect([p.pose.x, p.pose.z].map((v) => +v.toFixed(6))).toEqual([mid.x, mid.z].map((v) => +v.toFixed(6)));
@@ -1395,9 +1584,9 @@ describe('shadow paper', () => {
     l.in.target = { kind: 'tool', t: sheet, part: 'body', k: 0, point: { ...SHEET_SLOT }, distance: 200 };
     l.in.leftDown(false);
     expect(l.in.held?.t).toBe(sheet);
-    look(l, 100, 1200, 100, 700, 800);
+    look(l, 100, 1100, 100, 700, 700);
     l.in.release();
-    expect(l.in.held).toBeNull();
+    expect(l.in.held, l.in.flash?.text).toBeNull();
     expect(sheetIn(l.in.tools)).toBeNull();
     expect(toolStands(sheet)).toHaveLength(1);
     expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(true);
@@ -1405,7 +1594,7 @@ describe('shadow paper', () => {
     l.e.undo();
     expect(sheet.pose).toEqual(SHEET_SLOT);
     l.in.leftDown(false);
-    look(l, 100, 1200, 100, 700, 800);
+    look(l, 100, 1100, 100, 700, 700);
     l.in.putBack();
     expect(sheet.pose).toEqual(SHEET_SLOT);
   });
@@ -1426,7 +1615,7 @@ describe('shadow paper', () => {
     const N = SHEET.cells;
     sheet.expose(Float32Array.from({ length: N * N }, (_, k) => (k % N < N / 3 ? 0 : 1)), 0.6);
     const loose = sheetAtSlot(l);
-    look(l, 100, 1200, 100, 700, 800);
+    look(l, 100, 1100, 100, 700, 700);
     l.in.release();
     const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
     expect(s.tools.filter((t) => t.kind === 'sheet').map((t) => typeof t.image)).toEqual(['string', 'undefined']);

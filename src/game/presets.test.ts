@@ -5,7 +5,8 @@ import { CAP, N_FLASKS } from './config';
 import { Flask, roomFor } from './flask';
 import { CRYOSTABILIZER } from './supply';
 import { SHAPES, TANK_CAP, Tool } from './tools';
-import { onGrid, toolAnchor, toolBox } from './bodies';
+import { toolBox } from './bodies';
+import { onCell, toolAnchor } from './testLayout';
 import { boxesOverlap } from './physics';
 import { fromFrac } from './space';
 import { DEFAULT_PRESET, PRESETS, REFERENCE_FILL, applyFill, fillAtoms, type FlaskFill } from './presets';
@@ -47,10 +48,10 @@ describe('presets', () => {
   }
 
   for (const p of PRESETS) {
-    it(`${p.name} lays its tools out on the grid, clear of each other`, () => {
+    it(`${p.name} lays its tools out in whole cells, so that they line up, clear of each other`, () => {
       const tools = (p.tools ?? []).map((spec, i) => {
         const t = new Tool(spec.kind, i, { ...fromFrac({ x: spec.at[0], y: spec.at[1] }, spec.z), yaw: spec.yaw ?? 0 });
-        const g = onGrid(t.pose, toolAnchor(t));
+        const g = onCell(t.pose, toolAnchor(t));
         expect(g.x).toBeCloseTo(t.pose.x, 6);
         expect(g.z).toBeCloseTo(t.pose.z, 6);
         return t;

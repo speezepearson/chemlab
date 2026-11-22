@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { heatAt } from '../chem/reactions';
 import { SOLVENT_SPECIES, TARGET, pairOf, singleOf, speciesIndex } from '../chem/species';
-import { onGrid, paperMouth, spoutAt, standBase, toolAnchor, toolBox, toolParts, toolStands } from './bodies';
+import { paperMouth, spoutAt, standBase, toolBox, toolParts, toolStands } from './bodies';
 import { STOCK, type Stocked } from './cabinet';
 import { CAP, TRACE } from './config';
 import { Vessel, roomFor, volume } from './flask';
 import { boxesOverlap } from './physics';
-import { CELL, LIFT, toCell } from './space';
+import { CELL, LIFT } from './space';
+import { onCell, toCell, toolAnchor } from './testLayout';
 import {
   ATOM_PLACE, Blotter, DRIP, SECTOR_ATOMS, SHAPES, STRIP, TEST_PAPER, Tool, atomSector, composition, mouthBelow, overMouth, paperReading, paperTriangles,
   sectorInset, wetness,
@@ -290,12 +291,12 @@ describe("test paper's paper", () => {
 });
 
 describe('test paper in the room', () => {
-  it('lies flat within one grid cell, its middle over the middle of the cell', () => {
+  it("lies flat within a cell's square (see CELL), its middle over the square's middle", () => {
     expect(TEST_PAPER.w).toBeLessThanOrEqual(CELL);
     expect(TEST_PAPER.d).toBeLessThanOrEqual(CELL);
     for (const yaw of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
       const t = lying(137, 962, yaw + 0.2);
-      t.pose = onGrid(t.pose, toolAnchor(t));
+      t.pose = onCell(t.pose, toolAnchor(t));
       expect([t.pose.x, t.pose.z]).toEqual([toCell(137), toCell(962)]);
       expect(Math.abs(Math.sin(2 * t.pose.yaw))).toBeLessThan(1e-9);
       const b = toolBox(t);

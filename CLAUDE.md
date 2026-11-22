@@ -177,13 +177,20 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     (the `BLOTTERS`) are the tools set down on the counter itself, lying flat (`ToolShape.flat`): each one's box is
     thin and as deep as it's wide, its face is up, and it has no stand. They're one sheet, printed differently: share
     what they do (`isBlotter`), and keep only the print and the reading apart. A sheet lying there is in nothing's
-    way but another sheet's (the engine's `obstacles`): whatever else is set down on its cell stands on the counter
+    way but another sheet's (the engine's `obstacles`): whatever else is set down on it stands on the counter
     through it, and it's laid under what's there. So it must stay thinner than the 0.6 between a flask's floor and
     its fluid's (`FLASK_FLUID` in `view.ts`), or it shows inside a flask standing on it.
-  - **The grid.** Whatever's set down is on the floor's grid of `CELL` (60) squares: facing one of the four ways
-    along it, with every mouth and spout over a cell's middle (`onGrid`, `toolAnchor` and `SCALE_ANCHOR` in
-    `bodies.ts`; the engine's `gridded` and `toGrid`). So a tool's tanks and spouts must be a whole number of cells
-    apart along it (`bodies.test.ts` checks every shape), and the counters' edges run along cells' edges. Height is free.
+  - **Placement is free, with magnets.** What's let go of is set down where it's held (the engine's `placement`,
+    then `rest`), facing the nearest of the four ways (`facing`, `toCardinal`), or exactly as held while Alt is held
+    (`free`). There's no lattice: `CELL` (60) is only a unit of length (the counters' edges, presets, most tools'
+    pitches), and tanks and spouts may be any distance apart. What lines things up is the magnet: within `MAGNET`
+    (`bodies.ts`) it shifts what's held across so its outlets are over others' mouths, or its mouths under others'
+    outlets, the most pairs at once (`magnetShift`, fed by the engine's `magnets`; an empty scale's places count as
+    mouths). If that pose can't rest, the free one is tried, then the nearest within `NEAR` (rings `NEAR_STEP`
+    apart); keep that search cheap, since `placement()` runs every frame while something's held. The guides and
+    footprints draw whatever `placement()` says, so anything that changes where things go goes through it. The
+    special snaps sit on top (`snapped`: `slotted`, `docked`; `dipAim` for dippers). On load nothing's moved but
+    repairs (`toCounters`). Tests that want a scene laid out in cells use `src/game/testLayout.ts`.
 - **Hoses** aren't a tool: every spout and faucet has one, pulled out with the left button (`Hose.on` says which). A
   spout's fluid leaves at its hose's nozzle if it's out, so wherever fluid leaves a spout or faucet, use the engine's
   `outletAt` and `faucetOutlet`, not `spoutAt` or `fa.spout`.
@@ -212,18 +219,18 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - Tests and the README.
   - A tool needn't have tanks at all: the thermometers and the wicking strip (the `DIPPERS`), a sheet of shadow paper,
     a sheet of test paper or bond paper and the shadow lamp have none, nor spouts nor
-    valves. Then its grid anchor is its middle (`toolAnchor`), Enter writes its own `note`, and its collision is whatever
+    valves. Then Enter writes its own `note`, and its collision is whatever
     `toolParts` gives it (a thermometer's, only the top of its rod; a strip's, its clip), so code that reaches for
     `tanks[0]` must allow for there being none.
   - A tank needn't be under its opening: one with a `neck` (the swell bulbs') has its bulb and neck where the flag
-    says, and its own `x0` and `x1` are its inlet's, since it's the openings and spouts that go on the grid.
+    says, and its own `x0` and `x1` are its inlet's, since it's the openings and spouts that line up (see the magnet).
   - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `neck`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `flat`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
 - **Unique tools** (`UNIQUE_TOOLS`: the spectroscope, the receptacle and the shadow lamp) aren't on
   an equipment wheel and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
   whole supply station (`STATION` in `tools.ts`): its tanks are the funnel and the ship's reservoir, in that
   order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved. The
   `shadowlamp` (`LAMP` in `tools.ts`) is `fixed` too, at `LAMP_POSE` on a bench of its own (`LAMP_AREA`, the last of
-  `COUNTERS`): a trough, with no tanks and no stand, whose channel things are set down in like anywhere on the grid,
+  `COUNTERS`): a trough, with no tanks and no stand, whose channel things are set down in like anywhere else,
   on its floor, which is a little higher than the bench (`LAMP_FLOOR` in `space.ts`: the one place `counterUnder` and
   `groundAt` don't say `LIFT` over a counter, so use what they say); its button is a part of its own for the crosshair
   (`'button'`), and its dial is its one valve.
@@ -235,7 +242,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Inline instruments** (`INLINE_TOOLS`: the spectroscope and the flow meter) are a tube draining straight through at a fixed rate past the spectroscope's cabinet
   (or the flow meter's little readout, `METER_BODY`), which reads what goes by, as an exponentially weighted average that fades the past smoothly (`INSTRUMENT_TAU`,
   `Tool.smooth`). A hose's nozzle let go of over the tube snaps onto its
-  top (`docked` in `bodies.ts`, via the engine's `gridded`).
+  top (`docked` in `bodies.ts`, via the engine's `snapped`).
 - **The goal** is enough cryostabilizer in the station's reservoir (`tanks[1]`, against its supply's `goal`, once
   it's fitted for the last of `SUPPLIES`), not what's lying around in vessels.
 - **Saves** stay at format v1. New fields are optional and the loaders tolerate their absence. Species are stored by

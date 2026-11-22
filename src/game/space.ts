@@ -28,16 +28,14 @@ export const ROOM = { x0: -720, x1: 2280, z0: 0, z1: 3000, y1: 1300 };
  */
 export const SPIN = Math.sqrt(9.81 / 10_000);
 /**
- * The side of a cell of the room's grid, across the floor: whatever's set down stands squarely in it, facing one of
- * the four ways along it, with every mouth and spout over the middle of a cell (see toCell). Cells' edges are at whole
- * multiples of it, so the walls, and every counter's edges, run along them.
+ * The room's unit of length across the floor, a cell: the walls and every counter's edges are whole numbers of cells
+ * from its corner, the presets lay things out in cells, and most tools' tanks and spouts are a whole number of cells
+ * apart, so that a row of tools lines up under another. Nothing keeps what's set down on cells: it stays where it's let
+ * go of, or is pulled a little to line an outlet up over a mouth (see MAGNET in bodies.ts).
  */
 export const CELL = 60;
 
-/** The middle of the grid cell that x (or z) is in. */
-export const toCell = (v: number) => (Math.floor(v / CELL) + 0.5) * CELL;
-
-/** The nearest of the four ways along the grid: a yaw of a whole number of quarter turns. */
+/** The nearest of the four ways along the room's walls: a yaw of a whole number of quarter turns. */
 export const toCardinal = (yaw: number) => wrapAngle(Math.round(yaw / (Math.PI / 2)) * (Math.PI / 2));
 
 /**
@@ -49,27 +47,27 @@ export const WALL_PANEL = { w: 220, h: ROOM.y1 / 3 };
 
 /** Height of every counter: the sink counters along the walls, and the islands. */
 export const LIFT = 420;
-/** How far the back wall's counter comes out from it: three grid cells. */
+/** How far the back wall's counter comes out from it: three cells. */
 export const COUNTER_D = 3 * CELL;
 /**
- * How far the right wall's counter, under the faucets, comes out from it: two grid cells, so they're in easy reach, over
+ * How far the right wall's counter, under the faucets, comes out from it: two cells, so they're in easy reach, over
  * its outer row, the inner row free bench.
  */
 export const SINK_D = 2 * CELL;
 /**
  * The islands' size, across and front to back, and where their grid starts and how far apart they are, all in whole
- * grid cells: each is sixteen cells by six.
+ * cells: each is sixteen cells by six.
  */
 const ISLAND = { w: 16 * CELL, d: 6 * CELL, x0: -7 * CELL, z0: 10 * CELL, dx: 22 * CELL, dz: 13 * CELL, cols: 2, rows: 3 };
 /**
- * Where the equipment cabinet stands (see cabinet.ts): against the back wall from the left wall, thirty grid cells
+ * Where the equipment cabinet stands (see cabinet.ts): against the back wall from the left wall, thirty cells
  * along it and five out from it, two cells further than the counter, and as tall as its shelves need. The back
  * counter runs on from its end.
  */
 export const CABINET_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 30 * CELL, z0: ROOM.z0, z1: ROOM.z0 + 5 * CELL };
 /**
  * Where the shadow lamp stands (see LAMP in tools.ts): on a bench of its own in the room's front left corner, nine
- * grid cells along the front wall and five out from it, as high as the counters. Nothing could be set down there
+ * cells along the front wall and five out from it, as high as the counters. Nothing could be set down there
  * before it was, so no save has anything standing in its way. The lamp's trough lies along its edge toward the room,
  * over its second row of cells; the two rows of cells behind it are free bench, long enough for the longest tools (a
  * heater, a sorter, a separator) on their two stands. It stops short of the airlock's doorway.
@@ -148,7 +146,7 @@ export function counterUnder(f: { x: number; z: number; hx: number; hz: number; 
 }
 /**
  * How far out from the back wall things stand when nothing says otherwise: over the counter, in the middle of its
- * third row of grid cells, so a tool's stand behind it has the first two.
+ * third row of cells, so a tool's stand behind it has the first two.
  */
 export const Z_HOME = 2.5 * CELL;
 /** Where the old bench's sink was, in its own units, down from the top of its home area. */

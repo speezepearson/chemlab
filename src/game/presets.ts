@@ -27,9 +27,10 @@ export interface Spot {
 
 /**
  * Where the one and only spectroscope starts, unless a preset places it itself: there's always exactly one. It stands
- * over the back counter, its spout high enough for a flask under it.
+ * over the back counter, its spout high enough for a flask under it, and over the middle of a cell (see CELL), like
+ * the presets' tools.
  */
-export const SPECTROSCOPE_AT: Spot = { at: [1.45, 0.5] };
+export const SPECTROSCOPE_AT: Spot = { at: [1.47, 0.5] };
 
 /**
  * Where the station is (see STATION in tools.ts): built into the right wall, past the faucets, facing
@@ -95,7 +96,7 @@ const atomsOf = (species: number, atoms: number) => ({ species, molecules: atoms
  * cells, so their stands behind them have its first (the back wall's end of the counter is the equipment cabinet's).
  */
 const DEMO_Z = 11.5 * CELL;
-/** The middle of the grid cell `k` cells from x = 0, across, as a fraction of the home area's width (see Spot). */
+/** The middle of the cell `k` cells from x = 0, across, as a fraction of the home area's width (see Spot). */
 const cellX = (k: number) => ((k + 0.5) * CELL) / HOME_W;
 
 const SHOWCASE: [Atom, number][] = [
@@ -117,7 +118,7 @@ export const PRESETS: readonly Preset[] = [
       'mixing: the red comes out cool and the green hot. Slower flows trade more. Look at a valve and hold the right button: point up to open it, right to close it.',
     flasks: [],
     tools: [
-      // over the exchanger's two tanks, half a grid cell either side of its middle
+      // over the exchanger's two tanks, half a cell either side of its middle
       { kind: 'dispenser', at: [cellX(5), 0.22], z: DEMO_Z, valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('R'), 4 * CAP)], T: 10 }] },
       { kind: 'dispenser', at: [cellX(6), 0.22], z: DEMO_Z, valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('G'), 4 * CAP)], T: T_ROOM }] },
       { kind: 'exchanger', at: [cellX(5.5), 0.48], z: DEMO_Z, valves: [0.25, 0.25] },
@@ -136,7 +137,7 @@ export const PRESETS: readonly Preset[] = [
         kind: 'separator', at: [cellX(5), 0.2], z: DEMO_Z, valves: [0.3],
         tanks: [{ contents: [atomsOf(singleOf('R'), 2 * CAP), atomsOf(singleOf('K'), 2 * CAP)], T: T_ROOM }],
       },
-      // under its end spouts, two grid cells either side of its middle
+      // under its end spouts, two cells either side of its middle
       { kind: 'dispenser', at: [cellX(3), 0.5], z: DEMO_Z },
       { kind: 'dispenser', at: [cellX(7), 0.5], z: DEMO_Z },
     ],

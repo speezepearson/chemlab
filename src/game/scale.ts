@@ -37,7 +37,7 @@ export function flaskGrams(f: Flask): number {
 
 /**
  * Scale geometry in local units, origin at the top center of the platform, y down as on the old flat bench. It's two
- * grid cells long and one deep (see CELL), a little inside them, its places for a flask over the two (see SCALE_SLOTS):
+ * cells long and one deep (see CELL), a little inside them, its places for a flask over the two (see SCALE_SLOTS):
  * the display just wide enough for six seven-segment cells (a reading below −SCALE_MAX's five digits), and the tare key
  * beside it.
  */

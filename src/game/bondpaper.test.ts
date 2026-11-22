@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { BOND_KEYS } from '../chem/atoms';
 import { SOLVENT_SPECIES, SPECIES, TARGET, bondMask, pairOf, singleOf, speciesIndex } from '../chem/species';
-import { onGrid, paperMouth, toolAnchor, toolBox, toolParts, toolStands } from './bodies';
+import { paperMouth, toolBox, toolParts, toolStands } from './bodies';
 import { ENDLESS, STOCK } from './cabinet';
 import { CAP } from './config';
 import { Vessel, roomFor, volume } from './flask';
-import { CELL, LIFT, toCell } from './space';
+import { CELL, LIFT } from './space';
+import { onCell, toCell, toolAnchor } from './testLayout';
 import {
   ATOM_PLACE, BLOTTERS, BOND_ENDS, BOND_PAPER, Blotter, DRIP, SECTOR_ATOMS, SHAPES, TEST_PAPER, TOOL_NAMES, Tool, UNIQUE_TOOLS, bondDots, bondReading,
   bondShares, isBlotter, mouthBelow, overMouth, wetness,
@@ -288,10 +289,10 @@ describe("bond paper's paper", () => {
 });
 
 describe('bond paper in the room', () => {
-  it('lies flat within one grid cell, its middle over the middle of the cell, solid all over, with no stand', () => {
+  it("lies flat within a cell's square (see CELL), its middle over the square's middle, solid all over, with no stand", () => {
     for (const yaw of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
       const t = lying(137, 962, yaw + 0.2);
-      t.pose = onGrid(t.pose, toolAnchor(t));
+      t.pose = onCell(t.pose, toolAnchor(t));
       expect([t.pose.x, t.pose.z]).toEqual([toCell(137), toCell(962)]);
       const b = toolBox(t);
       expect([b.x, b.z]).toEqual([toCell(137), toCell(962)]);

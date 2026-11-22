@@ -4,9 +4,9 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
-  FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
-  FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, SHEET_SLOT, inSlot, sheetIn, slotPose, slotted, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
-  tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
+  FLASK_CENTER, FLASK_LIP, NEAR, NEAR_STEP, NOZZLE_H, NOZZLE_REACH, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
+  FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, SHEET_SLOT, inSlot, sheetIn, slotPose, slotted, magnetShift, nozzleMounts, nozzleStand, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
+  tankMouth, tankNoteY, toolBox, toolCenter, toolStands, valveNear, valveZ, type Magnets, type NozzleMount, type Stand,
 } from './bodies';
 import { CABINET, endless, isStocked, putIn, stockWith, takeFrom, takeSlot, type Stock, type Stocked } from './cabinet';
 import { changeover, type ChangeoverSound } from './changeover';
@@ -277,8 +277,6 @@ const CABINET_BOX: Box = {
 const COUNTER_BOXES: readonly Box[] = COUNTERS.map((c) => ({
   x: (c.x0 + c.x1) / 2, y: LIFT / 2, z: (c.z0 + c.z1) / 2, yaw: 0, hx: (c.x1 - c.x0) / 2, hy: LIFT / 2, hz: (c.z1 - c.z0) / 2,
 }));
-/** How far, in grid cells, what's let go of can be moved from the cell it's held over to find room for it (see placement). */
-const SEEK = 3;
 /** How far from straight ahead, in radians, the middle of what's held can be, so it's always in view (see holdInPlace). */
 const HOLD_CONE = Math.PI / 6;
 /** Radians the view turns per pixel the mouse moves, and that something held turns with Shift. */
@@ -301,7 +299,7 @@ const MOD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator
 /** Whether the screen is mainly touched, rather than pointed at with a mouse: then the on-screen sticks walk and look. */
 export const TOUCH = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 /**
- * Where the faucets are: along the right wall over its counter, a grid cell apart, each spout over the middle of a
+ * Where the faucets are: along the right wall over its counter, a cell apart, each spout over the middle of a
  * cell of the counter's outer row (see CELL, SINK_D), where the station's are too (see STATION.out), clear of the
  * manifold, and the row by the wall is free bench. Their spouts are a little under eye level, high enough over the
  * counter for a flask on a scale (whose mouth is 112 up) to go under one, at the foot of a neck FAUCET_NECK long.
@@ -340,6 +338,8 @@ const NAP_HINT_MS = 9000;
 const NAP_S = { close: 0.9, open: 0.6 };
 /** A flask's outline's area, in local units squared, for how exposed its fluid is (see exposures). */
 const FLASK_AREA = areaBelow(FLASK_OUTLINE, 0);
+/** What stands for a flask not yet on a scale's empty place, as an open top a magnet lines up (see magnets). */
+const SCALE_PLACE = new Vessel(0);
 /** Width of the stem a funnel-shaped tank narrows to, in local units. */
 const FUNNEL_STEM = 6;
 
@@ -973,18 +973,23 @@ export class GameEngine {
 
   /**
    * Where a tool new to the lab (see uniqueTools) can go: where it is, if it would come to rest there as if set down
-   * (see rest), or else the nearest spot on the grid where it would, at the same height and facing the same way. An
-   * older save can have something where a tool it lacked starts. Where it is, if there's room nowhere.
+   * (see rest), or else the nearest of the spots a whole number of cells (see CELL) from there across the room where
+   * it would, at the same height and facing the same way. An older save can have something where a tool it lacked
+   * starts. Where it is, if there's room nowhere.
    */
   private roomy(t: Tool): Pose {
     const h: Held = { kind: 'tool', t, relYaw: 0, dist: 0 };
     const obstacles = this.obstacles(h);
     const solid = this.obstacles(h, false);
     const spots: Pose[] = [];
-    for (let x = ROOM.x0 + CELL / 2; x < ROOM.x1; x += CELL)
-      for (let z = ROOM.z0 + CELL / 2; z < ROOM.z1; z += CELL) spots.push(this.gridded(h, { ...t.pose, x, z }));
+    const steps = (from: number, lo: number, hi: number) => {
+      const out: number[] = [];
+      for (let v = from - Math.floor((from - lo) / CELL) * CELL; v < hi; v += CELL) out.push(v);
+      return out;
+    };
+    for (const x of steps(t.pose.x, ROOM.x0, ROOM.x1)) for (const z of steps(t.pose.z, ROOM.z0, ROOM.z1)) spots.push({ ...t.pose, x, z });
     const off = (p: Pose) => Math.hypot(p.x - t.pose.x, p.z - t.pose.z);
-    for (const p of [this.gridded(h, t.pose), ...spots.sort((a, b) => off(a) - off(b))]) {
+    for (const p of [t.pose, ...spots.sort((a, b) => off(a) - off(b))]) {
       const r = this.rest(h, p, obstacles, solid);
       if (typeof r !== 'string') return r.pose;
     }
@@ -1032,7 +1037,7 @@ export class GameEngine {
    * that much above the counter.
    */
   private restAll(): void {
-    this.toGrid();
+    this.toCounters();
     const riders = this.standing();
     const down = (b: Box, move: (dy: number) => void) => {
       const top = counterUnder(b);
@@ -1046,12 +1051,12 @@ export class GameEngine {
   }
 
   /**
-   * Put everything on the grid (see onGrid), as it would be set down: presets and older saves can leave things
-   * anywhere. A tool or a hose's nozzle whose stand that leaves off the counter (as one an older save left near the
-   * back wall can be) comes forward up to three cells, as it faces, until its stand is on it. A flask on a scale goes to
-   * the nearer of its places, or off it if the other flask there has it.
+   * Mend what presets and older saves can leave amiss, which is otherwise left where and as it is: a tool or a hose's
+   * nozzle whose stand is off the counter (as one an older save left near the back wall can be) comes forward up to
+   * three cells (see CELL), as it faces, until its stand is on it; a sheet of shadow paper all but in the shadow lamp's
+   * slot goes into it; and a flask on a scale goes to the nearer of its places, or off it if the other flask there has it.
    */
-  private toGrid(): void {
+  private toCounters(): void {
     const onCounter = (t: Tool) => toolStands(t).every((st) => counterUnder(standBase(st, 0)) !== null);
     for (const t of this.tools) {
       // (what's fixed is where it is, and so is a sheet in the shadow lamp's slot)
@@ -1060,23 +1065,16 @@ export class GameEngine {
         t.pose = slotPose(t.pose.yaw);
         continue;
       }
-      t.pose = onGrid(t.pose, toolAnchor(t));
       for (let i = 0; i < 3 && !onCounter(t); i++) t.pose = { ...toWorld(t.pose, { x: 0, y: 0, z: CELL }), yaw: t.pose.yaw };
     }
     for (const sc of this.scales) {
-      sc.pose = onGrid(sc.pose, SCALE_ANCHOR);
       const load = sc.load.splice(0);
       for (const { f, dx } of load) {
         const slot = dx < 0 ? SCALE_SLOTS[0] : SCALE_SLOTS[1];
         if (!sc.load.some((l) => l.dx === slot)) sc.put(f, slot);
       }
     }
-    const riders = this.standing();
-    for (const f of this.flasks) if (!riders.has(f)) f.pose = onGrid(f.pose);
     for (const h of this.hoses) {
-      h.turn = toCardinal(h.turn);
-      const g = onGrid({ ...h.outlet, yaw: 0 });
-      h.outlet = { x: g.x, y: g.y, z: g.z };
       for (let i = 0; i < 3 && counterUnder(standBase(nozzleStand(h.outlet, h.turn, h.reach), 0)) === null; i++)
         h.outlet = toWorld({ ...h.outlet, yaw: h.turn }, { x: 0, y: 0, z: CELL });
     }
@@ -1253,8 +1251,9 @@ export class GameEngine {
   }
 
   /**
-   * Where what's held would be, where it's held from the eyes (see Held.dir): facing the nearest way along the grid to
-   * how it's turned from the player, so it turns in quarter turns.
+   * Where what's held would be, where it's held from the eyes (see Held.dir): facing the nearest of the four ways
+   * along the room (see toCardinal) to how it's turned from the player, so it turns in quarter turns; but while Alt is
+   * held (see free), just as it's turned from them, so it turns as they do.
    */
   private gripPose(h: Held): Pose {
     const eye = this.eye();
@@ -1263,7 +1262,7 @@ export class GameEngine {
     const d = {
       x: right.x * k.x + up.x * k.y + ahead.x * k.z, y: right.y * k.x + up.y * k.y + ahead.y * k.z, z: right.z * k.x + up.z * k.y + ahead.z * k.z,
     };
-    const yaw = h.kind === 'hose' ? 0 : toCardinal(this.player.yaw + h.relYaw);
+    const yaw = h.kind === 'hose' ? 0 : this.facing(h);
     const off = toWorld({ x: 0, y: 0, z: 0, yaw }, this.anchor(h));
     return { x: eye.x + d.x * h.dist - off.x, y: eye.y + d.y * h.dist - off.y, z: eye.z + d.z * h.dist - off.z, yaw };
   }
@@ -1501,7 +1500,13 @@ export class GameEngine {
         this.undo(e.code === 'KeyY' || e.shiftKey);
         return;
       }
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.ctrlKey || e.metaKey) return;
+      // Alt is the browser's while the mouse is free; captured, it's held to set things down just as they're held (see
+      // free), and the browser mustn't take it, or the keys pressed with it, for its own (its menu, Alt+D, ...)
+      if (e.altKey) {
+        if (!this.locked) return;
+        e.preventDefault();
+      }
       // Enter is OK on the message inside the cryopod, as it was on the notice it replaced
       if (e.code === 'Enter' && this.wake === 'pod') this.pressOk();
       // napping, or nodding off, N wakes them, whether or not the mouse is captured, and nothing else does anything
@@ -1546,6 +1551,8 @@ export class GameEngine {
     });
     on(window, 'keyup', (e) => {
       this.keys.delete(e.code);
+      // (letting go of Alt mustn't open the browser's menu either)
+      if (this.locked && (e.code === 'AltLeft' || e.code === 'AltRight')) e.preventDefault();
       const wheel = WHEEL_CODES.indexOf(e.code);
       if (wheel >= 0) this.closeWheel(wheel);
     });
@@ -1762,7 +1769,7 @@ export class GameEngine {
 
   /**
    * Where the hoses following what's held (see gather) would come to rest if it were set down at rest r: each over the
-   * same spot of it, on the grid, on a stand where there's room (see rest), still pouring into it; as high over it as
+   * same spot of it, on a stand where there's room (see rest), still pouring into it; as high over it as
    * it was if there's room, or else as low as there is, from NOZZLE_GAP over the mouth up to POUR_RISE. Or why not.
    */
   private followRests(h: Held, r: Rest): Rest[] | string {
@@ -1782,7 +1789,7 @@ export class GameEngine {
       unplaced.delete(f.hose);
       f.hose.turn = wrapAngle(f.turn + frame.yaw);
       const fh: Held = { kind: 'hose', h: f.hose, reach: f.hose.reach, relYaw: wrapAngle(f.hose.turn - this.player.yaw), dist: 0 };
-      const tip = onGrid({ ...toWorld(frame, f.off), yaw: 0 });
+      const tip = { ...toWorld(frame, f.off), yaw: 0 };
       const mouthY = mouths.find((m) => m.v === f.into)?.y ?? tip.y;
       const ys = [tip.y];
       for (let up = NOZZLE_GAP; up <= POUR_RISE; up += 10) ys.push(mouthY + up);
@@ -1929,7 +1936,7 @@ export class GameEngine {
   }
 
   /**
-   * Let go of what's held, if it can be set down (see placement): it comes to rest there, on the grid. If it can't, a
+   * Let go of what's held, if it can be set down (see placement): it comes to rest there. If it can't, a
    * note says why, and it stays in hand.
    */
   private release(): void {
@@ -2257,7 +2264,7 @@ export class GameEngine {
   }
 
   /**
-   * Where a held nozzle goes with the crosshair on an open top (see mouthAimed): over the mouth's middle, on the grid,
+   * Where a held nozzle goes with the crosshair on an open top (see mouthAimed): over the mouth's middle,
    * NOZZLE_GAP above it or as much higher as it takes (up to POUR_RISE) for it and its stand to have room, so it can
    * be set down there and what it lets out lands in the mouth. Null if there's no such place.
    */
@@ -2267,7 +2274,7 @@ export class GameEngine {
     const obstacles = this.obstacles(h);
     const solid = this.obstacles(h, false);
     for (let up = NOZZLE_GAP; up <= POUR_RISE; up += 10) {
-      const p = onGrid({ x: m.x, y: m.y + up, z: m.z, yaw: 0 });
+      const p = { x: m.x, y: m.y + up, z: m.z, yaw: 0 };
       const r = this.rest(h, p, obstacles, solid);
       if (typeof r !== 'string') return mouthBelow(this.open, r.pose) === m ? p : null;
     }
@@ -2276,7 +2283,7 @@ export class GameEngine {
 
   /**
    * Where a held dipper (see DIPPERS) goes with the crosshair on an open top (see mouthAimed): upright, facing as it's
-   * held, over the middle of the mouth, on the grid, hovering a little above it, or dipped into it, its foot just
+   * held (see facing), over the middle of the mouth, hovering a little above it, or dipped into it, its foot just
    * under the fluid's surface (see dipPoses); and where it would be set down standing in it, deeper (see dipPoses and
    * rest), or why it can't be. Null if the crosshair is on no open top.
    */
@@ -2285,7 +2292,7 @@ export class GameEngine {
     const m = this.mouthAimed();
     if (!m || (p?.kind !== 'flask' && p?.kind !== 'tool')) return null;
     const fluid = p.kind === 'flask' ? flaskFluid(p.f) : tankFluid(p.t, p.k);
-    const { hover, dipped, stood } = dipPoses(h.t, m, fluid, toCardinal(this.player.yaw + h.relYaw));
+    const { hover, dipped, stood } = dipPoses(h.t, m, fluid, this.facing(h));
     const r = this.rest(h, stood, [...this.obstacles(h), this.me()], [...this.obstacles(h, false), this.me()]);
     return { hover, dipped, rest: typeof r === 'string' ? { why: r } : { rest: r } };
   }
@@ -2896,23 +2903,98 @@ export class GameEngine {
   }
 
   /**
-   * Where what's held would be set down, at pose p: on the grid (see onGrid), facing the nearest way along it, with its
-   * mouths and spouts over the middles of cells; but a hose's nozzle over an inline instrument's tube on its top (see
-   * docked), and a sheet of shadow paper at the shadow lamp's slot in it (see slotted).
+   * Which way what's held faces, about the vertical, as it's turned from the player: the nearest of the four ways
+   * along the room (see toCardinal), so R turns it a quarter turn; but while Alt is held (see free), just as it's held.
    */
-  private gridded(h: Held, p: Pose): Pose {
-    // (a sheet of shadow paper held at the shadow lamp's slot goes into it)
-    if (h.kind === 'tool' && h.t.kind === 'sheet') return slotted(h.t, onGrid(p, toolAnchor(h.t)), this.tools);
-    if (h.kind === 'tool') return onGrid(p, toolAnchor(h.t));
-    if (h.kind === 'scale') return onGrid(p, SCALE_ANCHOR);
-    if (h.kind === 'hose') return docked(onGrid(p), this.tools);
-    return onGrid(p);
+  private facing(h: Held): number {
+    const yaw = this.player.yaw + h.relYaw;
+    return this.free() ? wrapAngle(yaw) : toCardinal(yaw);
   }
 
   /**
-   * Where what's held would come to rest if let go now (see rest): on the grid (see gridded), in the cell under where
-   * it's held if it can rest there, or else the nearest cell, no more than SEEK cells off, where it can, clear of the
-   * player too. If it can't rest anywhere near, why not where it's held.
+   * Whether Alt is held: then what's held is set down exactly where and as it's held, turned as it's held (see
+   * facing) and with no magnet (see magnet). Not on a touch screen, which has no Alt.
+   */
+  private free(): boolean {
+    return !TOUCH && (this.keys.has('AltLeft') || this.keys.has('AltRight'));
+  }
+
+  /**
+   * Where what's held would be set down, at pose p: just there, but a hose's nozzle over an inline instrument's tube on
+   * its top (see docked), a sheet of shadow paper at the shadow lamp's slot in it (see slotted), and a flask facing
+   * the nearest of the four ways (it's round: see faceFlask).
+   */
+  private snapped(h: Held, p: Pose): Pose {
+    if (h.kind === 'tool' && h.t.kind === 'sheet') return slotted(h.t, p, this.tools);
+    if (h.kind === 'hose') return docked(p, this.tools);
+    if (h.kind === 'flask') return { ...p, yaw: toCardinal(p.yaw) };
+    return p;
+  }
+
+  /**
+   * What, of what's held at pose p and of everything else, a magnet lines up (see magnetShift): its outlets (a tool's
+   * spouts with no hose out, a hose's nozzle; not a flask's lip) and the open tops it would take fluid into (a flask's,
+   * a tool's tanks', a sheet of blotting paper's face, the flasks' on a scale, or where a flask would go on a scale's
+   * empty places, at a flask's mouth's height); and every other outlet (spouts, nozzles, faucets) and open top. A
+   * hose following what's held goes with it, so it's neither.
+   */
+  private magnets(h: Held, p: Pose): { mine: Magnets; others: Magnets } {
+    const at = this.heldPose(h);
+    const tilt = h.kind === 'flask' ? h.f.tilt : 0;
+    if (h.kind === 'flask') h.f.tilt = 0;
+    this.placeHeld(h, p);
+    const vs = new Set<Vessel>();
+    const mouths: Mouth[] = [];
+    const outlets: Vec3[] = [];
+    if (h.kind === 'flask') vs.add(h.f);
+    else if (h.kind === 'tool') {
+      for (const v of isBlotter(h.t.kind) ? h.t.paper : h.t.tanks) vs.add(v);
+      h.t.shape.spouts.forEach((_, j) => {
+        if (!this.hoseOn({ tool: h.t, spout: j })) outlets.push(spoutAt(h.t, j));
+      });
+    } else if (h.kind === 'scale') {
+      for (const { f } of h.sc.load) vs.add(f);
+      for (const dx of SCALE_SLOTS)
+        if (!h.sc.load.some((l) => l.dx === dx)) {
+          const o = onScale(h.sc, dx);
+          mouths.push({ v: SCALE_PLACE, x: o.x, y: o.y, z: o.z, hx: FLASK_CATCH, hz: FLASK_CATCH, yaw: o.yaw });
+        }
+    } else outlets.push({ ...h.h.outlet });
+    const all = this.mouths();
+    mouths.push(...all.filter((m) => vs.has(m.v)));
+    const theirs: Vec3[] = [];
+    const following = new Set(h.follow?.map((f) => f.hose));
+    const foreign = (m: HoseMount) => {
+      const hose = this.hoseOn(m);
+      if (hose) return !following.has(hose) && !(h.kind === 'hose' && h.h === hose) && !('tool' in m && h.kind === 'tool' && m.tool === h.t);
+      return !('tool' in m && h.kind === 'tool' && m.tool === h.t);
+    };
+    this.faucets.forEach((_, i) => foreign({ faucet: i }) && theirs.push(this.faucetOutlet(i)));
+    for (const t of this.tools)
+      if (!t.away) t.shape.spouts.forEach((_, j) => foreign({ tool: t, spout: j }) && theirs.push(this.outletAt(t, j)));
+    const out = { mine: { outlets, mouths }, others: { outlets: theirs, mouths: all.filter((m) => !vs.has(m.v)) } };
+    this.placeHeld(h, at);
+    if (h.kind === 'flask') h.f.tilt = tilt;
+    return out;
+  }
+
+  /**
+   * Where what's held at pose p would be pulled to by a magnet: shifted across, no further than MAGNET, to line up the
+   * most of its outlets over others' open tops and others' outlets over its open tops that it can at once (see
+   * magnets and magnetShift). Null if there's nothing to line up so near.
+   */
+  private magnet(h: Held, p: Pose): Pose | null {
+    const { mine, others } = this.magnets(h, p);
+    if (!mine.outlets.length && !mine.mouths.length) return null;
+    const s = magnetShift(mine, others);
+    return s && { ...p, x: p.x + s.x, z: p.z + s.z };
+  }
+
+  /**
+   * Where what's held would come to rest if let go now (see rest): lined up by a magnet (see magnet) if it can rest
+   * there, or else where it's held (see snapped); or else the nearest spot, no more than NEAR across from there, where
+   * it can, clear of the player too. With Alt held (see free), no magnet. If it can't rest anywhere near, why not
+   * where it's held.
    */
   private placement(h: Held): { rest: Rest } | { why: string } {
     // a strip or a thermometer aimed at an open top is set down standing in it
@@ -2922,23 +3004,44 @@ export class GameEngine {
     const me = this.me();
     const obstacles = [...this.obstacles(h), me];
     const solid = [...this.obstacles(h, false), me];
-    // each cell's spot, nearest where it's held first; that's the cell it's held over
-    const spots: Pose[] = [];
-    for (let i = -SEEK; i <= SEEK; i++)
-      for (let j = -SEEK; j <= SEEK; j++) {
-        const g = this.gridded(h, { ...p, x: p.x + i * CELL, z: p.z + j * CELL });
-        if (Math.hypot(g.x - p.x, g.z - p.z) <= SEEK * CELL) spots.push(g);
-      }
-    spots.sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z));
+    const pulled = this.free() ? null : this.magnet(h, { ...p, y: this.restY(h, p, obstacles, solid) });
     let why: string | null = null;
-    for (const g of spots) {
-      const r = this.rest(h, g, obstacles, solid);
+    const at = (q: Pose): { rest: Rest } | null => {
+      const r = this.rest(h, this.snapped(h, q), obstacles, solid);
       const follow = typeof r === 'string' || !h.follow?.length ? null : this.followRests(h, r);
       const out = typeof r === 'string' ? r : typeof follow === 'string' ? follow : { rest: follow ? { ...r, follow } : r };
       if (typeof out !== 'string') return out;
-      why ??= out;
+      if (q === p) why = out;
+      return null;
+    };
+    const first = (pulled && at({ ...pulled, y: p.y })) || at(p);
+    if (first) return first;
+    // (a hose's nozzle that fits where it's held, but not its stand, has had its stand tried every way round it
+    // already, see nozzleMounts: looking round for the nozzle wouldn't help, and would cost dear)
+    if (h.kind === 'hose' && why !== 'No room') return { why: why! };
+    // the nearest spot round where it's held, ring by ring
+    for (let r = NEAR_STEP; r <= NEAR + 1e-9; r += NEAR_STEP) {
+      const n = Math.ceil((2 * Math.PI * r) / NEAR_STEP);
+      for (let k = 0; k < n; k++) {
+        const a = (2 * Math.PI * k) / n;
+        const got = at({ ...p, x: p.x + r * Math.cos(a), z: p.z + r * Math.sin(a) });
+        if (got) return got;
+      }
     }
     return { why: why! };
+  }
+
+  /**
+   * How high what's held at pose p would come to rest, for a magnet to go by (see magnet): where it would (see rest),
+   * or if it can't there, as if it went down onto a counter (a flask, a scale, a sheet of blotting paper) or stayed
+   * as high as it's held (what's on a stand).
+   */
+  private restY(h: Held, p: Pose, obstacles: readonly Box[], solid: readonly Box[]): number {
+    const r = this.rest(h, this.snapped(h, p), obstacles, solid);
+    if (typeof r !== 'string') return r.pose.y;
+    if (h.kind === 'hose' || (h.kind === 'tool' && !h.t.shape.flat)) return p.y;
+    const b = this.boxAt(h, p);
+    return p.y - (b.y - b.hy - (counterUnder(b) ?? LIFT));
   }
 
   /**
@@ -3015,12 +3118,13 @@ export class GameEngine {
   }
 
   /**
-   * Where a held nozzle's stand is wanted: turned with the player like anything held (in quarter turns, so the nozzle
-   * faces the way along the grid nearest how it's turned from them, with the stand behind it), as far behind as its
+   * Where a held nozzle's stand is wanted: turned with the player like anything held (see facing: in quarter turns, so the
+   * nozzle faces the way along the room nearest how it's turned from them, or with Alt held, just as it's turned; with
+   * the stand behind it), as far behind as its
    * clamp's arm is slid.
    */
   private nozzleWant(h: Held & { kind: 'hose' }): NozzleMount {
-    return { turn: toCardinal(this.player.yaw + h.relYaw), reach: snapReach(h.reach) };
+    return { turn: this.facing(h), reach: snapReach(h.reach) };
   }
 
   /** Every stand in the lab, with what it holds up; but none for a dipper (see DIPPERS) or a sheet of shadow paper while it's in hand. */
@@ -3052,7 +3156,7 @@ export class GameEngine {
   /**
    * Guides for lining up what's held (see aims), shown only while something's held, since that's when things are
    * being lined up: gray from a held flask's lip to where it would pour; and green, as it will be once let go and set
-   * down on the grid, wherever fluid would land in a mouth then. Each ends at the vessel that would take the fluid,
+   * down where placement says (lined up by a magnet, if one's caught it), wherever fluid would land in a mouth then. Each ends at the vessel that would take the fluid,
    * which flashes green.
    */
   private guides(pl: ReturnType<GameEngine['placement']> | null): Frame['guides'] {
@@ -3240,6 +3344,7 @@ export class GameEngine {
         add(['Shift', '↑↓'], 'slide its stand out or in');
       } else if (h.kind !== 'flask') add(['R'], 'turn it');
       add(['Wheel'], 'hold it nearer or further');
+      if (!TOUCH) add(['Alt'], 'hold to set it down just as it’s held');
       if (h.kind === 'hose') add(['Backspace'], 'roll the hose back up');
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it back in the cabinet');
       add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it back in the cabinet') : 'put it back');
