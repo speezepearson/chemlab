@@ -2869,11 +2869,14 @@ class StandView {
  * hides no guide.
  */
 const GHOST_LAYER = 7;
+/** The outline round a ghost that can't be set down (see GhostView.outline): the red of a footprint that can't go. */
+const GHOST_RED = '#e0604c';
 /** How a ghost looks (see GhostView): how much of each of its materials' opacity it keeps, and its red where it can't go. */
 export const GHOST: { opacity: number; least: number; red: number; redMix: number; glow: number; tint: number | null; tintMix: number } = {
   opacity: 0.55, least: 0.28, red: 0xe0604c, redMix: 0.75, glow: 0x5a686c,
-  // a color to tint it all toward, or null for its own colors (for trying looks out, from the console in a dev build)
-  tint: null, tintMix: 0.6,
+  // a pale cyan it's all tinted toward, so it's told from the real thing (null for its own colors; for trying looks
+  // out, from the console in a dev build)
+  tint: 0xbfe8ff, tintMix: 0.6,
 };
 
 /**
@@ -2890,6 +2893,13 @@ class GhostView {
   private copies = new Map<THREE.Material, { ok: THREE.Material; bad: THREE.Material }>();
   private originals = new Map<THREE.Material, THREE.Material>();
   private red: boolean | null = null;
+
+  /** Its meshes, to outline (see View.render), and whether it can't rest, for the outline's red; none if it's hidden. */
+  outline(): { meshes: THREE.Object3D[]; red: boolean } {
+    const meshes: THREE.Object3D[] = [];
+    if (this.holder.visible) this.holder.traverseVisible((o) => (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) && meshes.push(o));
+    return { meshes, red: !!this.red };
+  }
 
   constructor(scene: THREE.Scene) {
     scene.add(this.holder);
@@ -4403,7 +4413,7 @@ class Outliner {
   }
 
   /** Outline `meshes` over what `renderer` last drew of `scene`. */
-  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, meshes: THREE.Object3D[]): void {
+  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, meshes: THREE.Object3D[], color: string = OUTLINE.color): void {
     const width = OUTLINE.width * renderer.getPixelRatio();
     if (width <= 0 || !meshes.length) return;
     const reach = Math.min(254, Math.ceil(width + 0.5));
@@ -4445,7 +4455,7 @@ class Outliner {
     u.texel.value = texel;
     u.reach.value = reach;
     u.width.value = width;
-    (u.color.value as THREE.Color).set(OUTLINE.color);
+    (u.color.value as THREE.Color).set(color);
     this.quad.material = this.down;
     renderer.setRenderTarget(null);
     renderer.autoClear = false;
@@ -5012,6 +5022,9 @@ export class View {
     this.camera.layers.disable(GHOST_LAYER);
     this.renderGuides();
     this.renderOutline(fr.hot);
+    // what's moved by a ghost is outlined there, always, red if it can't go, its destination crisp against anything
+    const ghost = this.ghost.outline();
+    if (ghost.meshes.length) this.outliner.render(this.renderer, scene, this.camera, ghost.meshes, ghost.red ? GHOST_RED : OUTLINE.color);
     this.shine();
   }
 

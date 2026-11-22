@@ -1432,6 +1432,24 @@ describe('ghost moves', () => {
     expect(d.pose).toEqual(was);
   });
 
+  it('takes what is moved by its ghost out of what the crosshair can be on, as anything held is', () => {
+    const { l, d } = rig();
+    const I = l.in as unknown as { heldObject(): object | null };
+    pick(l, d);
+    expect(g(l).held!.ghost).toBeDefined();
+    expect(I.heldObject()).toBe(d);
+  });
+
+  it('with the toggle off, carries what is picked up off in hand, as ever', () => {
+    const { l, d } = rig();
+    g(l).ghostMoves = false;
+    pick(l, d);
+    expect(g(l).held!.ghost).toBeUndefined();
+    const to = { ...P, x: P.x + 3 * CELL };
+    hands(l).placeHeld(l.in.held, to);
+    expect(where(d.pose)).toEqual(where(to));
+  });
+
   it('can be nudged into space it partly takes up itself, its stand too', () => {
     const { l, d } = rig();
     pick(l, d);

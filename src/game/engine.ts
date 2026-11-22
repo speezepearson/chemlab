@@ -2702,8 +2702,8 @@ export class GameEngine {
 
   private heldObject(): object | null {
     const h = this.held;
-    // (what's moved by a ghost is still there to be seen and aimed at)
-    if (!h || h.ghost) return null;
+    // (what's moved by a ghost isn't aimed at either: its ghost is outlined instead, see the view's GhostView)
+    if (!h) return null;
     if (h.kind === 'flask') return h.f;
     if (h.kind === 'tool') return h.t;
     if (h.kind === 'scale') return h.sc;
