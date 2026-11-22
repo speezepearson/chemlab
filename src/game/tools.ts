@@ -1144,9 +1144,9 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spouts: [0, CELL],
     sump: { w: 14, h: 7 },
     valveY: 96,
-    spoutY: 126,
-    // the manifold under it (see the engine's SEP_BODY), with a handle on its left end
-    box: { x0: -34, x1: 116, y0: -6, y1: 128 },
+    spoutY: 144,
+    // the manifold under it (see the view's SEP_ARMS), its two arms sloping down to the spouts
+    box: { x0: -34, x1: 116, y0: -6, y1: 146 },
   },
   splitter: {
     tanks: [{ name: 'funnel', x0: -22, x1: 22 }],

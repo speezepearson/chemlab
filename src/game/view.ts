@@ -183,8 +183,12 @@ const DROP_R = 3;
 const DROP_R_ATOMS = 1.5e6;
 /** A CRT's phosphor green. */
 const PHOSPHOR = '64, 255, 110';
-/** The separator's splitter, below its valve, in local units (y down). */
-const SEP_BODY = { x0: -22, x1: 112, y0: 100, y1: 112 };
+/**
+ * The separator's manifold, below its valve, in local units (y down): two arms sloping down from a peak midway
+ * between its spouts, each `slope` (radians) below level, `thick` through and `deep` front to back, reaching `over`
+ * past its spout; `top` is how far down the peak's top is, and `bend` where the pipe from the tank turns toward it.
+ */
+const SEP_ARMS = { top: 108, bend: 101, slope: Math.PI / 12, thick: 12, deep: 20, over: 10 };
 /** Height of each line of a label, in world units. */
 const LABEL_H = 10;
 /** How far above a flask's mouth or a scale's platform its note sits, to the note's middle. */
@@ -219,6 +223,8 @@ const darkMat = new THREE.MeshStandardMaterial({ color: 0x30373a, metalness: 0.6
 const markMat = new THREE.MeshStandardMaterial({ color: 0x30373a, metalness: 0.2, roughness: 0.6, side: THREE.DoubleSide });
 const MARK_LIFT = 0.08;
 const panelMat = new THREE.MeshPhysicalMaterial({ color: 0xc4cbc7, metalness: 0.1, roughness: 0.5, clearcoat: 0.4, clearcoatRoughness: 0.35 });
+/** The separator's arm that molecules with a black atom leave by: the same paint, in a dark gray, at the user's request. */
+const blackSideMat = new THREE.MeshPhysicalMaterial({ color: 0x45494b, metalness: 0.1, roughness: 0.5, clearcoat: 0.4, clearcoatRoughness: 0.35 });
 const leverMat = new THREE.MeshPhysicalMaterial({ color: 0x15191a, metalness: 0, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.2 });
 /** A thermometer's white enamel backing (see THERMOMETER_ROD). */
 const enamelMat = new THREE.MeshStandardMaterial({ color: 0xf1efe6, roughness: 0.4 });
@@ -1549,16 +1555,22 @@ class ToolView {
         pipes(art, [[sh.spouts[k], HELIX.y + HELIX.r], [sh.spouts[k], sh.spoutY - 4]]);
       });
     else if (t.kind === 'separator') {
-      // the manifold: one pipe in, two out, with a divider between the outlets, and a handle on its left end
-      pipes(art, [[0, floor], [0, SEP_BODY.y0]]);
-      for (const x of sh.spouts) pipes(art, [[x, SEP_BODY.y1], [x, sh.spoutY - 4]]);
-      block(art, panelMat, SEP_BODY.x0, SEP_BODY.x1, SEP_BODY.y0, SEP_BODY.y1, -10, 10, 2);
-      for (let k = 1; k < sh.spouts.length; k++) {
-        const x = (sh.spouts[k - 1] + sh.spouts[k]) / 2;
-        block(art, darkMat, x - 0.8, x + 0.8, SEP_BODY.y0 + 4, SEP_BODY.y1, 10, 10.6);
-      }
-      const { x0, y0, y1 } = SEP_BODY;
-      pipes(art, [[x0, y0 + 3], [x0 - 6, y0 + 3], [x0 - 6, y1 - 3], [x0, y1 - 3]], 1.3);
+      // the manifold: the pipe from the tank runs across to a peak midway between the spouts, and from there an arm
+      // slopes down to each, the one for what has a black atom in a dark gray, which is how its two sides are told apart
+      const { top, bend, slope, thick, deep, over } = SEP_ARMS;
+      const [x0, x1] = sh.spouts;
+      const peak = (x0 + x1) / 2;
+      const mid = top + thick / 2;
+      pipes(art, [[0, floor], [0, bend], [peak, mid]]);
+      [x0, x1].forEach((x, k) => {
+        const reach = Math.abs(x - peak) + over;
+        const dir = Math.sign(x - peak);
+        // (its middle, half its reach out from the peak and as far down as its slope takes it by there)
+        const [cx, cy, len] = [peak + (dir * reach) / 2, mid + (reach / 2) * Math.tan(slope), reach / Math.cos(slope) + thick / 2];
+        const arm = block(art, k ? blackSideMat : panelMat, cx - len / 2, cx + len / 2, cy - thick / 2, cy + thick / 2, -deep / 2, deep / 2, 2);
+        arm.rotation.z = -dir * slope;
+        pipes(art, [[x, mid + Math.abs(x - peak) * Math.tan(slope)], [x, sh.spoutY - 4]]);
+      });
     } else if (t.kind === 'splitter') {
       const fork = sh.valveY + 10;
       pipes(art, [[0, TH], [0, fork]]);
