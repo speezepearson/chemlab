@@ -521,14 +521,12 @@ export const INSTRUMENT = {
 
 /** How many stretches the heater's tube is cut into, each holding what passes through it as one mixed packet. */
 export const HEATER_CELLS = 24;
-/** The stretches of the heater's tube that its three taps draw from: the ends of its first three quarters. */
-export const HEATER_TAPS = [5, 11, 17] as const;
 /**
  * How the resistive heater behaves, editable from the Chemistry panel:
  * - feed: how fast its funnel drains into its tube, in atoms per sim second (one flask a second);
  * - transit: how long fluid takes to run the length of the tube, in sim seconds, however much is in it;
  * - rate: how fast fluid in the tube heats toward the wire's temperature, per sim second: it closes
- *   1 − e^(−rate·t) of the gap in t seconds, so by default 31% by the first tap, 53%, 68%, and 78% by the end;
+ *   1 − e^(−rate·t) of the gap in t seconds, so by default 78% of it by the end;
  * - maxT: the wire's temperature with the dial turned all the way up.
  */
 export const HEATER = { feed: MAX_FLOW, transit: 6, rate: 0.25, maxT: 100 };
@@ -540,7 +538,7 @@ export function restoreDefaultHeater(): void {
 
 /**
  * The heater's tube, in local units: from x0 to x1 (cut into HEATER_CELLS equal stretches), centered at y, of radius r.
- * Its taps' stretches, and its last, are CELL apart, so a row of flasks can stand under its taps' spouts and its end's.
+ * Its last stretch, which its spout is under, is a whole number of CELL from its funnel.
  */
 export const HEATER_TUBE = { x0: -11.5 * (CELL / 6), x1: 12.5 * (CELL / 6), y: 48, r: 7 };
 /** The middle of stretch c of the heater's tube, in local units. */
@@ -1247,17 +1245,16 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -126, x1: 306, y0: -6, y1: 106 },
   },
   heater: {
-    // a funnel over the left end of a long tube (see HEATER_TUBE) with a wire down its middle; three taps
-    // along it and its far end turning down are the spouts, and the dial on a box above its right end sets
-    // the wire's heat
+    // a funnel over the left end of a long tube (see HEATER_TUBE) with a wire down its middle; its far end
+    // turning down is the spout, and the dial on a box above its right end, its one valve, sets the wire's heat
     tanks: [{ name: 'funnel', x0: -2 * CELL - 22, x1: -2 * CELL + 22 }],
     tankH: 30,
     tankCap: FUNNEL_CAP,
     funnel: true,
-    valves: [...HEATER_TAPS.map((_, j) => ({ x: (j - 1) * CELL, y: 72 })), { x: 170, y: 20 }],
-    dial: HEATER_TAPS.length,
-    // CELL apart, like the separator's, under the taps' stretches (see heaterCellX) and then the last
-    spouts: [-CELL, 0, CELL, 2 * CELL],
+    valves: [{ x: 170, y: 20 }],
+    dial: 0,
+    // under the tube's last stretch (see heaterCellX), a whole number of CELL from the funnel
+    spouts: [2 * CELL],
     valveY: 72,
     spoutY: 92,
     box: { x0: -228, x1: 216, y0: -6, y1: 94 },
@@ -1676,8 +1673,7 @@ export class Blotter extends Vessel {
  *   screens and off its end, each with a spout under it (see sieve).
  * - A **resistive heater** has a funnel draining (at HEATER.feed) into one end of a long tube, which carries
  *   it to the other end in HEATER.transit and out a spout there, heating it all the way (see heatBy) with a
- *   wire whose temperature its dial sets (see wireTemperature). Three taps along the tube, each a valve over
- *   a spout, let fluid out sooner, less heated.
+ *   wire whose temperature its dial sets (see wireTemperature).
  * - A **tank** is a dispenser holding a hundred flasks, drawn as big as a hundred flasks, with ten faint
  *   graduations across it.
  * - A **receptacle** is the station, built into the wall (see STATION): a funnel and the ship's
@@ -2387,8 +2383,7 @@ export class Tool {
 
   /**
    * A heater's step: each stretch of the tube passes h / (HEATER.transit / HEATER_CELLS) of itself on, the last
-   * out the end, and the funnel tops up the first; then each tap lets out what its valve allows from its
-   * stretch, and the wire heats what's left.
+   * out the end, and the funnel tops up the first; then the wire heats what's in the tube.
    */
   private heat(h: number): (Vessel | null)[] {
     const { tube, valves } = this;
@@ -2396,10 +2391,9 @@ export class Tool {
     const packets = this.shape.spouts.map((_, j) => this.packet(j));
     const on = Math.min(1, (h * HEATER_CELLS) / Math.max(1e-9, HEATER.transit));
     const last = tube.length - 1;
-    transfer(tube[last], packets[HEATER_TAPS.length], volume(tube[last]) * on);
+    transfer(tube[last], packets[0], volume(tube[last]) * on);
     for (let c = last - 1; c >= 0; c--) transfer(tube[c], tube[c + 1], volume(tube[c]) * on);
     transfer(this.tanks[0], tube[0], HEATER.feed * this.level(0) * h);
-    HEATER_TAPS.forEach((c, j) => transfer(tube[c], packets[j], valves[j] * MAX_FLOW * h));
     const wireT = wireTemperature(valves[this.shape.dial!]);
     for (const v of tube) heatBy(v, wireT, h);
     this.out = packets.map((p) => (p.N > 0 ? p : null));

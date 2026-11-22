@@ -217,10 +217,10 @@ describe('flatten', () => {
   });
 
   test('parks a hose that poured into nothing on the counter', () => {
-    const s = room({ tools: [tool('heater', 1, 600, 900, 1500)], hoses: [hose({ tool: 1, spout: 2 }, { x: 100, y: 800, z: 2900 })] });
-    expect(plumbing(readLab(s))['spout 1.2']).toBeNull();
+    const s = room({ tools: [tool('heater', 1, 600, 900, 1500)], hoses: [hose({ tool: 1, spout: 0 }, { x: 100, y: 800, z: 2900 })] });
+    expect(plumbing(readLab(s))['spout 1.0']).toBeNull();
     const { lab } = check(s);
-    expect(nozzle(lab, 'spout 1.2')!.y).toBeCloseTo(LIFT + 6, 6);
+    expect(nozzle(lab, 'spout 1.0')!.y).toBeCloseTo(LIFT + 6, 6);
   });
 
   test('stands a dipper as deep in what it stood in', () => {

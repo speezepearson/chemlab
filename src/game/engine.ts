@@ -16,6 +16,7 @@ import { CAP, DELIVERY, FILL_RATE, HOME_H, HOME_W, POUR_RATE, TRACE } from './co
 import { cool, exposure, taper } from './cooling';
 import { FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
 import { flatten } from './flatten';
+import { refit } from './refit';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
 import { Flask, Vessel, roomFor, sustenance, transfer, volume, volumeUnit } from './flask';
 import { History, arrange, arrangement, type Arrangement } from './history';
@@ -777,10 +778,11 @@ export class GameEngine {
 
   /**
    * Replace the lab with a saved one. `preset` is what Reset will go back to afterwards. A save from when the lab was
-   * a room to walk round is laid out along the wall first, hooked up as it was (see flatten).
+   * a room to walk round is laid out along the wall first, hooked up as it was (see flatten), once its tools are
+   * brought up to the shapes they have now (see refit).
    */
   restore(saved: SaveState, preset: Preset): void {
-    const s = flatten(saved);
+    const s = flatten(refit(saved));
     this.preset = preset;
     loadChem(this.chem.params, s.chem);
     this.chem.rebuild();
@@ -3351,7 +3353,7 @@ export class GameEngine {
     if (t.kind === 'receptacle') return !t.away && t.tanks.some((v, k) => v.N > TRACE && drains(t, k));
     // a column's dry bed drinks what's in its funnel, and lets nothing out
     if (t.kind === 'column') return t.soaked >= 1 && t.valves[0] > 0 && t.tanks[0].N > TRACE;
-    // a heater's tube runs whatever its valves say
+    // a heater's tube runs on with whatever is in it
     return (t.shape.spouts.length > 0 && t.tanks.some((v, k) => v.N > TRACE && drains(t, k))) || t.tube.some((v) => v.N > TRACE);
   }
 

@@ -83,10 +83,10 @@ describe('spoutNear', () => {
 
 describe('valveNear', () => {
   it('finds the nearest valve within reach of its lever, and none further off', () => {
-    const ht = new Tool('heater', 0);
-    const v = valveLocal(ht, 1);
-    expect(valveNear(ht, v.x + 5, v.y + 3)).toBe(1);
-    expect(valveNear(ht, v.x + 40, v.y + 40)).toBeNull();
+    const ex = new Tool('exchanger', 0);
+    const v = valveLocal(ex, 1);
+    expect(valveNear(ex, v.x + 5, v.y + 3)).toBe(1);
+    expect(valveNear(ex, v.x + 40, v.y + 40)).toBeNull();
     expect(valveNear(new Tool('sorter', 0), 0, 0)).toBeNull();
   });
 });
