@@ -3825,7 +3825,7 @@ function buildFaucets(
 
 /**
  * The part a pick is on, to outline just that: one of a tool's tanks, valves or spouts, the rest of a tool for its
- * body, a flask, a scale. A spout and the hose pulled out of it are one part, nozzle and stand too, and so are a faucet's
+ * body, a flask, a scale. A spout and the hose pulled out of it are one part, nozzle too, and so are a faucet's
  * spout and its hose; its knob, which is for its note, stands for the whole faucet. The supply station, built into the
  * wall, is outlined a part at a time as ever: its funnel, its reservoir's window, or one of its two faucets (its
  * spout's pipe, with its valve); its plate, nothing. Of the shadow lamp, which stays where it is too, only its button
@@ -5032,7 +5032,8 @@ export class View {
   /**
    * The outlines round what the crosshair is on (see Outliner): at full strength round the part of it (see partOf),
    * and first, faintly, round the whole thing it's part of (see thingOf) with that part, so no faint line cuts across
-   * a hose that's out. A part whose key is a whole thing (a tool's body) takes all of it in, its stands too.
+   * a hose that's out. A part whose key is a whole thing (a tool's body) takes all of it in. Clamp stands are never
+   * outlined, though looking at one is looking at what it holds: they're only what holds it up.
    */
   private renderOutline(hot: Pick | null): void {
     if (!hot) return;
@@ -5045,9 +5046,11 @@ export class View {
     const whole = wholeOf(hot);
     // (a hose's tube isn't hit, so it isn't among the pickables, but it's drawn as part of its hose)
     const members: [THREE.Object3D, Pick][] = [...this.pickables, ...[...this.hoses.values()].map((v): [THREE.Object3D, Pick] => [v.tube, { kind: 'hose', h: v.h }])];
+    const stands = new Set<THREE.Object3D>(this.stands.flatMap((v) => v.parts));
     const part: THREE.Object3D[] = [];
     const all: THREE.Object3D[] = [];
     for (const [o, p] of members) {
+      if (stands.has(o)) continue;
       const thing = thingOf(p);
       const inPart = partOf(p) === focus || thing === focus;
       if (inPart) part.push(o);
