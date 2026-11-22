@@ -219,6 +219,25 @@ const glassMat = makeGlass(false);
 const floorGlassMat = makeGlass(true);
 /** Every glass material, for whatever's done to all glass alike. */
 const GLASSES = [glassMat, floorGlassMat];
+
+/**
+ * Geometry `g` with its triangles lying flat at height `y` (a floor) put first, as group 1, and the rest after, as
+ * group 0: so a floor can be drawn in floorGlassMat and the walls in glassMat.
+ */
+function floorFirst(g: THREE.BufferGeometry, y: number): THREE.BufferGeometry {
+  const pos = g.attributes.position;
+  const index = g.index!.array;
+  const [floor, rest]: number[][] = [[], []];
+  for (let i = 0; i < index.length; i += 3) {
+    const tri = [index[i], index[i + 1], index[i + 2]];
+    (tri.every((v) => Math.abs(pos.getY(v) - y) < 1e-6) ? floor : rest).push(...tri);
+  }
+  g.setIndex([...floor, ...rest]);
+  g.clearGroups();
+  g.addGroup(0, floor.length, 1);
+  g.addGroup(floor.length, rest.length, 0);
+  return g;
+}
 const edgeMat = new THREE.LineBasicMaterial({ color: 0xbfd4da, transparent: true, opacity: 0.3 });
 // stainless pipework, dark anodized fittings, light powder-coated cabinets and black plastic levers, all of them
 // reflecting the room (see View's environment)
@@ -1383,7 +1402,12 @@ function glowTexture(sharpness: number): THREE.Texture {
 const FLASK_PROFILE = FLASK_OUTLINE.filter((p) => p.x >= 0 && !(p.x === 11 && p.y === 0) && p.y > 0)
   .map((p) => new THREE.Vector2(p.x, -p.y))
   .sort((a, b) => a.y - b.y);
-const flaskGlassGeom = new THREE.LatheGeometry([new THREE.Vector2(0, -FLASK_H), ...FLASK_PROFILE, new THREE.Vector2(11, 0), new THREE.Vector2(12.5, 0.5)], 48);
+const flaskGlassGeom = floorFirst(
+  new THREE.LatheGeometry([new THREE.Vector2(0, -FLASK_H), ...FLASK_PROFILE, new THREE.Vector2(11, 0), new THREE.Vector2(12.5, 0.5)], 48),
+  -FLASK_H,
+);
+/** A flask's glass: its walls, and its floor, which lies right on whatever it stands on (see makeGlass). */
+const flaskGlassMats = [glassMat, floorGlassMat];
 /**
  * The flask's fluid's solid: a hair inside the glass, so the two don't fight over the same pixels, standing `floor`
  * off the glass's floor, and so clear of what it stands on (a sink counter's drain grate is GRATE_LIFT over the counter);
@@ -1418,7 +1442,7 @@ class FlaskView {
     scene: THREE.Object3D,
     pickables: Map<THREE.Object3D, Pick>,
   ) {
-    const glass = new THREE.Mesh(flaskGlassGeom, glassMat);
+    const glass = new THREE.Mesh(flaskGlassGeom, flaskGlassMats);
     this.tilt.add(glass, new THREE.LineSegments(new THREE.EdgesGeometry(flaskGlassGeom, 25), edgeMat));
     this.flash = flashOver(glass)!;
     this.fluid = new FluidMesh([flaskFluidGeom], this.tilt);
