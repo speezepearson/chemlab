@@ -1,27 +1,23 @@
-// Headless stand-in for src/game/view.ts: no Three.js, no WebGL. Only what GameEngine calls.
+// Headless stand-in for src/game/view.ts: no canvas. Only what GameEngine calls, with the same signatures.
 
-/** The end's look; the engine reads only how far open the pod is in god mode's preview of it. */
-export const ARRIVAL = { open: 1 };
+type Vec3 = { x: number; y: number; z: number };
 
 export class View {
   constructor(..._args: unknown[]) {}
-  resize(): void {}
-  look(): void {}
-  pick(): null {
+  resize(_w: number, _h: number, _dpr: number): void {}
+  look(_cam: unknown): void {}
+  pick(_ndcX: number, _ndcY: number, _skip: object | null): null {
     return null;
   }
-  ray(): { origin: { x: number; y: number; z: number }; dir: { x: number; y: number; z: number } } {
-    return { origin: { x: 0, y: 0, z: 0 }, dir: { x: 0, y: 0, z: -1 } };
-  }
-  project(): null {
+  project(_p: Vec3, _w: number, _h: number): null {
     return null;
   }
-  toHead(p: { x: number; y: number; z: number }) {
+  toHead(p: Vec3): Vec3 {
     return { x: p.x, y: p.y, z: p.z };
   }
   icons(): Record<string, never> {
     return {};
   }
-  render(): void {}
+  render(_fr: unknown): void {}
   dispose(): void {}
 }

@@ -1,14 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { heatAt } from '../chem/reactions';
 import { SOLVENT_SPECIES, TARGET, pairOf, singleOf, speciesIndex } from '../chem/species';
-import { onGrid, paperMouth, spoutAt, standBase, toolAnchor, toolBox, toolParts, toolStands } from './bodies';
-import { STOCK, type Stocked } from './cabinet';
+import { flaskBox, paperFace, toolArms, toolBox, toolParts } from './bodies';
 import { CAP, TRACE } from './config';
-import { Vessel, roomFor, volume } from './flask';
+import { Flask, Vessel, roomFor, volume } from './flask';
 import { boxesOverlap } from './physics';
-import { CELL, LIFT, toCell } from './space';
+import { PLANE_Z } from './space';
 import {
-  ATOM_PLACE, Blotter, DRIP, SECTOR_ATOMS, SHAPES, STRIP, TEST_PAPER, Tool, atomSector, composition, mouthBelow, overMouth, paperReading, paperTriangles,
+  ATOM_PLACE, Blotter, DRIP, SECTOR_ATOMS, STRIP, TEST_PAPER, Tool, atomSector, composition, paperReading, paperTriangles,
   sectorInset, wetness,
 } from './tools';
 
@@ -31,8 +30,8 @@ const FULL = 1e6;
 /** What the one triangle of a sheet that soaks up FULL reads for a fluid: how strongly R, G, B and K are stained. */
 const read = (fill: [number, number][]) => paperReading(fluid(fill), FULL)[0];
 
-/** A sheet lying on a counter with its middle over (x, z), facing `yaw`. */
-const lying = (x: number, z: number, yaw = 0) => new Tool('testpaper', 0, { x, y: LIFT + TEST_PAPER.thick, z, yaw });
+/** A sheet pinned to the wall with the middle of its top at (x, y). */
+const pinned = (x: number, y: number) => new Tool('testpaper', 0, { x, y, z: PLANE_Z, yaw: 0 });
 
 describe("test paper's reading", () => {
   it('has one triangle, for molecules of every size, with a stain for each color', () => {
@@ -128,7 +127,7 @@ describe("test paper's reading", () => {
 describe("test paper's print", () => {
   it('is a triangle on its base, in the middle of the sheet, within its edges', () => {
     const [t] = paperTriangles();
-    const { w, d, edge } = TEST_PAPER;
+    const { w, h: d, edge } = TEST_PAPER;
     const corners = (['G', 'R', 'B'] as const).map((a) => ({ x: t.x + t.r * ATOM_PLACE[a][0], y: t.y + t.r * ATOM_PLACE[a][1] }));
     for (const p of corners) {
       expect(Math.abs(p.x)).toBeLessThanOrEqual(w / 2 - edge + 1e-9);
@@ -279,7 +278,7 @@ describe("test paper's paper", () => {
   it('has no tanks, spouts or valves, and running it does nothing to what it holds', () => {
     const t = new Tool('testpaper', 0);
     expect([t.tanks.length, t.shape.spouts.length, t.valves.length]).toEqual([0, 0, 0]);
-    expect(t.shape.flat).toBe(true);
+    expect(t.shape.pinned).toBe(true);
     expect(t.memory).toBeUndefined();
     t.paper[0].addFrom(source(R), 0.3 * TEST_PAPER.cap, true);
     t.paper[0].addFrom(source(G), 0.3 * TEST_PAPER.cap, true);
@@ -289,68 +288,29 @@ describe("test paper's paper", () => {
   });
 });
 
-describe('test paper in the room', () => {
-  it('lies flat within one grid cell, its middle over the middle of the cell', () => {
-    expect(TEST_PAPER.w).toBeLessThanOrEqual(CELL);
-    expect(TEST_PAPER.d).toBeLessThanOrEqual(CELL);
-    for (const yaw of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
-      const t = lying(137, 962, yaw + 0.2);
-      t.pose = onGrid(t.pose, toolAnchor(t));
-      expect([t.pose.x, t.pose.z]).toEqual([toCell(137), toCell(962)]);
-      expect(Math.abs(Math.sin(2 * t.pose.yaw))).toBeLessThan(1e-9);
-      const b = toolBox(t);
-      expect([b.x, b.z]).toEqual([150, 950]);
-      expect(b.y - b.hy).toBeCloseTo(LIFT, 9);
-      expect(b.y + b.hy).toBeCloseTo(LIFT + TEST_PAPER.thick, 9);
-      expect([b.hx, b.hz]).toEqual([TEST_PAPER.w / 2, TEST_PAPER.d / 2]);
-    }
-  });
-
-  it("is thin enough to lie under the fluid in a flask that stands on it, through it", () => {
-    // (a flask's fluid is drawn from 0.6 above what the flask stands on: see FLASK_FLUID in view.ts; and the sheet's
-    // printed face is drawn 0.06 above the sheet)
-    expect(TEST_PAPER.thick).toBeGreaterThan(0);
-    expect(TEST_PAPER.thick + 0.06).toBeLessThan(0.55);
-  });
-
-  it('is solid all over, and has no stand', () => {
-    const t = lying(150, 950);
-    expect(toolStands(t)).toEqual([]);
+describe('test paper on the wall', () => {
+  it('is pinned flat to the wall, face on, behind the plane everything else is in, solid all over, with no arm', () => {
+    const t = pinned(1500, 700);
+    expect(t.shape.pinned).toBe(true);
+    expect(toolArms(t)).toEqual([]);
+    const b = toolBox(t);
+    expect([b.x, b.y]).toEqual([1500, 700 - TEST_PAPER.h / 2]);
+    expect([b.hx, b.hy]).toEqual([TEST_PAPER.w / 2, TEST_PAPER.h / 2]);
+    // its one part is against the wall, out of the way of a flask or a tool in the plane in front of it
     const parts = toolParts(t);
     expect(parts).toHaveLength(1);
-    expect(parts[0]).toMatchObject({ x0: -TEST_PAPER.w / 2, x1: TEST_PAPER.w / 2, y0: 0, y1: TEST_PAPER.thick, hz: TEST_PAPER.d / 2 });
+    expect(parts[0]).toMatchObject({ x0: -TEST_PAPER.w / 2, x1: TEST_PAPER.w / 2, y0: 0, y1: TEST_PAPER.h });
+    const f = new Flask(CAP);
+    f.pose = { x: 1500, y: 680, z: PLANE_Z, yaw: 0 };
+    expect(boxesOverlap(flaskBox(f), b)).toBe(false);
+    expect(boxesOverlap(toolBox(new Tool('dispenser', 1, { x: 1500, y: 720, z: PLANE_Z, yaw: 0 })), b)).toBe(false);
+    // but not of another sheet
+    expect(boxesOverlap(toolBox(pinned(1530, 680)), b)).toBe(true);
+    expect(boxesOverlap(toolBox(pinned(1530 + TEST_PAPER.w, 680)), b)).toBe(false);
   });
 
-  it('catches what falls anywhere on its face, and nothing that falls beside it', () => {
-    const t = lying(150, 950, Math.PI / 2);
-    const m = paperMouth(t);
-    expect(m.v).toBe(t.paper[0]);
-    expect(m.y).toBeCloseTo(LIFT + TEST_PAPER.thick, 9);
-    expect(m.rim).toBeUndefined();
-    const h = TEST_PAPER.w / 2;
-    for (const [dx, dz] of [[0, 0], [h - 1, h - 1], [-(h - 1), h - 1], [h - 1, -(h - 1)], [-(h - 1), -(h - 1)]])
-      expect(mouthBelow([m], { x: 150 + dx, y: LIFT + 200, z: 950 + dz })).toBe(m);
-    for (const [dx, dz] of [[h + 1, 0], [0, h + 1], [-(h + 1), 0], [0, -(h + 1)]]) expect(overMouth(m, 150 + dx, 950 + dz)).toBe(false);
-    // nothing lands on it from below
-    expect(mouthBelow([m], { x: 150, y: LIFT, z: 950 })).toBeNull();
-  });
-
-  it("is clear of the base of every stand that holds a tool's spout over its middle", () => {
-    const sheet = lying(150, 950);
-    const kinds = (Object.keys(STOCK) as Stocked[]).filter((k) => k !== 'flask' && k !== 'scale' && SHAPES[k].spouts.length > 0);
-    expect(kinds.length).toBeGreaterThan(5);
-    for (const kind of kinds)
-      for (const yaw of [0, Math.PI / 2, Math.PI, -Math.PI / 2])
-        SHAPES[kind as keyof typeof SHAPES].spouts.forEach((_, j) => {
-          const t = new Tool(kind as keyof typeof SHAPES, 1, { x: 0, y: LIFT + 300, z: 0, yaw });
-          // slid so that spout j is over the sheet's middle
-          const sp = spoutAt(t, j);
-          t.pose = { ...t.pose, x: t.pose.x + 150 - sp.x, z: t.pose.z + 950 - sp.z };
-          expect(spoutAt(t, j).x).toBeCloseTo(150, 9);
-          expect(mouthBelow([paperMouth(sheet)], spoutAt(t, j))).not.toBeNull();
-          const stands = toolStands(t);
-          expect(stands.length).toBeGreaterThan(0);
-          for (const st of stands) expect(boxesOverlap(standBase(st, LIFT), toolBox(sheet))).toBe(false);
-        });
+  it("has its face where it's pinned: across and up the wall from its top middle", () => {
+    const f = paperFace(pinned(1500, 700));
+    expect(f).toEqual({ x0: 1500 - TEST_PAPER.w / 2, x1: 1500 + TEST_PAPER.w / 2, y0: 700 - TEST_PAPER.h, y1: 700 });
   });
 });

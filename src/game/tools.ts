@@ -7,7 +7,7 @@ import { CAP, DELIVERY, TRACE } from './config';
 import { COOLING } from './cooling';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
-import { CELL, LAMP_FLOOR, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
+import { CELL, LIFT, ORIGIN, PLANE_Z, WALL_PANEL, type Pose, type Vec3 } from './space';
 import { CRYOSTABILIZER, SUPPLIES, nextSupply, type Supply } from './supply';
 
 /** Capacity of each tank on a tool, in atoms. */
@@ -179,10 +179,34 @@ export function drip(drop: Vessel, out: Vessel | null, h: number, rand = Math.ra
     return out;
   }
   if (out) transfer(out, drop, volume(out));
+  return fall(drop, h, rand);
+}
+
+/**
+ * Whether the drop hanging at an outlet falls in a sim step of `h` seconds, with probability 1 − e^(−dropRate·h): if
+ * it does, it's returned, and nothing's left hanging; otherwise null.
+ */
+function fall(drop: Vessel, h: number, rand: () => number): Vessel | null {
   if (drop.N <= 0 || rand() >= 1 - Math.exp(-dropRate(drop.N) * h)) return null;
   const fell = new Vessel(Infinity);
   transfer(drop, fell, volume(drop));
   return fell;
+}
+
+/**
+ * How fast a flask poured slowly (Shift) lets fluid out, in atoms per sim second: twice the flow below which an
+ * outlet drips (DRIP_FLOW), so it's still an unbroken stream, just a thin one.
+ */
+export const SLOW_POUR = 2 * DRIP_FLOW;
+
+/**
+ * One sim step of `h` seconds of a flask poured slowly: SLOW_POUR atoms a second of what's in `from` (fewer if it
+ * hasn't that many), moved by volume in whole molecules (see transfer), returned as what's left its lip.
+ */
+export function slowPour(from: Vessel, h: number): Vessel {
+  const out = new Vessel(Infinity);
+  if (from.N > 0) transfer(from, out, (Math.min(from.N, SLOW_POUR * h) * volume(from)) / from.N);
+  return out;
 }
 
 /** How much a splitter's or multiplexer's funnel holds, in atoms: just a buffer, like a hose's. */
@@ -268,15 +292,15 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
 }
 
 /**
- * The station, built into the right wall (see STATION_POSE in presets.ts), for topping up what the ship is short of
+ * The station, built into the back wall (see STATION_POSE in presets.ts), for topping up what the ship is short of
  * (see Supply): first the antinucleant, and once there's enough of that, its block of the wall is changed for the
  * cryostabilizer's (see CHANGEOVER), the same but for what it takes and what's printed on it. It's the ship's
  * reservoir, a tall
  * column in the wall seen through a narrow glass pane, with a faucet under it; and beside it, low down, a glass funnel
  * over a diverter, which sends what drains from the funnel up into the reservoir if it's pure enough, or else down
  * and out a waste spigot under it, with a little LCD between the funnel and the spigot showing which way it's going.
- * In its own flat frame, x runs along the wall and y down from the column's top; z = 0 is over the middle of the
- * counter's row of cells nearest the wall, where the funnel and spouts are, and the wall is `out` behind it.
+ * In its own flat frame, x runs along the wall and y down from the column's top; z = 0 is the plane everything in
+ * the lab is in (see PLANE_Z), where the funnel and spouts are, and the wall is `out` behind it.
  * - paneW, paneH: the reservoir's pane, across and tall; the column behind it is as tall.
  * - out: how far the funnel and spouts stand out from the wall.
  * - top: how high the column's top is, in the room.
@@ -302,7 +326,7 @@ export const STATION = {
   paneW: 24,
   paneH: 260,
   top: STATION_TOP,
-  out: CELL / 2,
+  out: PLANE_Z,
   plate: 12,
   block: {
     x0: -CELL / 2,
@@ -319,7 +343,7 @@ export const STATION = {
   steadyScreen: { x0: 2 * CELL - 160, x1: 2 * CELL - 60, y0: -19, y1: -4 },
   /** The purity needle's dial (see needleAt), on the plate left of the diverter's LCD. */
   needle: { x0: CELL - 90, x1: CELL - 38, y0: 222, y1: 262 },
-  recess: 100,
+  recess: PLANE_Z + 50,
   door: { back: 2, thick: 6 },
   lamp: { x: -CELL / 2 + WALL_PANEL.w, y: STATION_TOP - 2 * WALL_PANEL.h - 56, r: 11 },
 };
@@ -492,14 +516,12 @@ export const INSTRUMENT = {
 
 /** How many stretches the heater's tube is cut into, each holding what passes through it as one mixed packet. */
 export const HEATER_CELLS = 24;
-/** The stretches of the heater's tube that its three taps draw from: the ends of its first three quarters. */
-export const HEATER_TAPS = [5, 11, 17] as const;
 /**
  * How the resistive heater behaves, editable from the Chemistry panel:
  * - feed: how fast its funnel drains into its tube, in atoms per sim second (one flask a second);
  * - transit: how long fluid takes to run the length of the tube, in sim seconds, however much is in it;
  * - rate: how fast fluid in the tube heats toward the wire's temperature, per sim second: it closes
- *   1 − e^(−rate·t) of the gap in t seconds, so by default 31% by the first tap, 53%, 68%, and 78% by the end;
+ *   1 − e^(−rate·t) of the gap in t seconds, so by default 78% of it by the end;
  * - maxT: the wire's temperature with the dial turned all the way up.
  */
 export const HEATER = { feed: MAX_FLOW, transit: 6, rate: 0.25, maxT: 100 };
@@ -511,7 +533,7 @@ export function restoreDefaultHeater(): void {
 
 /**
  * The heater's tube, in local units: from x0 to x1 (cut into HEATER_CELLS equal stretches), centered at y, of radius r.
- * Its taps' stretches, and its last, are a grid cell apart (see CELL), so each tap's spout and the end's can be over one.
+ * Its last stretch, which its spout is under, is a whole number of CELL from its funnel.
  */
 export const HEATER_TUBE = { x0: -11.5 * (CELL / 6), x1: 12.5 * (CELL / 6), y: 48, r: 7 };
 /** The middle of stretch c of the heater's tube, in local units. */
@@ -588,8 +610,8 @@ export const THERMOMETER_ROD = {
 export const BULB_Y = (THERMOMETER_ROD.bulb.y0 + THERMOMETER_ROD.bulb.y1) / 2;
 
 /**
- * The tools that are dipped (see Tool.bath): a wicking strip and the thermometers. They have no tanks; held with the
- * crosshair on an open top, one hovers upright over it, the right button lowers it in, and the left stands it in it.
+ * The tools that are dipped (see Tool.bath): a wicking strip and the thermometers. They have no tanks; one is
+ * lowered by hand into a vessel through its mouth, and can be left standing in it (see GameEngine.heldDip).
  */
 export const DIPPERS: readonly ToolKind[] = ['strip', 'thermometer', 'thermometerWide'];
 export const isDipper = (kind: ToolKind): boolean => DIPPERS.includes(kind);
@@ -601,7 +623,7 @@ export const isDipper = (kind: ToolKind): boolean => DIPPERS.includes(kind);
  * "db": their necks side by side in the middle, `gap` apart, each up from the inner edge of its bulb, with `marks`
  * graduations across both. Above the marks the necks part: each carries on as a thin tube leaning out and up,
  * `inlet.rise` higher, to a little funnel (reaching `inlet.w` either side of its middle, `inlet.h` deep) at its top,
- * the two funnels a grid cell apart, which is where each bulb is filled.
+ * the two funnels CELL apart, which is where each bulb is filled.
  */
 export const BULB = { w: 34, h: 20, sump: { w: 10, h: 5 }, neck: { w: 7, h: 90 }, marks: 20, gap: 1, inlet: { w: 7, h: 8, rise: 32 } };
 const BULB_BODY: Piece[] = [
@@ -640,7 +662,7 @@ export function neckShare(vol: number): number {
  * - paper: the paper itself, in local units, y down from the top of its clip: reaching w either side of the middle,
  *   from `top` down `len` to its foot, the last `point` of it narrowing to a point there;
  * - clip: the clip it hangs from, at its top, reaching w either side of the middle, h down from its top, d front to
- *   back: what its stand holds.
+ *   back: what the clamp stand holding it up grips.
  */
 export const STRIP = {
   cap: CAP / 100, spot: CAP / 1000, spots: 3, time: 20, drag: 34, cells: 108, spread: 0.05, ink: 33, tint: 0.4, marks: 20,
@@ -659,9 +681,9 @@ export const STRIP_FOOT = STRIP.paper.top + STRIP.paper.len;
 export const footY = (kind: ToolKind): number => (kind === 'strip' ? STRIP_FOOT - 0.5 : BULB_Y);
 
 /**
- * How far under a fluid's surface a dipper's foot (see footY) goes when it's dipped in by hand (see dipPoses), which is
- * no further than it takes to touch it: a wicking strip's, so that the lower half of its point is in; a thermometer's,
- * so that its bulb is just covered.
+ * How far under a fluid's surface a dipper's foot (see footY) is taken to be, at least, when it's touched to it by
+ * hand: no further than it takes to touch it. A wicking strip's, so that the lower half of its point is in; a
+ * thermometer's, so that its bulb is just covered.
  */
 export const dipUnder = (kind: ToolKind): number =>
   kind === 'strip' ? STRIP.paper.point / 2 - 0.5 : (THERMOMETER_ROD.bulb.y1 - THERMOMETER_ROD.bulb.y0) / 2 + 1;
@@ -801,12 +823,12 @@ export function scorchAt(T: number): number {
 
 /**
  * A sheet of shadow paper (see SHAPES.sheet), which the shadow lamp's light darkens, for good, where it falls on it:
- * - side: the paper, a square, this far across and tall, a grid cell, so it stands across the lamp's channel from wall
- *   to wall; top: how far down from the sheet's top its square starts, under the bar;
- * - clip: the bar clipped along its top edge, `h` tall and `d` front to back, which a stand's clamp holds, a little
- *   wider than the paper;
+ * - side: the paper, a square, this far across and tall; top: how far down from the sheet's top its square starts,
+ *   under the bar;
+ * - clip: the bar clipped along its top edge, `h` tall and `d` thick, a little wider than the paper, which pins it to
+ *   the wall;
  * - margin: how far in from each edge of the paper the lamp's light stops: it falls on the square in the middle (see
- *   sheetLit), and the margin round that stays as new however long the lamp shines;
+ *   sheetLit), and the margin round that, behind the lamp's frame, stays as new however long the lamp shines;
  * - cells: how many cells a side the light that square has had is kept in (see Tool.dose), a whole number of them to
  *   the margin's width;
  * - tau: how many sim seconds of the lamp's light, unshadowed, darken it all but 1/e of the way (see darkness): so
@@ -820,32 +842,22 @@ export const SHEET = { side: CELL, top: 14, clip: { h: 14, d: 5 }, margin: CELL 
 export const sheetLit = (): number => SHEET.side - 2 * SHEET.margin;
 
 /**
- * The shadow lamp (see SHAPES.shadowlamp): one long, low trough on a bench of its own. At one end is a closed box, the
- * lamp's enclosure; from its face an open channel runs between two side walls, over a floor of its own; and across the
- * channel's far end is an end wall, against whose inner face a sheet of shadow paper stands, facing the lamp (see the slot, in bodies.ts). In
- * its own frame (x along it, from the lamp toward the sheet; y down from its top; z toward its front, which is the
- * room; from the middle of the channel), in world units:
- * - h: how tall it is, enclosure and walls alike: as tall as a sheet's paper, so the bar along a sheet's top stands
- *   clear above the end wall, to take it out by;
- * - wall: how thick its side walls and its end wall are;
- * - floor: how thick the plate that floors the channel is (see LAMP_FLOOR in space.ts, which is where it is in the
- *   room): as thick as a sheet's margin is wide, so the light's lower edge is level with its top, and the shadow of
- *   whatever stands on it stands on the bottom edge of the square the light falls on, none of it lost below;
- * - slot: how far short of the end wall the floor stops: the slot a sheet stands in, its foot on the bench below, a
- *   little wider than the bar along a sheet's top is thick;
- * - box: the enclosure, from `x0` to `x1` along it, and as wide as the trough is over its walls;
- * - channel: the channel, from the enclosure's face at `x0` to the end wall's at `x1`, three grid cells, and reaching
- *   `z` either side of its middle line, one cell from wall to wall: what's set down in it is on the grid like anything;
- * - window: the square pane in the enclosure's face that its light leaves by, reaching `r` either side of the
- *   channel's middle line and of a height `y` down from the top: exactly the square of the sheet it lights (see
- *   sheetLit), so the sheet's margin, the channel's walls and whatever's outside the trough are never in its light;
- * - spread: how far its light strays from straight along the channel, as a slope. The enclosure sends its light out
- *   as a beam with the window's cross-section all the way to the sheet, not spreading from a point, so a shadow is the
- *   size of what casts it wherever along the channel that stands; but the lamp inside isn't a point, so the beam's
- *   rays stray this far either side of straight, and a shadow's edge is soft, twice this times how far from the sheet
- *   what casts it is;
- * - dial and button: the middles of the dial that sets how long it shines and of the button that sets it off, on the
- *   enclosure's front, and the button's radius;
+ * The shadow lamp (see SHAPES.shadowlamp), built into the back wall over the counter (see LAMP_POSE in presets.ts).
+ * The lamp itself is out of the view, toward the player, and shines back at the wall, onto a square pane in a frame
+ * set into it: behind the pane is a slot, which takes a sheet of shadow paper (see SHEET_SLOT in bodies.ts), seen and
+ * lit through it, its margin behind the frame. Its light is a beam square on to the wall, so whatever's in front of
+ * the pane (anything in the plane everything's in, see PLANE_Z) casts its shadow on the sheet the same size as it is.
+ * In its own flat frame (x across the wall from the pane's middle, y down from the frame's top), in world units:
+ * - pane: the square the light falls on, `y` down from the frame's top, reaching `r` either side of its middle:
+ *   exactly the square of the sheet it lights (see sheetLit); its foot is the frame's, h down, at the counter's top,
+ *   so a flask standing on the counter in front of it is all in the light;
+ * - rim: how wide the frame is round the pane, on its top and its left; on its right it's `panel` wide, for the dial
+ *   that sets how long it shines and the button that sets it off (`dial` and `button`, their middles, and the
+ *   button's radius);
+ * - h: how tall the frame is, from its top down to the counter;
+ * - spread: how far its light strays from square on to the wall, as a slope, since the lamp isn't a point: a
+ *   shadow's edge is soft, `soft` wide (twice this times how far what casts it is from the sheet: the plane's
+ *   distance out from the wall, about);
  * - shot: how long it shines for a press of the button (see lampShot), in sim seconds, with the dial at either end:
  *   from a flash that barely tints the sheet (a tenth of the way dark), to as long as darkens it all the way (see
  *   SHEET.full), past which there'd be nothing more to see; a factor of 64, so each of the six steps between the
@@ -857,12 +869,15 @@ export const sheetLit = (): number => SHEET.side - 2 * SHEET.margin;
  *   and visibly less toward its edges, and a full flask of nothing but rings lets through e^−10 of it, none.
  */
 export const LAMP = {
-  h: SHEET.side, wall: 6, floor: LAMP_FLOOR.y - LIFT, slot: SHEET.clip.d + 1, dim: 0.2, spread: 0.016,
-  box: { x0: -2.5 * CELL, x1: -1.5 * CELL },
-  channel: { x0: -1.5 * CELL, x1: 1.5 * CELL, z: CELL / 2 },
-  window: { r: sheetLit() / 2, y: SHEET.side / 2 },
-  dial: { x: -2 * CELL - 22, y: 36 },
-  button: { x: -2 * CELL + 20, y: 36, r: 7 },
+  pane: { r: sheetLit() / 2, y: 14 },
+  rim: 14,
+  panel: 34,
+  h: 14 + sheetLit(),
+  dial: { x: sheetLit() / 2 + 14 + 3, y: 30 },
+  button: { x: sheetLit() / 2 + 14 + 3, y: 66, r: 7 },
+  dim: 0.2,
+  spread: 0.016,
+  soft: 2,
   shot: { min: SHEET.full / 64, max: SHEET.full },
 };
 
@@ -959,16 +974,12 @@ export function sectorInset(atom: ColorAtom, margin: number): (readonly [number,
 }
 
 /**
- * A sheet of test paper (see SHAPES.testpaper): the wicking strip's blotting paper as a sheet that lies flat on a
- * counter, with a triangle printed on it in black, cut through the middles of its sides into four smaller ones, one
+ * A sheet of test paper (see SHAPES.testpaper): the wicking strip's blotting paper as a sheet pinned flat to the
+ * wall, face on (see ToolShape.pinned), with a triangle printed on it in black, cut through the middles of its sides into four smaller ones, one
  * per color (see atomSector). It soaks up what lands on it, as far as it has room (see Blotter), and each small
  * triangle is stained its atom's color, as strongly as paperReading says, by how much of what it could hold has
  * that color in it, for good:
- * - w and d: how far across and front to back the sheet is, and thick, how thick, in world units. It lies within
- *   one grid cell, clear of the base of a stand holding something over its middle (see STAND_BASE in bodies.ts),
- *   which starts 34 from there. It's thin enough to lie under the floor of the fluid in a flask standing on it,
- *   which is 0.6 above what the flask stands on (see FLASK_FLUID in view.ts): whatever's set down in its cell
- *   stands on the counter as if the sheet weren't there, through it, so a thicker sheet would show inside a flask;
+ * - w and h: how far across and tall the sheet is, and thick, how thick, in world units;
  * - cap: how much it soaks up, by volume, before it's soaked and shows as strongly as it ever will: three
  *   hundredths of a flask, three times what a wicking strip's paper holds, and about twenty drops (see DRIP);
  * - triangles: the triangles printed on it, in a row from its left, each for molecules of the sizes (in atoms)
@@ -977,31 +988,31 @@ export function sectorInset(atom: ColorAtom, margin: number): (readonly [number,
  *   are; margin: how far in from the middles of those lines each small triangle's stain keeps.
  */
 export const TEST_PAPER: {
-  w: number; d: number; thick: number; cap: number; triangles: readonly { sizes: readonly number[] }[]; edge: number; line: number; margin: number;
+  w: number; h: number; thick: number; cap: number; triangles: readonly { sizes: readonly number[] }[]; edge: number; line: number; margin: number;
 } = {
-  w: 64, d: 64, thick: 0.4, cap: (3 * CAP) / 100,
+  w: 64, h: 64, thick: 0.4, cap: (3 * CAP) / 100,
   triangles: [{ sizes: [1, 2, 3, 4] }],
   edge: 4, line: 1, margin: 2,
 };
 
 /**
  * Where a sheet of test paper's triangles are printed (see TEST_PAPER.triangles), in the sheet's own frame, from its
- * middle, x right and y toward its front: each one's middle, and the distance from there to a corner. They stand
- * in a row across the sheet, each on its base as seen from the sheet's front, as big as fits its share of the
- * sheet's width and the sheet's depth, TEST_PAPER.edge clear of the edges and of each other. A triangle on its base
- * reaches r behind its middle and half that in front, so their middles are a quarter of r in front of the sheet's.
+ * middle, x right and y down: each one's middle, and the distance from there to a corner. They stand in a row
+ * across the sheet, each on its base, as big as fits its share of the sheet's width and its height,
+ * TEST_PAPER.edge clear of the edges and of each other. A triangle on its base reaches r above its middle and half
+ * that below, so their middles are a quarter of r below the sheet's.
  */
 export function paperTriangles(): { x: number; y: number; r: number }[] {
-  const { w, d, edge, triangles } = TEST_PAPER;
+  const { w, h, edge, triangles } = TEST_PAPER;
   const n = triangles.length;
   const each = (w - (n + 1) * edge) / n;
-  const r = Math.min(each / Math.sqrt(3), (d - 2 * edge) / 1.5);
+  const r = Math.min(each / Math.sqrt(3), (h - 2 * edge) / 1.5);
   return triangles.map((_, i) => ({ x: -w / 2 + edge + each / 2 + i * (each + edge), y: r / 4, r }));
 }
 
 /**
- * A sheet of bond paper (see SHAPES.bondpaper): a sheet of test paper's blotting paper, the same size, lying flat the
- * same way and soaking up as much (see TEST_PAPER and Blotter), but printed differently: with four dots, one per
+ * A sheet of bond paper (see SHAPES.bondpaper): a sheet of test paper's blotting paper, the same size, pinned to the
+ * wall the same way and soaking up as much (see TEST_PAPER and Blotter), but printed differently: with four dots, one per
  * color, each in its atom's own color, placed as the colors' sectors are in a sheet of test paper's triangle (see
  * ATOM_PLACE): at the corners of a triangle standing on its base, and in its middle. Between each two of them runs a
  * line in an ink that's all but invisible dry, and that darkens, for good, by what the sheet soaks up: by how much
@@ -1014,14 +1025,13 @@ export function paperTriangles(): { x: number; y: number; r: number }[] {
 export const BOND_PAPER = { edge: 5, dot: 3.5, line: 2.2, gap: 1.6, faint: 0.05, dark: 0.96 };
 
 /**
- * Where a sheet of bond paper's dots are printed, in the sheet's own frame, from its middle, x right and y toward its
- * front, in SECTOR_ATOMS order: the corners and the middle of a triangle on its base as seen from the sheet's front
- * (see ATOM_PLACE), as big as leaves every dot BOND_PAPER.edge clear of the sheet's edges, and midway between its
- * front and back (see paperTriangles).
+ * Where a sheet of bond paper's dots are printed, in the sheet's own frame, from its middle, x right and y down, in
+ * SECTOR_ATOMS order: the corners and the middle of a triangle on its base (see ATOM_PLACE), as big as leaves every
+ * dot BOND_PAPER.edge clear of the sheet's edges, and midway between its top and bottom (see paperTriangles).
  */
 export function bondDots(): { x: number; y: number }[] {
   const { edge, dot } = BOND_PAPER;
-  const r = Math.min((TEST_PAPER.w / 2 - edge - dot) / (Math.sqrt(3) / 2), (TEST_PAPER.d - 2 * (edge + dot)) / 1.5);
+  const r = Math.min((TEST_PAPER.w / 2 - edge - dot) / (Math.sqrt(3) / 2), (TEST_PAPER.h - 2 * (edge + dot)) / 1.5);
   return SECTOR_ATOMS.map((a) => ({ x: r * ATOM_PLACE[a][0], y: r / 4 + r * ATOM_PLACE[a][1] }));
 }
 
@@ -1041,7 +1051,7 @@ export const PAPER_TAU = 0.5;
 const PAPER_DONE = 1e-4;
 
 /**
- * The sheets of blotting paper that lie flat on a counter and soak up what lands on them, once (see Blotter): test
+ * The sheets of blotting paper pinned to the wall that soak up what falls past their faces, once (see Blotter): test
  * paper and bond paper, which differ only in what's printed on them and so in what they show of what they hold.
  */
 export const BLOTTERS: readonly ToolKind[] = ['testpaper', 'bondpaper'];
@@ -1051,7 +1061,7 @@ export const isBlotter = (kind: ToolKind) => BLOTTERS.includes(kind);
 
 /**
  * Tools there's only ever one of: not on an equipment wheel, and never put away. The receptacle is the whole cryostabilizer
- * station (see STATION), reservoir included, and the shadow lamp is fixed to a bench of its own (see LAMP).
+ * station (see STATION), reservoir included, and the shadow lamp is built into the wall over the counter (see LAMP).
  */
 export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectroscope', 'receptacle', 'shadowlamp'];
 
@@ -1106,8 +1116,11 @@ export interface ToolShape {
   fixed?: boolean;
   /** Whether it's built into a wall, with no stand: only the supply station (see STATION). */
   wall?: boolean;
-  /** Whether it lies flat on a counter, with no stand, as deep front to back as its box says: a sheet of test paper. */
-  flat?: boolean;
+  /**
+   * Whether it's a sheet pinned flat to the wall, face on, behind everything else and with no clamp stand: a sheet of test
+   * paper, bond paper or shadow paper. It's in nothing's way but another such sheet's.
+   */
+  pinned?: boolean;
   /** Whether the tanks are sealed on top, so nothing can be poured or fall into them. */
   sealed?: boolean;
   /** Spout flow with a valve fully open and the tank full, in atoms per sim second, if not MAX_FLOW. */
@@ -1132,15 +1145,15 @@ const THERMOMETER_SHAPE: ToolShape = {
   box: { x0: -THERMOMETER_ROD.r - 0.5, x1: THERMOMETER_ROD.r + 0.5, y0: -0.5, y1: THERMOMETER_ROD.h + 0.5 },
 };
 
-/** A sheet of blotting paper lying flat (see TEST_PAPER and BLOTTERS), its top face up, with no tanks, spouts or valves. */
+/** A sheet of blotting paper pinned to the wall (see TEST_PAPER and BLOTTERS), face on, with no tanks, spouts or valves. */
 const BLOTTER_SHAPE: ToolShape = {
   tanks: [],
   noValve: true,
-  flat: true,
+  pinned: true,
   spouts: [],
   valveY: 0,
-  spoutY: TEST_PAPER.thick,
-  box: { x0: -TEST_PAPER.w / 2, x1: TEST_PAPER.w / 2, y0: 0, y1: TEST_PAPER.thick },
+  spoutY: TEST_PAPER.h,
+  box: { x0: -TEST_PAPER.w / 2, x1: TEST_PAPER.w / 2, y0: 0, y1: TEST_PAPER.h },
 };
 
 export const SHAPES: Record<ToolKind, ToolShape> = {
@@ -1169,7 +1182,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
       { name: 'B', x0: 21, x1: 79 },
     ],
     sump: { w: 14, h: 7 },
-    // the streams cross over in the exchanger, so each leaves on the other side, a grid cell apart (see CELL)
+    // the streams cross over in the exchanger, so each leaves on the other side, CELL apart
     spouts: [CELL / 2, -CELL / 2],
     valveY: 97,
     spoutY: 136,
@@ -1177,28 +1190,28 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   },
   separator: {
     tanks: [{ name: 'tank', x0: -30, x1: 30 }],
-    // one outlet per share of black (see SEPARATOR_OUTLET), a grid cell apart (see CELL), so a flask
-    // or a tool's tank fits under each
-    spouts: [-2 * CELL, -CELL, 0, CELL, 2 * CELL],
+    // two outlets, for what has black in it and what hasn't (see SEPARATOR_OUTLET), CELL either side of its
+    // tank, so a flask or a tool's tank fits under each
+    spouts: [-CELL, CELL],
     sump: { w: 14, h: 7 },
     valveY: 96,
     spoutY: 126,
-    // the manifold under it (see the engine's SEP_BODY), with a handle on its left end
-    box: { x0: -220, x1: 214, y0: -6, y1: 128 },
+    // the manifold under it (see SEP_BODY in flatTools.ts), with a handle on its left end
+    box: { x0: -120, x1: 114, y0: -6, y1: 128 },
   },
   splitter: {
     tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
     tankH: 30,
     tankCap: FUNNEL_CAP,
     funnel: true,
-    // a grid cell either side of its funnel, like the separator's
+    // CELL either side of its funnel, like the separator's
     spouts: [-CELL, CELL],
     valveY: 42,
     spoutY: 84,
     box: { x0: -116, x1: 116, y0: -6, y1: 86 },
   },
   multiplexer: {
-    // the splitter turned upside down: a funnel a grid cell either side of its one spout, their stems joining over the
+    // the splitter turned upside down: a funnel CELL either side of its one spout, their stems joining over the
     // valve, which picks how much of each goes through
     tanks: [
       { name: 'A', x0: -CELL - 22, x1: -CELL + 22 },
@@ -1220,24 +1233,23 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tankCap: FUNNEL_CAP,
     funnel: true,
     noValve: true,
-    // a grid cell apart, like the separator's, the first a cell on from the funnel
+    // CELL apart, like the separator's, the first CELL on from the funnel
     spouts: [0, CELL, 2 * CELL, 3 * CELL],
     valveY: 30,
     spoutY: 104,
     box: { x0: -126, x1: 306, y0: -6, y1: 106 },
   },
   heater: {
-    // a funnel over the left end of a long tube (see HEATER_TUBE) with a wire down its middle; three taps
-    // along it and its far end turning down are the spouts, and the dial on a box above its right end sets
-    // the wire's heat
+    // a funnel over the left end of a long tube (see HEATER_TUBE) with a wire down its middle; its far end
+    // turning down is the spout, and the dial on a box above its right end, its one valve, sets the wire's heat
     tanks: [{ name: 'funnel', x0: -2 * CELL - 22, x1: -2 * CELL + 22 }],
     tankH: 30,
     tankCap: FUNNEL_CAP,
     funnel: true,
-    valves: [...HEATER_TAPS.map((_, j) => ({ x: (j - 1) * CELL, y: 72 })), { x: 170, y: 20 }],
-    dial: HEATER_TAPS.length,
-    // a grid cell apart, like the separator's, under the taps' stretches (see heaterCellX) and then the last
-    spouts: [-CELL, 0, CELL, 2 * CELL],
+    valves: [{ x: 170, y: 20 }],
+    dial: 0,
+    // under the tube's last stretch (see heaterCellX), a whole number of CELL from the funnel
+    spouts: [2 * CELL],
     valveY: 72,
     spoutY: 92,
     box: { x0: -228, x1: 216, y0: -6, y1: 94 },
@@ -1256,7 +1268,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   },
   receptacle: {
     // the station: a funnel, and the reservoir's column in the wall, behind a pane (see STATION); a waste
-    // spigot under the funnel and a faucet under the reservoir, a grid cell apart (see CELL)
+    // spigot under the funnel and a faucet under the reservoir, CELL apart
     tanks: [
       { name: 'funnel', x0: CELL - STATION.funnel.w, x1: CELL + STATION.funnel.w, cap: INTAKE_CAP },
       {
@@ -1290,7 +1302,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   },
   dilatometer: {
     // two swell bulbs (see BULB) pressed together like "db", necks side by side in the middle; each filled through a
-    // funnel at the top of its neck, where the necks lean apart, a grid cell from the other, and draining slowly
+    // funnel at the top of its neck, where the necks lean apart, CELL from the other, and draining slowly
     // through its own valve to a spout under that; one wire wound round both, from a box under them whose dial sets
     // its heat
     tanks: [
@@ -1337,8 +1349,8 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -COLUMN.funnel.w - 2, x1: COLUMN.funnel.w + 2, y0: -6, y1: COLUMN.tube.y1 + 30 },
   },
   shadowlamp: {
-    // a trough: the lamp's enclosure, a floored channel between two walls, and an end wall (see LAMP), with no tanks
-    // or spouts; its one valve is the dial on its enclosure's front, which sets how long it shines (see lampShot)
+    // a frame in the wall round the pane the lamp's light falls on, with the slot behind it (see LAMP), and no tanks
+    // or spouts; its one valve is the dial on its frame, which sets how long it shines (see lampShot)
     tanks: [],
     valves: [{ x: LAMP.dial.x, y: LAMP.dial.y }],
     dial: 0,
@@ -1346,12 +1358,14 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spouts: [],
     valveY: 0,
     spoutY: LAMP.h,
-    box: { x0: LAMP.box.x0, x1: LAMP.channel.x1 + LAMP.wall, y0: 0, y1: LAMP.h },
+    box: { x0: -LAMP.pane.r - LAMP.rim, x1: LAMP.pane.r + LAMP.panel, y0: 0, y1: LAMP.h },
   },
   sheet: {
-    // a square of paper hanging from a bar clipped along its top edge (see SHEET), with no tanks, spouts or valves
+    // a square of paper pinned to the wall by a bar clipped along its top edge (see SHEET), with no tanks, spouts or
+    // valves
     tanks: [],
     noValve: true,
+    pinned: true,
     spouts: [],
     valveY: 0,
     spoutY: SHEET.top + SHEET.side,
@@ -1547,9 +1561,9 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
 
 /**
  * How sharply the separator sorts, editable from the Chemistry panel: each molecule goes to outlet j in proportion
- * to e^(−sharpness·(j − its own outlet)²) (see SEPARATOR_OUTLET). At 0 everything splits evenly five ways; at 3 a
- * molecule goes 91% to its own outlet if it's one of the middle three, 95% if it's at an end, and the rest mostly to
- * the next outlet over; and from SEPARATOR_PERFECT up, which is the default, every molecule goes out its own.
+ * to e^(−sharpness·(j − its own outlet)²) (see SEPARATOR_OUTLET). At 0 everything splits evenly both ways; at 3 a
+ * molecule goes 95% out its own outlet and 5% out the other; and from SEPARATOR_PERFECT up, which is the default,
+ * every molecule goes out its own.
  */
 export const SEPARATOR = { sharpness: 10 };
 const DEFAULT_SEPARATOR = { ...SEPARATOR };
@@ -1561,17 +1575,14 @@ export function restoreDefaultSeparator(): void {
 /** The sharpness from which the separator sorts perfectly: the top of its slider. */
 export const SEPARATOR_PERFECT = 10;
 
-/** How many outlets the separator has, one per share of black atoms a molecule can have. */
-export const SEPARATOR_OUTLETS = 5;
+/** How many outlets the separator has: one for molecules with a black atom in them, one for the rest. */
+export const SEPARATOR_OUTLETS = 2;
 
 /**
- * Each species' own outlet on the separator, left to right, by the share of its atoms that are black (K): none (0),
- * one in four (1), one in three (2), half (3), all (4).
+ * Each species' own outlet on the separator: the left (0) if it has a black atom (K) in it, K itself included, and
+ * the right (1) if not, the solvent included.
  */
-export const SEPARATOR_OUTLET: Uint8Array = Uint8Array.from(SPECIES, (sp) => {
-  if (!sp.atoms.includes('K')) return 0;
-  return sp.size === 1 ? 4 : 5 - sp.size;
-});
+export const SEPARATOR_OUTLET: Uint8Array = Uint8Array.from(SPECIES, (sp) => (sp.atoms.includes('K') ? 0 : 1));
 
 let shareCache = { sharpness: NaN, shares: [] as number[][] };
 
@@ -1593,11 +1604,9 @@ export function separatorShares(): number[][] {
 
 /**
  * What a sheet of test paper or of bond paper soaks up (see TEST_PAPER and BLOTTERS): blotting paper, which takes up
- * what lands on it only as far as it has room, however it's poured on, so it's never overfilled and nothing mixes
- * into what it already holds: what's more runs off it, and falls on past it (see soak): onto a bare counter, where
- * it's lost, if the sheet lies on one, or onto whatever's under a sheet held in the hand. Once it's soaked (see
- * soaked) it takes up nothing at all. So it holds the first of what landed on it, for good. It keeps none of its
- * heat, as a wicking strip's paper keeps none.
+ * what reaches it only as far as it has room, so it's never overfilled and nothing mixes into what it already holds
+ * (see soak). Once it's soaked (see soaked) it takes up nothing at all. So it holds the first of what reached it, for
+ * good. It keeps none of its heat, as a wicking strip's paper keeps none.
  */
 export class Blotter extends Vessel {
   /** Whether it's soaked: it has room for less than a trace more. */
@@ -1644,8 +1653,8 @@ export class Blotter extends Vessel {
  *   through a little funnel on top, that lets out PIPETTE_FLOW full and fully open.
  * - A **heat exchanger** has two tanks, whose streams pass each other in
  *   counterflow on the way to their spouts, trading heat but never mixing.
- * - A **separator** has one tank and five spouts, and sorts what drains
- *   among them by the share of its atoms that are black (see separate).
+ * - A **separator** has one tank and two spouts, and sorts what drains
+ *   between them by whether it has a black atom in it (see separate).
  * - A **splitter** has a small funnel that drains straight through (at
  *   FUNNEL_RATE) to two spouts. Its valve doesn't open or close: it sets the
  *   share that goes right, from 0 (all left) to 1 (all right).
@@ -1656,8 +1665,7 @@ export class Blotter extends Vessel {
  *   screens and off its end, each with a spout under it (see sieve).
  * - A **resistive heater** has a funnel draining (at HEATER.feed) into one end of a long tube, which carries
  *   it to the other end in HEATER.transit and out a spout there, heating it all the way (see heatBy) with a
- *   wire whose temperature its dial sets (see wireTemperature). Three taps along the tube, each a valve over
- *   a spout, let fluid out sooner, less heated.
+ *   wire whose temperature its dial sets (see wireTemperature).
  * - A **tank** is a dispenser holding a hundred flasks, drawn as big as a hundred flasks, with ten faint
  *   graduations across it.
  * - A **receptacle** is the station, built into the wall (see STATION): a funnel and the ship's
@@ -1682,12 +1690,12 @@ export class Blotter extends Vessel {
  *   that's too hot for it.
  * - A **spectroscope** is an inline instrument too, which lets everything through, counting the bonds that pass over
  *   the recent past (see INSTRUMENT_TAU and bondCounts) and showing them by energy as a graph (see spectroscopeAt).
- * - A **shadow lamp** has no tanks either: it's a trough with a lamp in a box at one end (see LAMP), fixed on a bench
- *   of its own, with a button that lights it (see press) for as long as its dial says (see lampShot), after which it
- *   goes out by itself. While it's lit, the sheet at its other end is owed its light (see shine).
+ * - A **shadow lamp** has no tanks either: it's a frame in the wall round the pane its light falls on (see LAMP),
+ *   with a button that lights it (see press) for as long as its dial says (see lampShot), after which it goes out by
+ *   itself. While it's lit, the sheet in the slot behind its pane is owed its light (see shine).
  * - A sheet of **shadow paper** has none: it's a square of paper (see SHEET) that darkens, for good, where the shadow
  *   lamp's light falls on it (see dose and expose).
- * - A sheet of **test paper** has none either: it lies flat on a counter (see TEST_PAPER), soaks up what lands on it
+ * - A sheet of **test paper** has none either: it's pinned to the wall (see TEST_PAPER), soaks up what falls past it
  *   until it's wet through (see paper and Blotter), and shows what it holds as stains (see paperReading). It's used once.
  * - A sheet of **bond paper** is the same sheet printed differently (see BOND_PAPER): it shows what it holds as the
  *   lines between its dots, darkened (see bondReading). What either sheet shows comes up over a couple of sim seconds
@@ -1706,6 +1714,12 @@ export class Tool {
    * half by default; and a shadow lamp's is its dial (see lampShot), halfway by default.
    */
   readonly valves: number[];
+  /**
+   * Per valve, which way its lever was turned from shut, for a plain valve, which turns a quarter either way (see
+   * valveSweep in bodies.ts): 1 the way it always went, up, counterclockwise as it faces; −1 the other way, down.
+   * How far open it is is its valve's setting either way. 1 for any other valve.
+   */
+  readonly sides: number[];
   /** Per spout, what left it on the last step, for drawing the stream; null if nothing did. */
   out: (Vessel | null)[];
   /** Per spout, the drop hanging there, gathering a flow too slow to stream (see drip). */
@@ -1860,6 +1874,7 @@ export class Tool {
     this.dose = new Float32Array(kind === 'sheet' ? SHEET.cells ** 2 : 0);
     const nValves = SHAPES[kind].valves?.length ?? this.tanks.length;
     this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' || kind === 'shadowlamp' ? 0.5 : 0));
+    this.sides = this.valves.map(() => 1);
     this.out = this.shape.spouts.map(() => null);
     this.flow = this.shape.spouts.map(() => 0);
     this.drops = this.shape.spouts.map(() => new Vessel(Infinity));
@@ -2360,8 +2375,7 @@ export class Tool {
 
   /**
    * A heater's step: each stretch of the tube passes h / (HEATER.transit / HEATER_CELLS) of itself on, the last
-   * out the end, and the funnel tops up the first; then each tap lets out what its valve allows from its
-   * stretch, and the wire heats what's left.
+   * out the end, and the funnel tops up the first; then the wire heats what's in the tube.
    */
   private heat(h: number): (Vessel | null)[] {
     const { tube, valves } = this;
@@ -2369,10 +2383,9 @@ export class Tool {
     const packets = this.shape.spouts.map((_, j) => this.packet(j));
     const on = Math.min(1, (h * HEATER_CELLS) / Math.max(1e-9, HEATER.transit));
     const last = tube.length - 1;
-    transfer(tube[last], packets[HEATER_TAPS.length], volume(tube[last]) * on);
+    transfer(tube[last], packets[0], volume(tube[last]) * on);
     for (let c = last - 1; c >= 0; c--) transfer(tube[c], tube[c + 1], volume(tube[c]) * on);
     transfer(this.tanks[0], tube[0], HEATER.feed * this.level(0) * h);
-    HEATER_TAPS.forEach((c, j) => transfer(tube[c], packets[j], valves[j] * MAX_FLOW * h));
     const wireT = wireTemperature(valves[this.shape.dial!]);
     for (const v of tube) heatBy(v, wireT, h);
     this.out = packets.map((p) => (p.N > 0 ? p : null));
@@ -2653,19 +2666,14 @@ export const sameMount = (a: HoseMount, b: HoseMount) =>
 
 /**
  * A hose pulled out of a spout or a faucet: whatever would leave the spout comes out of the hose's nozzle instead,
- * wherever that's been set down, and falls from there. Every spout and faucet has one, rolled up inside it until it's
+ * wherever that's been left, and falls from there. Every spout and faucet has one, rolled up inside it until it's
  * pulled out.
  */
 export class Hose {
-  /** Which way its nozzle faces, about the vertical (see Pose), with the stand holding it up behind it. */
-  turn = 0;
-
   constructor(
     /** The spout or faucet it runs from. */
     readonly on: HoseMount,
     /** Its nozzle's tip, in the room. */
     public outlet: Vec3,
-    /** How far behind the nozzle its stand's rod is (see NOZZLE_REACH in bodies.ts). */
-    public reach: number,
   ) {}
 }

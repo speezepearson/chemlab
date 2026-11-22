@@ -2,7 +2,7 @@ import { type Atom } from '../chem/atoms';
 import { THERMO, T_ROOM } from '../chem/params';
 import { ReactionNetwork, heatAt, type Fluid } from '../chem/reactions';
 import { NS, SPECIES, singleOf } from '../chem/species';
-import { COUNTERS, type Vec3 } from './space';
+import { BENCH, CELL, type Vec3 } from './space';
 import { mouthBelow, type Mouth } from './tools';
 
 /** A faucet dispenses an unlimited supply of one fixed fluid. */
@@ -16,22 +16,33 @@ export interface Faucet {
 /** A faucet of one atom, pure. */
 const pure = (a: Atom): Faucet => ({ start: singleOf(a) });
 
-/** How many of the faucets are the four colors' on the right wall; the rest are the solvent's, one on each island. */
-export const WALL_FAUCETS = 4;
+/** How many of the faucets are the four colors'; the rest are the solvent's. */
+export const COLOR_FAUCETS = 4;
+/** How many faucets the solvent has: one beside the colors', and the rest spread along the bench. */
+const SOLVENT_FAUCETS = 6;
 const SOLVENT: Faucet = pure('S');
 
 /**
- * The faucets, all pure, at room temperature: first the four colors', left to right along the right wall, then the
- * clear solvent's, S, one in the middle of each island, in the order of COUNTERS. Every pair has to be made by mixing.
+ * The faucets, all pure, at room temperature: first the four colors', left to right along the wall, then the clear
+ * solvent's, S, the first beside them and the rest along the bench. Every pair has to be made by mixing.
  */
 export const FAUCETS: readonly Faucet[] = [
   pure('R'), pure('G'), pure('B'), pure('K'),
-  ...COUNTERS.filter((c) => c.island).map(() => SOLVENT),
+  ...Array.from({ length: SOLVENT_FAUCETS }, () => SOLVENT),
 ];
 
 /**
+ * Where each faucet's spout is along the wall (see FAUCETS): the colors' and the first of the solvent's in a row a
+ * CELL apart, just past the supply station, which is at the bench's left end, by the cabinet (see STATION_POSE); and
+ * the solvent's others every 900 along the rest of it, past where the one-of-a-kind instruments start.
+ */
+export const FAUCET_X: readonly number[] = FAUCETS.map((_, i) =>
+  i <= COLOR_FAUCETS ? BENCH.x0 + (8 + i) * CELL : BENCH.x0 + 2600 + (i - COLOR_FAUCETS - 1) * 900,
+);
+
+/**
  * Older saves' faucets, by how many there were, as places among the new ones (null for one that's gone): from when
- * the solvent's was a fifth on the right wall, which is now the first island's; from before the solvent, when there
+ * the solvent had only the one, a fifth in the colors' row; from before the solvent, when there
  * were the four colors' alone, in the same order; from when there were six atoms, R, Y, G, C, B and M; and from before
  * that, when the twelve pairs that could bond had faucets too, 18, with the six atoms' at 3, 5, 7, 9, 11 and 13 (see
  * faucetIndex).

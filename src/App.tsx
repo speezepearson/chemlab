@@ -2,10 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { defaultChemParams, restoreDefaultChem } from './chem/params';
 import { ReactionNetwork } from './chem/reactions';
 import { AppearancePanel } from './components/AppearancePanel';
-import { ArrivalPanel } from './components/ArrivalPanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
 import { FlaskEditor } from './components/FlaskEditor';
-import { Hud, StartHint, TouchControls } from './components/Hud';
+import { Hud, TouchControls } from './components/Hud';
 import { LabelEditor } from './components/LabelEditor';
 import { Ending, SleepScreen } from './components/Sleep';
 import { SoundPanel } from './components/SoundPanel';
@@ -62,6 +61,8 @@ export function App() {
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [hud, setHud] = useState<HudState | null>(null);
   const [saved] = useState(storedSave);
+  /** The lab as it last was, to carry it from one engine to the next: the stored save to begin with. */
+  const latest = useRef<SaveState | null>(saved);
   const [preset, setPreset] = useState(() => presetOf(saved));
   const [chemVersion, setChemVersion] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -112,11 +113,11 @@ export function App() {
       onHud: setHud,
       onAwake: markIntroSeen,
     }, presetRef.current);
-    if (saved) e.restore(saved, presetRef.current);
+    if (latest.current) e.restore(latest.current, presetRef.current);
     setEngine(e);
     // for checks in a browser (see CLAUDE.md)
     if (import.meta.env.DEV) (window as unknown as { lab?: GameEngine }).lab = e;
-    const save = () => storeSave(e.snapshot());
+    const save = () => storeSave((latest.current = e.snapshot()));
     const timer = setInterval(save, AUTOSAVE_MS);
     window.addEventListener('pagehide', save);
     return () => {
@@ -125,7 +126,7 @@ export function App() {
       window.removeEventListener('pagehide', save);
       e.destroy();
     };
-  }, [network, saved]);
+  }, [network]);
 
   // the bench waits, paused, while the intro plays
   useEffect(() => {
@@ -232,15 +233,11 @@ export function App() {
           {engine && hud && <Hud engine={engine} hud={hud} help={help} />}
           {engine && hud && <TouchControls engine={engine} hud={hud} />}
           {inspection && <InfoPanel info={inspection} />}
-          {hud && !hud.locked && !hud.inPod && !hud.preview && !intro && editing === null && labeling === null && (
-            <StartHint />
-          )}
           {engine && editing !== null && <FlaskEditor engine={engine} id={editing} onClose={() => setEditing(null)} />}
           {engine && labeling !== null && (
             <LabelEditor key={labeling} engine={engine} id={labeling} onClose={() => setLabeling(null)} />
           )}
           {hud && <SleepScreen hud={hud} onWake={() => engine?.touchNap()} />}
-          {hud?.preview && <ArrivalPanel />}
           {engine && hud && (
             <Ending
               hud={hud}

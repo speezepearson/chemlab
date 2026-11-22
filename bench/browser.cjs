@@ -1,14 +1,14 @@
 /*
  * Browser benchmark: loads a scene save (bench/saves/<scene>.json, from `node bench/dist/sim.js <scene> --save=bench/saves
  * --warm=30`) into the dev server, and at each sim speed measures per real frame: the engine's simulate, its render
- * (frame building + view.render, which is Three.js), hud/inspect, and the rest (React, the browser); plus the sim
+ * (frame building + view.render, on a 2D canvas), hud/inspect, and the rest (React, the browser); plus the sim
  * speed actually achieved (sim clock over wall clock, since a frame's dt is capped at 0.1 s). Then a CPU profile
  * (Chrome DevTools Protocol) at one speed, and the sim alone in a tight loop inside the page (as if asleep).
  *
  * Usage: start `npx vite --port 5287 --strictPort`, then
  *   node bench/browser.cjs [scene=prod] [speeds=16,100,1000] [seconds=6] [profileSpeed=16]
- * Software WebGL (SwiftShader) makes the GPU side slow, so the frame rate here is far below a real machine's; the JS
- * timings (simulate, the JS side of render) are what carry over.
+ * Headless Chromium draws in software, so the frame rate here is below a real machine's; the JS timings (simulate,
+ * the frame building) are what carry over best.
  */
 const fs = require('fs');
 const path = require('path');
@@ -21,7 +21,7 @@ const PORT = process.env.PORT || 5287;
 const save = fs.readFileSync(path.join(__dirname, 'saves', `${scene}.json`), 'utf8');
 
 (async () => {
-  const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const browser = await chromium.launch();
   const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: Number(process.env.VW || 1280), height: Number(process.env.VH || 720) } });
   const page = await context.newPage();
   await page.addInitScript((s) => {
@@ -35,7 +35,7 @@ const save = fs.readFileSync(path.join(__dirname, 'saves', `${scene}.json`), 'ut
   await page.waitForTimeout(3000);
   await page.evaluate(() => {
     const lab = window.lab;
-    lab.debug({ locked: true, x: 1500, z: 1200, yaw: 0, pitch: -0.1 });
+    lab.debug({ x: 1500, z: 1200 });
     const acc = (window.__acc = {});
     const wrap = (obj, name, label) => {
       const orig = obj[name].bind(obj);
@@ -52,11 +52,11 @@ const save = fs.readFileSync(path.join(__dirname, 'saves', `${scene}.json`), 'ut
     };
     wrap(lab, 'simulate', 'simulate');
     wrap(lab, 'render', 'engine.render (incl. view.render)');
-    wrap(lab.view, 'render', 'view.render (Three.js)');
+    wrap(lab.view, 'render', 'view.render');
     wrap(lab, 'hud', 'hud');
     wrap(lab, 'inspect', 'inspect');
     wrap(lab, 'move', 'move');
-    wrap(lab.view, 'pick', 'view.pick (raycast)');
+    wrap(lab.view, 'pick', 'view.pick');
     window.__frames = [];
     const tick = (t) => {
       window.__frames.push(t);

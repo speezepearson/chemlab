@@ -5,8 +5,8 @@ import type { Pose, Vec3 } from './space';
 import type { Hose, Tool } from './tools';
 
 /**
- * Undo and redo, of the lab's arrangement only: what's in it, where everything is and which way it faces, tools'
- * valves, hoses, scales' tares, the player's notes, the room's switches and whether the shadow lamp is lit (see
+ * Undo and redo, of the lab's arrangement only: what's in it, where everything is, tools'
+ * valves (and which way a plain valve was turned), hoses, scales' tares, the player's notes, the room's switches and whether the shadow lamp is lit (see
  * Tool.lit: put back lit, it shines only for what its exposure had left). Never what's in the vessels:
  * the lab reacts and flows on between the player's actions, so an undo puts things back where they were, holding
  * whatever they hold now. Things are kept by reference, so one taken away and brought back by an undo or a redo is
@@ -27,31 +27,29 @@ export interface Things {
 /** The lab's arrangement at some moment (see arrangement). */
 export interface Arrangement {
   flasks: { f: Flask; pose: Pose; label: string }[];
-  tools: { t: Tool; pose: Pose; valves: number[]; note: string; labels: string[]; lit: boolean }[];
+  tools: { t: Tool; pose: Pose; valves: number[]; sides: number[]; note: string; labels: string[]; lit: boolean }[];
   scales: { sc: Scale; pose: Pose; load: { f: Flask; dx: number }[]; tare: number; note: string }[];
-  hoses: { h: Hose; outlet: Vec3; turn: number; reach: number }[];
+  hoses: { h: Hose; outlet: Vec3 }[];
   faucets: string[];
   stock: Stock;
   alarmsOff: boolean;
-  blindsShut: boolean;
 }
 
 /** The room's switches, which the engine keeps itself. */
-export type Switches = Pick<Arrangement, 'alarmsOff' | 'blindsShut'>;
+export type Switches = Pick<Arrangement, 'alarmsOff'>;
 
 /** How the lab is arranged just now. */
 export function arrangement(l: Things, sw: Switches): Arrangement {
   return {
     flasks: l.flasks.map((f) => ({ f, pose: { ...f.pose }, label: f.label })),
     tools: l.tools.map((t) => ({
-      t, pose: { ...t.pose }, valves: [...t.valves], note: t.note, labels: t.tanks.map((v) => v.label), lit: t.lit,
+      t, pose: { ...t.pose }, valves: [...t.valves], sides: [...t.sides], note: t.note, labels: t.tanks.map((v) => v.label), lit: t.lit,
     })),
     scales: l.scales.map((sc) => ({ sc, pose: { ...sc.pose }, load: sc.load.map((x) => ({ ...x })), tare: sc.tare, note: sc.note })),
-    hoses: l.hoses.map((h) => ({ h, outlet: { ...h.outlet }, turn: h.turn, reach: h.reach })),
+    hoses: l.hoses.map((h) => ({ h, outlet: { ...h.outlet } })),
     faucets: l.faucets.map((fa) => fa.note),
     stock: copyStock(l.stock),
     alarmsOff: sw.alarmsOff,
-    blindsShut: sw.blindsShut,
   };
 }
 
@@ -61,9 +59,10 @@ export function arrange(l: Things, a: Arrangement): void {
   l.tools.splice(
     0,
     Infinity,
-    ...a.tools.map(({ t, pose, valves, note, labels, lit }) => {
+    ...a.tools.map(({ t, pose, valves, sides, note, labels, lit }) => {
       Object.assign(t, { pose: { ...pose }, note, lit });
       t.valves.splice(0, Infinity, ...valves);
+      t.sides.splice(0, Infinity, ...sides);
       t.tanks.forEach((v, k) => (v.label = labels[k] ?? ''));
       return t;
     }),
@@ -77,7 +76,7 @@ export function arrange(l: Things, a: Arrangement): void {
       return sc;
     }),
   );
-  l.hoses.splice(0, Infinity, ...a.hoses.map(({ h, outlet, turn, reach }) => Object.assign(h, { outlet: { ...outlet }, turn, reach })));
+  l.hoses.splice(0, Infinity, ...a.hoses.map(({ h, outlet }) => Object.assign(h, { outlet: { ...outlet } })));
   l.faucets.forEach((fa, i) => (fa.note = a.faucets[i] ?? ''));
   for (const k of Object.keys(a.stock) as Stocked[]) l.stock[k].splice(0, Infinity, ...a.stock[k]);
 }

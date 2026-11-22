@@ -12,6 +12,7 @@ const STUBS: Record<string, string> = {
   chime: 'stubs/audio.ts',
   shatter: 'stubs/audio.ts',
   ambience: 'stubs/audio.ts',
+  audio: 'stubs/audio.ts',
 };
 
 export default defineConfig({
@@ -21,7 +22,7 @@ export default defineConfig({
       enforce: 'pre',
       resolveId(id, importer) {
         if (!importer || !importer.includes('/src/game/')) return null;
-        const m = /^\.\/(view|water|diverter|changeover|chime|shatter|ambience)$/.exec(id);
+        const m = /^\.\/(view|water|diverter|changeover|chime|shatter|ambience|audio)$/.exec(id);
         return m ? path.join(here, STUBS[m[1]]) : null;
       },
       // let the bench try other substep lengths (--substep=); the game's own is 0.02

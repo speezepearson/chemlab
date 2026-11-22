@@ -1,19 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FLASK_R, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_BASE, aimValve, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, onGrid, toolAnchor, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
-  docked, nozzleBox, nozzleMounts, nozzleStand, onScale, scaleBox, scaleSpot, snapReach, spoutNear, spoutAt, standBase, tankMouth, toolBox, toolStands, valveLocal,
-  valveNear, SHEET_SLOT, SLOT_REACH, inSlot, sheetIn, slotPose, slotted,
+  FAUCET_NECK, FAUCET_Y, FLASK_R, NOZZLE_R, SCALE_SLOTS, TOOL_DEPTH, bathAt, dippedIn, docked, faucetBox, faucetPipes, flaskArm, flaskBox,
+  flaskFluid, flaskLip, flaskMouth, footAt, insideVessel, isDocked, nozzleArm, nozzleBox, onScale, scaleArm, scaleBox, scaleSpot, spoutAt, spoutNear,
+  tankFluid, tankMouth, toolArms, toolBox, turnValve, newTurn, leverAt, setLever, leverOpening, SHUT_DEG, valveLocal, valveNear, SHEET_SLOT, SLOT_REACH, inSlot, sheetIn, slotted, FLASK_LIP, lipAt, tiltToLip,
 } from './bodies';
-import { SOLVENT_SPECIES, singleOf } from '../chem/species';
+import { LAMP_POSE, STATION_POSE } from './presets';
+import { singleOf } from '../chem/species';
 import { CAP } from './config';
+import { COLOR_FAUCETS, FAUCET_X } from './faucets';
 import { Flask } from './flask';
-import { FLASK_H } from './flaskShape';
-import { AIRLOCK } from './airlock';
+import { FLASK_H, fillLevel } from './flaskShape';
 import { boxesOverlap, solids } from './physics';
-import { LAMP_POSE } from './presets';
-import { SCALE_SHAPE, Scale } from './scale';
-import { CELL, COUNTERS, LAMP_AREA, LAMP_FLOOR, LIFT, ROOM, counterUnder, fromFrac, groundAt, toCell, toFrac, toWorld } from './space';
-import { BULB_Y, Hose, INLINE_DOCK, LAMP, SHAPES, SHEET, STRIP, STRIP_FOOT, THERMOMETER_ROD, Tool, dipUnder, footY, mouthBelow, tankX, type ToolKind } from './tools';
+import { Scale } from './scale';
+import { BENCH, CELL, LIFT, PLANE_Z, fromFrac, toFrac } from './space';
+import { BULB_Y, Hose, INLINE_DOCK, LAMP, SHAPES, SHEET, STRIP_FOOT, THERMOMETER_ROD, Tool, footY, mouthBelow, tankX, type ToolKind } from './tools';
 
 const at = (x: number, y: number, z: number, yaw = 0) => ({ x, y, z, yaw });
 
@@ -28,43 +28,7 @@ describe('fromFrac', () => {
   });
 });
 
-describe('the grid', () => {
-  it("runs along every counter's edges", () => {
-    for (const c of COUNTERS) for (const v of [c.x0, c.x1, c.z0, c.z1]) expect(v / CELL).toBeCloseTo(Math.round(v / CELL), 9);
-  });
-
-  it('puts a pose over the middle of the cell its anchor is in, facing the nearest way along it', () => {
-    const p = onGrid(at(130, 500, 470, 1.2), { x: 50, y: 0, z: 0 });
-    expect(p.yaw).toBeCloseTo(Math.PI / 2);
-    expect(p.y).toBe(500);
-    // turned a quarter, the anchor is 50 toward −z from it
-    expect(p.x).toBeCloseTo(150);
-    expect(p.z - 50).toBeCloseTo(450);
-  });
-
-  it("puts every mouth and spout of a tool on it over the middle of a cell, however it's turned, or a tool with none, its middle", () => {
-    for (const kind of Object.keys(SHAPES) as ToolKind[])
-      for (const yaw of [0.3, 1.9, -2.5]) {
-        const t = new Tool(kind, 0);
-        t.pose = onGrid(at(321, 500, 777, yaw), toolAnchor(t));
-        const pts = [...t.tanks.map((_, k) => tankMouth(t, k)), ...t.shape.spouts.map((_, j) => spoutAt(t, j))];
-        if (!pts.length) pts.push(t.pose);
-        for (const p of pts) {
-          expect(toCell(p.x), kind).toBeCloseTo(p.x, 6);
-          expect(toCell(p.z), kind).toBeCloseTo(p.z, 6);
-        }
-      }
-  });
-
-  it("puts both of a scale's places for a flask over cells' middles", () => {
-    const sc = new Scale(onGrid(at(321, 500, 777, 2), SCALE_ANCHOR));
-    for (const dx of SCALE_SLOTS) {
-      const p = onScale(sc, dx);
-      expect(toCell(p.x)).toBeCloseTo(p.x, 6);
-      expect(toCell(p.z)).toBeCloseTo(p.z, 6);
-    }
-  });
-
+describe('tool shapes', () => {
   it("has every tool's mouths and spouts a whole number of cells apart, so they can all be over cells' middles", () => {
     for (const kind of Object.keys(SHAPES) as ToolKind[]) {
       const sh = SHAPES[kind];
@@ -77,255 +41,25 @@ describe('the grid', () => {
   });
 });
 
-describe('the shadow lamp', () => {
-  const lamp = new Tool('shadowlamp', 0, { ...LAMP_POSE });
-  const b = toolBox(lamp);
-  const { h, wall, box, channel: ch } = LAMP;
-  /** The middle of the channel's cell `i`, counting from the enclosure, in the room. */
-  const cell = (i: number) => toWorld(LAMP_POSE, { x: ch.x0 + (i + 0.5) * CELL, y: 0, z: 0 });
-  const cells = Math.round((ch.x1 - ch.x0) / CELL);
-  const flaskAt = (x: number, z: number, y = LIFT) => {
-    const f = new Flask(CAP);
-    f.pose = at(x, y + FLASK_H, z);
-    return f;
-  };
-  /** The ways a tool can face along the channel: toward the lamp, or toward the sheet. */
-  const [TO_LAMP, TO_SHEET] = [LAMP_POSE.yaw - Math.PI / 2, LAMP_POSE.yaw + Math.PI / 2];
-  /**
-   * Whether a tool of a kind can stand in the channel, in its cell `i`, turned by `yaw`, its foot `up` above the
-   * channel's floor: clear of the trough, with its stands' bases on that floor and clear of the rest of it too.
-   */
-  const stands = (kind: ToolKind, i: number, yaw: number, up = 10): boolean => {
-    const t = new Tool(kind, 1);
-    const c = cell(i);
-    t.pose = onGrid(at(c.x, LAMP_FLOOR.y + up + t.shape.box.y1, c.z, yaw), toolAnchor(t));
-    const on = toolStands(t);
-    return !boxesOverlap(toolBox(t), b) && on.every((st) => counterUnder(standBase(st, 0)) === LAMP_FLOOR.y && !boxesOverlap(standBase(st, LAMP_FLOOR.y), b));
-  };
-
-  it('lies along the edge toward the room of a bench of its own in the front left corner, with no clamp stand', () => {
-    expect(COUNTERS.filter((c) => c.lamp)).toEqual([{ ...LAMP_AREA, lamp: true }]);
-    expect([LAMP_AREA.x0, LAMP_AREA.z1]).toEqual([ROOM.x0, ROOM.z1]);
-    // clear of every other counter, with room to squeeze between (the player is 90 across), and of the airlock's doorway
-    for (const c of COUNTERS.filter((k) => !k.lamp))
-      expect(Math.max(c.x0 - LAMP_AREA.x1, LAMP_AREA.x0 - c.x1, c.z0 - LAMP_AREA.z1, LAMP_AREA.z0 - c.z1)).toBeGreaterThanOrEqual(CELL);
-    expect(LAMP_AREA.x1).toBeLessThan(AIRLOCK.x - AIRLOCK.door.w / 2);
-    // on the bench, its enclosure's back flush with the bench's end, and its front wall just off the bench's edge
-    expect(b.y - b.hy).toBeCloseTo(LIFT);
-    expect(b.y + b.hy).toBeCloseTo(LIFT + h);
-    expect(b.x + b.hx).toBeCloseTo(LAMP_AREA.x1);
-    expect(b.x - b.hx).toBeGreaterThan(LAMP_AREA.x0);
-    expect(b.z - b.hz).toBeCloseTo(LAMP_AREA.z0 - wall);
-    expect(toolStands(lamp)).toEqual([]);
-  });
-
-  it("has its channel on the grid: the bench's row of cells nearest the room, a cell wide and three long", () => {
-    expect(2 * ch.z).toBe(CELL);
-    expect(cells).toBe(3);
-    expect(ch.x1 - ch.x0).toBe(cells * CELL);
-    for (let i = 0; i < cells; i++) {
-      const c = cell(i);
-      expect(toCell(c.x)).toBeCloseTo(c.x, 6);
-      expect(c.z).toBeCloseTo(LAMP_AREA.z0 + CELL / 2, 6);
-      expect(c.x).toBeGreaterThan(LAMP_AREA.x0);
-      expect(c.x).toBeLessThan(LAMP_AREA.x1);
-    }
-    // the lamp is at its end away from the left wall, shining toward that wall
-    expect(cell(0).x).toBeGreaterThan(cell(cells - 1).x);
-    expect(toWorld(LAMP_POSE, { x: box.x0, y: 0, z: 0 }).x).toBeGreaterThan(cell(0).x);
-  });
-
-  it("is solid in its enclosure, its two side walls and its end wall, all as tall as a sheet's paper, and its channel's floor", () => {
-    const parts = solids(b);
-    expect(parts).toHaveLength(5);
-    for (const p of parts.slice(0, 4)) expect([p.y - p.hy, p.y + p.hy].map((y) => +y.toFixed(6))).toEqual([LIFT, LIFT + SHEET.side]);
-    const [enclosure, near, far, end, floor] = parts;
-    // the floor is a plate on the bench from wall to wall, from the enclosure to a slot's width short of the end wall,
-    // and it's where space.ts says the channel's floor is
-    expect([floor.y - floor.hy, floor.y + floor.hy].map((y) => +y.toFixed(6))).toEqual([LIFT, LAMP_FLOOR.y]);
-    expect([floor.z - floor.hz, floor.z + floor.hz].map((z) => +z.toFixed(6))).toEqual([LAMP_FLOOR.z0, LAMP_FLOOR.z1]);
-    expect(floor.x + floor.hx).toBeCloseTo(LAMP_FLOOR.x1);
-    expect(floor.x - floor.hx).toBeCloseTo(LAMP_FLOOR.x0 + LAMP.slot);
-    expect(LAMP.slot).toBeGreaterThan(SHEET.clip.d);
-    expect(LAMP.floor).toBe(LAMP_FLOOR.y - LIFT);
-    // the enclosure is as wide as the trough over its walls; the walls are either side of the channel, all along it
-    expect(enclosure.hz).toBe(ch.z + wall);
-    expect(enclosure.hx).toBe((box.x1 - box.x0) / 2);
-    expect([near.z + near.hz, far.z - far.hz].map((z) => +z.toFixed(6))).toEqual([LAMP_AREA.z0, LAMP_AREA.z0 + CELL]);
-    expect(near.hx).toBe((ch.x1 - ch.x0) / 2);
-    // the end wall closes the channel's far end, from side to side
-    expect(end.x + end.hx).toBeCloseTo(cell(cells - 1).x - CELL / 2);
-    expect(end.hz).toBe(ch.z + wall);
-  });
-
-  it('takes a flask in any cell of its channel, on its floor, and a scale along it, but not across', () => {
-    for (let i = 0; i < cells; i++) {
-      const f = flaskAt(cell(i).x, cell(i).z, LAMP_FLOOR.y);
-      // it stands on the channel's floor, which is where what falls there lands too
-      expect(counterUnder(flaskBox(f))).toBe(LAMP_FLOOR.y);
-      expect(groundAt(f.pose.x, f.pose.z)).toBe(LAMP_FLOOR.y);
-      expect(boxesOverlap(flaskBox(f), b), `${i}`).toBe(false);
-      // set down on the bench under the floor, it would be in it
-      expect(boxesOverlap(flaskBox(flaskAt(cell(i).x, cell(i).z)), b)).toBe(true);
-    }
-    // off the floor, the bench is as high as any counter
-    expect(groundAt(cell(cells).x, cell(cells).z)).toBe(LIFT);
-    expect(groundAt(cell(1).x, cell(1).z + CELL)).toBe(LIFT);
-    expect(counterUnder(flaskBox(flaskAt(cell(1).x, cell(1).z + CELL)))).toBe(LIFT);
-    // a cell further either way is the enclosure, or past the end wall, where the bench is free
-    expect(boxesOverlap(flaskBox(flaskAt(cell(-1).x, cell(-1).z, LAMP_FLOOR.y)), b)).toBe(true);
-    expect(boxesOverlap(flaskBox(flaskAt(cell(cells).x, cell(cells).z)), b)).toBe(false);
-    // (a scale is two cells long, a place for a flask over each: over the first two of the channel's, or the last two)
-    for (const i of [1, 2]) {
-      const along = new Scale(onGrid(at(cell(i).x, LAMP_FLOOR.y + SCALE_SHAPE.body.y1, cell(i).z, LAMP_POSE.yaw), SCALE_ANCHOR));
-      expect(boxesOverlap(scaleBox(along), b)).toBe(false);
-      expect(counterUnder(scaleBox(along))).toBe(LAMP_FLOOR.y);
-    }
-    const across = new Scale(onGrid(at(cell(1).x, LAMP_FLOOR.y + SCALE_SHAPE.body.y1, cell(1).z, TO_LAMP), SCALE_ANCHOR));
-    expect(boxesOverlap(scaleBox(across), b)).toBe(true);
-  });
-
-  it('takes a tool no wider than its channel on its stand, facing along it, and no other', () => {
-    // in the cell by the lamp it faces the lamp, its stand behind it in the next cell; by the sheet, the sheet
-    expect(stands('dispenser', 0, TO_LAMP)).toBe(true);
-    expect(stands('dispenser', cells - 1, TO_SHEET)).toBe(true);
-    expect(stands('dispenser', 1, TO_LAMP)).toBe(true);
-    expect(stands('dispenser', 1, TO_SHEET)).toBe(true);
-    // the other way round its stand would be in the enclosure, or the end wall
-    expect(stands('dispenser', 0, TO_SHEET)).toBe(false);
-    expect(stands('dispenser', cells - 1, TO_LAMP)).toBe(false);
-    // facing across the channel, its stand would be in a side wall
-    for (let i = 0; i < cells; i++) for (const yaw of [LAMP_POSE.yaw, LAMP_POSE.yaw + Math.PI]) expect(stands('dispenser', i, yaw)).toBe(false);
-    const fits = (Object.keys(SHAPES) as ToolKind[])
-      .filter((k) => !SHAPES[k].fixed && !SHAPES[k].flat)
-      .filter((k) => [0, 1, 2].some((i) => [TO_LAMP, TO_SHEET].some((yaw) => stands(k, i, yaw))));
-    expect(fits.sort()).toEqual(['column', 'dispenser', 'meter', 'pipette', 'sheet', 'strip', 'thermometer', 'thermometerWide']);
-  });
-
-  it('leaves the two rows of its bench behind it clear, with room for the longest tools on their two stands', () => {
-    for (const row of [1.5, 2.5])
-      for (let x = LAMP_AREA.x0 + CELL / 2; x < LAMP_AREA.x1; x += CELL) {
-        const f = flaskAt(x, LAMP_AREA.z0 + row * CELL);
-        expect(counterUnder(flaskBox(f))).toBe(LIFT);
-        expect(boxesOverlap(flaskBox(f), b), `${x}, ${row}`).toBe(false);
-      }
-    for (const kind of ['heater', 'sorter', 'separator'] as const) {
-      // somewhere along the row behind the trough, facing the room, its stands in the row by the wall
-      const fits = [0, 1, 2, 3, 4].some((i) => {
-        const t = new Tool(kind, 1);
-        t.pose = onGrid(at(LAMP_AREA.x0 + (i + 0.5) * CELL, LIFT + 260, LAMP_AREA.z0 + 1.5 * CELL, Math.PI), toolAnchor(t));
-        const on = toolStands(t);
-        return on.length === 2 && !boxesOverlap(toolBox(t), b) && on.every((st) => counterUnder(standBase(st, 0)) === LIFT && !boxesOverlap(standBase(st, LIFT), b));
-      });
-      expect(fits, kind).toBe(true);
-    }
-  });
-});
-
-describe("the shadow lamp's slot", () => {
-  const lamp = new Tool('shadowlamp', 0, { ...LAMP_POSE });
-  const sheetAt = (p: { x: number; y: number; z: number; yaw: number }, id = 1) => new Tool('sheet', id, p);
-  /** A pose `along` the channel from the slot (toward the sheet's end of it), `up` from it, and `out` from it toward the room. */
-  const near = (along: number, up: number, out: number, yaw = SHEET_SLOT.yaw) => ({
-    ...toWorld({ ...SHEET_SLOT, yaw: LAMP_POSE.yaw }, { x: along, y: up, z: out }), yaw,
-  });
-
-  it("stands a sheet across the end of the channel, against the end wall, facing the lamp, its bar above the walls", () => {
-    const s = sheetAt({ ...SHEET_SLOT });
-    const sb = toolBox(s);
-    const [, near, far, end, floor] = solids(toolBox(lamp));
-    // on the bench, in the slot the floor leaves, its back to the end wall's inner face, its paper reaching from one
-    // side wall to the other
-    expect(sb.y - sb.hy).toBeCloseTo(LIFT);
-    const [bar, paper] = solids(sb);
-    expect(paper.x - paper.hz).toBeCloseTo(end.x + end.hx);
-    expect(paper.x + paper.hz).toBeLessThan(floor.x - floor.hx);
-    // so the square its light falls on stands on the floor's top
-    expect(sb.y - sb.hy + SHEET.margin).toBeCloseTo(LAMP_FLOOR.y);
-    expect(paper.z - paper.hx).toBeCloseTo(near.z + near.hz);
-    expect(paper.z + paper.hx).toBeCloseTo(far.z - far.hz);
-    expect(boxesOverlap(sb, toolBox(lamp))).toBe(false);
-    // the paper is as tall as the walls, and the bar is all above them, to take the sheet out by
-    expect(paper.y + paper.hy).toBeCloseTo(LIFT + LAMP.h);
-    expect(bar.y - bar.hy).toBeCloseTo(LIFT + LAMP.h);
-    // its front is toward the lamp
-    const front = { x: SHEET_SLOT.x + Math.sin(SHEET_SLOT.yaw), z: SHEET_SLOT.z + Math.cos(SHEET_SLOT.yaw) };
-    const box = toWorld(LAMP_POSE, { x: LAMP.box.x1, y: 0, z: 0 });
-    expect(Math.hypot(front.x - box.x, front.z - box.z)).toBeCloseTo(Math.hypot(SHEET_SLOT.x - box.x, SHEET_SLOT.z - box.z) - 1);
-    // and a flask in the cell next to it is clear of it
-    const f = new Flask(CAP);
-    f.pose = { ...toWorld(LAMP_POSE, { x: LAMP.channel.x1 - CELL / 2, y: LAMP.floor + FLASK_H - LAMP.h, z: 0 }), yaw: 0 };
-    expect(boxesOverlap(flaskBox(f), sb)).toBe(false);
-  });
-
-  it('needs no stand for a sheet in it, which stands on one anywhere else', () => {
-    expect(toolStands(sheetAt({ ...SHEET_SLOT }))).toEqual([]);
-    expect(toolStands(sheetAt(slotPose(SHEET_SLOT.yaw + Math.PI)))).toEqual([]);
-    const out = sheetAt(at(350, LIFT + 350, 750));
-    expect(toolStands(out)).toHaveLength(1);
-    // its stand's clamp is on the bar along its top
-    expect(out.pose.y - toolStands(out)[0].clampY).toBeLessThanOrEqual(SHEET.clip.h);
-  });
-
-  it('knows a sheet in it, facing either way, to within what a save keeps of where it is', () => {
-    expect(inSlot(SHEET_SLOT)).toBe(true);
-    expect(inSlot({ ...SHEET_SLOT, yaw: SHEET_SLOT.yaw + Math.PI })).toBe(true);
-    expect(inSlot({ ...SHEET_SLOT, x: SHEET_SLOT.x + 1e-9, y: SHEET_SLOT.y - 1e-9 })).toBe(true);
-    expect(inSlot({ ...SHEET_SLOT, yaw: SHEET_SLOT.yaw + Math.PI / 2 })).toBe(false);
-    expect(inSlot({ ...SHEET_SLOT, x: SHEET_SLOT.x + CELL / 2 })).toBe(false);
-    const a = sheetAt({ ...SHEET_SLOT });
-    const b = sheetAt(at(350, LIFT + 350, 750), 2);
-    expect(sheetIn([lamp, b, a])).toBe(a);
-    expect(sheetIn([lamp, b, a], a)).toBeNull();
-    expect(sheetIn([lamp, b])).toBeNull();
-  });
-
-  it('takes a sheet let go of near it, whichever way it faces, keeping the side that was toward the lamp there', () => {
-    const t = sheetAt(at(0, 0, 0));
-    // held over the cell at the end of the channel or the one past the end wall, or just off the bench from them,
-    // above or a little below
-    for (const p of [near(-47.5, 60, 0), near(52.5, 150, 0), near(-47.5, -80, CELL), near(52.5, 0, CELL), near(0, 0, 0)])
-      expect(slotted(t, p, [lamp, t])).toEqual(SHEET_SLOT);
-    // with its back to the lamp, it goes in that way round; held across it, it's turned to face the lamp
-    const back = SHEET_SLOT.yaw + Math.PI;
-    expect(slotted(t, near(-47.5, 60, 0, back), [lamp, t])).toEqual(slotPose(back));
-    expect(inSlot(slotted(t, near(-47.5, 60, 0, back), [lamp, t]))).toBe(true);
-    expect(Math.cos(slotted(t, near(-47.5, 60, 0, back), [lamp, t]).yaw - SHEET_SLOT.yaw)).toBeCloseTo(-1);
-    expect(slotted(t, near(-47.5, 60, 0, SHEET_SLOT.yaw + Math.PI / 2), [lamp, t])).toEqual(SHEET_SLOT);
-  });
-
-  it("leaves one that's held further off where it is, and one held at a slot that's full, or that isn't there", () => {
-    const t = sheetAt(at(0, 0, 0));
-    const R = SLOT_REACH;
-    // a cell further along the channel either way, over the row of bench behind the trough, too far out, too high, too low
-    for (const p of [near(R.along + 1, 0, 0), near(-R.along - 1, 0, 0), near(0, 0, -CELL), near(0, 0, R.out + 1), near(0, R.up + 1, 0), near(0, -R.down - 1, 0)])
-      expect(slotted(t, p, [lamp, t])).toEqual(p);
-    const p = near(-47.5, 50, 0);
-    const other = sheetAt({ ...SHEET_SLOT }, 2);
-    expect(slotted(t, p, [lamp, t, other])).toEqual(p);
-    expect(slotted(t, p, [t])).toEqual(p);
-    // its own place in the slot doesn't count against it
-    expect(slotted(other, p, [lamp, other])).toEqual(SHEET_SLOT);
-  });
-});
-
 describe('tools in the room', () => {
-  it('drip from a spout into the tank of a tool hung right under it, at any yaw', () => {
-    for (const yaw of [0, 1, Math.PI]) {
-      const top = new Tool('dispenser', 0, at(100, 800, 200, yaw));
-      const below = new Tool('dispenser', 1, at(100, 600, 200, yaw + 0.3));
-      const m = mouthBelow([tankMouth(top, 0), tankMouth(below, 0)], spoutAt(top, 0));
-      expect(m?.v).toBe(below.tanks[0]);
-    }
+  it('drip from a spout into the tank of a tool hung right under it', () => {
+    const top = new Tool('dispenser', 0, at(100, 800, PLANE_Z));
+    const below = new Tool('dispenser', 1, at(100, 600, PLANE_Z));
+    const m = mouthBelow([tankMouth(top, 0), tankMouth(below, 0)], spoutAt(top, 0));
+    expect(m?.v).toBe(below.tanks[0]);
+    // and past it, a CELL along, into nothing
+    below.pose = at(100 + CELL, 600, PLANE_Z);
+    expect(mouthBelow([tankMouth(top, 0), tankMouth(below, 0)], spoutAt(top, 0))).toBeNull();
   });
 
-  it('turn their spouts with them', () => {
-    const sep = new Tool('separator', 0, at(0, 500, 0, Math.PI / 2));
-    const last = sep.shape.spouts.length - 1;
-    // turned a quarter, left to right becomes front to back
-    expect(spoutAt(sep, 0).x).toBeCloseTo(0);
-    expect(spoutAt(sep, 0).z).toBeCloseTo(-sep.shape.spouts[0]);
-    expect(spoutAt(sep, last).z).toBeCloseTo(-sep.shape.spouts[last]);
+  it("drip from a row of spouts into a row of flasks a CELL apart under them", () => {
+    const sep = new Tool('separator', 0, at(1000, 800, PLANE_Z));
+    const flasks = sep.shape.spouts.map((x) => {
+      const f = new Flask(CAP);
+      f.pose = at(1000 + x, LIFT + FLASK_H, PLANE_Z);
+      return f;
+    });
+    sep.shape.spouts.forEach((_, j) => expect(mouthBelow(flasks.map(flaskMouth), spoutAt(sep, j))?.v).toBe(flasks[j]));
   });
 
   it('bump into each other only where their boxes meet', () => {
@@ -341,71 +75,218 @@ describe('spoutNear', () => {
     const sep = new Tool('separator', 0);
     const y = sep.shape.spoutY;
     expect(spoutNear(sep, sep.shape.spouts[1] + 3, y - 2)).toBe(1);
-    expect(spoutNear(sep, sep.shape.spouts[4], y - 25)).toBe(4);
-    expect(spoutNear(sep, sep.shape.spouts[4], y - 60)).toBeNull();
-    expect(spoutNear(sep, (sep.shape.spouts[1] + sep.shape.spouts[2]) / 2, y)).toBeNull();
+    expect(spoutNear(sep, sep.shape.spouts[0], y - 25)).toBe(0);
+    expect(spoutNear(sep, sep.shape.spouts[0], y - 60)).toBeNull();
+    expect(spoutNear(sep, (sep.shape.spouts[0] + sep.shape.spouts[1]) / 2, y)).toBeNull();
   });
 });
 
 describe('valveNear', () => {
   it('finds the nearest valve within reach of its lever, and none further off', () => {
-    const ht = new Tool('heater', 0);
-    const v = valveLocal(ht, 1);
-    expect(valveNear(ht, v.x + 5, v.y + 3)).toBe(1);
-    expect(valveNear(ht, v.x + 40, v.y + 40)).toBeNull();
+    const ex = new Tool('exchanger', 0);
+    const v = valveLocal(ex, 1);
+    expect(valveNear(ex, v.x + 5, v.y + 3)).toBe(1);
+    expect(valveNear(ex, v.x + 40, v.y + 40)).toBeNull();
     expect(valveNear(new Tool('sorter', 0), 0, 0)).toBeNull();
   });
 });
 
-describe('aimValve', () => {
-  it("turns a dial clockwise from down-left, off, to down-right, full", () => {
+describe('leverOpening', () => {
+  const zone = SHUT_DEG / 90;
+  it('is exactly shut within the dead zone either side of shut, as at shut', () => {
+    for (let d = -SHUT_DEG; d <= SHUT_DEG; d += 0.5) expect(leverOpening(d / 90)).toBe(0);
+    const t = new Tool('dispenser', 0);
+    t.sides[0] = -1;
+    setLever(t, 0, -zone * 0.9);
+    expect([t.valves[0], t.sides[0]]).toEqual([0, 1]);
+  });
+  it('rises from 0 at the edge of the dead zone to full at a quarter turn, continuously, alike either way', () => {
+    expect(leverOpening(zone + 1e-6)).toBeCloseTo(0, 5);
+    expect(leverOpening(1)).toBe(1);
+    expect(leverOpening(-1)).toBe(-1);
+    expect(leverOpening(5)).toBe(1);
+    let last = 0;
+    for (let i = 1; i <= 900; i++) {
+      const u = i / 900;
+      const o = leverOpening(u);
+      expect(leverOpening(-u) + 0).toBe(-o + 0);
+      expect(o).toBeGreaterThanOrEqual(last);
+      expect(o - last).toBeLessThan(1 / 900 / (1 - zone) + 1e-9);
+      last = o;
+    }
+    // so a fine opening is still to be had, a little past the edge
+    expect(leverOpening(zone + 0.1 / 90)).toBeGreaterThan(0);
+    expect(leverOpening(zone + 0.1 / 90)).toBeLessThan(0.002);
+  });
+});
+
+describe('turnValve', () => {
+  /** Turn valve k from scratch with the pointer at each of these points round it, at radius r, by angle clockwise from straight up. */
+  const round = (t: Tool, k: number, degrees: number[], r = 20, turn = newTurn()): number[] => {
+    const v = valveLocal(t, k);
+    return degrees.map((d) => {
+      const a = (d * Math.PI) / 180;
+      turnValve(t, k, v.x + r * Math.sin(a), v.y - r * Math.cos(a), turn);
+      return t.valves[k];
+    });
+  };
+  /** Every whole degree from `a` to `b`, the way it goes. */
+  const sweep = (a: number, b: number): number[] => Array.from({ length: Math.abs(b - a) + 1 }, (_, i) => a + Math.sign(b - a) * i);
+
+  it("sets a dial to where it's first pointed, clockwise from down-left, off, to down-right, full", () => {
     const ht = new Tool('heater', 0);
     const k = ht.shape.dial!;
-    const v = valveLocal(ht, k);
-    aimValve(ht, k, v.x - 20, v.y + 20);
-    expect(ht.valves[k]).toBeCloseTo(0);
-    aimValve(ht, k, v.x, v.y - 20);
-    expect(ht.valves[k]).toBeCloseTo(0.5);
-    aimValve(ht, k, v.x + 20, v.y + 20);
-    expect(ht.valves[k]).toBeCloseTo(1);
+    expect(round(ht, k, [-135])[0]).toBeCloseTo(0);
+    expect(round(ht, k, [0])[0]).toBeCloseTo(0.5);
+    expect(round(ht, k, [135])[0]).toBeCloseTo(1);
+    // first pointed into the gap at the bottom, it stays where it was
+    ht.valves[k] = 0.3;
+    expect(round(ht, k, [180])[0]).toBe(0.3);
   });
 
+  it('then follows the pointer round, staying at the end it reaches however far round it goes, and coming back as it does', () => {
+    const ht = new Tool('heater', 0);
+    const k = ht.shape.dial!;
+    const turn = newTurn();
+    // from straight up, clockwise round twice: up to full at down-right, and full from there on, across the gap too
+    const there = round(ht, k, sweep(0, 720), 20, turn);
+    expect(there[135]).toBeCloseTo(1);
+    expect(Math.min(...there.slice(135))).toBeCloseTo(1);
+    for (let i = 1; i < there.length; i++) expect(there[i]).toBeGreaterThanOrEqual(there[i - 1]);
+    // and back the other way, down as soon as it turns back, to off, and off from there on
+    const back = round(ht, k, sweep(720, -90), 20, turn);
+    expect(back[45]).toBeCloseTo(1 - 45 / 270);
+    expect(back[270]).toBeCloseTo(0);
+    expect(Math.max(...back.slice(270))).toBeCloseTo(0);
+    for (let i = 1; i < back.length; i++) expect(back[i]).toBeLessThanOrEqual(back[i - 1]);
+  });
 
-  it("points a splitter's or multiplexer's lever left for 0, up for even, and right for 1", () => {
-    for (const kind of ['splitter', 'multiplexer'] as const) {
-      const t = new Tool(kind, 0);
-      const v = valveLocal(t, 0);
-      aimValve(t, 0, v.x - 30, v.y);
-      expect(t.valves[0], kind).toBeCloseTo(0);
-      aimValve(t, 0, v.x, v.y - 30);
-      expect(t.valves[0], kind).toBeCloseTo(0.5);
-      aimValve(t, 0, v.x + 30, v.y);
-      expect(t.valves[0], kind).toBeCloseTo(1);
+  /** A plain valve's setting with its lever a share u of a quarter turn from shut, either way. */
+  const op = (u: number): number => Math.abs(leverOpening(u));
+  const ZONE = SHUT_DEG / 90;
+
+  it('opens a valve pointed up, closes it pointed right, and follows from there, clamped', () => {
+    const t = new Tool('dispenser', 0);
+    expect(round(t, 0, [0])[0]).toBeCloseTo(1);
+    expect(round(t, 0, [90])[0]).toBe(0);
+    expect(round(t, 0, [45])[0]).toBeCloseTo(op(0.5));
+    const turn = newTurn();
+    // from half open, a full turn counterclockwise opens it all the way, and a quarter back closes it
+    const open = round(t, 0, sweep(45, -315), 20, turn);
+    expect(open[open.length - 1]).toBe(1);
+    expect(round(t, 0, sweep(-315, -225), 20, turn).pop()).toBe(0);
+  });
+
+  it('opens a valve the other way too, pointed down, by how far its lever is from shut either way', () => {
+    const t = new Tool('dispenser', 0);
+    expect(round(t, 0, [180])[0]).toBeCloseTo(1);
+    expect(t.sides[0]).toBe(-1);
+    expect(round(t, 0, [135])[0]).toBeCloseTo(op(0.5));
+    expect(t.sides[0]).toBe(-1);
+    expect(leverAt(t, 0)).toBeCloseTo(-0.5);
+    expect(round(t, 0, [45])[0]).toBeCloseTo(op(0.5));
+    expect(t.sides[0]).toBe(1);
+    // pointed left, outside the sweep, it stays where it was
+    expect(round(t, 0, [270])[0]).toBeCloseTo(op(0.5));
+    expect(t.sides[0]).toBe(1);
+  });
+
+  it('turns smoothly through shut from one side to the other, clamped a quarter turn either way', () => {
+    const t = new Tool('dispenser', 0);
+    const turn = newTurn();
+    const step = 1 / 90 / (1 - ZONE) + 1e-9;
+    // from open up, clockwise: shut at straight right, then opening down, all the way at straight down, and no further
+    const down = sweep(0, 300).map((d) => (round(t, 0, [d], 20, turn), { u: turn.u!, v: t.valves[0], side: t.sides[0] }));
+    expect(down[0].u).toBeCloseTo(1);
+    expect(down[90].u).toBeCloseTo(0);
+    expect(down[180].u).toBeCloseTo(-1);
+    expect(Math.max(...down.slice(180).map((s) => s.u))).toBeCloseTo(-1);
+    for (let i = 1; i < down.length; i++) {
+      expect(down[i].u).toBeLessThanOrEqual(down[i - 1].u);
+      // no jumps, neither in the lever's turn nor in the valve's setting
+      expect(down[i - 1].u - down[i].u).toBeLessThan(1 / 90 + 1e-9);
+      expect(Math.abs(down[i].v - down[i - 1].v)).toBeLessThan(step);
     }
+    // shut, the usual way, all through the dead zone, and open either side of it
+    for (let d = 90 - SHUT_DEG; d <= 90 + SHUT_DEG; d++) expect([down[d].v, down[d].side]).toEqual([0, 1]);
+    expect(down[90 - SHUT_DEG - 1].v).toBeGreaterThan(0);
+    expect(down[90 + SHUT_DEG + 1].v).toBeGreaterThan(0);
+    expect(down[90 + SHUT_DEG + 1].side).toBe(-1);
+    expect([t.valves[0], t.sides[0]]).toEqual([1, -1]);
+    // and back off the end as soon as it turns back, through shut and up again
+    const up = sweep(300, 90).map((d) => (round(t, 0, [d], 20, turn), turn.u!));
+    expect(up[30]).toBeCloseTo(-1 + 30 / 90);
+    expect(up[90]).toBeCloseTo(0);
+    expect(up[180]).toBeCloseTo(1);
+    expect(up[210]).toBe(1);
+    expect([t.valves[0], t.sides[0]]).toEqual([1, 1]);
   });
 
-  it('opens pointing up, closes pointing right, and ignores the core', () => {
+  it('keeps a valve nudged a little off shut shut, and turns on from where its lever is, back and forth', () => {
+    const t = new Tool('dispenser', 0);
+    const turn = newTurn();
+    // pointed a degree or two off shut either way, it's shut
+    expect(round(t, 0, [88, 89, 91, 92], 20, turn)).toEqual([0, 0, 0, 0]);
+    expect(t.sides[0]).toBe(1);
+    expect(leverAt(t, 0)).toBe(0);
+    // up to the zone's edge and back past shut, it's shut, and then opens down from the other edge, no sooner
+    expect(round(t, 0, sweep(92, 90 - SHUT_DEG), 20, turn).every((v) => v === 0)).toBe(true);
+    const back = round(t, 0, sweep(90 - SHUT_DEG, 110), 20, turn);
+    expect(back.slice(0, 2 * SHUT_DEG + 1).every((v) => v === 0)).toBe(true);
+    expect(back[back.length - 1]).toBeCloseTo(op(-20 / 90));
+    expect(t.sides[0]).toBe(-1);
+  });
+
+  it("sets a plain valve's lever either side of shut, the usual way at shut", () => {
+    const t = new Tool('dispenser', 0);
+    setLever(t, 0, -0.25);
+    expect([t.valves[0], t.sides[0]]).toEqual([op(0.25), -1]);
+    setLever(t, 0, -3);
+    expect([t.valves[0], t.sides[0]]).toEqual([1, -1]);
+    setLever(t, 0, 0);
+    expect([t.valves[0], t.sides[0]]).toEqual([0, 1]);
+    setLever(t, 0, 2);
+    expect([t.valves[0], t.sides[0]]).toEqual([1, 1]);
+    setLever(t, 0, -ZONE / 2);
+    expect([t.valves[0], t.sides[0]]).toEqual([0, 1]);
+  });
+
+  it("draws a saved setting's lever where turning it there would, and keeps a tiny one as it was", () => {
+    const t = new Tool('dispenser', 0);
+    for (const u of [-1, -0.5, -ZONE - 0.01, ZONE + 0.01, 0.3, 1]) {
+      setLever(t, 0, u);
+      expect(leverAt(t, 0)).toBeCloseTo(u);
+    }
+    t.valves[0] = 0.001;
+    t.sides[0] = -1;
+    expect(leverAt(t, 0)).toBeLessThan(-ZONE);
+    expect(leverOpening(leverAt(t, 0))).toBeCloseTo(-0.001);
+    // taken hold of pointing outside its sweep, it's left exactly as it was
+    round(t, 0, [270]);
+    expect([t.valves[0], t.sides[0]]).toEqual([0.001, -1]);
+  });
+
+  it('keeps a valve where it is in its core, and picks the pointer up again where it comes out', () => {
     const t = new Tool('dispenser', 0);
     const v = valveLocal(t, 0);
-    aimValve(t, 0, v.x, v.y - 30);
-    expect(t.valves[0]).toBeCloseTo(1);
-    aimValve(t, 0, v.x + 30, v.y);
-    expect(t.valves[0]).toBeCloseTo(0);
-    aimValve(t, 0, v.x + 20, v.y - 20);
-    expect(t.valves[0]).toBeCloseTo(0.5);
-    aimValve(t, 0, v.x + 2, v.y - 2);
-    expect(t.valves[0]).toBeCloseTo(0.5);
+    const turn = newTurn();
+    round(t, 0, [45], 20, turn);
+    turnValve(t, 0, v.x + 2, v.y - 2, turn);
+    expect(t.valves[0]).toBeCloseTo(op(0.5));
+    // out the other side of the core, it's where it was, and goes on from there
+    expect(round(t, 0, [225, 215], 20, turn)).toEqual([expect.closeTo(op(0.5)), expect.closeTo(op(0.5 + 10 / 90))]);
   });
 
-  it("sweeps a splitter's from all left to all right", () => {
-    const t = new Tool('splitter', 0);
-    const v = valveLocal(t, 0);
-    aimValve(t, 0, v.x - 30, v.y);
-    expect(t.valves[0]).toBeCloseTo(0);
-    aimValve(t, 0, v.x + 30, v.y);
-    expect(t.valves[0]).toBeCloseTo(1);
-    aimValve(t, 0, v.x, v.y - 30);
-    expect(t.valves[0]).toBeCloseTo(0.5);
+  it("sweeps a splitter's or multiplexer's lever from all left to all right over the top", () => {
+    for (const kind of ['splitter', 'multiplexer'] as const) {
+      const t = new Tool(kind, 0);
+      expect(round(t, 0, [-90])[0], kind).toBeCloseTo(0);
+      expect(round(t, 0, [0])[0], kind).toBeCloseTo(0.5);
+      expect(round(t, 0, [90])[0], kind).toBeCloseTo(1);
+      // past all right, round underneath, it stays all right
+      const turn = newTurn();
+      expect(round(t, 0, sweep(0, 260), 20, turn).pop(), kind).toBe(1);
+    }
   });
 });
 
@@ -417,10 +298,6 @@ describe('flasks in the room', () => {
     f.tilt = Math.PI / 2;
     expect(flaskLip(f).x).toBeCloseTo(0);
     expect(flaskLip(f).y).toBeLessThan(500);
-    // turned to face the other way, it pours to the other side
-    f.tilt = 0.3;
-    f.pose = at(0, 500, 0, Math.PI);
-    expect(flaskLip(f).x).toBeLessThan(0);
   });
 
   it('catch what falls on their mouth', () => {
@@ -448,90 +325,10 @@ describe('scaleSpot', () => {
   });
 });
 
-describe('counterUnder', () => {
-  const island = COUNTERS.find((c) => c.island)!;
-  const mid = { x: (island.x0 + island.x1) / 2, z: (island.z0 + island.z1) / 2 };
-  it('finds the counter a footprint lies wholly on, at any yaw', () => {
-    expect(counterUnder({ ...mid, hx: 40, hz: 20, yaw: 0 })).toBe(LIFT);
-    expect(counterUnder({ ...mid, hx: 40, hz: 20, yaw: 1 })).toBe(LIFT);
-  });
-
-  it("finds none for one hanging off an edge, or out in an aisle", () => {
-    expect(counterUnder({ x: mid.x, z: island.z0 + 10, hx: 40, hz: 20, yaw: 0 })).toBeNull();
-    expect(counterUnder({ x: mid.x, z: island.z0 - 100, hx: 10, hz: 10, yaw: 0 })).toBeNull();
-  });
-});
-
-describe('stands', () => {
-  it('hold a tool up from behind, their bases clear of a flask standing under its spout', () => {
-    const t = new Tool('dispenser', 0, at(100, 600, 200));
-    const [st, more] = toolStands(t);
-    expect(more).toBeUndefined();
-    expect(st.z).toBeLessThan(200);
-    expect(st.clampY).toBeLessThan(600);
-    const f = new Flask(CAP);
-    const sp = spoutAt(t, 0);
-    f.pose = at(sp.x, LIFT + 70, sp.z);
-    expect(boxesOverlap(standBase(st, LIFT), flaskBox(f))).toBe(false);
-    expect(st.z + STAND_BASE.hz).toBeLessThan(sp.z - FLASK_R);
-  });
-
-  it('turn with the tool, two to a wide tool, and none for one built into a wall', () => {
-    const t = new Tool('dispenser', 0, at(0, 600, 0, Math.PI / 2));
-    // turned a quarter, its back is toward −x
-    expect(toolStands(t)[0].x).toBeLessThan(0);
-    expect(toolStands(t)[0].z).toBeCloseTo(0);
-    expect(toolStands(new Tool('separator', 0, at(0, 600, 0)))).toHaveLength(2);
-    expect(toolStands(new Tool('receptacle', 0, at(0, 600, 0)))).toHaveLength(0);
-  });
-
-  it("hold a hose's nozzle from behind it, as it faces", () => {
-    const e = { x: 10, y: 500, z: 300 };
-    expect(nozzleStand(e, 0).z).toBeLessThan(300);
-    expect(nozzleStand(e, Math.PI).z).toBeGreaterThan(300);
-    expect(nozzleStand(e, Math.PI).x).toBeCloseTo(10);
-  });
-
-  it("hold a hose's nozzle as far behind it as its arm reaches, in steps, within its range", () => {
-    const e = { x: 10, y: 500, z: 300 };
-    expect(nozzleStand(e, 0).z).toBeCloseTo(300 - NOZZLE_REACH.min);
-    expect(nozzleStand(e, 0, 200).z).toBeCloseTo(100);
-    const { min, max, step } = NOZZLE_REACH;
-    expect(snapReach(0)).toBe(min);
-    expect(snapReach(1e6)).toBe(max);
-    expect(snapReach(min + step * 0.6)).toBe(min + step);
-    expect(snapReach(min + step * 0.4)).toBe(min);
-  });
-
-  it("try a nozzle's stand where it's wanted first, then further along the same way, then round it", () => {
-    const want = { turn: 0, reach: NOZZLE_REACH.min + 2 * NOZZLE_REACH.step };
-    const ms = nozzleMounts(want);
-    expect(ms[0]).toEqual(want);
-    const same = ms.filter((m) => m.turn === 0);
-    expect(ms.slice(0, same.length)).toEqual(same);
-    expect(same.map((m) => m.reach)).toContain(NOZZLE_REACH.min);
-    expect(same.map((m) => m.reach)).toContain(NOZZLE_REACH.max);
-    // the opposite way comes last
-    expect(Math.abs(ms[ms.length - 1].turn)).toBeCloseTo(Math.PI);
-    expect(new Set(ms.map((m) => `${m.turn.toFixed(3)} ${m.reach}`)).size).toBe(ms.length);
-  });
-
-  it("find somewhere for a nozzle's stand clear of a cabinet behind the tube it's over", () => {
-    // turned a quarter, the spectroscope's cabinet reaches back from its tube, toward the wall, standing on the counter
-    const spec = new Tool('spectroscope', 0, at(500, LIFT + 96, 250, Math.PI / 2));
-    const tube = tankMouth(spec, 0);
-    const e = { x: tube.x, y: tube.y + 40, z: tube.z };
-    const clear = (m: { turn: number; reach: number }) => !boxesOverlap(standBase(nozzleStand(e, m.turn, m.reach), LIFT), toolBox(spec));
-    expect(clear({ turn: 0, reach: NOZZLE_REACH.min })).toBe(false);
-    const m = nozzleMounts({ turn: 0, reach: NOZZLE_REACH.min }).find(clear);
-    expect(m?.turn).toBe(0);
-  });
-});
-
 describe('docking', () => {
   it("snaps a nozzle down onto an inline instrument's tube it's over, from not too far above, and nothing else", () => {
-    const a = new Tool('spectroscope', 0, at(450, 800, 150));
-    const d = new Tool('dispenser', 1, at(750, 800, 150));
+    const a = new Tool('spectroscope', 0, at(450, 800, PLANE_Z));
+    const d = new Tool('dispenser', 1, at(750, 800, PLANE_Z));
     const top = tankMouth(a, 0);
     const over = (dy: number, x = top.x) => ({ x, y: top.y + dy, z: top.z, yaw: 0 });
     expect(docked(over(100), [a, d]).y).toBeCloseTo(top.y + 1);
@@ -541,15 +338,164 @@ describe('docking', () => {
     const tank = tankMouth(d, 0);
     expect(docked({ ...over(100), x: tank.x }, [a, d]).y).toBeCloseTo(top.y + 100);
     // docked, the nozzle sits clear of the tube
-    expect(boxesOverlap(nozzleBox(new Hose({ faucet: 0 }, docked(over(100), [a]), 0)), toolBox(a))).toBe(false);
+    expect(boxesOverlap(nozzleBox(new Hose({ faucet: 0 }, docked(over(100), [a]))), toolBox(a))).toBe(false);
+  });
+
+  it("centers a nozzle over the tube it snaps onto", () => {
+    const a = new Tool('spectroscope', 0, at(450, 800, PLANE_Z));
+    const top = tankMouth(a, 0);
+    const off = top.hx / 2;
+    const p = docked({ x: top.x + off, y: top.y + 50, z: top.z, yaw: 0 }, [a]);
+    expect(p.x).toBeCloseTo(top.x, 9);
+    expect(p.z).toBe(top.z);
+    // one that doesn't snap stays where it was let go
+    expect(docked({ x: top.x + off, y: top.y + INLINE_DOCK + 5, z: top.z, yaw: 0 }, [a]).x).toBe(top.x + off);
   });
 
   it("snaps a nozzle onto a flow meter's tube, clear of it", () => {
-    const m = new Tool('meter', 0, at(450, 800, 150));
+    const m = new Tool('meter', 0, at(450, 800, PLANE_Z));
     const top = tankMouth(m, 0);
     const p = docked({ x: top.x, y: top.y + 100, z: top.z, yaw: 0 }, [m]);
     expect(p.y).toBeCloseTo(top.y + 1);
-    expect(boxesOverlap(nozzleBox(new Hose({ faucet: 0 }, p, 0)), toolBox(m))).toBe(false);
+    expect(boxesOverlap(nozzleBox(new Hose({ faucet: 0 }, p)), toolBox(m))).toBe(false);
+  });
+
+  it("tells a nozzle snapped onto a tube from one left near it", () => {
+    const a = new Tool('spectroscope', 0, at(450, 800, PLANE_Z));
+    const d = new Tool('dispenser', 1, at(750, 800, PLANE_Z));
+    const top = tankMouth(a, 0);
+    const h = new Hose({ faucet: 0 }, docked({ x: top.x + 2, y: top.y + 30, z: top.z, yaw: 0 }, [a, d]));
+    expect(isDocked(h, [a, d])).toBe(true);
+    // not without the instrument, nor above it, nor beside it
+    expect(isDocked(h, [d])).toBe(false);
+    h.outlet = { ...h.outlet, y: top.y + 30 };
+    expect(isDocked(h, [a, d])).toBe(false);
+    h.outlet = { ...h.outlet, x: top.x + 10, y: top.y + 1 };
+    expect(isDocked(h, [a, d])).toBe(false);
+    // nor over a tank that isn't an instrument's
+    const tank = tankMouth(d, 0);
+    expect(isDocked(new Hose({ faucet: 0 }, { x: tank.x, y: tank.y + 1, z: tank.z }), [a, d])).toBe(false);
+  });
+});
+
+describe('arms', () => {
+  it('hold a narrow tool up by one in its middle, gripping its back near its top', () => {
+    const t = new Tool('dispenser', 0, at(300, 800, PLANE_Z));
+    const arms = toolArms(t);
+    expect(arms).toHaveLength(1);
+    const [a] = arms;
+    const b = t.shape.box;
+    expect(a.x).toBeCloseTo(300 + (b.x0 + b.x1) / 2, 9);
+    expect(a.z).toBeCloseTo(PLANE_Z - TOOL_DEPTH.dispenser.body / 2, 9);
+    expect(a.z).toBeGreaterThan(0);
+    expect(a.y).toBeLessThanOrEqual(800 - b.y0);
+    expect(a.y).toBeGreaterThan(800 - b.y1);
+    // on the tool's box, at its back
+    const box = toolBox(t);
+    expect(Math.abs(a.x - box.x)).toBeLessThanOrEqual(box.hx);
+    expect(Math.abs(a.y - box.y)).toBeLessThanOrEqual(box.hy);
+    expect(a.z).toBeCloseTo(box.z - box.hz, 9);
+  });
+
+  it('hold a wide tool up by two, one near each end', () => {
+    const t = new Tool('heater', 0, at(1000, 800, PLANE_Z));
+    const b = t.shape.box;
+    const arms = toolArms(t);
+    expect(arms).toHaveLength(2);
+    const [l, r] = arms;
+    expect(l.x).toBeGreaterThan(1000 + b.x0);
+    expect(l.x).toBeLessThan(1000);
+    expect(r.x).toBeGreaterThan(1000);
+    expect(r.x).toBeLessThan(1000 + b.x1);
+    expect(l.y).toBe(r.y);
+    for (const a of arms) expect(a.z).toBeLessThan(PLANE_Z);
+  });
+
+  it('hold up nothing built into the wall', () => {
+    expect(toolArms(new Tool('receptacle', 0, at(1000, 800, PLANE_Z)))).toHaveLength(0);
+  });
+
+  it("grip a thermometer by the top of its rod, the part of it that bumps into things", () => {
+    const t = new Tool('thermometer', 9, at(150, 800, PLANE_Z));
+    const [a] = toolArms(t);
+    expect(800 - a.y).toBeLessThan(THERMOMETER_ROD.h / 4);
+    const [top] = solids(toolBox(t));
+    expect(Math.abs(a.y - top.y)).toBeLessThanOrEqual(top.hy);
+  });
+
+  it("grip a flask, a scale and a hose's nozzle from behind, straight back from them", () => {
+    const f = new Flask(CAP);
+    f.pose = at(300, 700, PLANE_Z);
+    const fa = flaskArm(f);
+    expect(fa.x).toBe(300);
+    expect(fa.z).toBeLessThan(PLANE_Z);
+    expect(fa.y).toBeLessThan(700);
+    expect(fa.y).toBeGreaterThan(700 - FLASK_H);
+    const sc = new Scale(at(500, 700, PLANE_Z));
+    const sa = scaleArm(sc);
+    expect(sa.x).toBe(500);
+    expect(sa.y).toBeLessThan(700);
+    const sb = scaleBox(sc);
+    expect(sa.z).toBeCloseTo(sb.z - sb.hz, 9);
+    const h = new Hose({ faucet: 0 }, { x: 700, y: 650, z: PLANE_Z });
+    const na = nozzleArm(h);
+    expect(na).toEqual({ x: 700, y: na.y, z: PLANE_Z - NOZZLE_R });
+    const nb = nozzleBox(h);
+    expect(Math.abs(na.y - nb.y)).toBeLessThanOrEqual(nb.hy);
+  });
+});
+
+describe('faucets', () => {
+  it('have their spouts in a row along the wall where FAUCET_X says, out in the plane', () => {
+    const pipes = faucetPipes();
+    expect(pipes.map((p) => p.spout.x)).toEqual([...FAUCET_X]);
+    for (const { spout, wall } of pipes) {
+      expect(spout.y).toBe(FAUCET_Y);
+      expect(spout.z).toBe(PLANE_Z);
+      // its pipe leaves the wall straight behind and above it
+      expect(wall.x).toBe(spout.x);
+      expect(wall.y).toBe(FAUCET_Y + FAUCET_NECK);
+      expect(wall.z).toBeLessThan(spout.z);
+      expect(wall.z).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("are boxed from the spout up past the knob, and back to the wall, clear of each other", () => {
+    const pipes = faucetPipes();
+    const boxes = pipes.map((p) => faucetBox(p.spout));
+    pipes.forEach(({ spout, wall }, i) => {
+      const b = boxes[i];
+      expect(b.x).toBe(spout.x);
+      expect(b.y - b.hy).toBeCloseTo(spout.y, 9);
+      expect(b.y + b.hy).toBeGreaterThan(wall.y);
+      expect(b.z - b.hz).toBeCloseTo(0, 9);
+      expect(b.z + b.hz).toBeGreaterThan(spout.z);
+    });
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) expect(boxesOverlap(boxes[i], boxes[j])).toBe(false);
+  });
+
+  it('come after the supply station, which is next to the cabinet, clear of it and of the shadow lamp', () => {
+    const station = toolBox(new Tool('receptacle', 0, { ...STATION_POSE }));
+    const lamp = toolBox(new Tool('shadowlamp', 1, { ...LAMP_POSE }));
+    expect(station.x - station.hx).toBeGreaterThanOrEqual(BENCH.x0);
+    for (const { spout } of faucetPipes()) {
+      const b = faucetBox(spout);
+      expect(b.x - b.hx).toBeGreaterThan(station.x + station.hx);
+      expect(boxesOverlap(b, station)).toBe(false);
+      expect(boxesOverlap(b, lamp)).toBe(false);
+    }
+    // the first row is between the station and the lamp
+    expect(FAUCET_X[COLOR_FAUCETS]).toBeLessThan(lamp.x - lamp.hx);
+  });
+
+  it('leave room under them for a flask on a scale on the counter, to fill it', () => {
+    const [{ spout }] = faucetPipes();
+    const sc = new Scale(at(spout.x - SCALE_SLOTS[1], LIFT, PLANE_Z));
+    const f = new Flask(CAP);
+    f.pose = onScale(sc, SCALE_SLOTS[1]);
+    expect(boxesOverlap(flaskBox(f), faucetBox(spout))).toBe(false);
+    expect(boxesOverlap(scaleBox(sc, true), faucetBox(spout))).toBe(false);
+    expect(mouthBelow([flaskMouth(f)], spout)?.v).toBe(f);
   });
 });
 
@@ -590,13 +536,11 @@ describe('dippers', () => {
   /** A thermometer standing upright with its bulb at p. */
   const dipped = (p: { x: number; y: number; z: number }) => new Tool('thermometer', 9, at(p.x, p.y + BULB_Y, p.z));
 
-  it('bump into nothing below the top of the rod, where its stand holds it, so it can stand down in a flask', () => {
+  it('bump into nothing below the top of the rod, where its arm holds it, so it can stand down in a flask', () => {
     const f = new Flask(CAP);
     f.pose = at(150, LIFT + FLASK_H, 150);
     const t = dipped({ x: 150, y: LIFT + 10, z: 150 });
     expect(boxesOverlap(toolBox(t), flaskBox(f))).toBe(false);
-    const [st] = toolStands(t);
-    expect(t.pose.y - st.clampY).toBeLessThan(THERMOMETER_ROD.h / 4);
     // its top still does
     expect(boxesOverlap(toolBox(t), toolBox(new Tool('thermometer', 8, at(151, t.pose.y, 150))))).toBe(true);
   });
@@ -645,9 +589,6 @@ describe('dippers', () => {
     expect(foot.x).toBeCloseTo(150, 9);
     expect(foot.z).toBeCloseTo(150, 9);
     expect(foot.y).toBeCloseTo(LIFT + 200 - (STRIP_FOOT - 0.5), 9);
-    // turned, its foot stays under its top
-    t.pose = at(150, LIFT + 200, 150, 1.3);
-    expect(footAt(t).x).toBeCloseTo(150, 9);
     // stood with its foot in a flask's fluid, it's in it, and doesn't bump into the flask
     const f = new Flask(CAP);
     f.pose = at(150, LIFT + FLASK_H, 150);
@@ -656,71 +597,136 @@ describe('dippers', () => {
     t.pose = at(150, (floor + surface) / 2 + footY('strip'), 150);
     expect(bathAt(footAt(t), [f], [])).toBe(f);
     expect(boxesOverlap(toolBox(t), flaskBox(f))).toBe(false);
-    const [st] = toolStands(t);
-    expect(t.pose.y - st.clampY).toBeLessThan(STRIP.clip.h);
+  });
+});
+
+describe('insideVessel', () => {
+  const R = singleOf('R');
+
+  it("finds the flask a point is inside, whether or not it's in its fluid, where dippedIn needs the fluid", () => {
+    const f = new Flask(CAP);
+    f.pose = at(150, LIFT + FLASK_H, PLANE_Z);
+    const { floor } = flaskFluid(f);
+    const low = { x: 150, y: floor + 5, z: PLANE_Z };
+    const high = { x: 150, y: f.pose.y - 5, z: PLANE_Z };
+    // empty: inside it, but in no fluid
+    expect(insideVessel(low, [f], [])).toBe(f);
+    expect(dippedIn(low, [f], [])).toBeNull();
+    expect(bathAt(low, [f], [])).toBeNull();
+    // a third full: in its fluid low down, only inside it higher up
+    f.setMolecules(R, CAP / 3);
+    const { surface } = flaskFluid(f);
+    expect(surface).toBeGreaterThan(low.y);
+    expect(surface).toBeLessThan(high.y);
+    expect(insideVessel(low, [f], [])).toBe(f);
+    expect(bathAt(low, [f], [])).toBe(f);
+    expect(dippedIn(low, [f], [])?.depth).toBeCloseTo(surface - low.y, 6);
+    expect(insideVessel(high, [f], [])).toBe(f);
+    expect(bathAt(high, [f], [])).toBeNull();
+    // outside the glass, above its mouth or below its floor, in none
+    for (const p of [{ ...low, x: 150 + FLASK_R + 2 }, { ...high, y: f.pose.y + 5 }, { ...low, y: floor - 2 }]) {
+      expect(insideVessel(p, [f], [])).toBeNull();
+      expect(bathAt(p, [f], [])).toBeNull();
+    }
+    // tipped to pour, in none
+    f.tilt = 1;
+    expect(insideVessel(low, [f], [])).toBeNull();
   });
 
-  it('hover over the middle of a mouth they are aimed at, dip just under its fluid, and stand deeper in it', () => {
-    for (const kind of ['strip', 'thermometer', 'thermometerWide'] as const) {
-      const t = new Tool(kind, 9);
-      const strip = kind === 'strip';
-      // a flask on the grid, nearly full
-      const f = new Flask(CAP);
-      f.pose = at(150, LIFT + FLASK_H, 250);
-      f.setMolecules(R, 0.9 * CAP);
-      const m = flaskMouth(f);
-      const { hover, dipped, stood } = dipPoses(t, m, flaskFluid(f), 0.2);
-      for (const p of [hover, dipped, stood]) {
-        t.pose = p;
-        const foot = footAt(t);
-        expect(foot.x, kind).toBeCloseTo(m.x, 6);
-        expect(foot.z, kind).toBeCloseTo(m.z, 6);
-        expect(p.yaw).toBe(0);
-      }
-      t.pose = hover;
-      expect(footAt(t).y).toBeCloseTo(m.y + DIP_HOVER, 6);
-      // dipped by hand, no further in than it takes to touch the fluid
-      const { floor, surface } = flaskFluid(f);
-      expect(surface - floor).toBeGreaterThan(2 * (STRIP_STOOD + DIP_FLOOR));
-      t.pose = dipped;
-      expect(footAt(t).y).toBeCloseTo(surface - dipUnder(kind), 6);
-      expect(bathAt(footAt(t), [f], [])).toBe(f);
-      // a strip's point half in, a thermometer's bulb just covered
-      if (strip) expect(surface - (footAt(t).y - 0.5)).toBeCloseTo(STRIP.paper.point / 2, 6);
-      else expect(surface - (footAt(t).y + (THERMOMETER_ROD.bulb.y1 - THERMOMETER_ROD.bulb.y0) / 2)).toBeCloseTo(1, 6);
-      // stood in it, deeper: a strip's whole point under, a thermometer's bulb near the floor
-      t.pose = stood;
-      expect(footAt(t).y).toBeCloseTo(strip ? surface - STRIP_STOOD : floor + DIP_FLOOR, 6);
-      expect(footAt(t).y).toBeLessThan(surface - dipUnder(kind));
-      expect(bathAt(footAt(t), [f], [])).toBe(f);
-      // empty, down where it would stand on its floor, dipped or stood
-      f.setMolecules(R, 0);
-      const empty = dipPoses(t, m, flaskFluid(f), 0);
-      for (const p of [empty.dipped, empty.stood]) {
-        t.pose = p;
-        expect(footAt(t).y).toBeCloseTo(floor + (strip ? STRIP_FLOOR : DIP_FLOOR), 6);
-      }
-      // in a tool's shallow fluid (a flow meter's tube), dipped to the middle of its depth, and stood no higher: a strip's tip on its floor
-      const d = new Tool('meter', 3, onGrid(at(420, LIFT + 100, 250), toolAnchor(new Tool('meter', 3))));
-      d.tanks[0].setMolecules(SOLVENT_SPECIES, d.tanks[0].cap / 20);
-      const fl = tankFluid(d, 0);
-      const mid = (fl.floor + fl.surface) / 2;
-      expect(fl.surface - fl.floor).toBeLessThan(2 * dipUnder(kind));
-      const shallow = dipPoses(t, tankMouth(d, 0), fl, Math.PI / 2);
-      t.pose = shallow.dipped;
-      expect(footAt(t).y).toBeCloseTo(mid, 6);
-      expect(bathAt(footAt(t), [], [d])).toBe(d.tanks[0]);
-      t.pose = shallow.stood;
-      expect(footAt(t).y).toBeCloseTo(strip ? fl.floor + STRIP_FLOOR : mid, 6);
-      expect(bathAt(footAt(t), [], [d])).toBe(d.tanks[0]);
-      // and in next to nothing, either way at the middle of what there is, so it's in it
-      d.tanks[0].setMolecules(SOLVENT_SPECIES, d.tanks[0].cap / 2000);
-      const film = tankFluid(d, 0);
-      const least = dipPoses(t, tankMouth(d, 0), film, 0);
-      for (const p of [least.dipped, least.stood]) {
-        t.pose = p;
-        expect(footAt(t).y).toBeCloseTo((film.floor + film.surface) / 2, 6);
-      }
+  it("finds the tank a point is inside, whether or not it's in its fluid", () => {
+    const t = new Tool('dispenser', 0, at(300, 800, PLANE_Z));
+    const { floor } = tankFluid(t, 0);
+    const low = { x: 300, y: floor + 5, z: PLANE_Z };
+    const high = { x: 300, y: 795, z: PLANE_Z };
+    expect(insideVessel(low, [], [t])).toBe(t.tanks[0]);
+    expect(bathAt(low, [], [t])).toBeNull();
+    t.tanks[0].setMolecules(R, t.tanks[0].cap / 3);
+    const { surface } = tankFluid(t, 0);
+    expect(surface).toBeGreaterThan(low.y);
+    expect(surface).toBeLessThan(high.y);
+    expect(insideVessel(low, [], [t])).toBe(t.tanks[0]);
+    expect(bathAt(low, [], [t])).toBe(t.tanks[0]);
+    expect(insideVessel(high, [], [t])).toBe(t.tanks[0]);
+    expect(bathAt(high, [], [t])).toBeNull();
+    // beside its walls, or below its floor, in none
+    for (const p of [{ ...low, x: 300 + SHAPES.dispenser.tanks[0].x1 + 2 }, { ...low, y: floor - 2 }]) {
+      expect(insideVessel(p, [], [t])).toBeNull();
+      expect(bathAt(p, [], [t])).toBeNull();
     }
+  });
+
+  it("never finds the supply station's tanks, in the wall", () => {
+    const r = new Tool('receptacle', 0, at(1000, 800, PLANE_Z));
+    r.tanks[1].setMolecules(R, r.tanks[1].cap / 2);
+    const m = tankMouth(r, 1);
+    for (let dy = 0; dy < 400; dy += 10) {
+      const p = { x: m.x, y: m.y - dy, z: PLANE_Z };
+      expect(insideVessel(p, [], [r])).toBeNull();
+      expect(bathAt(p, [], [r])).toBeNull();
+    }
+  });
+});
+
+describe("the shadow lamp's slot", () => {
+  const lamp = () => new Tool('shadowlamp', 0, { ...LAMP_POSE });
+
+  it("stands a sheet of shadow paper behind the lamp's pane, its margin behind the frame and its bar showing above it", () => {
+    const s = new Tool('sheet', 1, { ...SHEET_SLOT });
+    // the paper's lit square is the pane, exactly
+    const paperTop = SHEET_SLOT.y - SHEET.top;
+    expect(paperTop - SHEET.margin).toBeCloseTo(LAMP_POSE.y - LAMP.pane.y, 9);
+    expect(SHEET_SLOT.x).toBe(LAMP_POSE.x);
+    // its bar is above the frame's top, to take it out by
+    expect(SHEET_SLOT.y).toBeGreaterThan(LAMP_POSE.y);
+    // in the wall behind the frame, so in neither's way
+    expect(boxesOverlap(toolBox(s), toolBox(lamp()))).toBe(false);
+    // where a sheet pinned to the wall anywhere else would be in the frame's way
+    expect(boxesOverlap(toolBox(new Tool('sheet', 2, { ...SHEET_SLOT, y: SHEET_SLOT.y + 1 })), toolBox(lamp()))).toBe(true);
+    expect(inSlot(s.pose)).toBe(true);
+    expect(sheetIn([lamp(), s])).toBe(s);
+    expect(sheetIn([lamp(), s], s)).toBeNull();
+  });
+
+  it('takes a sheet let go of near it, if the lamp is there and its slot is empty', () => {
+    const near = { ...SHEET_SLOT, x: SHEET_SLOT.x + SLOT_REACH.x - 1, y: SHEET_SLOT.y - SLOT_REACH.y + 1 };
+    const s = new Tool('sheet', 1, near);
+    expect(slotted(s, near, [lamp()])).toEqual(SHEET_SLOT);
+    // too far from it, or with no lamp, or a sheet in it already, it's just where it's held
+    const far = { ...near, x: SHEET_SLOT.x + SLOT_REACH.x + 1 };
+    expect(slotted(s, far, [lamp()])).toEqual(far);
+    expect(slotted(s, near, [])).toEqual(near);
+    expect(slotted(s, near, [lamp(), new Tool('sheet', 2, { ...SHEET_SLOT })])).toEqual(near);
+  });
+
+  it("leaves the lamp's frame and what's pinned to the wall out of the way of what's in the plane in front of them", () => {
+    const f = new Flask(CAP);
+    f.pose = { x: LAMP_POSE.x, y: LIFT + FLASK_H, z: PLANE_Z, yaw: 0 };
+    expect(boxesOverlap(flaskBox(f), toolBox(lamp()))).toBe(false);
+    expect(boxesOverlap(flaskBox(f), toolBox(new Tool('sheet', 1, { ...SHEET_SLOT })))).toBe(false);
+    expect(boxesOverlap(flaskBox(f), toolBox(new Tool('testpaper', 1, { x: LAMP_POSE.x + 300, y: LIFT + 70, z: PLANE_Z, yaw: 0 })))).toBe(false);
+    expect(toolArms(lamp())).toEqual([]);
+    expect(toolArms(new Tool('sheet', 1, { x: 4000, y: 900, z: PLANE_Z, yaw: 0 }))).toEqual([]);
+  });
+});
+
+describe('tiltToLip', () => {
+  const [lo, hi] = [0.1, 1.9];
+  it("tips a flask just far enough for its fluid to reach its lip, less the fuller it is, within the bounds it's given", () => {
+    let last = lo;
+    for (const frac of [0.9, 0.6, 0.3, 0.15, 0.05]) {
+      const t = tiltToLip(frac, lo, hi);
+      expect(t).toBeGreaterThanOrEqual(last);
+      last = t;
+      if (t > lo && t < hi) expect(fillLevel(t, frac)).toBeCloseTo(-FLASK_LIP * Math.sin(t), 0);
+    }
+    expect(tiltToLip(1, lo, hi)).toBe(lo);
+    expect(tiltToLip(0, lo, hi)).toBeGreaterThanOrEqual(last);
+  });
+
+  it('puts the lip of a flask with its mouth at a pose where flaskLip puts it', () => {
+    const f = new Flask(CAP);
+    f.pose = at(300, 500, PLANE_Z);
+    f.tilt = 1.2;
+    expect(lipAt(f.pose, 1.2)).toEqual(flaskLip(f));
   });
 });

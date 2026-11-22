@@ -5,14 +5,14 @@ import { History, UNDO_DEPTH, arrange, arrangement, sameArrangement, type Things
 import { Scale } from './scale';
 import { Hose, Tool } from './tools';
 
-const sw = { alarmsOff: false, blindsShut: false };
+const sw = { alarmsOff: false };
 
 function lab(): Things {
   const f = new Flask(100);
   f.pose = { x: 50, y: 490, z: 150, yaw: 0 };
   const t = new Tool('dispenser', 0, { x: 250, y: 800, z: 150, yaw: 0 });
   const sc = new Scale({ x: 450, y: 420, z: 150, yaw: 0 });
-  const h = new Hose({ tool: t, spout: 0 }, { x: 250, y: 600, z: 150 }, 50);
+  const h = new Hose({ tool: t, spout: 0 }, { x: 250, y: 600, z: 150 });
   return { flasks: [f], tools: [t], scales: [sc], hoses: [h], faucets: [{ note: '' }], stock: stockWith({}) };
 }
 
@@ -25,8 +25,10 @@ describe('arrangement', () => {
     f.pose = { x: 950, y: 490, z: 150, yaw: 1 };
     f.label = 'acid';
     t.valves[0] = 0.7;
+    t.sides[0] = -1;
     f.N = 5;
     arrange(l, a);
+    expect(t.sides[0]).toBe(1);
     expect(f.pose).toEqual({ x: 50, y: 490, z: 150, yaw: 0 });
     expect(f.label).toBe('');
     expect(t.valves[0]).toBe(0);
@@ -87,11 +89,11 @@ describe('arrangement', () => {
     const a = arrangement(l, sw);
     sc.remove(f);
     h.outlet = { x: 0, y: 0, z: 0 };
-    h.turn = 2;
     arrange(l, a);
     expect(sc.load).toEqual([{ f, dx: 50 }]);
     expect(h.outlet).toEqual({ x: 250, y: 600, z: 150 });
-    expect(h.turn).toBe(0);
+    // the very same hose
+    expect(l.hoses[0]).toBe(h);
   });
 
   it('tells a changed arrangement from the same one', () => {
@@ -104,7 +106,7 @@ describe('arrangement', () => {
     l.tools[0].valves[0] = 0.5;
     expect(sameArrangement(a, arrangement(l, sw))).toBe(false);
     l.tools[0].valves[0] = 0;
-    expect(sameArrangement(a, arrangement(l, { ...sw, blindsShut: true }))).toBe(false);
+    expect(sameArrangement(a, arrangement(l, { ...sw, alarmsOff: true }))).toBe(false);
     l.flasks.push(new Flask(100));
     expect(sameArrangement(a, arrangement(l, sw))).toBe(false);
   });

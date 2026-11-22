@@ -3,7 +3,7 @@ import { T_ROOM } from '../chem/params';
 import { SPECIES, TARGET, singleOf } from '../chem/species';
 import { CAP } from './config';
 import type { Vessel } from './flask';
-import { CELL, LAMP_AREA, LIFT, ROOM, type Pose } from './space';
+import { BENCH, CELL, LIFT, PLANE_Z, ROOM, WALL_PANEL, type Pose } from './space';
 import { CRYOSTABILIZER } from './supply';
 import { LAMP, STATION, type ToolKind } from './tools';
 
@@ -16,36 +16,54 @@ export interface FlaskFill {
 }
 
 /**
- * Where a tool stands: its top center, as fractions of the home area's width and height (see HOME_W); how far out
- * from the back wall, if not Z_HOME; and which way it faces (see Pose), if not out from the back wall.
+ * Where a tool hangs on the wall: its top center, as fractions of the old flat bench's home area (see fromFrac): a
+ * thousand world units to the unit across, and 620 to the unit down.
  */
 export interface Spot {
   at: [number, number];
-  z?: number;
-  yaw?: number;
 }
 
 /**
- * Where the one and only spectroscope starts, unless a preset places it itself: there's always exactly one. It stands
- * over the back counter, its spout high enough for a flask under it.
+ * Where the one and only spectroscope starts, unless a preset places it itself: there's always exactly one. It
+ * hangs over the counter, past the supply station and the shadow lamp, its spout high enough for a flask under it.
  */
-export const SPECTROSCOPE_AT: Spot = { at: [1.45, 0.5] };
+export const SPECTROSCOPE_AT: Spot = { at: [2.86, 0.5] };
 
 /**
- * Where the station is (see STATION in tools.ts): built into the right wall, past the faucets, facing
- * into the room, its funnel and spouts over the middles of the cells of the counter's row nearest the wall, and its
- * spouts high enough for a flask under them. Every lab has it, always here.
+ * Where the station is (see STATION in tools.ts): built into the back wall at the bench's left end, just past the
+ * equipment cabinet and before the first row of faucets, its block lined up with the wall's panels (the first two
+ * wholly past the cabinet: the tenth and eleventh from the wall's left end), its funnel and spouts out in the plane
+ * everything else is in (see PLANE_Z), and its spouts high enough for a flask under them. Every lab has it, always
+ * here.
  */
-export const STATION_POSE: Pose = { x: ROOM.x1 - CELL / 2, y: STATION.top, z: 11.5 * CELL, yaw: -Math.PI / 2 };
+export const STATION_POSE: Pose = {
+  x: ROOM.x0 + Math.ceil((BENCH.x0 - ROOM.x0) / WALL_PANEL.w) * WALL_PANEL.w - STATION.block.x0,
+  y: STATION.top,
+  z: PLANE_Z,
+  yaw: 0,
+};
 
 /**
- * Where the shadow lamp is (see LAMP in tools.ts): on its own bench in the front left corner, along its edge toward
- * the room, its top LAMP.h above the bench and its front to the room. Its channel is the bench's row of cells nearest
- * the room, so it can be reached into and seen down into from there (its near wall stands just off the bench's edge);
- * its enclosure is at the bench's end away from the left wall, and it shines along the bench toward that wall, at its
- * end wall, a cell short of it. Every lab has it, always here.
+ * Where the station and the first row of faucets were before the station moved to the bench's left end: the faucets
+ * first, from 200 along the bench, and the station past them, its block on the wall's thirteenth and fourteenth
+ * panels. A save from then (one on the wall without `stationLeft`) is hooked up as it was there (see
+ * GameEngine.keepOutlets).
  */
-export const LAMP_POSE: Pose = { x: LAMP_AREA.x1 + LAMP.box.x0, y: LIFT + LAMP.h, z: LAMP_AREA.z0 + LAMP.channel.z, yaw: Math.PI };
+export const BEFORE_LEFT = {
+  station: { ...STATION_POSE, x: ROOM.x0 + 12 * WALL_PANEL.w - STATION.block.x0 } as Pose,
+  faucets: [0, 1, 2, 3, 4].map((i) => BENCH.x0 + (2 + i) * CELL),
+};
+
+/** Where a preset's flasks stand, along the counter: the first one's middle, across the wall; the rest follow a CELL apart. */
+export const PRESET_FLASKS_X = 3600;
+
+/**
+ * Where the shadow lamp is (see LAMP in tools.ts): built into the back wall over the counter, past the supply station
+ * where the composition analyzer used to hang, its frame's foot on the counter, so the foot of its pane, which the
+ * light falls through, is level with the counter's top, and a flask stood on the counter in front of it is all in
+ * its light. Every lab has it, always here.
+ */
+export const LAMP_POSE: Pose = { x: 2620, y: LIFT + LAMP.h, z: PLANE_Z, yaw: 0 };
 
 /**
  * What the cryostabilizer's reservoir starts with: the hundred flasks of the target left on board (see VOYAGE). It's
@@ -90,12 +108,6 @@ export interface Preset {
 /** `atoms` atoms' worth of one species. */
 const atomsOf = (species: number, atoms: number) => ({ species, molecules: atoms / SPECIES[species].size });
 
-/**
- * How far out from the back wall the demos' tools stand: over the first island, in the middle of its second row of
- * cells, so their stands behind them have its first (the back wall's end of the counter is the equipment cabinet's).
- */
-const DEMO_Z = 7.5 * CELL;
-
 const SHOWCASE: [Atom, number][] = [
   ['R', 0], ['G', 0.2], ['B', 0.5], ['K', 1], ['R', 3], ['G', 10], ['B', 30], ['K', 100],
 ];
@@ -112,31 +124,31 @@ export const PRESETS: readonly Preset[] = [
     name: 'Heat exchanger demo',
     description:
       'Hot red and room-temperature green pass each other in a counterflow heat exchanger, trading heat but not ' +
-      'mixing: the red comes out cool and the green hot. Slower flows trade more. Look at a valve and hold the right button: point up to open it, right to close it.',
+      'mixing: the red comes out cool and the green hot. Slower flows trade more. Drag a valve’s lever: up to open it, right to close it.',
     flasks: [],
     tools: [
-      // over the exchanger's two tanks, half a grid cell either side of its middle
-      { kind: 'dispenser', at: [0.35, 0.22], z: DEMO_Z, valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('R'), 4 * CAP)], T: 10 }] },
-      { kind: 'dispenser', at: [0.45, 0.22], z: DEMO_Z, valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('G'), 4 * CAP)], T: T_ROOM }] },
-      { kind: 'exchanger', at: [0.4, 0.48], z: DEMO_Z, valves: [0.25, 0.25] },
+      // over the exchanger's two tanks, half of CELL either side of its middle
+      { kind: 'dispenser', at: [3.95, 0.22], valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('R'), 4 * CAP)], T: 10 }] },
+      { kind: 'dispenser', at: [4.05, 0.22], valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('G'), 4 * CAP)], T: T_ROOM }] },
+      { kind: 'exchanger', at: [4, 0.48], valves: [0.25, 0.25] },
     ],
   },
   {
     id: 'separator',
     name: 'Separator demo',
     description:
-      'A separator sorts red from black: each molecule goes out the spout for the share of its atoms that are ' +
-      'black, none at the far left and all at the far right. The dispensers below catch the two ends. Turn its ' +
-      'sharpness down in the Chemistry panel and some leaks into the spouts beside them.',
+      'A separator sorts red from black: each molecule with any black in it goes out the left spout, and the rest ' +
+      'out the right. The dispensers below catch the two. Turn its sharpness down in the Chemistry panel and some ' +
+      'leaks out the other spout.',
     flasks: [],
     tools: [
       {
-        kind: 'separator', at: [0.35, 0.2], z: DEMO_Z, valves: [0.3],
+        kind: 'separator', at: [4.1, 0.2], valves: [0.3],
         tanks: [{ contents: [atomsOf(singleOf('R'), 2 * CAP), atomsOf(singleOf('K'), 2 * CAP)], T: T_ROOM }],
       },
-      // under its end spouts, two grid cells either side of its middle
-      { kind: 'dispenser', at: [0.15, 0.5], z: DEMO_Z },
-      { kind: 'dispenser', at: [0.55, 0.5], z: DEMO_Z },
+      // under its two spouts, CELL either side of its middle
+      { kind: 'dispenser', at: [4.0, 0.5] },
+      { kind: 'dispenser', at: [4.2, 0.5] },
     ],
   },
   {

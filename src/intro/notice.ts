@@ -3,7 +3,7 @@ import { PLAYER } from './log';
 
 /**
  * The cheerful notice from Celestia Starlines that wakes the player, projected on the inside of their cryopod's
- * front (see view.ts's AirlockView), as blocks of text: a heading, paragraphs, preformatted figures, an empty list
+ * front (see messageCanvas in screens.ts), as blocks of text: a heading, paragraphs, preformatted figures, an empty list
  * (the crew who'll guide them, of whom there are none), small print, and rules between its sections.
  */
 export type Block =

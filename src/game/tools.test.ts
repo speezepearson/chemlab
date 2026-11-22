@@ -8,13 +8,12 @@ import { Vessel, roomFor, transfer, volume } from './flask';
 import { FLASK_VOLUME, flaskRadius } from './flaskShape';
 import { STATION_POSE } from './presets';
 import { CRYOSTABILIZER, FIRST_SUPPLY, SUPPLIES, nextSupply } from './supply';
-import { CELL, WALL_PANEL } from './space';
+import { CELL, PLANE_Z, ROOM, WALL_PANEL } from './space';
 import { tankMouth } from './bodies';
 import { loadVessel, saveVessel } from './save';
-import { TILES } from './surfaces';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, BOND_KEYS, SPECTROSCOPE, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, STRIP, STRIP_FOOT, STRIP_RUN, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SHEET, darkness, lampLight, type Mouth, lampShot, sheetLit,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, BOND_KEYS, SPECTROSCOPE, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
+  clockText, needleAt, STRIP, STRIP_FOOT, STRIP_RUN, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, SLOW_POUR, slowPour, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SHEET, darkness, lampLight, type Mouth, lampShot, sheetLit,
 } from './tools';
 
 const R = singleOf('R');
@@ -74,9 +73,9 @@ describe('pipette', () => {
 });
 
 describe('resistive heater', () => {
-  it("has its taps' spouts, and the end's, under the stretches they draw from", () => {
-    const sp = SHAPES.heater.spouts;
-    [...HEATER_TAPS, HEATER_CELLS - 1].forEach((c, j) => expect(heaterCellX(c)).toBeCloseTo(sp[j], 9));
+  it("has its one spout under its tube's last stretch", () => {
+    expect(SHAPES.heater.spouts.length).toBe(1);
+    expect(heaterCellX(HEATER_CELLS - 1)).toBeCloseTo(SHAPES.heater.spouts[0], 9);
   });
 
   /** A heater fed a steady room-temperature stream of R for `t` sim seconds, catching what leaves each spout. */
@@ -91,14 +90,14 @@ describe('resistive heater', () => {
     }
     return { ht, out, fed };
   }
-  const dial = (d: number, taps = [0, 0, 0]) => [...taps, d];
+  const dial = (d: number) => [d];
   const held = (ht: Tool) => [...ht.tanks, ...ht.tube].reduce((n, v) => n + v.N, 0);
 
-  it('has three taps and a dial, all starting at 0', () => {
+  it('has no valve but its dial, which starts at 0', () => {
     const ht = new Tool('heater', 0);
-    expect(ht.valves).toEqual([0, 0, 0, 0]);
-    expect(ht.shape.dial).toBe(3);
-    expect(ht.shape.spouts.length).toBe(4);
+    expect(ht.valves).toEqual([0]);
+    expect(ht.shape.dial).toBe(0);
+    expect(ht.shape.spouts.length).toBe(1);
     expect(ht.tube.length).toBe(HEATER_CELLS);
   });
 
@@ -108,25 +107,24 @@ describe('resistive heater', () => {
     // the first of it gets out a little early, as the stretches mix; most takes about the transit
     let t = 0;
     let out = 0;
-    for (; out < CAP / 200 && t < 20; t += 0.02) out += ht.step(0.02)[3]?.N ?? 0;
+    for (; out < CAP / 200 && t < 20; t += 0.02) out += ht.step(0.02)[0]?.N ?? 0;
     expect(t).toBeGreaterThan(0.8 * HEATER.transit);
     expect(t).toBeLessThan(1.2 * HEATER.transit);
   });
 
-  it('loses nothing but traces, and with the taps shut lets it all out the end', () => {
+  it('loses nothing but traces, and lets it all out the end', () => {
     const { ht, out, fed } = run(dial(0.5));
-    expect(out[0].N + out[1].N + out[2].N).toBe(0);
     // transfer drops a trace left behind (see TRACE), as the front of the stream spreads along the tube
-    expect(1 - (out[3].N + held(ht)) / fed).toBeLessThan(1e-4);
+    expect(1 - (out[0].N + held(ht)) / fed).toBeLessThan(1e-4);
   });
 
   it("doesn't heat with the dial at 0", () => {
     const { out } = run(dial(0));
-    expect(temperature(out[3])).toBeCloseTo(1, 6);
+    expect(temperature(out[0])).toBeCloseTo(1, 6);
   });
 
   it('heats more with the dial further up', () => {
-    const T = [0.2, 0.5, 0.8].map((d) => temperature(run(dial(d)).out[3]));
+    const T = [0.2, 0.5, 0.8].map((d) => temperature(run(dial(d)).out[0]));
     expect(T[0]).toBeGreaterThan(1.05);
     expect(T[1]).toBeGreaterThan(T[0]);
     expect(T[2]).toBeGreaterThan(T[1]);
@@ -134,25 +132,13 @@ describe('resistive heater', () => {
     expect(T[2]).toBeLessThan(wireTemperature(0.8));
   });
 
-  it('heats fluid more the longer it has been along the tube, so each tap runs hotter than the last', () => {
-    const { out } = run(dial(0.5, [0.05, 0.05, 0.05]));
-    const T = out.map((v) => temperature(v));
-    for (let k = 1; k < 4; k++) expect(T[k]).toBeGreaterThan(T[k - 1]);
-    // roughly as far toward the wire as its time in the tube says
+  it('heats fluid about as far toward the wire as its time along the tube says', () => {
+    const T = temperature(run(dial(0.5)).out[0]);
     const wire = wireTemperature(0.5);
-    HEATER_TAPS.forEach((c, k) => {
-      const share = 1 - Math.exp((-HEATER.rate * HEATER.transit * (c + 1)) / HEATER_CELLS);
-      const ratio = (T[k] - 1) / (wire - 1) / share;
-      expect(ratio).toBeGreaterThan(0.85);
-      expect(ratio).toBeLessThan(1.15);
-    });
-  });
-
-  it('lets everything out of a wide-open tap, so none goes further', () => {
-    const { out } = run(dial(0.5, [0, 1, 0]));
-    expect(out[0].N).toBe(0);
-    expect(out[1].N).toBeGreaterThan(0);
-    expect(out[2].N + out[3].N).toBe(0);
+    const share = 1 - Math.exp(-HEATER.rate * HEATER.transit);
+    const ratio = (T - 1) / (wire - 1) / share;
+    expect(ratio).toBeGreaterThan(0.85);
+    expect(ratio).toBeLessThan(1.15);
   });
 
   it('feeds its tube from its funnel in proportion to how high the fluid stands in it', () => {
@@ -449,11 +435,16 @@ describe('supply station', () => {
   it("is a block of the wall lined up with the wall's panels", () => {
     const { block, top } = STATION;
     const pose = STATION_POSE;
-    // the right wall's panels run along it from z = 0, and up from the floor
-    for (const z of [pose.z + block.x0, pose.z + block.x1]) expect(z / WALL_PANEL.w).toBeCloseTo(Math.round(z / WALL_PANEL.w), 9);
+    // the back wall's panels run along it from its left end, and up from the floor
+    for (const x of [pose.x + block.x0, pose.x + block.x1]) {
+      const n = (x - ROOM.x0) / WALL_PANEL.w;
+      expect(n).toBeCloseTo(Math.round(n), 9);
+    }
+    // on the back wall, facing out, its funnel and spouts out in the plane everything else is in
+    expect(pose.yaw).toBe(0);
+    expect(pose.z).toBe(PLANE_Z);
+    expect(STATION.out).toBe(pose.z - ROOM.z0);
     for (const y of [top - block.y0, top - block.y1]) expect(y / WALL_PANEL.h).toBeCloseTo(Math.round(y / WALL_PANEL.h), 9);
-    expect(TILES.walls.u / 2).toBe(WALL_PANEL.w);
-    expect(TILES.walls.v / 3).toBeCloseTo(WALL_PANEL.h, 9);
     expect(pose.y).toBe(top);
     // everything on it is inside it
     const r = new Tool('receptacle', 0);
@@ -2012,37 +2003,41 @@ describe('separator', () => {
     }
   };
 
-  it('gives each molecule its own outlet by its share of black atoms: none, ¼, ⅓, ½, all', () => {
-    expect(SEPARATOR_OUTLET[R]).toBe(0);
-    expect(SEPARATOR_OUTLET[SOLVENT_SPECIES]).toBe(0);
-    expect(SEPARATOR_OUTLET[tri('△RGB')]).toBe(0);
-    expect(SEPARATOR_OUTLET[pair('R–G')]).toBe(0);
-    expect(SEPARATOR_OUTLET[tri('⊠RGBK')]).toBe(1);
-    expect(SEPARATOR_OUTLET[tri('R–G–B–K')]).toBe(1);
-    expect(SEPARATOR_OUTLET[tri('△RGK')]).toBe(2);
-    expect(SEPARATOR_OUTLET[pair('R–K')]).toBe(3);
-    expect(SEPARATOR_OUTLET[K]).toBe(4);
+  // one of each kind of molecule: with black in it, the outlet on the left (0), and without, the right (1)
+  const sample = () => [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K, SOLVENT_SPECIES, tri('△RGB')];
+  const ownOf = (sp: number) => (SPECIES[sp].atoms.includes('K') ? 0 : 1);
+
+  it('gives every molecule with a black atom in it the left outlet, and every other the right', () => {
+    expect(SEPARATOR_OUTLETS).toBe(2);
+    expect(SEPARATOR_OUTLET[K]).toBe(0);
+    expect(SEPARATOR_OUTLET[pair('R–K')]).toBe(0);
+    expect(SEPARATOR_OUTLET[tri('△RGK')]).toBe(0);
+    expect(SEPARATOR_OUTLET[tri('R–G–B–K')]).toBe(0);
+    expect(SEPARATOR_OUTLET[tri('⊠RGBK')]).toBe(0);
+    expect(SEPARATOR_OUTLET[R]).toBe(1);
+    expect(SEPARATOR_OUTLET[SOLVENT_SPECIES]).toBe(1);
+    expect(SEPARATOR_OUTLET[pair('R–G')]).toBe(1);
+    expect(SEPARATOR_OUTLET[tri('△RGB')]).toBe(1);
+    for (const sp of SPECIES) expect(SEPARATOR_OUTLET[sp.i]).toBe(ownOf(sp.i));
   });
 
-  it('sends most of each molecule out its own outlet, the rest mostly next door, and more so the sharper it is', () => {
+  it('sends most of each molecule out its own outlet, the rest out the other, and more so the sharper it is', () => {
     const f = new Vessel(Infinity);
-    for (const sp of [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K]) f.n[sp] = CAP;
+    for (const sp of sample()) f.n[sp] = CAP;
     f.N = atomTotal(f);
     let last = 0;
     for (const k of [1, 3, 6]) {
       withSharpness(k, () => {
         const out = separate(f);
         expect(out).toHaveLength(SEPARATOR_OUTLETS);
-        const ownShare = out[2].n[tri('△RGK')] / CAP;
+        const ownShare = out[0].n[tri('△RGK')] / CAP;
         expect(ownShare).toBeGreaterThan(last);
         last = ownShare;
-        [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K].forEach((sp, own) => {
+        for (const sp of sample()) {
           const shares = out.map((v) => v.n[sp] / CAP);
-          expect(Math.max(...shares)).toBe(shares[own]);
-          for (let j = 0; j < SEPARATOR_OUTLETS; j++)
-            if (Math.abs(j - own) > 1) expect(shares[j]).toBeLessThan(shares[own - Math.sign(own - j)] + 1e-9);
+          expect(shares[ownOf(sp)]).toBeGreaterThan(0.5);
           expect(shares.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 12);
-        });
+        }
       });
     }
   });
@@ -2050,16 +2045,14 @@ describe('separator', () => {
   it('sorts perfectly from SEPARATOR_PERFECT up', () => {
     withSharpness(SEPARATOR_PERFECT, () => {
       const f = new Vessel(Infinity);
-      for (const sp of [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K]) f.n[sp] = CAP;
+      for (const sp of sample()) f.n[sp] = CAP;
       f.N = atomTotal(f);
       const out = separate(f);
-      [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K].forEach((sp, own) =>
-        out.forEach((v, j) => expect(v.n[sp]).toBe(j === own ? CAP : 0)),
-      );
+      for (const sp of sample()) out.forEach((v, j) => expect(v.n[sp]).toBe(j === ownOf(sp) ? CAP : 0));
     });
   });
 
-  it('splits everything evenly five ways at sharpness 0', () => {
+  it('splits everything evenly both ways at sharpness 0', () => {
     withSharpness(0, () => {
       const f = filled(new Vessel(Infinity), R, CAP, 1);
       for (const v of separate(f)) expect(v.n[R] / CAP).toBeCloseTo(1 / SEPARATOR_OUTLETS, 4);
@@ -2096,7 +2089,7 @@ describe('hose', () => {
     expect(sameMount({ tool: t, spout: 2 }, { tool: u, spout: 2 })).toBe(false);
     expect(sameMount({ faucet: 3 }, { faucet: 3 })).toBe(true);
     expect(sameMount({ faucet: 0 }, { tool: t, spout: 0 })).toBe(false);
-    expect(new Hose({ faucet: 3 }, { x: 1, y: 2, z: 3 }, 50).outlet).toEqual({ x: 1, y: 2, z: 3 });
+    expect(new Hose({ faucet: 3 }, { x: 1, y: 2, z: 3 }).outlet).toEqual({ x: 1, y: 2, z: 3 });
   });
 });
 
@@ -2163,6 +2156,34 @@ describe('dripping', () => {
   });
 });
 
+describe('pouring slowly', () => {
+  const h = 0.02;
+
+  it('lets out SLOW_POUR a second, fast enough to stream rather than drip, whatever the flask holds, conserving atoms', () => {
+    expect(SLOW_POUR).toBe(2 * DRIP_FLOW);
+    // a flask of pairs: the rate goes by atoms, though fluid's moved by volume
+    const RG = SPECIES.findIndex((s) => s.size === 2);
+    const flask = filled(new Vessel(CAP), RG, CAP / 2, 2);
+    let out = 0;
+    const steps = 500; // 10 sim s
+    for (let i = 0; i < steps; i++) {
+      const p = slowPour(flask, h);
+      // what leaves in a step would stream from an outlet, not gather in a drop (see drip)
+      expect(drip(new Vessel(Infinity), p, h, () => 0)).toBe(p);
+      out += p.N;
+    }
+    expect(out + flask.N).toBe(CAP / 2);
+    expect(Math.abs(out - steps * h * SLOW_POUR)).toBeLessThan(0.01 * steps * h * SLOW_POUR);
+  });
+
+  it('stops once the flask is empty', () => {
+    const flask = filled(new Vessel(CAP), R, 3e5, 2);
+    expect(slowPour(flask, 1).N).toBe(3e5);
+    expect(flask.N).toBe(0);
+    expect(slowPour(flask, h).N).toBe(0);
+  });
+});
+
 describe('the shadow lamp', () => {
   it('is one of a kind, fixed where it is, with no tanks or spouts, and one valve, its dial', () => {
     const t = new Tool('shadowlamp', 0);
@@ -2175,15 +2196,16 @@ describe('the shadow lamp', () => {
     expect(t.valves[0]).toBe(0.5);
     expect(new Tool('shadowlamp', 1, undefined, [0.25]).valves[0]).toBe(0.25);
     expect(t.step(0.02)).toEqual([]);
-    // the dial and the button are on the enclosure's front, clear of each other and of its edges
-    const { dial, button, box, h } = LAMP;
+    // the dial and the button are on the frame, beside the pane, clear of each other and of its edges
+    const { dial, button, h, pane } = LAMP;
+    const box = t.shape.box;
     for (const c of [dial, button]) {
-      expect(c.x - 14).toBeGreaterThan(box.x0);
-      expect(c.x + 14).toBeLessThan(box.x1);
+      expect(c.x - 14).toBeGreaterThan(pane.r);
+      expect(c.x + 14).toBeLessThan(box.x1 + 1);
       expect(c.y - 14).toBeGreaterThan(0);
       expect(c.y + 14).toBeLessThan(h);
     }
-    expect(button.x - button.r - (dial.x + 14)).toBeGreaterThan(5);
+    expect(button.y - button.r - (dial.y + 14)).toBeGreaterThan(5);
   });
 
   it('shines for as long as its dial says, from a flash to as long as darkens a sheet all the way, each step doubling it', () => {
@@ -2314,35 +2336,21 @@ describe('the shadow lamp', () => {
     expect(t.owed).toBe(SHEET.full);
   });
 
-  it("is a trough as tall as a sheet's paper, with a channel a grid cell wide and a whole number of cells long", () => {
-    const { h, wall, box, channel: ch } = LAMP;
-    expect(h).toBe(SHEET.side);
-    expect(2 * ch.z).toBe(CELL);
-    expect((ch.x1 - ch.x0) / CELL).toBe(Math.round((ch.x1 - ch.x0) / CELL));
-    expect(ch.x1 - ch.x0).toBeGreaterThanOrEqual(2 * CELL);
-    // the enclosure runs up to the channel's start, and the trough's box is all of it, end wall included
-    expect(box.x1).toBe(ch.x0);
-    expect(box.x0).toBeLessThan(box.x1);
-    const b = SHAPES.shadowlamp.box;
-    expect([b.x0, b.x1, b.y0, b.y1]).toEqual([box.x0, ch.x1 + wall, 0, h]);
-  });
-
-  it('sends its light out as a beam the size of the square in the middle of the sheet, straying little', () => {
-    const { h, channel: ch, window: win, spread } = LAMP;
-    // a sheet in the slot has its paper from the top of the walls down: the window is square on to the middle of it,
-    // and as big as the square the light falls on, so the margin round that is never lit
-    expect(win.r).toBe(sheetLit() / 2);
-    expect(win.y).toBe(h - SHEET.side / 2);
+  it('is a frame round a pane the size of the square in the middle of a sheet, which reaches down to its foot', () => {
+    const { h, pane, rim, panel } = LAMP;
+    // the pane is as big as the square the light falls on, so the margin round that, behind the frame, is never lit
+    expect(pane.r).toBe(sheetLit() / 2);
     expect(sheetLit()).toBe(SHEET.side - 2 * SHEET.margin);
-    // its lower edge is level with the top of the channel's floor, so what stands there casts all of its shadow
-    expect(win.y + win.r).toBe(h - LAMP.floor);
-    expect(LAMP.floor).toBe(SHEET.margin);
-    // nor are the channel's walls, even by the rays that stray most
-    expect(win.r + spread * (ch.x1 - ch.x0)).toBeLessThan(ch.z);
-    // a shadow's edge from the far end of the channel is a few units wide: soft, but no wider than a flask's neck
-    const edge = 2 * spread * (ch.x1 - ch.x0);
-    expect(edge).toBeGreaterThan(2);
-    expect(edge).toBeLessThan(12);
+    // the frame is round its top and sides, wide enough to hide a sheet's margin; the pane reaches its foot
+    expect(rim).toBeGreaterThanOrEqual(SHEET.margin);
+    expect(panel).toBeGreaterThanOrEqual(SHEET.margin);
+    expect(pane.y).toBe(rim);
+    expect(h).toBe(pane.y + sheetLit());
+    const b = SHAPES.shadowlamp.box;
+    expect([b.x0, b.x1, b.y0, b.y1]).toEqual([-pane.r - rim, pane.r + panel, 0, h]);
+    // a shadow's edge is soft, but no wider than a flask's neck
+    expect(LAMP.soft).toBeGreaterThan(0);
+    expect(LAMP.soft).toBeLessThan(12);
   });
 });
 
@@ -2352,17 +2360,17 @@ describe('shadow paper', () => {
   const light = (at: (i: number, j: number) => number) => Float32Array.from({ length: N * N }, (_, k) => at(k % N, Math.floor(k / N)));
   const all = light(() => 1);
 
-  it("is a square of paper a grid cell on a side, with no tanks, spouts or valves, which fits across the lamp's channel", () => {
+  it("is a square of paper a grid cell on a side, with no tanks, spouts or valves, pinned to the wall", () => {
     const t = new Tool('sheet', 0);
     expect([t.tanks.length, t.shape.spouts.length, t.valves.length]).toEqual([0, 0, 0]);
     expect(t.step(0.02)).toEqual([]);
     expect(UNIQUE_TOOLS).not.toContain('sheet');
     expect(SHEET.side).toBe(CELL);
-    expect(SHEET.side).toBe(2 * LAMP.channel.z);
+    expect(t.shape.pinned).toBe(true);
     // the bar along its top is a little wider than the paper, which starts where the bar ends
     const b = t.shape.box;
     expect(b.x1 - b.x0).toBeGreaterThan(SHEET.side);
-    expect(b.x1 - b.x0).toBeLessThan(SHEET.side + 2 * LAMP.wall);
+    expect(b.x1 - b.x0).toBeLessThan(SHEET.side + 2 * LAMP.rim);
     expect(SHEET.top).toBe(SHEET.clip.h);
     expect(b.y1 - b.y0).toBe(SHEET.clip.h + SHEET.side);
     // the light falls on the square in its middle, a margin of about a tenth of its side left all round; its image

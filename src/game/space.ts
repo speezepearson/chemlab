@@ -2,9 +2,11 @@ import { HOME_H, HOME_W } from './config';
 import type { Point } from './flask';
 
 /**
- * The lab in three dimensions, in world units (a flask is 70 tall), with y up. The old flat bench is its back
- * wall: x runs along the wall as it did across the bench, height comes from the bench's height above its sink,
- * and z comes out of the wall into the room.
+ * The lab, in world units (a flask is 70 tall), with y up. It's drawn flat, square on to the back wall, and worked
+ * in two dimensions: all the equipment hangs or stands in one upright plane a little way out from the back wall (see
+ * PLANE_Z), facing out from it, and is moved only across the wall and up and down it. x runs along the wall, y is
+ * height above the floor, and z comes out of the wall into the room, as it did when the lab was a room to walk round
+ * (see flatten.ts).
  */
 export interface Vec3 {
   x: number;
@@ -12,136 +14,75 @@ export interface Vec3 {
   z: number;
 }
 
-/** Where something is: a point, and how far it's turned about the vertical (counterclockwise seen from above). */
+/**
+ * Where something is: a point, and how far it's turned about the vertical (counterclockwise seen from above).
+ * Everything in the lab faces out from the wall, a yaw of 0; only saves from when the lab was walked round have any
+ * other (see flatten.ts).
+ */
 export interface Pose extends Vec3 {
   yaw: number;
 }
 
 export const ORIGIN: Pose = { x: 0, y: 0, z: 0, yaw: 0 };
 
-/** The room's walls, floor and ceiling. The back wall, at z = 0, is the old bench. */
-export const ROOM = { x0: -700, x1: 2300, z0: 0, z1: 3000, y1: 1300 };
 /**
- * How fast the ship turns, in radians per sim second: the lab is on the rim of a ring 10 km in radius, spun for 1 g,
- * √(g / r), about one turn every 200 s. It turns about an axis square to the left wall (x), so the stars wheel round
- * the middle of the porthole in it.
+ * The room's walls, floor and ceiling: a long gallery. The back wall, at z = 0, is the one the lab is on; the wall
+ * opposite, behind the player, is at z1.
  */
-export const SPIN = Math.sqrt(9.81 / 10_000);
+export const ROOM = { x0: -700, x1: 8300, z0: 0, z1: 3000, y1: 1300 };
 /**
- * The side of a cell of the room's grid, across the floor: whatever's set down stands squarely in it, facing one of
- * the four ways along it, with every mouth and spout over the middle of a cell (see toCell). Cells' edges are at whole
- * multiples of it, so the walls, and every counter's edges, run along them.
+ * How far apart a tool's mouths and spouts are along it, or a whole number of times this: so a row of flasks, or of
+ * tanks, this far apart can stand under a row of spouts.
  */
 export const CELL = 100;
 
-/** The middle of the grid cell that x (or z) is in. */
-export const toCell = (v: number) => (Math.floor(v / CELL) + 0.5) * CELL;
-
-/** The nearest of the four ways along the grid: a yaw of a whole number of quarter turns. */
-export const toCardinal = (yaw: number) => wrapAngle(Math.round(yaw / (Math.PI / 2)) * (Math.PI / 2));
-
 /**
- * The panels the walls are lined with (see the walls' texture in surfaces.ts): this wide, and a third of the room high,
- * their seams at whole multiples of each along every wall from its left end as it faces into the room, and up from
- * the floor.
+ * The panels the back wall is lined with (see drawWall in flatRoom.ts): this wide, and a third of the room high, their
+ * seams at whole multiples of each along it from its left end, and up from the floor.
  */
 export const WALL_PANEL = { w: 220, h: ROOM.y1 / 3 };
 
-/** Height of every counter: the sink counters along the walls, and the islands. */
+/** Height of the counter along the foot of the back wall. */
 export const LIFT = 420;
-/** How far the back wall's counter comes out from it: two grid cells. */
-export const COUNTER_D = 2 * CELL;
-/** How far the right wall's counter, under the faucets, comes out from it: one grid cell, so they're in easy reach. */
-export const SINK_D = CELL;
 /**
- * The islands' size, across and front to back, and where their grid starts and how far apart they are, all in whole
- * grid cells: each is ten cells by four.
+ * How far out from the back wall everything in the lab is: tools, flasks, scales, hoses' nozzles, spouts and streams
+ * are all in the upright plane this far out, so whatever leaves a spout falls into whatever's under it.
  */
-const ISLAND = { w: 10 * CELL, d: 4 * CELL, x0: -4 * CELL, z0: 6 * CELL, dx: 13 * CELL, dz: 8 * CELL, cols: 2, rows: 3 };
+export const PLANE_Z = 120;
+/** How far the counter comes out from the back wall: twice as far as what stands on it. */
+export const COUNTER_D = 2 * PLANE_Z;
 /**
- * Where the equipment cabinet stands (see cabinet.ts): against the back wall from the left wall, eighteen grid cells
- * along it and three out from it, a cell further than the counter, and as tall as its shelves need. The back counter
- * runs on from its end.
+ * Where the equipment cabinet stands (see cabinet.ts): against the back wall from its left end, 1800 along it and
+ * 300 out from it, and as tall as its shelves need. The counter runs on from its end.
  */
 export const CABINET_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 18 * CELL, z0: ROOM.z0, z1: ROOM.z0 + 3 * CELL };
 /**
- * Where the shadow lamp stands (see LAMP in tools.ts): on a bench of its own in the room's front left corner, five
- * grid cells along the front wall and three out from it, as high as the counters. Nothing could be set down there
- * before it was, so no save has anything standing in its way. The lamp's trough lies along its edge toward the room;
- * the two rows of cells behind that are free bench, long enough for the longest tools (a heater, a sorter, a
- * separator) on their two stands. It stops short of the airlock's doorway.
+ * The bench: the stretch of the back wall equipment can be left on, from the cabinet's end to the wall's, and from
+ * the counter's top to the ceiling.
  */
-export const LAMP_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 5 * CELL, z0: ROOM.z1 - 3 * CELL, z1: ROOM.z1 };
-/**
- * The floor of the shadow lamp's channel (see LAMP in tools.ts): a plate lying on its bench, over the three cells of
- * the bench's row nearest the room that the channel is, a cell in from either end, its top `y` high, a little above
- * the bench's. What's set down in the channel stands on it (see counterUnder), and what falls there lands on it (see
- * groundAt).
- */
-export const LAMP_FLOOR = { x0: LAMP_AREA.x0 + CELL, x1: LAMP_AREA.x1 - CELL, z0: LAMP_AREA.z0, z1: LAMP_AREA.z0 + CELL, y: LIFT + CELL / 10 };
-/**
- * A counter: its x and z extents, and whether it's an island out in the room rather than a sink counter on a wall, or
- * the shadow lamp's own bench.
- */
+export const BENCH = { x0: CABINET_AREA.x1, x1: ROOM.x1, y0: LIFT, y1: ROOM.y1 };
+/** A counter: its x and z extents. */
 export interface Counter {
   x0: number;
   x1: number;
   z0: number;
   z1: number;
-  island?: boolean;
-  lamp?: boolean;
 }
-/**
- * The counters, all LIFT high (but for the floor of the shadow lamp's channel on its bench, see LAMP_FLOOR), as x and z extents: one along the back wall under the old bench, from the equipment
- * cabinet on, one along the right wall under the faucets, a grid of islands out in the room, like an
- * undergraduate lab's benches, and last the shadow lamp's bench in the front left corner.
- */
-export const COUNTERS: readonly Counter[] = [
-  { x0: CABINET_AREA.x1, x1: ROOM.x1 - SINK_D, z0: ROOM.z0, z1: ROOM.z0 + COUNTER_D },
-  { x0: ROOM.x1 - SINK_D, x1: ROOM.x1, z0: ROOM.z0, z1: ROOM.z1 },
-  ...Array.from({ length: ISLAND.cols * ISLAND.rows }, (_, i) => {
-    const x0 = ISLAND.x0 + (i % ISLAND.cols) * ISLAND.dx;
-    const z0 = ISLAND.z0 + Math.floor(i / ISLAND.cols) * ISLAND.dz;
-    return { x0, x1: x0 + ISLAND.w, z0, z1: z0 + ISLAND.d, island: true };
-  }),
-  { ...LAMP_AREA, lamp: true },
-];
+/** The counters, all LIFT high, as x and z extents: the one along the back wall under the bench, from the cabinet on. */
+export const COUNTERS: readonly Counter[] = [{ x0: BENCH.x0, x1: BENCH.x1, z0: ROOM.z0, z1: ROOM.z0 + COUNTER_D }];
 
-/**
- * How high the floor or counter is under (x, z), or the floor of the shadow lamp's channel (see LAMP_FLOOR): where
- * whatever falls there goes down the sink.
- */
+/** How high the floor or counter is under (x, z): where whatever falls there goes down the sink. */
 export function groundAt(x: number, z: number): number {
-  const within = (c: { x0: number; x1: number; z0: number; z1: number }) => x >= c.x0 && x <= c.x1 && z >= c.z0 && z <= c.z1;
-  return within(LAMP_FLOOR) ? LAMP_FLOOR.y : COUNTERS.some(within) ? LIFT : 0;
+  return COUNTERS.some((c) => x >= c.x0 && x <= c.x1 && z >= c.z0 && z <= c.z1) ? LIFT : 0;
 }
-/**
- * The top of the counter a footprint (a rectangle `hx` by `hz` either side of (x, z), turned by `yaw` like a box) lies
- * wholly on, or null if it doesn't lie wholly on one: things are set down only squarely on a counter. One wholly on
- * the floor of the shadow lamp's channel (see LAMP_FLOOR) is on that, which is a little higher than its bench.
- */
-export function counterUnder(f: { x: number; z: number; hx: number; hz: number; yaw: number }): number | null {
-  const c = Math.cos(f.yaw);
-  const s = Math.sin(f.yaw);
-  const corners = [-1, 1].flatMap((sx) =>
-    [-1, 1].map((sz) => ({ x: f.x + sx * f.hx * c + sz * f.hz * s, z: f.z - sx * f.hx * s + sz * f.hz * c })),
-  );
-  const on = (k: { x0: number; x1: number; z0: number; z1: number }) => corners.every((p) => p.x >= k.x0 && p.x <= k.x1 && p.z >= k.z0 && p.z <= k.z1);
-  return on(LAMP_FLOOR) ? LAMP_FLOOR.y : COUNTERS.some(on) ? LIFT : null;
-}
-/**
- * How far out from the back wall things stand when nothing says otherwise: over the counter, in the middle of its
- * second row of grid cells, so a tool's stand behind it has the first.
- */
-export const Z_HOME = 1.5 * CELL;
-/** Where the old bench's sink was, in its own units, down from the top of its home area. */
+/** Where the old flat bench's sink was, in its own units, down from the top of its home area. */
 const SINK_2D = HOME_H - 16;
 
 /**
- * A position stored as fractions of the old bench's home area (see HOME_W), as presets and saves keep tools,
- * scales and hose ends, in the room: across stays across, and up is up from the counter.
+ * A position stored as fractions of the old flat bench's home area (see HOME_W), as presets and saves keep tools,
+ * scales and hose ends, on the wall: a thousand to the unit across, and up from the counter.
  */
-export function fromFrac(f: Point, z = Z_HOME): Vec3 {
+export function fromFrac(f: Point, z = PLANE_Z): Vec3 {
   return { x: f.x * HOME_W, y: LIFT + SINK_2D - f.y * HOME_H, z };
 }
 
@@ -163,14 +104,6 @@ export function toLocal(pose: Pose, p: Vec3): Vec3 {
   const dx = p.x - pose.x;
   const dz = p.z - pose.z;
   return { x: dx * c - dz * s, y: p.y - pose.y, z: dx * s + dz * c };
-}
-
-/** An angle wrapped into (−π, π]. */
-export function wrapAngle(a: number): number {
-  a %= 2 * Math.PI;
-  if (a <= -Math.PI) a += 2 * Math.PI;
-  if (a > Math.PI) a -= 2 * Math.PI;
-  return a;
 }
 
 export const dist3 = (a: Vec3, b: Vec3) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);

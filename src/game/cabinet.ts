@@ -2,7 +2,7 @@ import { FLASK_CENTER, FLASK_R, scaleBox, toolBox } from './bodies';
 import { FLASK_H } from './flaskShape';
 import { Scale } from './scale';
 import { CABINET_AREA, type Pose, type Vec3 } from './space';
-import { Tool, type ToolKind } from './tools';
+import { SHAPES, SHEET, Tool, type ToolKind } from './tools';
 
 /**
  * The equipment cabinet: open steel shelving against the back wall (CABINET_AREA), holding the lab's stock of
@@ -63,10 +63,11 @@ const BAYS: readonly (readonly (readonly Compartment[])[])[] = [
   ],
   [
     [{ kind: 'dispenser', cols: 2, high: 1, deep: 4 }],
-    // (the sheets of test paper in one stack, lying flat on the shelf, and the sheets of bond paper in another)
+    // (the sheets of test paper in one stack, standing on edge one behind another, and the sheets of bond paper in
+    // another)
     [
-      { kind: 'strip', cols: 8, high: 1, deep: 2 }, { kind: 'testpaper', cols: 1, high: 16, deep: 1 },
-      { kind: 'bondpaper', cols: 1, high: 16, deep: 1 },
+      { kind: 'strip', cols: 8, high: 1, deep: 2 }, { kind: 'testpaper', cols: 1, high: 1, deep: 16 },
+      { kind: 'bondpaper', cols: 1, high: 1, deep: 16 },
     ],
     [{ kind: 'thermometer', cols: 8, high: 1, deep: 2 }, { kind: 'thermometerWide', cols: 8, high: 1, deep: 2 }],
     [{ kind: 'sheet', cols: 1, high: 1, deep: 16 }],
@@ -85,6 +86,8 @@ export const CABINET_BUILD = { base: 120, side: 8, board: 4, clear: 10, back: 4,
 function sizeOf(k: Stocked): { w: number; h: number; d: number; c: Vec3 } {
   if (k === 'flask') return { w: 2 * FLASK_R, h: FLASK_H, d: 2 * FLASK_R, c: FLASK_CENTER };
   const b = k === 'scale' ? scaleBox(new Scale()) : toolBox(new Tool(k, 0));
+  // a sheet of paper is as thick as its bar, though its box reaches back to the wall it's pinned to (see PIN_Z)
+  if (k !== 'scale' && SHAPES[k].pinned) return { w: 2 * b.hx, h: 2 * b.hy, d: SHEET.clip.d, c: { x: b.x, y: b.y, z: 0 } };
   return { w: 2 * b.hx, h: 2 * b.hy, d: 2 * b.hz, c: { x: b.x, y: b.y, z: b.z } };
 }
 
