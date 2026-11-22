@@ -184,11 +184,11 @@ const DROP_R_ATOMS = 1.5e6;
 /** A CRT's phosphor green. */
 const PHOSPHOR = '64, 255, 110';
 /**
- * The separator's manifold, below its valve, in local units (y down): two arms sloping down from a peak midway
- * between its spouts, each `slope` (radians) below level, `thick` through and `deep` front to back, reaching `over`
- * past its spout; `top` is how far down the peak's top is, and `bend` where the pipe from the tank turns toward it.
+ * The separator's manifold, below its valve, in local units (y down): two arms sloping down from a peak under its
+ * tank, midway between its spouts, each `slope` (radians) below level, `thick` through and `deep` front to back,
+ * reaching `over` past its spout; `top` is how far down the peak's top is.
  */
-const SEP_ARMS = { top: 108, bend: 101, slope: Math.PI / 12, thick: 12, deep: 20, over: 10 };
+const SEP_ARMS = { top: 102, slope: Math.PI / 12, thick: 12, deep: 20, over: 10 };
 /** Height of each line of a label, in world units. */
 const LABEL_H = 10;
 /** How far above a flask's mouth or a scale's platform its note sits, to the note's middle. */
@@ -1555,13 +1555,13 @@ class ToolView {
         pipes(art, [[sh.spouts[k], HELIX.y + HELIX.r], [sh.spouts[k], sh.spoutY - 4]]);
       });
     else if (t.kind === 'separator') {
-      // the manifold: the pipe from the tank runs across to a peak midway between the spouts, and from there an arm
+      // the manifold: the pipe from the tank runs down to a peak midway between the spouts, and from there an arm
       // slopes down to each, the one for what has a black atom in a dark gray, which is how its two sides are told apart
-      const { top, bend, slope, thick, deep, over } = SEP_ARMS;
+      const { top, slope, thick, deep, over } = SEP_ARMS;
       const [x0, x1] = sh.spouts;
       const peak = (x0 + x1) / 2;
       const mid = top + thick / 2;
-      pipes(art, [[0, floor], [0, bend], [peak, mid]]);
+      pipes(art, [[peak, floor], [peak, mid]]);
       [x0, x1].forEach((x, k) => {
         const reach = Math.abs(x - peak) + over;
         const dir = Math.sign(x - peak);

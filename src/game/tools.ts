@@ -1139,32 +1139,32 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   },
   separator: {
     tanks: [{ name: 'tank', x0: -30, x1: 30 }],
-    // two outlets (see SEPARATOR_OUTLET), a grid cell (see CELL) apart, the first under its tank, so the tool is
-    // two cells across and a flask or a tool's tank fits under each
-    spouts: [0, CELL],
+    // two outlets (see SEPARATOR_OUTLET), a grid cell (see CELL) either side of its tank, so a flask or a tool's
+    // tank fits under each
+    spouts: [-CELL, CELL],
     sump: { w: 14, h: 7 },
     valveY: 96,
-    spoutY: 144,
+    spoutY: 152,
     // the manifold under it (see the view's SEP_ARMS), its two arms sloping down to the spouts
-    box: { x0: -34, x1: 116, y0: -6, y1: 146 },
+    box: { x0: -116, x1: 116, y0: -6, y1: 154 },
   },
   splitter: {
     tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
     tankH: 30,
     tankCap: FUNNEL_CAP,
     funnel: true,
-    // one straight down under its funnel and one a grid cell to its right, like the separator's
-    spouts: [0, CELL],
+    // a grid cell either side of its funnel, like the separator's of its tank
+    spouts: [-CELL, CELL],
     valveY: 42,
     spoutY: 84,
-    box: { x0: -26, x1: 116, y0: -6, y1: 86 },
+    box: { x0: -116, x1: 116, y0: -6, y1: 86 },
   },
   multiplexer: {
-    // the splitter turned upside down: two funnels a grid cell apart, the second over its one spout, their stems
-    // joining over the valve, which picks how much of each goes through
+    // the splitter turned upside down: a funnel a grid cell either side of its one spout, their stems joining over the
+    // valve, which picks how much of each goes through
     tanks: [
       { name: 'A', x0: -CELL - 22, x1: -CELL + 22 },
-      { name: 'B', x0: -22, x1: 22 },
+      { name: 'B', x0: CELL - 22, x1: CELL + 22 },
     ],
     tankH: 30,
     tankCap: FUNNEL_CAP,
@@ -1173,7 +1173,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spouts: [0],
     valveY: 64,
     spoutY: 88,
-    box: { x0: -126, x1: 26, y0: -6, y1: 90 },
+    box: { x0: -126, x1: 126, y0: -6, y1: 90 },
   },
   sorter: {
     // a funnel at the high end of the chute (see SORTER_CHUTE), which drops through three screens, then off its end
@@ -1598,7 +1598,7 @@ export class Blotter extends Vessel {
  *   FUNNEL_RATE) to two spouts. Its valve doesn't open or close: it sets the
  *   share that goes right, from 0 (all left) to 1 (all right).
  * - A **multiplexer** is a splitter the other way up: two funnels, each draining (at FUNNEL_RATE times how high
- *   its fluid stands) into one spout, under the right one. Its valve picks which: the share of FUNNEL_RATE the right funnel
+ *   its fluid stands) into one spout between them. Its valve picks which: the share of FUNNEL_RATE the right funnel
  *   gets, from 0 (only the left drains) to 1 (only the right), the left getting the rest.
  * - A **size sorter** has a funnel like the splitter's, with no valve, draining down a chute through three
  *   screens and off its end, each with a spout under it (see sieve).

@@ -184,6 +184,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     along it, with every mouth and spout over a cell's middle (`onGrid`, `toolAnchor` and `SCALE_ANCHOR` in
     `bodies.ts`; the engine's `gridded` and `toGrid`). So a tool's tanks and spouts must be a whole number of cells
     apart along it (`bodies.test.ts` checks every shape), and the counters' edges run along cells' edges. Height is free.
+    That's why the splitter, the multiplexer and the separator are three cells across for two outlets or inlets:
+    the one in the middle has to be over a cell too. The user prefers that to a narrower tool that isn't symmetrical.
 - **Hoses** aren't a tool: every spout and faucet has one, pulled out with the left button (`Hose.on` says which). A
   spout's fluid leaves at its hose's nozzle if it's out, so wherever fluid leaves a spout or faucet, use the engine's
   `outletAt` and `faucetOutlet`, not `spoutAt` or `fa.spout`.

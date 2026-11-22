@@ -2033,19 +2033,19 @@ describe('separator', () => {
   const without = [R, SOLVENT_SPECIES, tri('△RGB'), pair('R–G')];
   const withK = [tri('⊠RGBK'), tri('R–G–B–K'), tri('△RGK'), pair('R–K'), K];
 
-  it('has two spouts a grid cell apart, the first under its tank, so it is two cells across', () => {
+  it('has two spouts, a grid cell either side of its tank', () => {
     const t = new Tool('separator', 0);
     expect(SEPARATOR_OUTLETS).toBe(2);
-    expect(t.shape.spouts).toEqual([0, CELL]);
+    expect(t.shape.spouts).toEqual([-CELL, CELL]);
     expect(tankX(t.shape.tanks[0])).toBe(0);
-    expect(t.shape.box.x1 - t.shape.box.x0).toBeLessThan(2 * CELL);
   });
 
-  it('has its neighbours two cells across too: the splitter\'s funnel over its left spout, the multiplexer\'s right funnel over its spout', () => {
-    const [sp, mx] = [SHAPES.splitter, SHAPES.multiplexer];
-    expect(sp.spouts).toEqual([tankX(sp.tanks[0]), tankX(sp.tanks[0]) + CELL]);
-    expect(mx.tanks.map(tankX)).toEqual([mx.spouts[0] - CELL, mx.spouts[0]]);
-    for (const sh of [sp, mx]) expect(sh.box.x1 - sh.box.x0).toBeLessThan(2 * CELL);
+  it('is symmetrical, as the splitter and the multiplexer are: each one\'s inlets and outlets are about its middle', () => {
+    for (const kind of ['separator', 'splitter', 'multiplexer'] as const) {
+      const sh = SHAPES[kind];
+      const xs = [...sh.tanks.map(tankX), ...sh.spouts].sort((a, b) => a - b);
+      expect(xs, kind).toEqual([-CELL, 0, CELL]);
+    }
   });
 
   it('gives each molecule its outlet by whether it has a black atom: the left with none, the right with any', () => {
