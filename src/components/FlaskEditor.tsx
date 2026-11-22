@@ -66,8 +66,18 @@ export function FlaskEditor({ engine, id, onClose }: { engine: GameEngine; id: s
       <div className="line">
         <span>T</span>
         <DragNumber typeable min={0} value={temperature(f)} onChange={(v) => edit(() => f.setTemperature(v))} />
-        <span className="muted">
-          {fmtCount(volume(f))} / {fmtCount(f.cap)} {volumeUnit()}
+        <span className="total">
+          <DragNumber
+            typeable
+            min={0}
+            value={volume(f)}
+            format={fmtCount}
+            onChange={(v) => edit(() => f.setVolume(v))}
+          />
+          <span className="muted">
+            {' '}
+            / {fmtCount(f.cap)} {volumeUnit()}
+          </span>
         </span>
       </div>
       <table>
@@ -146,7 +156,7 @@ export function FlaskEditor({ engine, id, onClose }: { engine: GameEngine; id: s
         </button>
       </div>
       {showReactions && <Reactions engine={engine} id={id} />}
-      <p className="muted">Drag a number to scale it, or double-click to type. It keeps reacting while you edit. Equilibrate runs every reaction to its end at once, even ones too slow ever to happen. Reactions lists what's reacting, each net of its reverse, in events per sim second.</p>
+      <p className="muted">Drag a number to scale it, or double-click to type; the total scales everything in it in proportion. It keeps reacting while you edit. Equilibrate runs every reaction to its end at once, even ones too slow ever to happen. Reactions lists what's reacting, each net of its reverse, in events per sim second.</p>
     </div>
   );
 }
