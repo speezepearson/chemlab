@@ -98,8 +98,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `wheel.ts` is the two equipment wheels: what's on each (`WHEELS`), where the mouse puts the pointer while a
     wheel's key (1 or 2) is held, and which sector that picks. The engine holds the open one's state (`wheel`,
     `openWheel`, `closeWheel`) and `Wheel` in `Hud.tsx` draws it.
-  - `outline.ts` is the player's settings for the outline round what the crosshair is on; the view's `Outliner` draws
-    it over the finished frame, from a mask of the meshes registered as that thing's parts.
+  - `outline.ts` is the player's settings for the two outlines round what the crosshair is on: the part it's on
+    (`partOf` in `view.ts`: a valve, a tank, a spout with its hose), and faintly the whole thing that's part of
+    (`thingOf`). The view's `Outliner` draws each over the finished frame, from a mask of the meshes whose picks have
+    that key.
   - `smell.ts` is what a sniff (F) makes of a fluid, pure and DOM-free: the ten odorants and Nadia's similes for them
     (`ODORANTS`), how strong each is for a composition and temperature, masking, and what she says of it all
     (`script`): pieces of text, each with the real seconds it waits before coming up, and whether it starts a new line,

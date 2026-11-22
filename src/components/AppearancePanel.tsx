@@ -121,7 +121,7 @@ export function AppearancePanel() {
             )}
             <tr className="group">
               <td colSpan={2}>
-                <b>Outline</b> <span>round what the crosshair is on; thickness in pixels, 0 for none</span>
+                <b>Outline</b> <span>round the part the crosshair is on, and faintly round the whole thing; thickness in pixels, faint as a share of full strength, 0 for none</span>
               </td>
             </tr>
             <tr>
@@ -155,6 +155,26 @@ export function AppearancePanel() {
                     }}
                   />
                   <output>{OUTLINE.width}</output>
+                </label>
+              </td>
+            </tr>
+            <tr>
+              <td>faint</td>
+              <td>
+                <label className="slider">
+                  <input
+                    type="range"
+                    aria-label="faint outline opacity"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={OUTLINE.faint}
+                    onChange={(e) => {
+                      setOutline({ faint: +e.target.value });
+                      rerender();
+                    }}
+                  />
+                  <output>{OUTLINE.faint}</output>
                 </label>
               </td>
             </tr>

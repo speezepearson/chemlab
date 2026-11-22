@@ -1,17 +1,20 @@
 /**
- * The player's settings for the outline drawn round whatever the crosshair is on: its color, and how thick it is in
- * CSS pixels (0 for none). Kept in local storage, not in saves: it's a preference, like the volumes.
+ * The player's settings for the outlines drawn round whatever the crosshair is on (the part of it, and faintly the whole
+ * thing it's part of): their color, how thick they are in CSS pixels (0 for none), and how strong the faint one is.
+ * Kept in local storage, not in saves: it's a preference, like the volumes.
  */
 export interface Outline {
   /** A CSS hex color, #rrggbb. */
   color: string;
   width: number;
+  /** The opacity of the outline round the whole thing, from 0 (none) to 1 (as strong as the part's). */
+  faint: number;
 }
 
 /** The thickest the slider goes, in CSS pixels. */
 export const MAX_OUTLINE_WIDTH = 8;
 
-export const DEFAULT_OUTLINE: Readonly<Outline> = { color: '#ffffff', width: 2 };
+export const DEFAULT_OUTLINE: Readonly<Outline> = { color: '#ffffff', width: 2, faint: 0.25 };
 
 export function defaultOutline(): Outline {
   return { ...DEFAULT_OUTLINE };
@@ -27,9 +30,10 @@ export function parseOutline(json: string | null): Outline {
     return out;
   }
   if (!raw || typeof raw !== 'object') return out;
-  const { color, width } = raw as Record<string, unknown>;
+  const { color, width, faint } = raw as Record<string, unknown>;
   if (typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)) out.color = color.toLowerCase();
   if (typeof width === 'number' && width >= 0 && width <= MAX_OUTLINE_WIDTH) out.width = width;
+  if (typeof faint === 'number' && faint >= 0 && faint <= 1) out.faint = faint;
   return out;
 }
 

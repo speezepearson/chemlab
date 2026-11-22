@@ -1882,12 +1882,18 @@ export class GameEngine {
   private mountAimed(): HoseMount | null {
     const p = this.target;
     if (p?.kind === 'faucet') return p.spout ? { faucet: p.i } : null;
+    const j = this.spoutAimed();
+    return j === null || p?.kind !== 'tool' ? null : { tool: p.t, spout: j };
+  }
+
+  /** Which of a tool's spouts the crosshair is on, for mountAimed: its tip, or the tool just above it (see spoutNear). */
+  private spoutAimed(): number | null {
+    const p = this.target;
     // nothing on the station can be worked through its changeover
     if (p?.kind !== 'tool' || !p.t.shape.spouts.length || p.t.swap !== null) return null;
-    if (p.part === 'spout') return { tool: p.t, spout: p.k };
+    if (p.part === 'spout') return p.k;
     const l = toLocal(p.t.pose, p.point);
-    const j = spoutNear(p.t, l.x, -l.y);
-    return j === null ? null : { tool: p.t, spout: j };
+    return spoutNear(p.t, l.x, -l.y);
   }
 
   /**
@@ -3138,13 +3144,18 @@ export class GameEngine {
 
   /**
    * What's outlined: what the crosshair is on, but the whole equipment cabinet while what's held would go into it,
-   * and nothing for the cabinet itself otherwise.
+   * and nothing for the cabinet itself otherwise; and a tool's spout, with its hose, where the crosshair is on the
+   * tool just above it, since that's where the left button pulls the hose out (see mountAimed).
    */
   private hot(): Pick | null {
     // (nothing while she sniffs: her nose is in it)
     if (this.sniffing) return null;
     const p = this.target;
     if (this.held) return this.intoCabinet() ? { kind: 'cabinet' } : p?.kind === 'cabinet' || p?.kind === 'stock' ? null : p;
+    if (p?.kind === 'tool' && p.part === 'body') {
+      const j = this.spoutAimed();
+      if (j !== null) return { kind: 'tool', t: p.t, part: 'spout', k: j };
+    }
     return p?.kind === 'cabinet' ? null : p;
   }
 

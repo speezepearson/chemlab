@@ -2762,7 +2762,8 @@ const nozzleGeom = new THREE.CylinderGeometry(4, 3, NOZZLE_H, 12).translate(0, N
  */
 class HoseView {
   private outlet = new THREE.Group();
-  private tube: THREE.Mesh;
+  /** Not hit (only its nozzle is), but outlined with it (see View.renderOutline). */
+  readonly tube: THREE.Mesh;
   private core: THREE.Mesh;
   private coreMat = new THREE.MeshBasicMaterial();
   private key = '';
@@ -3823,30 +3824,57 @@ function buildFaucets(
 /* ---------------- the view ---------------- */
 
 /**
- * The thing a pick is part of, to outline all of it: a tool for any of its parts, a faucet for its knob or spout. The
- * supply station, built into the wall, is outlined a part at a time: its funnel, its reservoir's window, or one
- * of its two faucets (its spout's pipe, with its valve); its plate, nothing. Of the shadow lamp, which stays where it
- * is too, only its button and its dial are. Null for nothing.
+ * The part a pick is on, to outline just that: one of a tool's tanks, valves or spouts, the rest of a tool for its
+ * body, a flask, a scale. A spout and the hose pulled out of it are one part, nozzle and stand too, and so are a faucet's
+ * spout and its hose; its knob, which is for its note, stands for the whole faucet. The supply station, built into the
+ * wall, is outlined a part at a time as ever: its funnel, its reservoir's window, or one of its two faucets (its
+ * spout's pipe, with its valve); its plate, nothing. Of the shadow lamp, which stays where it is too, only its button
+ * and its dial are. Null for nothing.
  */
-function thingOf(p: Pick): unknown {
+function partOf(p: Pick): unknown {
   switch (p.kind) {
     case 'flask': return p.f;
     case 'tool': {
       const { t } = p;
-      // (the shadow lamp, which stays where it is too: only its button, and its dial)
       if (p.part === 'button') return `tool ${t.id} button`;
       if (t.kind === 'shadowlamp') return p.part === 'valve' ? `tool ${t.id} dial` : null;
-      if (!t.shape.fixed) return t;
       if (p.part === 'tank') return `tool ${t.id} tank ${p.k}`;
       if (p.part === 'spout') return `tool ${t.id} spout ${p.k}`;
-      if (p.part === 'valve') return `tool ${t.id} spout ${t.shape.spouts.indexOf(valveLocal(t, p.k).x)}`;
-      return null;
+      // (the station's one valve is its faucet's, so it goes with that spout)
+      if (p.part === 'valve') return t.shape.fixed ? `tool ${t.id} spout ${t.shape.spouts.indexOf(valveLocal(t, p.k).x)}` : `tool ${t.id} valve ${p.k}`;
+      return t.shape.fixed ? null : t;
     }
     case 'scale': return p.sc;
-    case 'hose': return p.h;
+    case 'hose': {
+      const m = p.h.on;
+      return 'tool' in m ? `tool ${m.tool.id} spout ${m.spout}` : `faucet ${m.faucet} spout`;
+    }
+    case 'faucet': return p.spout ? `faucet ${p.i} spout` : `faucet ${p.i}`;
+    default: return p.kind;
+  }
+}
+
+/**
+ * The whole thing a pick's mesh is part of, outlined faintly round the part: a tool for any of its parts, a faucet for
+ * its knob or spout. Nothing for the station or the shadow lamp, which are part of the room; and nothing for a hose,
+ * which isn't part of its tool's own shape, so outlining the tool doesn't take its hoses in.
+ */
+function thingOf(p: Pick): unknown {
+  switch (p.kind) {
+    case 'flask': return p.f;
+    case 'tool': return p.t.shape.fixed ? null : p.t;
+    case 'scale': return p.sc;
+    case 'hose': return null;
     case 'faucet': return `faucet ${p.i}`;
     default: return p.kind;
   }
+}
+
+/** The whole thing round what the crosshair is on: what thingOf says, but for a hose, what it runs from. */
+function wholeOf(p: Pick): unknown {
+  if (p.kind !== 'hose') return thingOf(p);
+  const m = p.h.on;
+  return 'tool' in m ? (m.tool.shape.fixed ? null : m.tool) : `faucet ${m.faucet}`;
 }
 
 const quadVertex = /* glsl */ `
@@ -4202,7 +4230,7 @@ class IconStudio {
 }
 
 /**
- * The outline round whatever the crosshair is on (see OUTLINE in outline.ts), drawn over the finished frame. Its
+ * An outline round some of what the crosshair is on (see OUTLINE in outline.ts), drawn over the finished frame. Its
  * silhouette, the whole of it whatever's in front, goes into a mask; then each pixel finds how far it is from the
  * mask, along its row and then down its column (the nearest along each row first, so the second pass gets the true
  * distance), and the pixels within the outline's width of it are painted, the outermost blended for a smooth edge.
@@ -4230,11 +4258,11 @@ class Outliner {
     depthTest: false,
     depthWrite: false,
   });
-  /** Down each column: the distance to the mask, and the outline's color as far out as its width. */
+  /** Down each column: the distance to the mask, and the outline's color as far out as its width, at its opacity. */
   private down = new THREE.ShaderMaterial({
     uniforms: {
       rows: { value: null }, texel: { value: new THREE.Vector2() }, reach: { value: 1 }, width: { value: 1 },
-      color: { value: new THREE.Color() },
+      color: { value: new THREE.Color() }, opacity: { value: 1 },
     },
     vertexShader: quadVertex,
     fragmentShader: /* glsl */ `
@@ -4243,6 +4271,7 @@ class Outliner {
       uniform int reach;
       uniform float width;
       uniform vec3 color;
+      uniform float opacity;
       varying vec2 vUv;
       void main() {
         float best = 1e4;
@@ -4252,7 +4281,7 @@ class Outliner {
         }
         float a = clamp(width + 0.5 - best, 0.0, 1.0);
         if (best < 0.5 || a <= 0.0) discard;
-        gl_FragColor = vec4(color, a);
+        gl_FragColor = vec4(color, a * opacity);
         #include <colorspace_fragment>
       }`,
     transparent: true,
@@ -4269,10 +4298,10 @@ class Outliner {
     this.quad.frustumCulled = false;
   }
 
-  /** Outline `meshes` over what `renderer` last drew of `scene`. */
-  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, meshes: THREE.Object3D[]): void {
+  /** Outline `meshes` over what `renderer` last drew of `scene`, at `opacity`. */
+  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, meshes: THREE.Object3D[], opacity = 1): void {
     const width = OUTLINE.width * renderer.getPixelRatio();
-    if (width <= 0 || !meshes.length) return;
+    if (width <= 0 || opacity <= 0 || !meshes.length) return;
     const reach = Math.min(254, Math.ceil(width + 0.5));
     const { x: w, y: h } = renderer.getDrawingBufferSize(this.size);
     if (this.mask.width !== w || this.mask.height !== h) {
@@ -4313,6 +4342,7 @@ class Outliner {
     u.reach.value = reach;
     u.width.value = width;
     (u.color.value as THREE.Color).set(OUTLINE.color);
+    u.opacity.value = opacity;
     this.quad.material = this.down;
     renderer.setRenderTarget(null);
     renderer.autoClear = false;
@@ -4999,17 +5029,32 @@ export class View {
     scene.background = bg;
   }
 
-  /** The outline round everything that's part of what the crosshair is on (see Outliner). */
+  /**
+   * The outlines round what the crosshair is on (see Outliner): at full strength round the part of it (see partOf),
+   * and first, faintly, round the whole thing it's part of (see thingOf) with that part, so no faint line cuts across
+   * a hose that's out. A part whose key is a whole thing (a tool's body) takes all of it in, its stands too.
+   */
   private renderOutline(hot: Pick | null): void {
     if (!hot) return;
     if (hot.kind === 'stock') {
       this.outliner.render(this.renderer, this.scene, this.camera, this.cabinet.outline(hot.item, hot.slot));
       return;
     }
-    const thing = thingOf(hot);
-    if (thing === null) return;
-    const meshes = [...this.pickables].filter(([, p]) => thingOf(p) === thing).map(([o]) => o);
-    this.outliner.render(this.renderer, this.scene, this.camera, meshes);
+    const focus = partOf(hot);
+    if (focus === null) return;
+    const whole = wholeOf(hot);
+    // (a hose's tube isn't hit, so it isn't among the pickables, but it's drawn as part of its hose)
+    const members: [THREE.Object3D, Pick][] = [...this.pickables, ...[...this.hoses.values()].map((v): [THREE.Object3D, Pick] => [v.tube, { kind: 'hose', h: v.h }])];
+    const part: THREE.Object3D[] = [];
+    const all: THREE.Object3D[] = [];
+    for (const [o, p] of members) {
+      const thing = thingOf(p);
+      const inPart = partOf(p) === focus || thing === focus;
+      if (inPart) part.push(o);
+      if (inPart || (whole !== null && thing === whole)) all.push(o);
+    }
+    if (whole !== null && whole !== focus) this.outliner.render(this.renderer, this.scene, this.camera, all, OUTLINE.faint);
+    this.outliner.render(this.renderer, this.scene, this.camera, part);
   }
 
   /** Every stand, its base on whatever's under it: a counter, or the floor under something held out over it. */
