@@ -20,6 +20,12 @@ export const TANK_CAP = 4 * CAP;
 export const MAX_FLOW = CAP;
 /** Height of every tank, in local units. */
 export const TANK_H = 84;
+/**
+ * The section of the glass tanks of a dispenser, a separator and a heat exchanger: `w` across, and `h` tall, taller
+ * than TANK_H, so that holding TANK_CAP they're about as deep front to back as across (see tankDepth), and a tank
+ * fits in a grid cell, with room to spare for its neighbour's in the next.
+ */
+export const TANK_SECTION = { w: 52, h: 92 };
 
 /**
  * How much room fluid takes up as it's drawn, in world units cubed per atom a vessel holds: a flask's inside over
@@ -276,11 +282,11 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
  * over a diverter, which sends what drains from the funnel up into the reservoir if it's pure enough, or else down
  * and out a waste spigot under it, with a little LCD between the funnel and the spigot showing which way it's going.
  * In its own flat frame, x runs along the wall and y down from the column's top; z = 0 is over the middle of the
- * counter's middle row of cells, where the funnel and spouts are, and the wall is `out` behind it.
+ * counter's outer row of cells, where the funnel and spouts are, and the wall is `out` behind it.
  * - along: how far along the wall from its back end (z, in the room) its frame's origin is, over the middle of a cell
  *   (see STATION_POSE in presets.ts); the funnel is a cell on from it, and the reservoir a cell on from that.
  * - paneW, paneH: the reservoir's pane, across and tall; the column behind it is as tall.
- * - out: how far the funnel and spouts stand out from the wall: over the middle of the counter's middle row of cells,
+ * - out: how far the funnel and spouts stand out from the wall: over the middle of the counter's outer row of cells,
  *   in line with the faucets (a flask under them in the row nearest the wall would be up against the block's seam).
  * - top: how high the column's top is, in the room.
  * - plate: how deep the plate the pane is set in goes into the wall, its face flush with the wall.
@@ -1157,12 +1163,14 @@ const BLOTTER_SHAPE: ToolShape = {
 
 export const SHAPES: Record<ToolKind, ToolShape> = {
   dispenser: {
-    tanks: [{ name: 'tank', x0: -30, x1: 30 }],
+    // a glass tank of the standard section (see TANK_SECTION), so it fits in a grid cell, beside another
+    tanks: [{ name: 'tank', x0: -TANK_SECTION.w / 2, x1: TANK_SECTION.w / 2 }],
+    tankH: TANK_SECTION.h,
     sump: { w: 14, h: 7 },
     spouts: [0],
-    valveY: 98,
-    spoutY: 114,
-    box: { x0: -34, x1: 34, y0: -6, y1: 116 },
+    valveY: TANK_SECTION.h + 14,
+    spoutY: TANK_SECTION.h + 30,
+    box: { x0: -TANK_SECTION.w / 2 - 3, x1: TANK_SECTION.w / 2 + 3, y0: -6, y1: TANK_SECTION.h + 32 },
   },
   pipette: {
     // a narrow dispenser, filled through a little funnel on top
@@ -1176,27 +1184,30 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -18, x1: 18, y0: -20, y1: 116 },
   },
   exchanger: {
-    // a pair of tanks too wide to stand a grid cell apart, so two (see CELL)
+    // two tanks of the standard section (see TANK_SECTION), half a grid cell either side of its middle
     tanks: [
-      { name: 'A', x0: -CELL - 29, x1: -CELL + 29 },
-      { name: 'B', x0: CELL - 29, x1: CELL + 29 },
+      { name: 'A', x0: -CELL / 2 - TANK_SECTION.w / 2, x1: -CELL / 2 + TANK_SECTION.w / 2 },
+      { name: 'B', x0: CELL / 2 - TANK_SECTION.w / 2, x1: CELL / 2 + TANK_SECTION.w / 2 },
     ],
+    tankH: TANK_SECTION.h,
     sump: { w: 14, h: 7 },
-    // the streams cross over in the exchanger, so each leaves on the other side, under the other tank
-    spouts: [CELL, -CELL],
-    valveY: 97,
-    spoutY: 136,
-    box: { x0: -CELL - 33, x1: CELL + 33, y0: -6, y1: 138 },
+    // the streams cross over in the exchanger, so each leaves on the other side, a grid cell apart (see CELL)
+    spouts: [CELL / 2, -CELL / 2],
+    valveY: TANK_SECTION.h + 13,
+    spoutY: TANK_SECTION.h + 52,
+    box: { x0: -CELL / 2 - TANK_SECTION.w / 2 - 3, x1: CELL / 2 + TANK_SECTION.w / 2 + 3, y0: -6, y1: TANK_SECTION.h + 54 },
   },
   separator: {
-    tanks: [{ name: 'tank', x0: -30, x1: 30 }],
+    // the dispenser's tank (see TANK_SECTION)
+    tanks: [{ name: 'tank', x0: -TANK_SECTION.w / 2, x1: TANK_SECTION.w / 2 }],
+    tankH: TANK_SECTION.h,
     // one outlet per share of black (see SEPARATOR_OUTLET), a grid cell apart (see CELL), so a flask fits under each
     spouts: [-2 * CELL, -CELL, 0, CELL, 2 * CELL],
     sump: { w: 14, h: 7 },
-    valveY: 96,
-    spoutY: 126,
+    valveY: TANK_SECTION.h + 12,
+    spoutY: TANK_SECTION.h + 42,
     // the manifold under it (see the view's SEP_BODY), with a handle on its left end
-    box: { x0: -2 * CELL - 20, x1: 2 * CELL + 14, y0: -6, y1: 128 },
+    box: { x0: -2 * CELL - 20, x1: 2 * CELL + 14, y0: -6, y1: TANK_SECTION.h + 44 },
   },
   splitter: {
     tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
@@ -1528,7 +1539,7 @@ export const tankX = (tk: { x0: number; x1: number }) => (tk.x0 + tk.x1) / 2;
  * one end to the bottom of the other, so a stream comes down from its tank,
  * winds across, and drops out the far side.
  */
-export const HELIX = { x0: -CELL, x1: CELL, y: 110, r: 6, halfTwists: 9 };
+export const HELIX = { x0: -CELL / 2, x1: CELL / 2, y: TANK_SECTION.h + 26, r: 6, halfTwists: 9 };
 
 /** The inside of a tank with a neck, by kind of tool (see Tool.level): every tank of a kind is alike. */
 const necked = new Map<ToolKind, Piece[]>();

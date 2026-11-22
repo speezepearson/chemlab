@@ -52,15 +52,15 @@ export const LIFT = 420;
 /** How far the back wall's counter comes out from it: three grid cells. */
 export const COUNTER_D = 3 * CELL;
 /**
- * How far the right wall's counter, under the faucets, comes out from it: three grid cells, so they're in easy reach,
- * over its middle row, with room for a scale's depth either side of a flask under one.
+ * How far the right wall's counter, under the faucets, comes out from it: two grid cells, so they're in easy reach, over
+ * its outer row, the inner row free bench.
  */
-export const SINK_D = 3 * CELL;
+export const SINK_D = 2 * CELL;
 /**
  * The islands' size, across and front to back, and where their grid starts and how far apart they are, all in whole
  * grid cells: each is sixteen cells by six.
  */
-const ISLAND = { w: 16 * CELL, d: 6 * CELL, x0: -7 * CELL, z0: 10 * CELL, dx: 21 * CELL, dz: 13 * CELL, cols: 2, rows: 3 };
+const ISLAND = { w: 16 * CELL, d: 6 * CELL, x0: -7 * CELL, z0: 10 * CELL, dx: 22 * CELL, dz: 13 * CELL, cols: 2, rows: 3 };
 /**
  * Where the equipment cabinet stands (see cabinet.ts): against the back wall from the left wall, thirty grid cells
  * along it and five out from it, two cells further than the counter, and as tall as its shelves need. The back

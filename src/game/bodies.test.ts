@@ -180,10 +180,11 @@ describe('the shadow lamp', () => {
     expect(boxesOverlap(flaskBox(flaskAt(cell(-1).x, cell(-1).z, LAMP_FLOOR.y)), b)).toBe(true);
     expect(boxesOverlap(flaskBox(flaskAt(cell(cells).x, cell(cells).z)), b)).toBe(true);
     expect(boxesOverlap(flaskBox(flaskAt(cell(cells + 1).x, cell(cells + 1).z)), b)).toBe(false);
-    // (a scale is a little over three cells long, its places for a flask two cells apart: it fits over the middle
-    // three of the channel's)
-    for (const i of [2]) {
-      const along = new Scale(onGrid(at(cell(i).x, LAMP_FLOOR.y + SCALE_SHAPE.body.y1, cell(i).z, LAMP_POSE.yaw), SCALE_ANCHOR));
+    // (a scale is two cells long, a place for a flask over each: it fits over any two of the channel's side by side)
+    for (let i = 1; i < cells; i++) {
+      const mid = { x: (cell(i - 1).x + cell(i).x) / 2, z: (cell(i - 1).z + cell(i).z) / 2 };
+      const along = new Scale(onGrid(at(mid.x, LAMP_FLOOR.y + SCALE_SHAPE.body.y1, mid.z, LAMP_POSE.yaw), SCALE_ANCHOR));
+      expect(Math.hypot(along.pose.x - mid.x, along.pose.z - mid.z)).toBeCloseTo(0, 6);
       expect(boxesOverlap(scaleBox(along), b)).toBe(false);
       expect(counterUnder(scaleBox(along))).toBe(LAMP_FLOOR.y);
     }
@@ -341,8 +342,10 @@ describe('tools in the room', () => {
 
   it('bump into each other only where their boxes meet', () => {
     const a = new Tool('dispenser', 0, at(0, 500, 0));
-    expect(boxesOverlap(toolBox(a), toolBox(new Tool('dispenser', 1, at(60, 500, 0))))).toBe(true);
-    expect(boxesOverlap(toolBox(a), toolBox(new Tool('dispenser', 1, at(80, 500, 0))))).toBe(false);
+    expect(boxesOverlap(toolBox(a), toolBox(new Tool('dispenser', 1, at(CELL - 10, 500, 0))))).toBe(true);
+    // a cell apart, either way, they're clear of each other
+    expect(boxesOverlap(toolBox(a), toolBox(new Tool('dispenser', 1, at(CELL, 500, 0))))).toBe(false);
+    expect(boxesOverlap(toolBox(a), toolBox(new Tool('dispenser', 1, at(0, 500, CELL, Math.PI / 2))))).toBe(false);
     expect(boxesOverlap(toolBox(a), toolBox(new Tool('dispenser', 1, at(0, 300, 0))))).toBe(false);
   });
 });
@@ -446,7 +449,7 @@ describe('scaleSpot', () => {
   const sc = new Scale(at(0, 400, 0));
   it('stands a flask let go just over the platform on it, at the nearer of its two places', () => {
     expect(scaleSpot(sc, { x: 30, y: 400 + FLASK_H + 20, z: 0 })).toBe(SCALE_SLOTS[1]);
-    expect(scaleSpot(sc, { x: 90, y: 400 + FLASK_H + 5, z: 10 })).toBe(SCALE_SLOTS[1]);
+    expect(scaleSpot(sc, { x: SCALE_SHAPE.platform.x1 - 5, y: 400 + FLASK_H + 5, z: 10 })).toBe(SCALE_SLOTS[1]);
     expect(scaleSpot(sc, { x: -10, y: 400 + FLASK_H + 5, z: 0 })).toBe(SCALE_SLOTS[0]);
     expect(onScale(sc, 30).y).toBeCloseTo(400 + FLASK_H);
   });
@@ -455,7 +458,7 @@ describe('scaleSpot', () => {
     expect(scaleSpot(sc, { x: 30, y: 400 + FLASK_H + 120, z: 0 })).toBeNull();
     expect(scaleSpot(sc, { x: 30, y: 400 + FLASK_H - 40, z: 0 })).toBeNull();
     expect(scaleSpot(sc, { x: 30, y: 400 + FLASK_H, z: 80 })).toBeNull();
-    expect(scaleSpot(sc, { x: 130, y: 400 + FLASK_H, z: 0 })).toBeNull();
+    expect(scaleSpot(sc, { x: SCALE_SHAPE.platform.x1 + 10, y: 400 + FLASK_H, z: 0 })).toBeNull();
   });
 });
 

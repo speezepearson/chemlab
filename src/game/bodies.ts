@@ -419,11 +419,8 @@ export function onScale(sc: Scale, dx: number): Pose {
   return { ...toWorld(sc.pose, { x: dx, y: FLASK_H, z: 0 }), yaw: sc.pose.yaw };
 }
 
-/**
- * Where along its platform a scale stands flasks: a grid cell either side of its middle, two cells apart, toward the
- * platform's ends, so each stands on the scale with room round it, and a scale fits under any two spouts two cells apart.
- */
-export const SCALE_SLOTS = [-CELL, CELL];
+/** Where along its platform a scale stands flasks: half a grid cell either side of its middle, a cell apart. */
+export const SCALE_SLOTS = [-CELL / 2, CELL / 2];
 /** The point of a scale that goes over the middle of a grid cell: one of its places for a flask, so both are. */
 export const SCALE_ANCHOR: Vec3 = { x: SCALE_SLOTS[1], y: 0, z: 0 };
 
@@ -578,7 +575,7 @@ export interface Stand {
 }
 
 /** A stand's base plate: how far it reaches either side of its rod, across and front to back, and how thick it is. */
-export const STAND_BASE = { hx: 30, hz: 16, h: 6 };
+export const STAND_BASE = { hx: 28, hz: 16, h: 6 };
 /** How high a stand's rod reaches above the counter, whatever it holds: its clamp slides up and down it. */
 export const STAND_ROD = 570;
 /** How high a stand's clamp can be above the counter: just short of the top of its rod. */

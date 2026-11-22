@@ -302,8 +302,8 @@ const MOD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator
 export const TOUCH = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 /**
  * Where the faucets are: along the right wall over its counter, a grid cell apart, each spout over the middle of a
- * cell of the counter's middle row (see CELL, SINK_D), where the station's are too (see STATION.out),
- * clear of the manifold. Their spouts are a little under eye level, high enough over the
+ * cell of the counter's outer row (see CELL, SINK_D), where the station's are too (see STATION.out), clear of the
+ * manifold, and the row by the wall is free bench. Their spouts are a little under eye level, high enough over the
  * counter for a flask on a scale (whose mouth is 112 up) to go under one, at the foot of a neck FAUCET_NECK long.
  */
 const FAUCET_Y = LIFT + 160;

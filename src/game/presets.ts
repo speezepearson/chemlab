@@ -33,7 +33,7 @@ export const SPECTROSCOPE_AT: Spot = { at: [1.45, 0.5] };
 
 /**
  * Where the station is (see STATION in tools.ts): built into the right wall, past the faucets, facing
- * into the room, its funnel and spouts over the middles of the cells of the counter's middle row, and its
+ * into the room, its funnel and spouts over the middles of the cells of the counter's outer row, and its
  * spouts high enough for a flask under them. Every lab has it, always here.
  */
 export const STATION_POSE: Pose = { x: ROOM.x1 - STATION.out, y: STATION.top, z: STATION.along, yaw: -Math.PI / 2 };
@@ -117,10 +117,10 @@ export const PRESETS: readonly Preset[] = [
       'mixing: the red comes out cool and the green hot. Slower flows trade more. Look at a valve and hold the right button: point up to open it, right to close it.',
     flasks: [],
     tools: [
-      // over the exchanger's two tanks, a grid cell either side of its middle
+      // over the exchanger's two tanks, half a grid cell either side of its middle
       { kind: 'dispenser', at: [cellX(5), 0.22], z: DEMO_Z, valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('R'), 4 * CAP)], T: 10 }] },
-      { kind: 'dispenser', at: [cellX(7), 0.22], z: DEMO_Z, valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('G'), 4 * CAP)], T: T_ROOM }] },
-      { kind: 'exchanger', at: [cellX(6), 0.48], z: DEMO_Z, valves: [0.25, 0.25] },
+      { kind: 'dispenser', at: [cellX(6), 0.22], z: DEMO_Z, valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('G'), 4 * CAP)], T: T_ROOM }] },
+      { kind: 'exchanger', at: [cellX(5.5), 0.48], z: DEMO_Z, valves: [0.25, 0.25] },
     ],
   },
   {
