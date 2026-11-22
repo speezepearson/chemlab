@@ -2882,7 +2882,11 @@ export class GameEngine {
       h.t.shape.spouts.forEach((_, j) => {
         if (!this.hoseOn({ tool: h.t, spout: j })) outlets.push({ at: spoutAt(h.t, j), lip: false });
       });
-    } else if (h.kind === 'scale') for (const { f } of h.sc.load) mine.add(f);
+    } else if (h.kind === 'scale') {
+      for (const { f } of h.sc.load) mine.add(f);
+      // (and where a flask would go on it, for a guide to show it lined up under a spout before a flask's there)
+      mine.add(SCALE_PLACE);
+    }
     else outlets.push({ at: h.h.outlet, lip: false });
     const out: Aim[] = [];
     const aim = (from: Vec3, held: Aim['held']) => {
@@ -2954,11 +2958,7 @@ export class GameEngine {
       });
     } else if (h.kind === 'scale') {
       for (const { f } of h.sc.load) vs.add(f);
-      for (const dx of SCALE_SLOTS)
-        if (!h.sc.load.some((l) => l.dx === dx)) {
-          const o = onScale(h.sc, dx);
-          mouths.push({ v: SCALE_PLACE, x: o.x, y: o.y, z: o.z, hx: FLASK_CATCH, hz: FLASK_CATCH, yaw: o.yaw });
-        }
+      mouths.push(...this.emptyPlaces(h.sc));
     } else outlets.push({ ...h.h.outlet });
     const all = this.mouths();
     mouths.push(...all.filter((m) => vs.has(m.v)));
@@ -2976,6 +2976,17 @@ export class GameEngine {
     this.placeHeld(h, at);
     if (h.kind === 'flask') h.f.tilt = tilt;
     return out;
+  }
+
+  /**
+   * A scale's places for a flask with no flask on them, as open tops at a flask's mouth's height, standing in for
+   * the flask that's not there yet (see SCALE_PLACE), for the magnet and the guides.
+   */
+  private emptyPlaces(sc: Scale): Mouth[] {
+    return SCALE_SLOTS.filter((dx) => !sc.load.some((l) => l.dx === dx)).map((dx) => {
+      const o = onScale(sc, dx);
+      return { v: SCALE_PLACE, x: o.x, y: o.y, z: o.z, hx: FLASK_CATCH, hz: FLASK_CATCH, yaw: o.yaw };
+    });
   }
 
   /**
@@ -3175,7 +3186,9 @@ export class GameEngine {
       const tilt = h.kind === 'flask' ? h.f.tilt : 0;
       if (h.kind === 'flask') h.f.tilt = 0;
       this.placeHeld(h, pl.rest.pose);
-      for (const a of this.aims(h, this.mouths())) if (a.held !== 'lip') out.push(guide(a, 'snap'));
+      // (a scale's empty places too, as if flasks stood there)
+      const places = h.kind === 'scale' ? this.emptyPlaces(h.sc) : [];
+      for (const a of this.aims(h, [...this.mouths(), ...places])) if (a.held !== 'lip') out.push(guide(a, 'snap'));
       this.placeHeld(h, at);
       if (h.kind === 'flask') h.f.tilt = tilt;
     }

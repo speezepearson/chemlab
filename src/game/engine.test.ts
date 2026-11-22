@@ -1346,6 +1346,22 @@ describe('setting things down', () => {
     expect(fs[0].n[more(l).faucets[0].start.start]).toBeGreaterThan(0);
     expect(fs[1].n[more(l).faucets[1].start.start]).toBeGreaterThan(0);
   });
+
+  it('shows green guides from two faucets into an empty scale’s places as it will be set down under them, and none far off', () => {
+    const l = lab();
+    const [a, b] = more(l).faucets.map((fa) => fa.spout);
+    const mid = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
+    const yaw = Math.atan2(-(b.z - a.z), b.x - a.x);
+    const G = l.in as unknown as { guides(pl: unknown): { from: { x: number; z: number }; look: string; mouth: { x: number; z: number } }[] };
+    holdAt(l, 'scale' as 'pipette', { x: mid.x - 6, y: LIFT + 100, z: mid.z + 8, yaw });
+    const gs = G.guides(l.in.placement(l.in.held)).filter((g) => g.look === 'snap');
+    expect(gs).toHaveLength(2);
+    for (const s of [a, b]) expect(gs.some((g) => Math.hypot(g.from.x - s.x, g.from.z - s.z) < 1e-6 && Math.hypot(g.mouth.x - s.x, g.mouth.z - s.z) < 1e-6)).toBe(true);
+    l.in.putAway();
+    // held well away from the faucets, it lines up with nothing
+    holdAt(l, 'scale' as 'pipette', { x: mid.x - 6, y: LIFT + 100, z: mid.z + 8 + 4 * CELL, yaw });
+    expect(G.guides(l.in.placement(l.in.held)).filter((g) => g.look === 'snap')).toHaveLength(0);
+  });
 });
 
 describe('the shadow lamp', () => {
