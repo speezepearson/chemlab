@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   FAUCET_NECK, FAUCET_Y, FLASK_R, NOZZLE_R, SCALE_SLOTS, TOOL_DEPTH, bathAt, dippedIn, docked, faucetBox, faucetPipes, flaskArm, flaskBox,
   flaskFluid, flaskLip, flaskMouth, footAt, insideVessel, isDocked, nozzleArm, nozzleBox, onScale, scaleArm, scaleBox, scaleSpot, spoutAt, spoutNear,
-  tankFluid, tankMouth, toolArms, toolBox, turnValve, newTurn, leverAt, setLever, valveLocal, valveNear, SHEET_SLOT, SLOT_REACH, inSlot, sheetIn, slotted, FLASK_LIP, lipAt, tiltToLip,
+  tankFluid, tankMouth, toolArms, toolBox, turnValve, newTurn, leverAt, setLever, leverOpening, SHUT_DEG, valveLocal, valveNear, SHEET_SLOT, SLOT_REACH, inSlot, sheetIn, slotted, FLASK_LIP, lipAt, tiltToLip,
 } from './bodies';
 import { LAMP_POSE, STATION_POSE } from './presets';
 import { singleOf } from '../chem/species';
@@ -91,6 +91,35 @@ describe('valveNear', () => {
   });
 });
 
+describe('leverOpening', () => {
+  const zone = SHUT_DEG / 90;
+  it('is exactly shut within the dead zone either side of shut, as at shut', () => {
+    for (let d = -SHUT_DEG; d <= SHUT_DEG; d += 0.5) expect(leverOpening(d / 90)).toBe(0);
+    const t = new Tool('dispenser', 0);
+    t.sides[0] = -1;
+    setLever(t, 0, -zone * 0.9);
+    expect([t.valves[0], t.sides[0]]).toEqual([0, 1]);
+  });
+  it('rises from 0 at the edge of the dead zone to full at a quarter turn, continuously, alike either way', () => {
+    expect(leverOpening(zone + 1e-6)).toBeCloseTo(0, 5);
+    expect(leverOpening(1)).toBe(1);
+    expect(leverOpening(-1)).toBe(-1);
+    expect(leverOpening(5)).toBe(1);
+    let last = 0;
+    for (let i = 1; i <= 900; i++) {
+      const u = i / 900;
+      const o = leverOpening(u);
+      expect(leverOpening(-u) + 0).toBe(-o + 0);
+      expect(o).toBeGreaterThanOrEqual(last);
+      expect(o - last).toBeLessThan(1 / 900 / (1 - zone) + 1e-9);
+      last = o;
+    }
+    // so a fine opening is still to be had, a little past the edge
+    expect(leverOpening(zone + 0.1 / 90)).toBeGreaterThan(0);
+    expect(leverOpening(zone + 0.1 / 90)).toBeLessThan(0.002);
+  });
+});
+
 describe('turnValve', () => {
   /** Turn valve k from scratch with the pointer at each of these points round it, at radius r, by angle clockwise from straight up. */
   const round = (t: Tool, k: number, degrees: number[], r = 20, turn = newTurn()): number[] => {
@@ -132,49 +161,60 @@ describe('turnValve', () => {
     for (let i = 1; i < back.length; i++) expect(back[i]).toBeLessThanOrEqual(back[i - 1]);
   });
 
+  /** A plain valve's setting with its lever a share u of a quarter turn from shut, either way. */
+  const op = (u: number): number => Math.abs(leverOpening(u));
+  const ZONE = SHUT_DEG / 90;
+
   it('opens a valve pointed up, closes it pointed right, and follows from there, clamped', () => {
     const t = new Tool('dispenser', 0);
     expect(round(t, 0, [0])[0]).toBeCloseTo(1);
-    expect(round(t, 0, [90])[0]).toBeCloseTo(0);
-    expect(round(t, 0, [45])[0]).toBeCloseTo(0.5);
+    expect(round(t, 0, [90])[0]).toBe(0);
+    expect(round(t, 0, [45])[0]).toBeCloseTo(op(0.5));
     const turn = newTurn();
     // from half open, a full turn counterclockwise opens it all the way, and a quarter back closes it
     const open = round(t, 0, sweep(45, -315), 20, turn);
     expect(open[open.length - 1]).toBe(1);
-    expect(round(t, 0, sweep(-315, -225), 20, turn).pop()).toBeCloseTo(0);
+    expect(round(t, 0, sweep(-315, -225), 20, turn).pop()).toBe(0);
   });
 
   it('opens a valve the other way too, pointed down, by how far its lever is from shut either way', () => {
     const t = new Tool('dispenser', 0);
     expect(round(t, 0, [180])[0]).toBeCloseTo(1);
     expect(t.sides[0]).toBe(-1);
-    expect(round(t, 0, [135])[0]).toBeCloseTo(0.5);
+    expect(round(t, 0, [135])[0]).toBeCloseTo(op(0.5));
     expect(t.sides[0]).toBe(-1);
     expect(leverAt(t, 0)).toBeCloseTo(-0.5);
-    expect(round(t, 0, [45])[0]).toBeCloseTo(0.5);
+    expect(round(t, 0, [45])[0]).toBeCloseTo(op(0.5));
     expect(t.sides[0]).toBe(1);
     // pointed left, outside the sweep, it stays where it was
-    expect(round(t, 0, [270])[0]).toBeCloseTo(0.5);
+    expect(round(t, 0, [270])[0]).toBeCloseTo(op(0.5));
     expect(t.sides[0]).toBe(1);
   });
 
   it('turns smoothly through shut from one side to the other, clamped a quarter turn either way', () => {
     const t = new Tool('dispenser', 0);
     const turn = newTurn();
+    const step = 1 / 90 / (1 - ZONE) + 1e-9;
     // from open up, clockwise: shut at straight right, then opening down, all the way at straight down, and no further
-    const down = sweep(0, 300).map((d) => (round(t, 0, [d], 20, turn), leverAt(t, 0)));
-    expect(down[0]).toBeCloseTo(1);
-    expect(down[90]).toBeCloseTo(0);
-    expect(down[180]).toBeCloseTo(-1);
-    expect(Math.max(...down.slice(180))).toBeCloseTo(-1);
+    const down = sweep(0, 300).map((d) => (round(t, 0, [d], 20, turn), { u: turn.u!, v: t.valves[0], side: t.sides[0] }));
+    expect(down[0].u).toBeCloseTo(1);
+    expect(down[90].u).toBeCloseTo(0);
+    expect(down[180].u).toBeCloseTo(-1);
+    expect(Math.max(...down.slice(180).map((s) => s.u))).toBeCloseTo(-1);
     for (let i = 1; i < down.length; i++) {
-      expect(down[i]).toBeLessThanOrEqual(down[i - 1]);
-      // no jumps
-      expect(down[i - 1] - down[i]).toBeLessThan(1 / 90 + 1e-9);
+      expect(down[i].u).toBeLessThanOrEqual(down[i - 1].u);
+      // no jumps, neither in the lever's turn nor in the valve's setting
+      expect(down[i - 1].u - down[i].u).toBeLessThan(1 / 90 + 1e-9);
+      expect(Math.abs(down[i].v - down[i - 1].v)).toBeLessThan(step);
     }
+    // shut, the usual way, all through the dead zone, and open either side of it
+    for (let d = 90 - SHUT_DEG; d <= 90 + SHUT_DEG; d++) expect([down[d].v, down[d].side]).toEqual([0, 1]);
+    expect(down[90 - SHUT_DEG - 1].v).toBeGreaterThan(0);
+    expect(down[90 + SHUT_DEG + 1].v).toBeGreaterThan(0);
+    expect(down[90 + SHUT_DEG + 1].side).toBe(-1);
     expect([t.valves[0], t.sides[0]]).toEqual([1, -1]);
     // and back off the end as soon as it turns back, through shut and up again
-    const up = sweep(300, 90).map((d) => (round(t, 0, [d], 20, turn), leverAt(t, 0)));
+    const up = sweep(300, 90).map((d) => (round(t, 0, [d], 20, turn), turn.u!));
     expect(up[30]).toBeCloseTo(-1 + 30 / 90);
     expect(up[90]).toBeCloseTo(0);
     expect(up[180]).toBeCloseTo(1);
@@ -182,16 +222,48 @@ describe('turnValve', () => {
     expect([t.valves[0], t.sides[0]]).toEqual([1, 1]);
   });
 
+  it('keeps a valve nudged a little off shut shut, and turns on from where its lever is, back and forth', () => {
+    const t = new Tool('dispenser', 0);
+    const turn = newTurn();
+    // pointed a degree or two off shut either way, it's shut
+    expect(round(t, 0, [88, 89, 91, 92], 20, turn)).toEqual([0, 0, 0, 0]);
+    expect(t.sides[0]).toBe(1);
+    expect(leverAt(t, 0)).toBe(0);
+    // up to the zone's edge and back past shut, it's shut, and then opens down from the other edge, no sooner
+    expect(round(t, 0, sweep(92, 90 - SHUT_DEG), 20, turn).every((v) => v === 0)).toBe(true);
+    const back = round(t, 0, sweep(90 - SHUT_DEG, 110), 20, turn);
+    expect(back.slice(0, 2 * SHUT_DEG + 1).every((v) => v === 0)).toBe(true);
+    expect(back[back.length - 1]).toBeCloseTo(op(-20 / 90));
+    expect(t.sides[0]).toBe(-1);
+  });
+
   it("sets a plain valve's lever either side of shut, the usual way at shut", () => {
     const t = new Tool('dispenser', 0);
     setLever(t, 0, -0.25);
-    expect([t.valves[0], t.sides[0]]).toEqual([0.25, -1]);
+    expect([t.valves[0], t.sides[0]]).toEqual([op(0.25), -1]);
     setLever(t, 0, -3);
     expect([t.valves[0], t.sides[0]]).toEqual([1, -1]);
     setLever(t, 0, 0);
     expect([t.valves[0], t.sides[0]]).toEqual([0, 1]);
     setLever(t, 0, 2);
     expect([t.valves[0], t.sides[0]]).toEqual([1, 1]);
+    setLever(t, 0, -ZONE / 2);
+    expect([t.valves[0], t.sides[0]]).toEqual([0, 1]);
+  });
+
+  it("draws a saved setting's lever where turning it there would, and keeps a tiny one as it was", () => {
+    const t = new Tool('dispenser', 0);
+    for (const u of [-1, -0.5, -ZONE - 0.01, ZONE + 0.01, 0.3, 1]) {
+      setLever(t, 0, u);
+      expect(leverAt(t, 0)).toBeCloseTo(u);
+    }
+    t.valves[0] = 0.001;
+    t.sides[0] = -1;
+    expect(leverAt(t, 0)).toBeLessThan(-ZONE);
+    expect(leverOpening(leverAt(t, 0))).toBeCloseTo(-0.001);
+    // taken hold of pointing outside its sweep, it's left exactly as it was
+    round(t, 0, [270]);
+    expect([t.valves[0], t.sides[0]]).toEqual([0.001, -1]);
   });
 
   it('keeps a valve where it is in its core, and picks the pointer up again where it comes out', () => {
@@ -200,9 +272,9 @@ describe('turnValve', () => {
     const turn = newTurn();
     round(t, 0, [45], 20, turn);
     turnValve(t, 0, v.x + 2, v.y - 2, turn);
-    expect(t.valves[0]).toBeCloseTo(0.5);
+    expect(t.valves[0]).toBeCloseTo(op(0.5));
     // out the other side of the core, it's where it was, and goes on from there
-    expect(round(t, 0, [225, 215], 20, turn)).toEqual([expect.closeTo(0.5), expect.closeTo(0.5 + 10 / 90)]);
+    expect(round(t, 0, [225, 215], 20, turn)).toEqual([expect.closeTo(op(0.5)), expect.closeTo(op(0.5 + 10 / 90))]);
   });
 
   it("sweeps a splitter's or multiplexer's lever from all left to all right over the top", () => {

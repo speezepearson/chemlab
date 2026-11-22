@@ -666,29 +666,57 @@ export function valveSweep(t: Tool, k: number): { at: (x: number, y: number) => 
 }
 
 /**
- * Where a plain valve's lever is, as a share of a quarter turn counterclockwise from shut, from −1 (open all the way
- * down) to 1 (open all the way up): its setting, on the side it was turned to (see Tool.sides).
+ * How far either side of shut, in degrees, a plain valve's lever can be and still be shut: its dead zone. Turned by
+ * pointing, it's easy to stop a hair off shut, which would leave it open a sliver, dripping forever; within this it's
+ * exactly shut, and drawn so.
  */
-export const leverAt = (t: Tool, k: number): number => t.valves[k] * (t.sides[k] < 0 ? -1 : 1);
+export const SHUT_DEG = 6;
+/** SHUT_DEG as a share of the quarter turn a plain valve's lever goes either way. */
+const SHUT = SHUT_DEG / 90;
+
+/**
+ * A plain valve's opening, signed by side, for its lever at `u`, a share of a quarter turn counterclockwise from shut
+ * (clamped to a quarter turn either way): 0 within SHUT_DEG of shut, then rising evenly from 0 at the dead zone's
+ * edge to 1 at a quarter turn, alike either way.
+ */
+export function leverOpening(u: number): number {
+  const c = Math.max(-1, Math.min(1, u));
+  const o = (Math.abs(c) - SHUT) / (1 - SHUT);
+  // and shut at the edge itself, however the turn there was summed up
+  return o > 1e-9 ? Math.sign(c) * o : 0;
+}
+
+/**
+ * Where a plain valve's lever is, as a share of a quarter turn counterclockwise from shut, from −1 (open all the way
+ * down) to 1 (open all the way up), from its setting, on the side it was turned to (see Tool.sides): exactly at shut
+ * when it's shut, and otherwise beyond the dead zone, by leverOpening the other way round.
+ */
+export function leverAt(t: Tool, k: number): number {
+  const v = t.valves[k];
+  return v <= 0 ? 0 : (t.sides[k] < 0 ? -1 : 1) * (SHUT + v * (1 - SHUT));
+}
 
 /**
  * Put a plain valve's lever at `u`, a share of a quarter turn counterclockwise from shut (see leverAt), clamped to a
- * quarter turn either way: its setting is how far that is from shut, and its side, which way (the usual way, 1, right
- * at shut, where it makes no difference).
+ * quarter turn either way: its setting is its opening there (leverOpening), and its side, which way (the usual way,
+ * 1, when it's shut, where it makes no difference).
  */
 export function setLever(t: Tool, k: number, u: number): void {
-  const c = Math.max(-1, Math.min(1, u));
-  t.valves[k] = Math.abs(c);
-  t.sides[k] = c < 0 ? -1 : 1;
+  const o = leverOpening(u);
+  t.valves[k] = Math.abs(o);
+  t.sides[k] = o < 0 ? -1 : 1;
 }
 
 /**
  * Valve k being turned by pointing (see turnValve): the pointer's angle about it when it was last seen outside its
- * core, if it has been since the core was last entered, and whether it's been seen outside its core at all yet.
+ * core, if it has been since the core was last entered, and whether it's been seen outside its core at all yet; and,
+ * for a plain valve, where its lever's been turned to (`u`, as setLever takes it), which goes on following the pointer
+ * through the dead zone about shut, where the valve itself stays shut.
  */
 export interface Turn {
   a: number | null;
   begun: boolean;
+  u?: number;
 }
 
 /** A valve that's just been taken hold of, to turn (see turnValve). */
@@ -701,7 +729,8 @@ export const newTurn = (): Turn => ({ a: null, begun: false });
  * pointer moves round it, not where it points: each move round it turns the valve the same way by as much, the
  * short way round, until it's at an end, where it stays however much further the pointer goes, and it comes back off
  * the end as soon as the pointer comes back. A plain valve turned on past shut opens again the other way, smoothly, as
- * its lever goes on round (see setLever). So going on round past an end, or across the gap at the bottom of a
+ * its lever goes on round (see setLever), its lever's turn (`turn.u`) going on through the dead zone about shut
+ * (SHUT_DEG) while the valve stays shut there. So going on round past an end, or across the gap at the bottom of a
  * dial, never jumps it to the other end. Within VALVE_DEADZONE of the valve, the angle is too jumpy to mean anything,
  * so the valve stays put, and the pointer's picked up again where it comes out.
  */
@@ -715,14 +744,19 @@ export function turnValve(t: Tool, k: number, x: number, y: number, turn: Turn):
   const a = at(x, y);
   if (!turn.begun) {
     const v = (a - a0) / span;
-    if (both && v >= -1 && v <= 1) setLever(t, k, v);
-    else if (v >= 0 && v <= 1) t.valves[k] = v;
+    if (both) {
+      // pointed outside its sweep, it stays as it was, a saved setting exactly so
+      if (v >= -1 && v <= 1) setLever(t, k, (turn.u = v));
+      else turn.u = leverAt(t, k);
+    } else if (v >= 0 && v <= 1) t.valves[k] = v;
     turn.begun = true;
   } else if (turn.a !== null) {
     let d = a - turn.a;
     d -= 2 * Math.PI * Math.round(d / (2 * Math.PI));
-    if (both) setLever(t, k, leverAt(t, k) + d / span);
-    else t.valves[k] = Math.max(0, Math.min(1, t.valves[k] + d / span));
+    if (both) {
+      turn.u = Math.max(-1, Math.min(1, (turn.u ?? leverAt(t, k)) + d / span));
+      setLever(t, k, turn.u);
+    } else t.valves[k] = Math.max(0, Math.min(1, t.valves[k] + d / span));
   }
   turn.a = a;
 }
