@@ -192,21 +192,33 @@ const NOTE_Y = 13;
 
 /* ---------------- materials ---------------- */
 
-const glassMat = new THREE.MeshStandardMaterial({
-  color: 0xd6ecf2, transparent: true, opacity: 0.1, roughness: 0.04, metalness: 0, depthWrite: false, side: THREE.DoubleSide,
-  envMapIntensity: 1.4, premultipliedAlpha: true,
-  // a hair further off than it is, so where fluid lies right against it (a tank's floor), the fluid wins cleanly
-  // rather than the two flickering pixel by pixel
-  polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 4,
-});
-// glass: what it reflects is added in full, however clear it is, and only what's behind it is dimmed by its opacity,
-// so it glints and shows the room in it as real glass does, and more so edge on
-glassMat.onBeforeCompile = (sh) => {
-  sh.fragmentShader = sh.fragmentShader
-    .replace('#include <opaque_fragment>', 'gl_FragColor = vec4( totalDiffuse * diffuseColor.a + totalSpecular + totalEmissiveRadiance, diffuseColor.a );')
-    .replace('#include <premultiplied_alpha_fragment>', '');
-};
-glassMat.customProgramCacheKey = () => 'glass';
+/**
+ * Glass: what it reflects is added in full, however clear it is, and only what's behind it is dimmed by its opacity,
+ * so it glints and shows the room in it as real glass does, and more so edge on. `floor`: glass that fluid lies right
+ * against (a tank's floor), drawn a hair further off than it is, so the fluid wins cleanly there rather than the two
+ * flickering pixel by pixel. Only there: the offset grows as the glass is seen edge on, so on walls, where the fluid
+ * is held a little inside the glass, it would take a wall seen at a slant for being behind its fluid, and hide a band
+ * of it whose edge jitters as the view turns.
+ */
+function makeGlass(floor: boolean): THREE.MeshStandardMaterial {
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xd6ecf2, transparent: true, opacity: 0.1, roughness: 0.04, metalness: 0, depthWrite: false, side: THREE.DoubleSide,
+    envMapIntensity: 1.4, premultipliedAlpha: true,
+    ...(floor ? { polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 4 } : {}),
+  });
+  mat.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <opaque_fragment>', 'gl_FragColor = vec4( totalDiffuse * diffuseColor.a + totalSpecular + totalEmissiveRadiance, diffuseColor.a );')
+      .replace('#include <premultiplied_alpha_fragment>', '');
+  };
+  mat.customProgramCacheKey = () => 'glass';
+  return mat;
+}
+const glassMat = makeGlass(false);
+/** Glass that fluid lies right against (see makeGlass). */
+const floorGlassMat = makeGlass(true);
+/** Every glass material, for whatever's done to all glass alike. */
+const GLASSES = [glassMat, floorGlassMat];
 const edgeMat = new THREE.LineBasicMaterial({ color: 0xbfd4da, transparent: true, opacity: 0.3 });
 // stainless pipework, dark anodized fittings, light powder-coated cabinets and black plastic levers, all of them
 // reflecting the room (see View's environment)
@@ -525,7 +537,7 @@ class FluidMesh {
 function openBox(parent: THREE.Object3D, x0: number, x1: number, y0: number, y1: number, d: number): THREE.Mesh {
   const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, d);
   // faces go +x, −x, +y, −y, +z, −z: no top
-  const m = new THREE.Mesh(g, [glassMat, glassMat, hidden, glassMat, glassMat, glassMat]);
+  const m = new THREE.Mesh(g, [glassMat, glassMat, hidden, floorGlassMat, glassMat, glassMat]);
   m.position.copy(v3((x0 + x1) / 2, (y0 + y1) / 2));
   parent.add(m);
   const e = new THREE.LineSegments(new THREE.EdgesGeometry(g), edgeMat);
@@ -577,8 +589,9 @@ const FLASH = { hz: 1.5, lo: 0.05, hi: 0.22 };
 function flashOver(o: THREE.Object3D): THREE.Mesh | null {
   if (!(o instanceof THREE.Mesh)) return null;
   const mats: THREE.Material[] = Array.isArray(o.material) ? o.material : [o.material];
-  if (!mats.includes(glassMat)) return null;
-  const m = new THREE.Mesh(o.geometry, Array.isArray(o.material) ? mats.map((x) => (x === glassMat ? flashMat : hidden)) : flashMat);
+  const glassy = (x: THREE.Material) => GLASSES.includes(x as THREE.MeshStandardMaterial);
+  if (!mats.some(glassy)) return null;
+  const m = new THREE.Mesh(o.geometry, Array.isArray(o.material) ? mats.map((x) => (glassy(x) ? flashMat : hidden)) : flashMat);
   m.position.copy(o.position);
   m.quaternion.copy(o.quaternion);
   m.scale.copy(o.scale);
@@ -1629,7 +1642,7 @@ class ToolView {
         const rr = w / 2;
         const mid = -(r.y0 + r.y1) / 2;
         glassFrom(art, new THREE.CylinderGeometry(rr, rr, r.y1 - r.y0, 48, 1, true).translate(cx, mid, 0));
-        art.add(new THREE.Mesh(new THREE.CircleGeometry(rr, 48).rotateX(Math.PI / 2).translate(cx, -r.y1, 0), glassMat));
+        art.add(new THREE.Mesh(new THREE.CircleGeometry(rr, 48).rotateX(Math.PI / 2).translate(cx, -r.y1, 0), floorGlassMat));
         geoms = [new THREE.CylinderGeometry(rr - 0.5, rr - 0.5, r.y1 - r.y0 - 0.5, 48).translate(cx, mid - 0.25, 0)];
         const rim = new THREE.Mesh(new THREE.TorusGeometry(rr + 0.6, 0.8, 6, 48).rotateX(Math.PI / 2).translate(cx, 0, 0), pipeMat);
         art.add(rim);
@@ -2071,7 +2084,7 @@ class ToolView {
     const [bx, nx, ix] = [neck.bodies[k], neck.necks[k], tankX(sh.tanks[k])];
     const [rr, nr] = [neck.body / 2, neck.w / 2];
     glassFrom(art, new THREE.CylinderGeometry(rr, rr, H, 48, 1, true).translate(bx, -H / 2, 0));
-    for (const y of [0, H]) art.add(new THREE.Mesh(new THREE.CircleGeometry(rr, 48).rotateX(Math.PI / 2).translate(bx, -y, 0), glassMat));
+    for (const y of [0, H]) art.add(new THREE.Mesh(new THREE.CircleGeometry(rr, 48).rotateX(Math.PI / 2).translate(bx, -y, 0), y ? floorGlassMat : glassMat));
     glassFrom(art, new THREE.CylinderGeometry(nr, nr, neck.h, 20, 1, true).translate(nx, neck.h / 2, 0));
     const geoms = [
       new THREE.CylinderGeometry(rr - 0.5, rr - 0.5, H - 0.5, 48).translate(bx, -H / 2 - 0.25, 0),
@@ -4111,7 +4124,7 @@ class IconStudio {
     const clearAlpha = renderer.getClearAlpha();
     const [glass, edge] = [glassMat.opacity, edgeMat.opacity];
     renderer.setClearColor(0x000000, 0);
-    glassMat.opacity = ICON_VIEW.glass;
+    for (const m of GLASSES) m.opacity = ICON_VIEW.glass;
     edgeMat.opacity = ICON_VIEW.edge;
     this.scene.environment = environment;
     const pixels = new Uint8Array(n * n * 4);
@@ -4135,7 +4148,7 @@ class IconStudio {
       icons[k] = canvas;
     }
     this.scene.environment = null;
-    glassMat.opacity = glass;
+    for (const m of GLASSES) m.opacity = glass;
     edgeMat.opacity = edge;
     renderer.setRenderTarget(null);
     renderer.setClearColor(clear, clearAlpha);
