@@ -125,18 +125,18 @@ export const PRESETS: readonly Preset[] = [
     id: 'separator',
     name: 'Separator demo',
     description:
-      'A separator sorts red from black: each molecule goes out the spout for the share of its atoms that are ' +
-      'black, none at the far left and all at the far right. The dispensers below catch the two ends. Turn its ' +
-      'sharpness down in the Chemistry panel and some leaks into the spouts beside them.',
+      'A separator sorts red from black: each molecule goes out the left spout if none of its atoms is black, ' +
+      'and the right if any is. The dispensers below catch the two. Turn its sharpness down in the Chemistry ' +
+      'panel and some of each leaks out the other spout.',
     flasks: [],
     tools: [
       {
         kind: 'separator', at: [0.35, 0.2], z: DEMO_Z, valves: [0.3],
         tanks: [{ contents: [atomsOf(singleOf('R'), 2 * CAP), atomsOf(singleOf('K'), 2 * CAP)], T: T_ROOM }],
       },
-      // under its end spouts, two grid cells either side of its middle
-      { kind: 'dispenser', at: [0.15, 0.5], z: DEMO_Z },
-      { kind: 'dispenser', at: [0.55, 0.5], z: DEMO_Z },
+      // under its spouts, a grid cell either side of its middle
+      { kind: 'dispenser', at: [0.25, 0.5], z: DEMO_Z },
+      { kind: 'dispenser', at: [0.45, 0.5], z: DEMO_Z },
     ],
   },
   {

@@ -208,7 +208,7 @@ describe('the shadow lamp', () => {
         expect(counterUnder(flaskBox(f))).toBe(LIFT);
         expect(boxesOverlap(flaskBox(f), b), `${x}, ${row}`).toBe(false);
       }
-    for (const kind of ['heater', 'sorter', 'separator'] as const) {
+    for (const kind of ['heater', 'sorter'] as const) {
       // somewhere along the row behind the trough, facing the room, its stands in the row by the wall
       const fits = [0, 1, 2, 3, 4].some((i) => {
         const t = new Tool(kind, 1);
@@ -252,10 +252,10 @@ describe('spoutNear', () => {
   it("finds the spout whose tip, or the pipe just above it, is under the crosshair, as the tool stands", () => {
     const sep = new Tool('separator', 0);
     const y = sep.shape.spoutY;
-    expect(spoutNear(sep, sep.shape.spouts[1] + 3, y - 2)).toBe(1);
-    expect(spoutNear(sep, sep.shape.spouts[4], y - 25)).toBe(4);
-    expect(spoutNear(sep, sep.shape.spouts[4], y - 60)).toBeNull();
-    expect(spoutNear(sep, (sep.shape.spouts[1] + sep.shape.spouts[2]) / 2, y)).toBeNull();
+    expect(spoutNear(sep, sep.shape.spouts[0] + 3, y - 2)).toBe(0);
+    expect(spoutNear(sep, sep.shape.spouts[1], y - 25)).toBe(1);
+    expect(spoutNear(sep, sep.shape.spouts[1], y - 60)).toBeNull();
+    expect(spoutNear(sep, (sep.shape.spouts[0] + sep.shape.spouts[1]) / 2, y)).toBeNull();
   });
 });
 
@@ -393,7 +393,8 @@ describe('stands', () => {
     // turned a quarter, its back is toward −x
     expect(toolStands(t)[0].x).toBeLessThan(0);
     expect(toolStands(t)[0].z).toBeCloseTo(0);
-    expect(toolStands(new Tool('separator', 0, at(0, 600, 0)))).toHaveLength(2);
+    expect(toolStands(new Tool('heater', 0, at(0, 600, 0)))).toHaveLength(2);
+    expect(toolStands(new Tool('separator', 0, at(0, 600, 0)))).toHaveLength(1);
     expect(toolStands(new Tool('receptacle', 0, at(0, 600, 0)))).toHaveLength(0);
   });
 

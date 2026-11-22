@@ -184,7 +184,7 @@ const DROP_R_ATOMS = 1.5e6;
 /** A CRT's phosphor green. */
 const PHOSPHOR = '64, 255, 110';
 /** The separator's splitter, below its valve, in local units (y down). */
-const SEP_BODY = { x0: -210, x1: 210, y0: 100, y1: 112 };
+const SEP_BODY = { x0: -110, x1: 110, y0: 100, y1: 112 };
 /** Height of each line of a label, in world units. */
 const LABEL_H = 10;
 /** How far above a flask's mouth or a scale's platform its note sits, to the note's middle. */
@@ -1549,7 +1549,7 @@ class ToolView {
         pipes(art, [[sh.spouts[k], HELIX.y + HELIX.r], [sh.spouts[k], sh.spoutY - 4]]);
       });
     else if (t.kind === 'separator') {
-      // the manifold: one pipe in, five out, with a divider between each two outlets, and a handle on its left end
+      // the manifold: one pipe in, two out, with a divider between the outlets, and a handle on its left end
       pipes(art, [[0, floor], [0, SEP_BODY.y0]]);
       for (const x of sh.spouts) pipes(art, [[x, SEP_BODY.y1], [x, sh.spoutY - 4]]);
       block(art, panelMat, SEP_BODY.x0, SEP_BODY.x1, SEP_BODY.y0, SEP_BODY.y1, -10, 10, 2);

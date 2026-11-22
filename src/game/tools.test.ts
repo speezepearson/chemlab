@@ -2012,37 +2012,41 @@ describe('separator', () => {
     }
   };
 
-  it('gives each molecule its own outlet by its share of black atoms: none, ¼, ⅓, ½, all', () => {
-    expect(SEPARATOR_OUTLET[R]).toBe(0);
-    expect(SEPARATOR_OUTLET[SOLVENT_SPECIES]).toBe(0);
-    expect(SEPARATOR_OUTLET[tri('△RGB')]).toBe(0);
-    expect(SEPARATOR_OUTLET[pair('R–G')]).toBe(0);
-    expect(SEPARATOR_OUTLET[tri('⊠RGBK')]).toBe(1);
-    expect(SEPARATOR_OUTLET[tri('R–G–B–K')]).toBe(1);
-    expect(SEPARATOR_OUTLET[tri('△RGK')]).toBe(2);
-    expect(SEPARATOR_OUTLET[pair('R–K')]).toBe(3);
-    expect(SEPARATOR_OUTLET[K]).toBe(4);
+  /** Some of each: with no black atom, and with one. */
+  const without = [R, SOLVENT_SPECIES, tri('△RGB'), pair('R–G')];
+  const withK = [tri('⊠RGBK'), tri('R–G–B–K'), tri('△RGK'), pair('R–K'), K];
+
+  it('has two spouts, a grid cell either side of its tank', () => {
+    const t = new Tool('separator', 0);
+    expect(SEPARATOR_OUTLETS).toBe(2);
+    expect(t.shape.spouts).toEqual([-CELL, CELL]);
+    expect(tankX(t.shape.tanks[0])).toBe(0);
   });
 
-  it('sends most of each molecule out its own outlet, the rest mostly next door, and more so the sharper it is', () => {
+  it('gives each molecule its outlet by whether it has a black atom: the left with none, the right with any', () => {
+    for (const s of without) expect(SEPARATOR_OUTLET[s]).toBe(0);
+    for (const s of withK) expect(SEPARATOR_OUTLET[s]).toBe(1);
+    expect(SPECIES.every((sp) => SEPARATOR_OUTLET[sp.i] === +sp.atoms.includes('K'))).toBe(true);
+  });
+
+  it('sends most of each molecule out its own outlet and the rest out the other, more so the sharper it is', () => {
     const f = new Vessel(Infinity);
-    for (const sp of [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K]) f.n[sp] = CAP;
+    for (const sp of [...without, ...withK]) f.n[sp] = CAP;
     f.N = atomTotal(f);
-    let last = 0;
+    let last = 0.5;
     for (const k of [1, 3, 6]) {
       withSharpness(k, () => {
         const out = separate(f);
         expect(out).toHaveLength(SEPARATOR_OUTLETS);
-        const ownShare = out[2].n[tri('△RGK')] / CAP;
+        const ownShare = out[1].n[K] / CAP;
+        expect(ownShare).toBeCloseTo(1 / (1 + Math.exp(-k)), 4);
         expect(ownShare).toBeGreaterThan(last);
         last = ownShare;
-        [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K].forEach((sp, own) => {
+        for (const sp of [...without, ...withK]) {
           const shares = out.map((v) => v.n[sp] / CAP);
-          expect(Math.max(...shares)).toBe(shares[own]);
-          for (let j = 0; j < SEPARATOR_OUTLETS; j++)
-            if (Math.abs(j - own) > 1) expect(shares[j]).toBeLessThan(shares[own - Math.sign(own - j)] + 1e-9);
-          expect(shares.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 12);
-        });
+          expect(shares[SEPARATOR_OUTLET[sp]]).toBeGreaterThan(shares[1 - SEPARATOR_OUTLET[sp]]);
+          expect(shares[0] + shares[1]).toBeCloseTo(1, 12);
+        }
       });
     }
   });
@@ -2050,16 +2054,14 @@ describe('separator', () => {
   it('sorts perfectly from SEPARATOR_PERFECT up', () => {
     withSharpness(SEPARATOR_PERFECT, () => {
       const f = new Vessel(Infinity);
-      for (const sp of [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K]) f.n[sp] = CAP;
+      for (const sp of [...without, ...withK]) f.n[sp] = CAP;
       f.N = atomTotal(f);
       const out = separate(f);
-      [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K].forEach((sp, own) =>
-        out.forEach((v, j) => expect(v.n[sp]).toBe(j === own ? CAP : 0)),
-      );
+      for (const sp of [...without, ...withK]) out.forEach((v, j) => expect(v.n[sp]).toBe(j === SEPARATOR_OUTLET[sp] ? CAP : 0));
     });
   });
 
-  it('splits everything evenly five ways at sharpness 0', () => {
+  it('splits everything evenly two ways at sharpness 0', () => {
     withSharpness(0, () => {
       const f = filled(new Vessel(Infinity), R, CAP, 1);
       for (const v of separate(f)) expect(v.n[R] / CAP).toBeCloseTo(1 / SEPARATOR_OUTLETS, 4);
@@ -2075,7 +2077,7 @@ describe('separator', () => {
     for (const v of out) if (v.N > 1e6) expect(temperature(v)).toBeCloseTo(temperature(f), 3);
   });
 
-  it('drains its tank at the valve rate times its level, out of all five spouts', () => {
+  it('drains its tank at the valve rate times its level, out of both spouts', () => {
     const x = new Tool('separator', 0, undefined, [0.5]);
     filled(x.tanks[0], singleOf('B'), CAP, 3);
     x.tanks[0].setMolecules(K, CAP);
