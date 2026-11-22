@@ -419,8 +419,11 @@ export function onScale(sc: Scale, dx: number): Pose {
   return { ...toWorld(sc.pose, { x: dx, y: FLASK_H, z: 0 }), yaw: sc.pose.yaw };
 }
 
-/** Where along its platform a scale stands flasks: half a grid cell either side of its middle, a cell apart. */
-export const SCALE_SLOTS = [-CELL / 2, CELL / 2];
+/**
+ * Where along its platform a scale stands flasks: a grid cell either side of its middle, two cells apart, toward the
+ * platform's ends, so each stands on the scale with room round it, and a scale fits under any two spouts two cells apart.
+ */
+export const SCALE_SLOTS = [-CELL, CELL];
 /** The point of a scale that goes over the middle of a grid cell: one of its places for a flask, so both are. */
 export const SCALE_ANCHOR: Vec3 = { x: SCALE_SLOTS[1], y: 0, z: 0 };
 
@@ -494,7 +497,7 @@ export const SHEET_SLOT: Pose = {
  * from the slot's along the channel; across the channel, no further than `out` from it toward the lamp's front (the
  * room), nor `back` the other way; and its top no more than `up` above where it would stand, nor `down` below.
  */
-export const SLOT_REACH = { along: 0.6 * CELL, out: CELL, back: 0.6 * CELL, up: 2 * CELL, down: CELL };
+export const SLOT_REACH = { along: CELL, out: 2.5 * CELL, back: 0.9 * CELL, up: 3 * CELL, down: 1.5 * CELL };
 
 /** Whether a pose is a sheet's in the shadow lamp's slot (see SHEET_SLOT), facing the lamp or with its back to it. */
 export function inSlot(p: Pose): boolean {
@@ -581,7 +584,7 @@ export const STAND_ROD = 570;
 /** How high a stand's clamp can be above the counter: just short of the top of its rod. */
 export const STAND_MAX = STAND_ROD - 10;
 /** A tool wider than this is held by two stands, one near each end, rather than one in the middle. */
-const TWO_STANDS = 300;
+const TWO_STANDS = 240;
 /**
  * How far behind the middle of what it holds a stand's rod is: far enough that its base clears a flask standing
  * under what it holds (or under the tool's spouts, which are along its middle), by this much.
@@ -609,9 +612,10 @@ export function toolStands(t: Tool, pose = t.pose): Stand[] {
 
 /**
  * How far behind a hose's nozzle its stand's rod can be, its clamp's arm slid in or out: from just far enough for its
- * base to clear a flask under the nozzle, out to three cells, in steps of `step`.
+ * base to clear a flask under the nozzle, out to five cells, in ten even steps of `step`.
  */
-export const NOZZLE_REACH = { min: rodBack(2 * NOZZLE_R), max: 3 * CELL, step: CELL / 4 };
+const NOZZLE_MIN = rodBack(2 * NOZZLE_R);
+export const NOZZLE_REACH = { min: NOZZLE_MIN, max: 5 * CELL, step: (5 * CELL - NOZZLE_MIN) / 10 };
 
 /** A reach for a nozzle's stand (see NOZZLE_REACH): the nearest step to `r`, within its range. */
 export function snapReach(r: number): number {

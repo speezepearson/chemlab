@@ -120,7 +120,8 @@ const hands = (l: Lab) => l.in as unknown as Hands;
 /** A sheet of blotting paper, of either kind. */
 type Sheet = 'testpaper' | 'bondpaper';
 /** The middle of a cell in the front row of the first island. */
-const SPOT = { x: 150, z: 950 };
+/** A cell's middle on the first island, a cell in from its front edge. */
+const SPOT = { x: 2.5 * CELL, z: 14.5 * CELL };
 const paperOf = (t: Tool) => t.paper[0];
 /** Where something is, to a millionth of a unit. */
 const where = (p: Tool['pose']) => [p.x, p.y, p.z, p.yaw].map((v) => Math.round(v * 1e6) / 1e6 + 0);
@@ -193,10 +194,10 @@ describe('test paper', () => {
     expect('why' in l.in.placement(l.in.held)).toBe(true);
     l.in.putAway();
     // turned a quarter, it lies a quarter turned
-    holdAt(l, 'testpaper', { x: 350, y: 500, z: 950, yaw: Math.PI / 2 });
+    holdAt(l, 'testpaper', { x: SPOT.x + 3 * CELL, y: 500, z: SPOT.z, yaw: Math.PI / 2 });
     const turned = l.in.held!.t!;
     l.in.release();
-    expect(where(turned.pose)).toEqual(flat(350, 950, where({ ...turned.pose, yaw: Math.PI / 2 })[3]));
+    expect(where(turned.pose)).toEqual(flat(SPOT.x + 3 * CELL, SPOT.z, where({ ...turned.pose, yaw: Math.PI / 2 })[3]));
   });
 
   it('lets no other sheet be laid on its cell, but a tool on its stand can have its spout over it', () => {
@@ -967,7 +968,7 @@ describe('the composition analyzer, which is gone', () => {
     expect(UNIQUE_TOOLS).not.toContain('analyzer');
     expect(INLINE_TOOLS).not.toContain('analyzer');
     expect(Object.keys(SHAPES)).not.toContain('analyzer');
-    expect(l.in.tools.find((t) => t.kind === 'spectroscope')!.pose.x).toBe(1450);
+    expect(l.in.tools.find((t) => t.kind === 'spectroscope')!.pose.x).toBe(toCell(1450));
   });
 
   it('is lost from an older save as it loads, without error, with the hoses out of its spouts; the rest loads as it was', () => {
@@ -1021,7 +1022,7 @@ describe('the bond visualizer, which is gone', () => {
     expect([...INLINE_TOOLS].sort()).toEqual(['meter', 'spectroscope']);
     expect(Object.keys(SHAPES)).not.toContain('visualizer');
     expect(kinds(l.in).filter((k) => k === 'spectroscope')).toHaveLength(1);
-    expect(l.in.tools.find((t) => t.kind === 'spectroscope')!.pose.x).toBe(1450);
+    expect(l.in.tools.find((t) => t.kind === 'spectroscope')!.pose.x).toBe(toCell(1450));
     expect(l.e.spawn('bondpaper')).toBe(true);
     expect(l.in.held?.t?.kind).toBe('bondpaper');
   });
@@ -1040,7 +1041,7 @@ describe('the bond visualizer, which is gone', () => {
     const hoses = (l.in as unknown as { hoses: { on: { tool?: Tool }; outlet: { x: number } }[] }).hoses;
     expect(hoses).toHaveLength(1);
     expect(hoses[0].on.tool).toBe(pip);
-    expect(hoses[0].outlet.x).toBeCloseTo(1750, 6);
+    expect(hoses[0].outlet.x).toBeCloseTo(toCell(1750), 6);
     // and the lab runs: what the hose lets out falls to the counter
     expect(() => {
       for (let i = 0; i < 40; i++) l.in.simulate(0.05);
@@ -1283,10 +1284,10 @@ describe('the shadow lamp', () => {
     // (whoever holds it is looking across the channel, the sheet's end on their right)
     l.in.held!.relYaw = Math.PI / 2;
     l.in.held!.dist = Math.hypot(160, LIFT + 40 - 620);
-    look(l, mid.x - CELL, mid.z - 160, mid.x - CELL, LIFT + 40, mid.z);
+    look(l, mid.x - 2 * CELL, mid.z - 160, mid.x - 2 * CELL, LIFT + 40, mid.z);
     l.in.release();
     expect(l.in.held).toBeNull();
-    expect(d.pose.x).toBeCloseTo(mid.x - CELL);
+    expect(d.pose.x).toBeCloseTo(mid.x - 2 * CELL);
     expect(d.pose.z).toBeCloseTo(mid.z);
     expect(d.pose.y - d.shape.box.y1).toBeCloseTo(LAMP_FLOOR.y);
     const [st] = toolStands(d);
@@ -1350,7 +1351,7 @@ describe('shadow paper', () => {
    * sheet held up over the end of the lamp's channel: turned to face the lamp, or with its back to it.
    */
   function sheetAtSlot(l: { e: GameEngine; in: Inside }, facing = true): Tool {
-    const at = () => look(l, SHEET_SLOT.x, SHEET_SLOT.z - 240, SHEET_SLOT.x, SHEET_SLOT.y - 150, SHEET_SLOT.z);
+    const at = () => look(l, SHEET_SLOT.x, SHEET_SLOT.z - 160, SHEET_SLOT.x, SHEET_SLOT.y - 150, SHEET_SLOT.z);
     at();
     expect(l.e.spawn('sheet')).toBe(true);
     // (whoever holds it is looking across the channel, the lamp on their left)

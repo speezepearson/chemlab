@@ -7,7 +7,7 @@ import { CAP, DELIVERY, TRACE } from './config';
 import { COOLING } from './cooling';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
-import { CELL, LAMP_FLOOR, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
+import { CELL, LAMP_FLOOR, LAMP_SLOT, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
 import { CRYOSTABILIZER, SUPPLIES, nextSupply, type Supply } from './supply';
 
 /** Capacity of each tank on a tool, in atoms. */
@@ -276,13 +276,16 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
  * over a diverter, which sends what drains from the funnel up into the reservoir if it's pure enough, or else down
  * and out a waste spigot under it, with a little LCD between the funnel and the spigot showing which way it's going.
  * In its own flat frame, x runs along the wall and y down from the column's top; z = 0 is over the middle of the
- * counter's row of cells nearest the wall, where the funnel and spouts are, and the wall is `out` behind it.
+ * counter's middle row of cells, where the funnel and spouts are, and the wall is `out` behind it.
+ * - along: how far along the wall from its back end (z, in the room) its frame's origin is, over the middle of a cell
+ *   (see STATION_POSE in presets.ts); the funnel is a cell on from it, and the reservoir a cell on from that.
  * - paneW, paneH: the reservoir's pane, across and tall; the column behind it is as tall.
- * - out: how far the funnel and spouts stand out from the wall.
+ * - out: how far the funnel and spouts stand out from the wall: over the middle of the counter's middle row of cells,
+ *   in line with the faucets (a flask under them in the row nearest the wall would be up against the block's seam).
  * - top: how high the column's top is, in the room.
  * - plate: how deep the plate the pane is set in goes into the wall, its face flush with the wall.
  * - block: the plate's edges, in the flat frame: a swappable block of the wall, two of the wall's panels across and one
- *   high (see WALL_PANEL), lined up with them, with a rubber seam round it.
+ *   high (see WALL_PANEL), lined up with them (from the fifth seam along the wall), with a rubber seam round it.
  * - funnel: the funnel's mouth, `y` down from the column's top (within easy reach), reaching w either side of its
  *   middle; it narrows to its stem h below that.
  * - display: the diverter's LCD, on the plate between the funnel and the waste spigot.
@@ -298,19 +301,24 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
  *   down (above the tape round the block), and its radius.
  */
 const STATION_TOP = LIFT + 400;
+const STATION_ALONG = 20.5 * CELL;
+const STATION_BLOCK_X0 = 5 * WALL_PANEL.w - STATION_ALONG;
+const STATION_OUT = 1.5 * CELL;
+const STATION_MOUTH = { y: 180, w: 30, h: 30 };
 export const STATION = {
+  along: STATION_ALONG,
   paneW: 24,
   paneH: 260,
   top: STATION_TOP,
-  out: CELL / 2,
+  out: STATION_OUT,
   plate: 12,
   block: {
-    x0: -CELL / 2,
-    x1: -CELL / 2 + 2 * WALL_PANEL.w,
+    x0: STATION_BLOCK_X0,
+    x1: STATION_BLOCK_X0 + 2 * WALL_PANEL.w,
     y0: STATION_TOP - 2 * WALL_PANEL.h,
     y1: STATION_TOP - WALL_PANEL.h,
   },
-  funnel: { y: 180, w: 30, h: 30 },
+  funnel: STATION_MOUTH,
   display: { x0: CELL - 28, x1: CELL + 28, y0: 222, y1: 262 },
   labelY: -31,
   gauge: { x0: 2 * CELL + 20, x1: 2 * CELL + 30, segments: 26 },
@@ -319,9 +327,9 @@ export const STATION = {
   steadyScreen: { x0: 2 * CELL - 160, x1: 2 * CELL - 60, y0: -19, y1: -4 },
   /** The purity needle's dial (see needleAt), on the plate left of the diverter's LCD. */
   needle: { x0: CELL - 90, x1: CELL - 38, y0: 222, y1: 262 },
-  recess: 100,
+  recess: STATION_OUT + STATION_MOUTH.w + 20,
   door: { back: 2, thick: 6 },
-  lamp: { x: -CELL / 2 + WALL_PANEL.w, y: STATION_TOP - 2 * WALL_PANEL.h - 56, r: 11 },
+  lamp: { x: STATION_BLOCK_X0 + WALL_PANEL.w, y: STATION_TOP - 2 * WALL_PANEL.h - 56, r: 11 },
 };
 
 /**
@@ -519,7 +527,7 @@ export function heaterCellX(c: number): number {
   return HEATER_TUBE.x0 + ((c + 0.5) * (HEATER_TUBE.x1 - HEATER_TUBE.x0)) / HEATER_CELLS;
 }
 /** The heater's control box, above the right end of its tube, with the dial (see SHAPES.heater.valves) on it. */
-export const HEATER_BOX = { x0: 150, x1: 190, y0: 2, y1: 36 };
+export const HEATER_BOX = { x0: 2 * CELL - 50, x1: 2 * CELL - 10, y0: 2, y1: 36 };
 
 /**
  * The heater's wire temperature for a dial setting from 0 to 1: off at 0 (it heats nothing), then rising
@@ -801,8 +809,9 @@ export function scorchAt(T: number): number {
 
 /**
  * A sheet of shadow paper (see SHAPES.sheet), which the shadow lamp's light darkens, for good, where it falls on it:
- * - side: the paper, a square, this far across and tall, a grid cell, so it stands across the lamp's channel from wall
- *   to wall; top: how far down from the sheet's top its square starts, under the bar;
+ * - side: the paper, a square, this far across and tall, so it stands across the lamp's channel from wall to wall (see
+ *   LAMP_FLOOR in space.ts, which is as wide); hanging from a stand, it's wider than a grid cell, like a dispenser;
+ *   top: how far down from the sheet's top its square starts, under the bar;
  * - clip: the bar clipped along its top edge, `h` tall and `d` front to back, which a stand's clamp holds, a little
  *   wider than the paper;
  * - margin: how far in from each edge of the paper the lamp's light stops: it falls on the square in the middle (see
@@ -814,7 +823,7 @@ export function scorchAt(T: number): number {
  * - full: the most light a cell takes, in sim seconds of it unshadowed: as dark as it gets, to within what a save
  *   keeps of it (see Tool.image).
  */
-export const SHEET = { side: CELL, top: 14, clip: { h: 14, d: 5 }, margin: CELL / 10, cells: 64, tau: 0.5, full: 3.2 };
+export const SHEET = { side: 100, top: 14, clip: { h: 14, d: 5 }, margin: 10, cells: 64, tau: 0.5, full: 3.2 };
 
 /** How far across and tall the square in the middle of a sheet of shadow paper that the lamp's light falls on is (see SHEET.margin). */
 export const sheetLit = (): number => SHEET.side - 2 * SHEET.margin;
@@ -831,11 +840,14 @@ export const sheetLit = (): number => SHEET.side - 2 * SHEET.margin;
  * - floor: how thick the plate that floors the channel is (see LAMP_FLOOR in space.ts, which is where it is in the
  *   room): as thick as a sheet's margin is wide, so the light's lower edge is level with its top, and the shadow of
  *   whatever stands on it stands on the bottom edge of the square the light falls on, none of it lost below;
- * - slot: how far short of the end wall the floor stops: the slot a sheet stands in, its foot on the bench below, a
+ * - slot: how far short of the end wall the floor stops (see LAMP_SLOT in space.ts): the slot a sheet stands in, its foot on the bench below, a
  *   little wider than the bar along a sheet's top is thick;
- * - box: the enclosure, from `x0` to `x1` along it, and as wide as the trough is over its walls;
- * - channel: the channel, from the enclosure's face at `x0` to the end wall's at `x1`, three grid cells, and reaching
- *   `z` either side of its middle line, one cell from wall to wall: what's set down in it is on the grid like anything;
+ * - box: the enclosure, from `x0` to `x1` along it, two grid cells, and as wide as the trough is over its walls;
+ * - channel: the channel, from the enclosure's face at `x0` to the end wall's at `x1`, five grid cells and the slot
+ *   past them, and reaching
+ *   `z` either side of its middle line, which is over the middle of a row of cells: a sheet's side from wall to wall,
+ *   wide enough for a flask's shadow to fall whole on the sheet. What's set down in it is on the grid like anything,
+ *   in the row of cells along its middle (the rows either side are in its walls);
  * - window: the square pane in the enclosure's face that its light leaves by, reaching `r` either side of the
  *   channel's middle line and of a height `y` down from the top: exactly the square of the sheet it lights (see
  *   sheetLit), so the sheet's margin, the channel's walls and whatever's outside the trough are never in its light;
@@ -857,12 +869,12 @@ export const sheetLit = (): number => SHEET.side - 2 * SHEET.margin;
  *   and visibly less toward its edges, and a full flask of nothing but rings lets through e^−10 of it, none.
  */
 export const LAMP = {
-  h: SHEET.side, wall: 6, floor: LAMP_FLOOR.y - LIFT, slot: SHEET.clip.d + 1, dim: 0.2, spread: 0.016,
-  box: { x0: -2.5 * CELL, x1: -1.5 * CELL },
-  channel: { x0: -1.5 * CELL, x1: 1.5 * CELL, z: CELL / 2 },
+  h: SHEET.side, wall: 6, floor: LAMP_FLOOR.y - LIFT, slot: LAMP_SLOT, dim: 0.2, spread: 0.016,
+  box: { x0: -4.5 * CELL, x1: -2.5 * CELL },
+  channel: { x0: -2.5 * CELL, x1: 2.5 * CELL + LAMP_SLOT, z: SHEET.side / 2 },
   window: { r: sheetLit() / 2, y: SHEET.side / 2 },
-  dial: { x: -2 * CELL - 22, y: 36 },
-  button: { x: -2 * CELL + 20, y: 36, r: 7 },
+  dial: { x: -3.5 * CELL - 22, y: 36 },
+  button: { x: -3.5 * CELL + 20, y: 36, r: 7 },
   shot: { min: SHEET.full / 64, max: SHEET.full },
 };
 
@@ -979,7 +991,7 @@ export function sectorInset(atom: ColorAtom, margin: number): (readonly [number,
 export const TEST_PAPER: {
   w: number; d: number; thick: number; cap: number; triangles: readonly { sizes: readonly number[] }[]; edge: number; line: number; margin: number;
 } = {
-  w: 64, d: 64, thick: 0.4, cap: (3 * CAP) / 100,
+  w: 56, d: 56, thick: 0.4, cap: (3 * CAP) / 100,
   triangles: [{ sizes: [1, 2, 3, 4] }],
   edge: 4, line: 1, margin: 2,
 };
@@ -1164,27 +1176,27 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -18, x1: 18, y0: -20, y1: 116 },
   },
   exchanger: {
+    // a pair of tanks too wide to stand a grid cell apart, so two (see CELL)
     tanks: [
-      { name: 'A', x0: -79, x1: -21 },
-      { name: 'B', x0: 21, x1: 79 },
+      { name: 'A', x0: -CELL - 29, x1: -CELL + 29 },
+      { name: 'B', x0: CELL - 29, x1: CELL + 29 },
     ],
     sump: { w: 14, h: 7 },
-    // the streams cross over in the exchanger, so each leaves on the other side, a grid cell apart (see CELL)
-    spouts: [CELL / 2, -CELL / 2],
+    // the streams cross over in the exchanger, so each leaves on the other side, under the other tank
+    spouts: [CELL, -CELL],
     valveY: 97,
     spoutY: 136,
-    box: { x0: -83, x1: 83, y0: -6, y1: 138 },
+    box: { x0: -CELL - 33, x1: CELL + 33, y0: -6, y1: 138 },
   },
   separator: {
     tanks: [{ name: 'tank', x0: -30, x1: 30 }],
-    // one outlet per share of black (see SEPARATOR_OUTLET), a grid cell apart (see CELL), so a flask
-    // or a tool's tank fits under each
+    // one outlet per share of black (see SEPARATOR_OUTLET), a grid cell apart (see CELL), so a flask fits under each
     spouts: [-2 * CELL, -CELL, 0, CELL, 2 * CELL],
     sump: { w: 14, h: 7 },
     valveY: 96,
     spoutY: 126,
-    // the manifold under it (see the engine's SEP_BODY), with a handle on its left end
-    box: { x0: -220, x1: 214, y0: -6, y1: 128 },
+    // the manifold under it (see the view's SEP_BODY), with a handle on its left end
+    box: { x0: -2 * CELL - 20, x1: 2 * CELL + 14, y0: -6, y1: 128 },
   },
   splitter: {
     tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
@@ -1195,7 +1207,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spouts: [-CELL, CELL],
     valveY: 42,
     spoutY: 84,
-    box: { x0: -116, x1: 116, y0: -6, y1: 86 },
+    box: { x0: -CELL - 16, x1: CELL + 16, y0: -6, y1: 86 },
   },
   multiplexer: {
     // the splitter turned upside down: a funnel a grid cell either side of its one spout, their stems joining over the
@@ -1211,7 +1223,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spouts: [0],
     valveY: 64,
     spoutY: 88,
-    box: { x0: -126, x1: 126, y0: -6, y1: 90 },
+    box: { x0: -CELL - 26, x1: CELL + 26, y0: -6, y1: 90 },
   },
   sorter: {
     // a funnel at the high end of the chute (see SORTER_CHUTE), which drops through three screens, then off its end
@@ -1224,7 +1236,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spouts: [0, CELL, 2 * CELL, 3 * CELL],
     valveY: 30,
     spoutY: 104,
-    box: { x0: -126, x1: 306, y0: -6, y1: 106 },
+    box: { x0: -CELL - 26, x1: 3 * CELL + 6, y0: -6, y1: 106 },
   },
   heater: {
     // a funnel over the left end of a long tube (see HEATER_TUBE) with a wire down its middle; three taps
@@ -1234,13 +1246,13 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tankH: 30,
     tankCap: FUNNEL_CAP,
     funnel: true,
-    valves: [...HEATER_TAPS.map((_, j) => ({ x: (j - 1) * CELL, y: 72 })), { x: 170, y: 20 }],
+    valves: [...HEATER_TAPS.map((_, j) => ({ x: (j - 1) * CELL, y: 72 })), { x: (HEATER_BOX.x0 + HEATER_BOX.x1) / 2, y: 20 }],
     dial: HEATER_TAPS.length,
     // a grid cell apart, like the separator's, under the taps' stretches (see heaterCellX) and then the last
     spouts: [-CELL, 0, CELL, 2 * CELL],
     valveY: 72,
     spoutY: 92,
-    box: { x0: -228, x1: 216, y0: -6, y1: 94 },
+    box: { x0: -2 * CELL - 28, x1: 2 * CELL + 16, y0: -6, y1: 94 },
   },
   tank: {
     // a hundred flasks' worth, drawn as big as a hundred flasks, with ten faint graduations across it
@@ -1378,7 +1390,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
 };
 
 /** The size sorter's chute, in local units: it slopes down from (x0, y0) to (x1, y1), where it turns down into the last spout. */
-export const SORTER_CHUTE = { x0: -112, x1: 300, y0: 44, y1: 76 };
+export const SORTER_CHUTE = { x0: -CELL - 12, x1: 3 * CELL, y0: 44, y1: 76 };
 /** Height of the sorter's chute at x, in local units. */
 export const chuteY = (x: number) =>
   SORTER_CHUTE.y0 + ((x - SORTER_CHUTE.x0) / (SORTER_CHUTE.x1 - SORTER_CHUTE.x0)) * (SORTER_CHUTE.y1 - SORTER_CHUTE.y0);
@@ -1516,7 +1528,7 @@ export const tankX = (tk: { x0: number; x1: number }) => (tk.x0 + tk.x1) / 2;
  * one end to the bottom of the other, so a stream comes down from its tank,
  * winds across, and drops out the far side.
  */
-export const HELIX = { x0: -CELL / 2, x1: CELL / 2, y: 110, r: 6, halfTwists: 9 };
+export const HELIX = { x0: -CELL, x1: CELL, y: 110, r: 6, halfTwists: 9 };
 
 /** The inside of a tank with a neck, by kind of tool (see Tool.level): every tank of a kind is alike. */
 const necked = new Map<ToolKind, Piece[]>();

@@ -20,7 +20,7 @@ export interface Pose extends Vec3 {
 export const ORIGIN: Pose = { x: 0, y: 0, z: 0, yaw: 0 };
 
 /** The room's walls, floor and ceiling. The back wall, at z = 0, is the old bench. */
-export const ROOM = { x0: -700, x1: 2300, z0: 0, z1: 3000, y1: 1300 };
+export const ROOM = { x0: -720, x1: 2280, z0: 0, z1: 3000, y1: 1300 };
 /**
  * How fast the ship turns, in radians per sim second: the lab is on the rim of a ring 10 km in radius, spun for 1 g,
  * √(g / r), about one turn every 200 s. It turns about an axis square to the left wall (x), so the stars wheel round
@@ -32,7 +32,7 @@ export const SPIN = Math.sqrt(9.81 / 10_000);
  * the four ways along it, with every mouth and spout over the middle of a cell (see toCell). Cells' edges are at whole
  * multiples of it, so the walls, and every counter's edges, run along them.
  */
-export const CELL = 100;
+export const CELL = 60;
 
 /** The middle of the grid cell that x (or z) is in. */
 export const toCell = (v: number) => (Math.floor(v / CELL) + 0.5) * CELL;
@@ -49,36 +49,53 @@ export const WALL_PANEL = { w: 220, h: ROOM.y1 / 3 };
 
 /** Height of every counter: the sink counters along the walls, and the islands. */
 export const LIFT = 420;
-/** How far the back wall's counter comes out from it: two grid cells. */
-export const COUNTER_D = 2 * CELL;
-/** How far the right wall's counter, under the faucets, comes out from it: one grid cell, so they're in easy reach. */
-export const SINK_D = CELL;
+/** How far the back wall's counter comes out from it: three grid cells. */
+export const COUNTER_D = 3 * CELL;
+/**
+ * How far the right wall's counter, under the faucets, comes out from it: three grid cells, so they're in easy reach,
+ * over its middle row, with room for a scale's depth either side of a flask under one.
+ */
+export const SINK_D = 3 * CELL;
 /**
  * The islands' size, across and front to back, and where their grid starts and how far apart they are, all in whole
- * grid cells: each is ten cells by four.
+ * grid cells: each is sixteen cells by six.
  */
-const ISLAND = { w: 10 * CELL, d: 4 * CELL, x0: -4 * CELL, z0: 6 * CELL, dx: 13 * CELL, dz: 8 * CELL, cols: 2, rows: 3 };
+const ISLAND = { w: 16 * CELL, d: 6 * CELL, x0: -7 * CELL, z0: 10 * CELL, dx: 21 * CELL, dz: 13 * CELL, cols: 2, rows: 3 };
 /**
- * Where the equipment cabinet stands (see cabinet.ts): against the back wall from the left wall, eighteen grid cells
- * along it and three out from it, a cell further than the counter, and as tall as its shelves need. The back counter
- * runs on from its end.
+ * Where the equipment cabinet stands (see cabinet.ts): against the back wall from the left wall, thirty grid cells
+ * along it and five out from it, two cells further than the counter, and as tall as its shelves need. The back
+ * counter runs on from its end.
  */
-export const CABINET_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 18 * CELL, z0: ROOM.z0, z1: ROOM.z0 + 3 * CELL };
+export const CABINET_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 30 * CELL, z0: ROOM.z0, z1: ROOM.z0 + 5 * CELL };
 /**
- * Where the shadow lamp stands (see LAMP in tools.ts): on a bench of its own in the room's front left corner, five
- * grid cells along the front wall and three out from it, as high as the counters. Nothing could be set down there
- * before it was, so no save has anything standing in its way. The lamp's trough lies along its edge toward the room;
- * the two rows of cells behind that are free bench, long enough for the longest tools (a heater, a sorter, a
- * separator) on their two stands. It stops short of the airlock's doorway.
+ * Where the shadow lamp stands (see LAMP in tools.ts): on a bench of its own in the room's front left corner, nine
+ * grid cells along the front wall and five out from it, as high as the counters. Nothing could be set down there
+ * before it was, so no save has anything standing in its way. The lamp's trough lies along its edge toward the room,
+ * over its second row of cells; the two rows of cells behind it are free bench, long enough for the longest tools (a
+ * heater, a sorter, a separator) on their two stands. It stops short of the airlock's doorway.
  */
-export const LAMP_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 5 * CELL, z0: ROOM.z1 - 3 * CELL, z1: ROOM.z1 };
+export const LAMP_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 9 * CELL, z0: ROOM.z1 - 5 * CELL, z1: ROOM.z1 };
 /**
- * The floor of the shadow lamp's channel (see LAMP in tools.ts): a plate lying on its bench, over the three cells of
- * the bench's row nearest the room that the channel is, a cell in from either end, its top `y` high, a little above
- * the bench's. What's set down in the channel stands on it (see counterUnder), and what falls there lands on it (see
- * groundAt).
+ * The middle line of the shadow lamp's channel, across the room (see LAMP in tools.ts): over the middle of its bench's
+ * second row of cells from the room, so its near wall stands on the bench.
  */
-export const LAMP_FLOOR = { x0: LAMP_AREA.x0 + CELL, x1: LAMP_AREA.x1 - CELL, z0: LAMP_AREA.z0, z1: LAMP_AREA.z0 + CELL, y: LIFT + CELL / 10 };
+export const LAMP_Z = LAMP_AREA.z0 + 1.5 * CELL;
+/**
+ * How far past the five cells of the shadow lamp's channel its end wall is (see LAMP in tools.ts): the slot a sheet of
+ * shadow paper stands in, a little wider than the bar along a sheet's top is thick (see SHEET), so a flask in the
+ * channel's last cell stands clear of a sheet in it.
+ */
+export const LAMP_SLOT = 6;
+/**
+ * The floor of the shadow lamp's channel (see LAMP in tools.ts): a plate lying on its bench, over the five cells
+ * along the middle of the channel and the slot past them (see LAMP_SLOT), from the enclosure (two cells in from the
+ * bench's end) to the end wall (a little under two cells in from the left wall), as wide as the channel (a sheet of
+ * shadow paper's side, 100, see SHEET), and its top `y` high, a little above the bench's (by a sheet's margin, 10).
+ * What's set down in the channel stands on it (see counterUnder), and what falls there lands on it (see groundAt).
+ */
+export const LAMP_FLOOR = {
+  x0: LAMP_AREA.x0 + 2 * CELL - LAMP_SLOT, x1: LAMP_AREA.x1 - 2 * CELL, z0: LAMP_Z - 50, z1: LAMP_Z + 50, y: LIFT + 10,
+};
 /**
  * A counter: its x and z extents, and whether it's an island out in the room rather than a sink counter on a wall, or
  * the shadow lamp's own bench.
@@ -131,9 +148,9 @@ export function counterUnder(f: { x: number; z: number; hx: number; hz: number; 
 }
 /**
  * How far out from the back wall things stand when nothing says otherwise: over the counter, in the middle of its
- * second row of grid cells, so a tool's stand behind it has the first.
+ * third row of grid cells, so a tool's stand behind it has the first two.
  */
-export const Z_HOME = 1.5 * CELL;
+export const Z_HOME = 2.5 * CELL;
 /** Where the old bench's sink was, in its own units, down from the top of its home area. */
 const SINK_2D = HOME_H - 16;
 

@@ -278,7 +278,7 @@ const COUNTER_BOXES: readonly Box[] = COUNTERS.map((c) => ({
   x: (c.x0 + c.x1) / 2, y: LIFT / 2, z: (c.z0 + c.z1) / 2, yaw: 0, hx: (c.x1 - c.x0) / 2, hy: LIFT / 2, hz: (c.z1 - c.z0) / 2,
 }));
 /** How far, in grid cells, what's let go of can be moved from the cell it's held over to find room for it (see placement). */
-const SEEK = 2;
+const SEEK = 3;
 /** How far from straight ahead, in radians, the middle of what's held can be, so it's always in view (see holdInPlace). */
 const HOLD_CONE = Math.PI / 6;
 /** Radians the view turns per pixel the mouse moves, and that something held turns with Shift. */
@@ -302,14 +302,15 @@ const MOD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator
 export const TOUCH = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 /**
  * Where the faucets are: along the right wall over its counter, a grid cell apart, each spout over the middle of a
- * cell of the counter's one row (see CELL, SINK_D). Their spouts are a little under eye level, high enough over the
+ * cell of the counter's middle row (see CELL, SINK_D), where the station's are too (see STATION.out),
+ * clear of the manifold. Their spouts are a little under eye level, high enough over the
  * counter for a flask on a scale (whose mouth is 112 up) to go under one, at the foot of a neck FAUCET_NECK long.
  */
 const FAUCET_Y = LIFT + 160;
 const FAUCET_NECK = 30;
-const FAUCET_Z0 = 3.5 * CELL;
+const FAUCET_Z0 = 5.5 * CELL;
 const FAUCET_GAP = CELL;
-const FAUCET_OUT = CELL / 2;
+const FAUCET_OUT = 1.5 * CELL;
 /**
  * An island's faucet rises from the island's middle, a corner of four cells, and reaches out over the middle of one
  * of them, this far along x and along z (see CELL).
@@ -1047,7 +1048,7 @@ export class GameEngine {
   /**
    * Put everything on the grid (see onGrid), as it would be set down: presets and older saves can leave things
    * anywhere. A tool or a hose's nozzle whose stand that leaves off the counter (as one an older save left near the
-   * back wall can be) comes forward a cell or two, as it faces, until its stand is on it. A flask on a scale goes to
+   * back wall can be) comes forward up to three cells, as it faces, until its stand is on it. A flask on a scale goes to
    * the nearer of its places, or off it if the other flask there has it.
    */
   private toGrid(): void {
@@ -1060,7 +1061,7 @@ export class GameEngine {
         continue;
       }
       t.pose = onGrid(t.pose, toolAnchor(t));
-      for (let i = 0; i < 2 && !onCounter(t); i++) t.pose = { ...toWorld(t.pose, { x: 0, y: 0, z: CELL }), yaw: t.pose.yaw };
+      for (let i = 0; i < 3 && !onCounter(t); i++) t.pose = { ...toWorld(t.pose, { x: 0, y: 0, z: CELL }), yaw: t.pose.yaw };
     }
     for (const sc of this.scales) {
       sc.pose = onGrid(sc.pose, SCALE_ANCHOR);
@@ -1076,7 +1077,7 @@ export class GameEngine {
       h.turn = toCardinal(h.turn);
       const g = onGrid({ ...h.outlet, yaw: 0 });
       h.outlet = { x: g.x, y: g.y, z: g.z };
-      for (let i = 0; i < 2 && counterUnder(standBase(nozzleStand(h.outlet, h.turn, h.reach), 0)) === null; i++)
+      for (let i = 0; i < 3 && counterUnder(standBase(nozzleStand(h.outlet, h.turn, h.reach), 0)) === null; i++)
         h.outlet = toWorld({ ...h.outlet, yaw: h.turn }, { x: 0, y: 0, z: CELL });
     }
   }

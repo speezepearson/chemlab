@@ -12,7 +12,7 @@ import { AIRLOCK } from './airlock';
 import { boxesOverlap, solids } from './physics';
 import { LAMP_POSE } from './presets';
 import { SCALE_SHAPE, Scale } from './scale';
-import { CELL, COUNTERS, LAMP_AREA, LAMP_FLOOR, LIFT, ROOM, counterUnder, fromFrac, groundAt, toCell, toFrac, toWorld } from './space';
+import { CELL, COUNTERS, LAMP_AREA, LAMP_FLOOR, LAMP_SLOT, LAMP_Z, LIFT, ROOM, counterUnder, fromFrac, groundAt, toCell, toFrac, toWorld } from './space';
 import { BULB_Y, Hose, INLINE_DOCK, LAMP, SHAPES, SHEET, STRIP, STRIP_FOOT, THERMOMETER_ROD, Tool, dipUnder, footY, mouthBelow, tankX, type ToolKind } from './tools';
 
 const at = (x: number, y: number, z: number, yaw = 0) => ({ x, y, z, yaw });
@@ -83,7 +83,7 @@ describe('the shadow lamp', () => {
   const { h, wall, box, channel: ch } = LAMP;
   /** The middle of the channel's cell `i`, counting from the enclosure, in the room. */
   const cell = (i: number) => toWorld(LAMP_POSE, { x: ch.x0 + (i + 0.5) * CELL, y: 0, z: 0 });
-  const cells = Math.round((ch.x1 - ch.x0) / CELL);
+  const cells = Math.round((ch.x1 - LAMP_SLOT - ch.x0) / CELL);
   const flaskAt = (x: number, z: number, y = LIFT) => {
     const f = new Flask(CAP);
     f.pose = at(x, y + FLASK_H, z);
@@ -110,23 +110,27 @@ describe('the shadow lamp', () => {
     for (const c of COUNTERS.filter((k) => !k.lamp))
       expect(Math.max(c.x0 - LAMP_AREA.x1, LAMP_AREA.x0 - c.x1, c.z0 - LAMP_AREA.z1, LAMP_AREA.z0 - c.z1)).toBeGreaterThanOrEqual(CELL);
     expect(LAMP_AREA.x1).toBeLessThan(AIRLOCK.x - AIRLOCK.door.w / 2);
-    // on the bench, its enclosure's back flush with the bench's end, and its front wall just off the bench's edge
+    // on the bench, its enclosure's back flush with the bench's end, and its front wall on the bench, a little in from
+    // its edge
     expect(b.y - b.hy).toBeCloseTo(LIFT);
     expect(b.y + b.hy).toBeCloseTo(LIFT + h);
     expect(b.x + b.hx).toBeCloseTo(LAMP_AREA.x1);
     expect(b.x - b.hx).toBeGreaterThan(LAMP_AREA.x0);
-    expect(b.z - b.hz).toBeCloseTo(LAMP_AREA.z0 - wall);
+    expect(b.z - b.hz).toBeCloseTo(LAMP_Z - ch.z - wall);
+    expect(b.z - b.hz).toBeGreaterThan(LAMP_AREA.z0);
+    expect(b.z - b.hz).toBeLessThan(LAMP_AREA.z0 + CELL);
     expect(toolStands(lamp)).toEqual([]);
   });
 
-  it("has its channel on the grid: the bench's row of cells nearest the room, a cell wide and three long", () => {
-    expect(2 * ch.z).toBe(CELL);
-    expect(cells).toBe(3);
-    expect(ch.x1 - ch.x0).toBe(cells * CELL);
+  it("has its channel on the grid: along the bench's second row of cells from the room, five cells long, and a slot", () => {
+    expect(2 * ch.z).toBe(SHEET.side);
+    expect(cells).toBe(5);
+    expect(ch.x1 - ch.x0).toBe(cells * CELL + LAMP_SLOT);
     for (let i = 0; i < cells; i++) {
       const c = cell(i);
       expect(toCell(c.x)).toBeCloseTo(c.x, 6);
-      expect(c.z).toBeCloseTo(LAMP_AREA.z0 + CELL / 2, 6);
+      expect(toCell(c.z)).toBeCloseTo(c.z, 6);
+      expect(c.z).toBeCloseTo(LAMP_AREA.z0 + 1.5 * CELL, 6);
       expect(c.x).toBeGreaterThan(LAMP_AREA.x0);
       expect(c.x).toBeLessThan(LAMP_AREA.x1);
     }
@@ -151,10 +155,10 @@ describe('the shadow lamp', () => {
     // the enclosure is as wide as the trough over its walls; the walls are either side of the channel, all along it
     expect(enclosure.hz).toBe(ch.z + wall);
     expect(enclosure.hx).toBe((box.x1 - box.x0) / 2);
-    expect([near.z + near.hz, far.z - far.hz].map((z) => +z.toFixed(6))).toEqual([LAMP_AREA.z0, LAMP_AREA.z0 + CELL]);
+    expect([near.z + near.hz, far.z - far.hz].map((z) => +z.toFixed(6))).toEqual([LAMP_FLOOR.z0, LAMP_FLOOR.z1]);
     expect(near.hx).toBe((ch.x1 - ch.x0) / 2);
-    // the end wall closes the channel's far end, from side to side
-    expect(end.x + end.hx).toBeCloseTo(cell(cells - 1).x - CELL / 2);
+    // the end wall closes the channel's far end, from side to side, the slot past its last cell
+    expect(end.x + end.hx).toBeCloseTo(cell(cells - 1).x - CELL / 2 - LAMP_SLOT);
     expect(end.hz).toBe(ch.z + wall);
   });
 
@@ -172,11 +176,13 @@ describe('the shadow lamp', () => {
     expect(groundAt(cell(cells).x, cell(cells).z)).toBe(LIFT);
     expect(groundAt(cell(1).x, cell(1).z + CELL)).toBe(LIFT);
     expect(counterUnder(flaskBox(flaskAt(cell(1).x, cell(1).z + CELL)))).toBe(LIFT);
-    // a cell further either way is the enclosure, or past the end wall, where the bench is free
+    // a cell further either way is the enclosure, or the end wall; two past the channel, the bench is free
     expect(boxesOverlap(flaskBox(flaskAt(cell(-1).x, cell(-1).z, LAMP_FLOOR.y)), b)).toBe(true);
-    expect(boxesOverlap(flaskBox(flaskAt(cell(cells).x, cell(cells).z)), b)).toBe(false);
-    // (a scale is two cells long, a place for a flask over each: over the first two of the channel's, or the last two)
-    for (const i of [1, 2]) {
+    expect(boxesOverlap(flaskBox(flaskAt(cell(cells).x, cell(cells).z)), b)).toBe(true);
+    expect(boxesOverlap(flaskBox(flaskAt(cell(cells + 1).x, cell(cells + 1).z)), b)).toBe(false);
+    // (a scale is a little over three cells long, its places for a flask two cells apart: it fits over the middle
+    // three of the channel's)
+    for (const i of [2]) {
       const along = new Scale(onGrid(at(cell(i).x, LAMP_FLOOR.y + SCALE_SHAPE.body.y1, cell(i).z, LAMP_POSE.yaw), SCALE_ANCHOR));
       expect(boxesOverlap(scaleBox(along), b)).toBe(false);
       expect(counterUnder(scaleBox(along))).toBe(LAMP_FLOOR.y);
@@ -198,12 +204,12 @@ describe('the shadow lamp', () => {
     for (let i = 0; i < cells; i++) for (const yaw of [LAMP_POSE.yaw, LAMP_POSE.yaw + Math.PI]) expect(stands('dispenser', i, yaw)).toBe(false);
     const fits = (Object.keys(SHAPES) as ToolKind[])
       .filter((k) => !SHAPES[k].fixed && !SHAPES[k].flat)
-      .filter((k) => [0, 1, 2].some((i) => [TO_LAMP, TO_SHEET].some((yaw) => stands(k, i, yaw))));
+      .filter((k) => Array.from({ length: cells }, (_, i) => i).some((i) => [TO_LAMP, TO_SHEET].some((yaw) => stands(k, i, yaw))));
     expect(fits.sort()).toEqual(['column', 'dispenser', 'meter', 'pipette', 'sheet', 'strip', 'thermometer', 'thermometerWide']);
   });
 
   it('leaves the two rows of its bench behind it clear, with room for the longest tools on their two stands', () => {
-    for (const row of [1.5, 2.5])
+    for (const row of [3.5, 4.5])
       for (let x = LAMP_AREA.x0 + CELL / 2; x < LAMP_AREA.x1; x += CELL) {
         const f = flaskAt(x, LAMP_AREA.z0 + row * CELL);
         expect(counterUnder(flaskBox(f))).toBe(LIFT);
@@ -211,9 +217,9 @@ describe('the shadow lamp', () => {
       }
     for (const kind of ['heater', 'sorter', 'separator'] as const) {
       // somewhere along the row behind the trough, facing the room, its stands in the row by the wall
-      const fits = [0, 1, 2, 3, 4].some((i) => {
+      const fits = Array.from({ length: (LAMP_AREA.x1 - LAMP_AREA.x0) / CELL }, (_, i) => i).some((i) => {
         const t = new Tool(kind, 1);
-        t.pose = onGrid(at(LAMP_AREA.x0 + (i + 0.5) * CELL, LIFT + 260, LAMP_AREA.z0 + 1.5 * CELL, Math.PI), toolAnchor(t));
+        t.pose = onGrid(at(LAMP_AREA.x0 + (i + 0.5) * CELL, LIFT + 260, LAMP_AREA.z0 + 3.5 * CELL, Math.PI), toolAnchor(t));
         const on = toolStands(t);
         return on.length === 2 && !boxesOverlap(toolBox(t), b) && on.every((st) => counterUnder(standBase(st, 0)) === LIFT && !boxesOverlap(standBase(st, LIFT), b));
       });
@@ -254,7 +260,7 @@ describe("the shadow lamp's slot", () => {
     expect(Math.hypot(front.x - box.x, front.z - box.z)).toBeCloseTo(Math.hypot(SHEET_SLOT.x - box.x, SHEET_SLOT.z - box.z) - 1);
     // and a flask in the cell next to it is clear of it
     const f = new Flask(CAP);
-    f.pose = { ...toWorld(LAMP_POSE, { x: LAMP.channel.x1 - CELL / 2, y: LAMP.floor + FLASK_H - LAMP.h, z: 0 }), yaw: 0 };
+    f.pose = { ...toWorld(LAMP_POSE, { x: LAMP.channel.x1 - LAMP_SLOT - CELL / 2, y: LAMP.floor + FLASK_H - LAMP.h, z: 0 }), yaw: 0 };
     expect(boxesOverlap(flaskBox(f), sb)).toBe(false);
   });
 
@@ -284,7 +290,12 @@ describe("the shadow lamp's slot", () => {
     const t = sheetAt(at(0, 0, 0));
     // held over the cell at the end of the channel or the one past the end wall, or just off the bench from them,
     // above or a little below
-    for (const p of [near(-47.5, 60, 0), near(52.5, 150, 0), near(-47.5, -80, CELL), near(52.5, 0, CELL), near(0, 0, 0)])
+    // (the slot is LAMP_SLOT past the channel's last cell, and the sheet's middle half its bar's thickness short of its
+    // end; off the bench is a little further toward the room than its edge)
+    const last = SHEET.clip.d / 2 - LAMP_SLOT - CELL / 2;
+    const past = last + CELL;
+    const off = LAMP_Z - LAMP_AREA.z0 + CELL / 3;
+    for (const p of [near(last, 60, 0), near(past, 150, 0), near(last, -80, off), near(past, 0, off), near(0, 0, 0)])
       expect(slotted(t, p, [lamp, t])).toEqual(SHEET_SLOT);
     // with its back to the lamp, it goes in that way round; held across it, it's turned to face the lamp
     const back = SHEET_SLOT.yaw + Math.PI;
@@ -666,7 +677,7 @@ describe('dippers', () => {
       const strip = kind === 'strip';
       // a flask on the grid, nearly full
       const f = new Flask(CAP);
-      f.pose = at(150, LIFT + FLASK_H, 250);
+      f.pose = at(2.5 * CELL, LIFT + FLASK_H, 4.5 * CELL);
       f.setMolecules(R, 0.9 * CAP);
       const m = flaskMouth(f);
       const { hover, dipped, stood } = dipPoses(t, m, flaskFluid(f), 0.2);

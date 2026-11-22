@@ -17,7 +17,7 @@ import { CAP, DELIVERY, GOAL_PURITY, TRACE } from './config';
 import { Flask, Vessel, fluidAlpha, fluidRGB, volume } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, Scale } from './scale';
-import { COUNTERS, LIFT, ROOM, groundAt, toLocal, toWorld, type Vec3 } from './space';
+import { CELL, COUNTERS, LIFT, ROOM, groundAt, toLocal, toWorld, type Vec3 } from './space';
 import { PORT_FRAC, PORT_WALL, porthole, type Porthole } from './porthole';
 import { AIRLOCK, POD } from './airlock';
 import { arrival, notice, type Block } from '../intro/notice';
@@ -184,7 +184,7 @@ const DROP_R_ATOMS = 1.5e6;
 /** A CRT's phosphor green. */
 const PHOSPHOR = '64, 255, 110';
 /** The separator's splitter, below its valve, in local units (y down). */
-const SEP_BODY = { x0: -210, x1: 210, y0: 100, y1: 112 };
+const SEP_BODY = { x0: -2 * CELL - 10, x1: 2 * CELL + 10, y0: 100, y1: 112 };
 /** Height of each line of a label, in world units. */
 const LABEL_H = 10;
 /** How far above a flask's mouth or a scale's platform its note sits, to the note's middle. */
@@ -2346,7 +2346,7 @@ class ToolView {
       this.lids.push(lid);
     };
 
-    // the funnel, over the cell in front of the wall, with its fluid settling into it as drawn (see STATION_FUNNEL)
+    // the funnel, over the second cell out from the wall, with its fluid settling into it as drawn (see STATION_FUNNEL)
     const built = art.children.length;
     glassFrom(art, frustum(fx, f.y, f.y + f.h, 2 * f.w, 2 * f.w, FUNNEL_TIP, FUNNEL_TIP, true));
     const fm = new FluidMesh([frustum(fx, f.y + 0.5, f.y + f.h - 0.5, 2 * f.w - 1.5, 2 * f.w - 1.5, FUNNEL_TIP - 1, FUNNEL_TIP - 1, false)], art);

@@ -294,7 +294,7 @@ describe('bond paper in the room', () => {
       t.pose = onGrid(t.pose, toolAnchor(t));
       expect([t.pose.x, t.pose.z]).toEqual([toCell(137), toCell(962)]);
       const b = toolBox(t);
-      expect([b.x, b.z]).toEqual([150, 950]);
+      expect([b.x, b.z]).toEqual([toCell(137), toCell(962)]);
       expect(b.y - b.hy).toBeCloseTo(LIFT, 9);
       expect(b.y + b.hy).toBeCloseTo(LIFT + TEST_PAPER.thick, 9);
       expect([b.hx, b.hz]).toEqual([TEST_PAPER.w / 2, TEST_PAPER.d / 2]);
