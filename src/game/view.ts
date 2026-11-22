@@ -194,17 +194,19 @@ const NOTE_Y = 13;
 
 /**
  * Glass: what it reflects is added in full, however clear it is, and only what's behind it is dimmed by its opacity,
- * so it glints and shows the room in it as real glass does, and more so edge on. `floor`: glass that fluid lies right
- * against (a tank's floor), drawn a hair further off than it is, so the fluid wins cleanly there rather than the two
- * flickering pixel by pixel. Only there: the offset grows as the glass is seen edge on, so on walls, where the fluid
- * is held a little inside the glass, it would take a wall seen at a slant for being behind its fluid, and hide a band
- * of it whose edge jitters as the view turns.
+ * so it glints and shows the room in it as real glass does, and more so edge on. `lie`, for glass lying right against
+ * something: +1, glass that fluid lies on (a tank's floor), drawn a hair further off than it is, so the fluid wins
+ * cleanly there rather than the two flickering pixel by pixel; −1, glass lying on something (a flask's floor on the
+ * counter), drawn a hair nearer, so the glass wins, and looks the same standing there as lifted off it. Only there:
+ * the offset grows as the glass is seen edge on, so on walls, where the fluid is held a little inside the glass, it
+ * would take a wall seen at a slant for being behind its fluid, and hide a band of it whose edge jitters as the view
+ * turns.
  */
-function makeGlass(floor: boolean): THREE.MeshStandardMaterial {
+function makeGlass(lie: -1 | 0 | 1): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({
     color: 0xd6ecf2, transparent: true, opacity: 0.1, roughness: 0.04, metalness: 0, depthWrite: false, side: THREE.DoubleSide,
     envMapIntensity: 1.4, premultipliedAlpha: true,
-    ...(floor ? { polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 4 } : {}),
+    ...(lie ? { polygonOffset: true, polygonOffsetFactor: lie, polygonOffsetUnits: 4 * lie } : {}),
   });
   mat.onBeforeCompile = (sh) => {
     sh.fragmentShader = sh.fragmentShader
@@ -214,23 +216,26 @@ function makeGlass(floor: boolean): THREE.MeshStandardMaterial {
   mat.customProgramCacheKey = () => 'glass';
   return mat;
 }
-const glassMat = makeGlass(false);
+const glassMat = makeGlass(0);
 /** Glass that fluid lies right against (see makeGlass). */
-const floorGlassMat = makeGlass(true);
+const floorGlassMat = makeGlass(1);
+/** Glass lying right on something else (see makeGlass). */
+const baseGlassMat = makeGlass(-1);
 /** Every glass material, for whatever's done to all glass alike. */
-const GLASSES = [glassMat, floorGlassMat];
+const GLASSES = [glassMat, floorGlassMat, baseGlassMat];
 
 /**
- * Geometry `g` with its triangles lying flat at height `y` (a floor) put first, as group 1, and the rest after, as
- * group 0: so a floor can be drawn in floorGlassMat and the walls in glassMat.
+ * Geometry `g` with its triangles within `near` over height `y` (a floor, and the foot of any wall curving into it)
+ * put first, as group 1, and the rest after, as group 0: so a floor can be drawn in a glass of its own and the walls
+ * in glassMat.
  */
-function floorFirst(g: THREE.BufferGeometry, y: number): THREE.BufferGeometry {
+function floorFirst(g: THREE.BufferGeometry, y: number, near: number): THREE.BufferGeometry {
   const pos = g.attributes.position;
   const index = g.index!.array;
   const [floor, rest]: number[][] = [[], []];
   for (let i = 0; i < index.length; i += 3) {
     const tri = [index[i], index[i + 1], index[i + 2]];
-    (tri.every((v) => Math.abs(pos.getY(v) - y) < 1e-6) ? floor : rest).push(...tri);
+    (tri.every((v) => pos.getY(v) - y <= near) ? floor : rest).push(...tri);
   }
   g.setIndex([...floor, ...rest]);
   g.clearGroups();
@@ -1402,12 +1407,21 @@ function glowTexture(sharpness: number): THREE.Texture {
 const FLASK_PROFILE = FLASK_OUTLINE.filter((p) => p.x >= 0 && !(p.x === 11 && p.y === 0) && p.y > 0)
   .map((p) => new THREE.Vector2(p.x, -p.y))
   .sort((a, b) => a.y - b.y);
+/**
+ * How far up from its floor a flask's glass is drawn as lying on what it stands on (see makeGlass): its heel curves
+ * into its floor, all but flat for the last of it, so that fought what it stands on as the floor did.
+ */
+const FLASK_HEEL = 1;
 const flaskGlassGeom = floorFirst(
   new THREE.LatheGeometry([new THREE.Vector2(0, -FLASK_H), ...FLASK_PROFILE, new THREE.Vector2(11, 0), new THREE.Vector2(12.5, 0.5)], 48),
   -FLASK_H,
+  FLASK_HEEL,
 );
-/** A flask's glass: its walls, and its floor, which lies right on whatever it stands on (see makeGlass). */
-const flaskGlassMats = [glassMat, floorGlassMat];
+/**
+ * A flask's glass: its walls, and its floor, which lies right on whatever it stands on (see makeGlass), with its fluid
+ * held off it (see FLASK_FLUID).
+ */
+const flaskGlassMats = [glassMat, baseGlassMat];
 /**
  * The flask's fluid's solid: a hair inside the glass, so the two don't fight over the same pixels, standing `floor`
  * off the glass's floor, and so clear of what it stands on (a sink counter's drain grate is GRATE_LIFT over the counter);
