@@ -91,7 +91,7 @@ export interface SavedTool extends SavedDepth {
   bed?: SavedVessel[];
   /** From when a wicking strip's paper took up a sample from a pad on top of it, as one vessel; ignored now. */
   sample?: SavedVessel;
-  /** A sheet of shadow paper's image, if it's had any light (see Tool.image). */
+  /** From when there was shadow paper, a sheet's image; ignored now, as the sheet is. */
   image?: string;
 }
 
