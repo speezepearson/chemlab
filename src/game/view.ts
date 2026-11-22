@@ -230,11 +230,12 @@ const keyMats = {
 /** The shadow lamp's light, as its pane glows with it: a faint lavender, like a blacklight's. */
 const LAMP_GLOW = 0xb9a6ff;
 /**
- * The shadow lamp's screen (see SCREEN): its own color, a dark brown, as it is where no light falls on it; and what it
- * fluoresces where the lamp's light falls on it unshadowed, an electric yellow, given off as light of its own (0 to
- * 255 a channel), less of it by how much less brightly it's fluorescing (see Tool.glow).
+ * The shadow lamp's screen (see SCREEN), a wall of green phosphor: what it gives off where no light falls on it, a
+ * deep, dark green; and where the lamp's light falls on it unshadowed, a bright phosphor green; in between, a blend
+ * of the two by how brightly it's fluorescing (see Tool.glow). All of it is light of its own (0 to 255 a channel),
+ * so a shadow on it is green too, whatever the room's light; `back` is what's behind that, all but black.
  */
-const SCREEN_COLORS = { dark: 0x4a2e1a, bright: [255, 244, 36] } as const;
+const SCREEN_COLORS = { back: 0x04120c, dark: [18, 88, 62], bright: [74, 234, 142] } as const;
 /** Blotting paper, for the wicking strip and the sheets of test paper and bond paper. */
 const paperMat = new THREE.MeshStandardMaterial({ color: 0xe6dfc8, roughness: 0.95, metalness: 0 });
 /** Its cream, as drawn on a canvas. */
@@ -1904,8 +1905,8 @@ class ToolView {
    * The shadow lamp (see LAMP): one long, low trough. At one end its enclosure, a closed box with a square pane in a
    * dark bezel in its face onto the channel, which its light leaves by, and on its front a round button in a dark
    * collar; from it the channel's two side walls, and its floor between them; and the end wall across their far ends,
-   * with the screen set in its inner face, straight across from the pane: a dark brown square, which gives off its own
-   * yellow light wherever it's fluorescing (see drawScreen). The pane glows lavender while it's lit, and the
+   * with the screen set in its inner face, straight across from the pane: a square of green phosphor, dark where no
+   * light falls on it and bright where it's fluorescing (see drawScreen). The pane glows lavender while it's lit, and the
    * button's cap with it, pushed in. None of it lights anything in the room.
    */
   private buildLamp(pick: (m: THREE.Object3D, part: 'button') => void): void {
@@ -1949,18 +1950,18 @@ class ToolView {
     tex.magFilter = tex.minFilter = THREE.LinearFilter;
     tex.needsUpdate = true;
     const screen = new THREE.MeshStandardMaterial({
-      color: SCREEN_COLORS.dark, roughness: 0.9, metalness: 0, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 1,
+      color: SCREEN_COLORS.back, roughness: 0.9, metalness: 0, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 1,
     });
     const face = new THREE.Mesh(new THREE.PlaneGeometry(SCREEN.side, SCREEN.side).rotateY(-Math.PI / 2), screen);
     face.position.set(ch.x1 - 0.2, -win.y, 0);
     face.receiveShadow = true;
     art.add(face);
-    this.lamp = { pane: glass, cap, out: out + 4, tex, screen, drawn: 0 };
+    this.lamp = { pane: glass, cap, out: out + 4, tex, screen, drawn: -1 };
   }
 
   /**
    * Draw what the shadow lamp's screen is fluorescing, if that's changed since it was last drawn: each cell giving off
-   * its yellow by how brightly it is (see Tool.glow), and none where it's dark.
+   * its green, from dark to bright by how brightly it is (see Tool.glow).
    */
   private drawScreen(): void {
     const l = this.lamp!;
@@ -1968,7 +1969,8 @@ class ToolView {
     if (l.drawn === glowed) return;
     l.drawn = glowed;
     const px = l.tex.image.data as Uint8Array;
-    for (let i = 0; i < glow.length; i++) for (let c = 0; c < 3; c++) px[4 * i + c] = Math.round(SCREEN_COLORS.bright[c] * glow[i]);
+    const { dark, bright } = SCREEN_COLORS;
+    for (let i = 0; i < glow.length; i++) for (let c = 0; c < 3; c++) px[4 * i + c] = Math.round(dark[c] + (bright[c] - dark[c]) * glow[i]);
     l.tex.needsUpdate = true;
   }
 
