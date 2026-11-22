@@ -134,8 +134,8 @@ export const PRESETS: readonly Preset[] = [
         kind: 'separator', at: [0.35, 0.2], z: DEMO_Z, valves: [0.3],
         tanks: [{ contents: [atomsOf(singleOf('R'), 2 * CAP), atomsOf(singleOf('K'), 2 * CAP)], T: T_ROOM }],
       },
-      // under its spouts, a grid cell either side of its middle
-      { kind: 'dispenser', at: [0.25, 0.5], z: DEMO_Z },
+      // under its spouts: straight under its tank, and a grid cell to the right
+      { kind: 'dispenser', at: [0.35, 0.5], z: DEMO_Z },
       { kind: 'dispenser', at: [0.45, 0.5], z: DEMO_Z },
     ],
   },

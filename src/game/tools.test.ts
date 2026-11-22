@@ -13,7 +13,7 @@ import { tankMouth } from './bodies';
 import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, BOND_KEYS, SPECTROSCOPE, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
+  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, BOND_KEYS, SPECTROSCOPE, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
   clockText, needleAt, STRIP, STRIP_FOOT, STRIP_RUN, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SCREEN, lampLight, type Mouth,
 } from './tools';
 
@@ -91,15 +91,33 @@ describe('resistive heater', () => {
     }
     return { ht, out, fed };
   }
-  const dial = (d: number, taps = [0, 0, 0]) => [...taps, d];
+  /** Its end's spout comes after its tap's. */
+  const END = HEATER_TAPS.length;
+  const dial = (d: number, taps = [0]) => [...taps, d];
   const held = (ht: Tool) => [...ht.tanks, ...ht.tube].reduce((n, v) => n + v.N, 0);
 
-  it('has three taps and a dial, all starting at 0', () => {
+  it('has one tap and a dial, both starting at 0, and two spouts: its tap\'s and its end\'s', () => {
     const ht = new Tool('heater', 0);
-    expect(ht.valves).toEqual([0, 0, 0, 0]);
-    expect(ht.shape.dial).toBe(3);
-    expect(ht.shape.spouts.length).toBe(4);
+    expect(END).toBe(1);
+    expect(ht.valves).toEqual([0, 0]);
+    expect(ht.shape.dial).toBe(1);
+    expect(ht.shape.spouts.length).toBe(2);
     expect(ht.tube.length).toBe(HEATER_CELLS);
+  });
+
+  it('is three grid cells along: its funnel, its tap\'s spout a cell on under the middle of its tube, and its end\'s another', () => {
+    const sh = SHAPES.heater;
+    const x = tankX(sh.tanks[0]);
+    expect(sh.spouts).toEqual([x + CELL, x + 2 * CELL]);
+    expect(heaterCellX(HEATER_TAPS[0])).toBeCloseTo(sh.spouts[0]);
+    expect(heaterCellX(HEATER_CELLS - 1)).toBeCloseTo(sh.spouts[1]);
+    expect(sh.valves![0].x).toBe(sh.spouts[0]);
+    // the tap draws from the end of the tube's first half
+    expect(HEATER_TAPS[0] + 1).toBe(HEATER_CELLS / 2);
+    // its box is no more than those three cells and a little over, the dial's box within it
+    expect(sh.box.x1 - sh.box.x0).toBeLessThan(3 * CELL);
+    expect(HEATER_BOX.x1).toBeLessThan(sh.box.x1);
+    expect(HEATER_BOX.x0).toBeGreaterThan(sh.tanks[0].x1);
   });
 
   it('carries fluid the length of its tube in about HEATER.transit, and out the end', () => {
@@ -108,25 +126,25 @@ describe('resistive heater', () => {
     // the first of it gets out a little early, as the stretches mix; most takes about the transit
     let t = 0;
     let out = 0;
-    for (; out < CAP / 200 && t < 20; t += 0.02) out += ht.step(0.02)[3]?.N ?? 0;
+    for (; out < CAP / 200 && t < 20; t += 0.02) out += ht.step(0.02)[END]?.N ?? 0;
     expect(t).toBeGreaterThan(0.8 * HEATER.transit);
     expect(t).toBeLessThan(1.2 * HEATER.transit);
   });
 
-  it('loses nothing but traces, and with the taps shut lets it all out the end', () => {
+  it('loses nothing but traces, and with the tap shut lets it all out the end', () => {
     const { ht, out, fed } = run(dial(0.5));
-    expect(out[0].N + out[1].N + out[2].N).toBe(0);
+    expect(out[0].N).toBe(0);
     // transfer drops a trace left behind (see TRACE), as the front of the stream spreads along the tube
-    expect(1 - (out[3].N + held(ht)) / fed).toBeLessThan(1e-4);
+    expect(1 - (out[END].N + held(ht)) / fed).toBeLessThan(1e-4);
   });
 
   it("doesn't heat with the dial at 0", () => {
     const { out } = run(dial(0));
-    expect(temperature(out[3])).toBeCloseTo(1, 6);
+    expect(temperature(out[END])).toBeCloseTo(1, 6);
   });
 
   it('heats more with the dial further up', () => {
-    const T = [0.2, 0.5, 0.8].map((d) => temperature(run(dial(d)).out[3]));
+    const T = [0.2, 0.5, 0.8].map((d) => temperature(run(dial(d)).out[END]));
     expect(T[0]).toBeGreaterThan(1.05);
     expect(T[1]).toBeGreaterThan(T[0]);
     expect(T[2]).toBeGreaterThan(T[1]);
@@ -134,10 +152,10 @@ describe('resistive heater', () => {
     expect(T[2]).toBeLessThan(wireTemperature(0.8));
   });
 
-  it('heats fluid more the longer it has been along the tube, so each tap runs hotter than the last', () => {
-    const { out } = run(dial(0.5, [0.05, 0.05, 0.05]));
+  it('heats fluid more the longer it has been along the tube, so the end runs hotter than the tap', () => {
+    const { out } = run(dial(0.5, [0.05]));
     const T = out.map((v) => temperature(v));
-    for (let k = 1; k < 4; k++) expect(T[k]).toBeGreaterThan(T[k - 1]);
+    expect(T[END]).toBeGreaterThan(T[0]);
     // roughly as far toward the wire as its time in the tube says
     const wire = wireTemperature(0.5);
     HEATER_TAPS.forEach((c, k) => {
@@ -149,10 +167,9 @@ describe('resistive heater', () => {
   });
 
   it('lets everything out of a wide-open tap, so none goes further', () => {
-    const { out } = run(dial(0.5, [0, 1, 0]));
-    expect(out[0].N).toBe(0);
-    expect(out[1].N).toBeGreaterThan(0);
-    expect(out[2].N + out[3].N).toBe(0);
+    const { out } = run(dial(0.5, [1]));
+    expect(out[0].N).toBeGreaterThan(0);
+    expect(out[END].N).toBe(0);
   });
 
   it('feeds its tube from its funnel in proportion to how high the fluid stands in it', () => {
@@ -2016,11 +2033,19 @@ describe('separator', () => {
   const without = [R, SOLVENT_SPECIES, tri('△RGB'), pair('R–G')];
   const withK = [tri('⊠RGBK'), tri('R–G–B–K'), tri('△RGK'), pair('R–K'), K];
 
-  it('has two spouts, a grid cell either side of its tank', () => {
+  it('has two spouts a grid cell apart, the first under its tank, so it is two cells across', () => {
     const t = new Tool('separator', 0);
     expect(SEPARATOR_OUTLETS).toBe(2);
-    expect(t.shape.spouts).toEqual([-CELL, CELL]);
+    expect(t.shape.spouts).toEqual([0, CELL]);
     expect(tankX(t.shape.tanks[0])).toBe(0);
+    expect(t.shape.box.x1 - t.shape.box.x0).toBeLessThan(2 * CELL);
+  });
+
+  it('has its neighbours two cells across too: the splitter\'s funnel over its left spout, the multiplexer\'s right funnel over its spout', () => {
+    const [sp, mx] = [SHAPES.splitter, SHAPES.multiplexer];
+    expect(sp.spouts).toEqual([tankX(sp.tanks[0]), tankX(sp.tanks[0]) + CELL]);
+    expect(mx.tanks.map(tankX)).toEqual([mx.spouts[0] - CELL, mx.spouts[0]]);
+    for (const sh of [sp, mx]) expect(sh.box.x1 - sh.box.x0).toBeLessThan(2 * CELL);
   });
 
   it('gives each molecule its outlet by whether it has a black atom: the left with none, the right with any', () => {

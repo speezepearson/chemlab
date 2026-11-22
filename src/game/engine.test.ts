@@ -1312,6 +1312,37 @@ describe('the shadow lamp', () => {
   });
 });
 
+describe('a heater from when it had three taps', () => {
+  it("loads with its middle tap as its tap and its dial as its dial, its hoses on the spouts those became", () => {
+    const l = lab();
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    const none = { n: {}, Q: 0 };
+    const drop = (n: number) => ({ n: { R: n }, Q: n });
+    s.tools.push({
+      kind: 'heater', id: 900, fx: 0.5, fy: 0.5, z: 750, valves: [0.1, 0.2, 0.3, 0.6], tanks: [none], drops: [drop(1), drop(2), drop(3), drop(4)],
+    } as unknown as SaveState['tools'][number]);
+    const outlet = (x: number) => ({ x, y: 0.6, z: 750, yaw: 0, reach: 50 });
+    s.hoses.push(
+      { outlet: outlet(0.2), on: { tool: 900, spout: 0 } },
+      { outlet: outlet(0.3), on: { tool: 900, spout: 1 } },
+      { outlet: outlet(0.4), on: { tool: 900, spout: 2 } },
+      { outlet: outlet(0.5), on: { tool: 900, spout: 3 } },
+    );
+    l.e.restore(s, DEFAULT_PRESET);
+    const ht = l.in.tools.find((t) => t.kind === 'heater')!;
+    expect(ht.valves).toEqual([0.2, 0.6]);
+    expect(ht.drops.map((d) => d.N)).toEqual([2, 4]);
+    const hoses = (l.in as unknown as { hoses: { on: { tool?: Tool; spout?: number }; outlet: { x: number } }[] }).hoses.filter((h) => h.on.tool === ht);
+    expect(hoses.map((h) => h.on.spout)).toEqual([0, 1]);
+    expect(hoses[0].outlet.x).toBeLessThan(hoses[1].outlet.x);
+    // saved again and loaded, it's as it is now
+    l.e.restore(JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState, DEFAULT_PRESET);
+    const again = l.in.tools.find((t) => t.kind === 'heater')!;
+    expect(again.valves).toEqual([0.2, 0.6]);
+    expect((l.in as unknown as { hoses: { on: { tool?: Tool; spout?: number } }[] }).hoses.filter((h) => h.on.tool === again).map((h) => h.on.spout)).toEqual([0, 1]);
+  });
+});
+
 describe('shadow paper, which is gone', () => {
   /** A lab's save with a sheet of shadow paper in the lamp's slot, with an image on it, and another on a stand, as labs had. */
   function withSheets(l: { e: GameEngine; in: Inside }): SaveState {

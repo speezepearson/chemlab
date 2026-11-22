@@ -263,6 +263,13 @@ const IN_POD = { x: POD.x, z: POD.z, yaw: 0, pitch: -0.12 };
 const SLEEP_SLICE_MS = 12;
 /** How far away something can be and still be picked up or pressed. */
 const REACH = 460;
+/**
+ * The heater as older saves have it: with four spouts, three taps' and then its end's, and as many valves, a tap's
+ * each and then its dial. `kept` are the two of each that it still has, in order: its middle tap, which drew from
+ * where its one tap does now, and its last, which is its end's spout or its dial. A hose on either of those spouts
+ * stays on it; one on either of the other two taps' is rolled up, and what hung from them is gone.
+ */
+const OLD_HEATER = { spouts: 4, kept: [1, 3] };
 /** The nearest and furthest something can be held, from the eyes to its middle, beyond its own size. */
 const HOLD_NEAR = 40;
 /** How much further off than other things a flask is held to start with (see holdDist). */
@@ -847,12 +854,18 @@ export class GameEngine {
       loadVessel(f, sf);
       return f;
     });
+    const longHeaters = new Set<number>();
     this.tools = s.tools
       .filter((st) => st.kind in SHAPES)
       .map((st) => {
-        const t = new Tool(st.kind, st.id, pose(fromFrac({ x: st.fx, y: st.fy }), st), st.valves ?? []);
+        // (an older save's heater had three taps, each with a spout, before its end's: see OLD_HEATER)
+        const long = (a: unknown[] | undefined) => st.kind === 'heater' && a?.length === OLD_HEATER.spouts;
+        const valves = long(st.valves) ? OLD_HEATER.kept.map((j) => st.valves![j]) : st.valves;
+        const drops = long(st.drops) ? OLD_HEATER.kept.map((j) => st.drops![j]) : st.drops;
+        if (long(st.valves) || long(st.drops)) longHeaters.add(st.id);
+        const t = new Tool(st.kind, st.id, pose(fromFrac({ x: st.fx, y: st.fy }), st), valves ?? []);
         t.tanks.forEach((v, k) => st.tanks?.[k] && loadVessel(v, st.tanks[k]));
-        t.drops.forEach((v, k) => st.drops?.[k] && loadVessel(v, st.drops[k]));
+        t.drops.forEach((v, k) => drops?.[k] && loadVessel(v, drops[k]));
         t.tube.forEach((v, k) => st.tube?.[k] && loadVessel(v, st.tube[k]));
         if (typeof st.note === 'string') t.note = st.note;
         t.remember(st.memory);
@@ -889,8 +902,10 @@ export class GameEngine {
       if (!on || !sh.outlet) continue;
       const fa = Number.isInteger(on.faucet) ? faucetIndex(on.faucet!, fs.length) : null;
       const t = this.tools.find((u) => u.id === on.tool);
+      // (a hose on a spout of an older save's heater is on the spout that's become: its middle tap's, or its end's)
+      const spout = t && longHeaters.has(t.id) && Number.isInteger(on.spout) ? OLD_HEATER.kept.indexOf(on.spout!) : on.spout;
       const mount: HoseMount | null =
-        t && Number.isInteger(on.spout) && on.spout! >= 0 && on.spout! < t.shape.spouts.length ? { tool: t, spout: on.spout! }
+        t && Number.isInteger(spout) && spout! >= 0 && spout! < t.shape.spouts.length ? { tool: t, spout: spout! }
         : fa !== null ? { faucet: fa }
         : null;
       if (!mount || this.hoses.some((h) => sameMount(h.on, mount))) continue;

@@ -208,7 +208,7 @@ describe('the shadow lamp', () => {
         expect(counterUnder(flaskBox(f))).toBe(LIFT);
         expect(boxesOverlap(flaskBox(f), b), `${x}, ${row}`).toBe(false);
       }
-    for (const kind of ['heater', 'sorter'] as const) {
+    for (const kind of ['sorter'] as const) {
       // somewhere along the row behind the trough, facing the room, its stands in the row by the wall
       const fits = [0, 1, 2, 3, 4].some((i) => {
         const t = new Tool(kind, 1);
@@ -393,8 +393,8 @@ describe('stands', () => {
     // turned a quarter, its back is toward −x
     expect(toolStands(t)[0].x).toBeLessThan(0);
     expect(toolStands(t)[0].z).toBeCloseTo(0);
-    expect(toolStands(new Tool('heater', 0, at(0, 600, 0)))).toHaveLength(2);
-    expect(toolStands(new Tool('separator', 0, at(0, 600, 0)))).toHaveLength(1);
+    expect(toolStands(new Tool('sorter', 0, at(0, 600, 0)))).toHaveLength(2);
+    for (const kind of ['separator', 'heater'] as const) expect(toolStands(new Tool(kind, 0, at(0, 600, 0)))).toHaveLength(1);
     expect(toolStands(new Tool('receptacle', 0, at(0, 600, 0)))).toHaveLength(0);
   });
 

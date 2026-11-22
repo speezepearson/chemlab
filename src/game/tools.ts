@@ -492,14 +492,14 @@ export const INSTRUMENT = {
 
 /** How many stretches the heater's tube is cut into, each holding what passes through it as one mixed packet. */
 export const HEATER_CELLS = 24;
-/** The stretches of the heater's tube that its three taps draw from: the ends of its first three quarters. */
-export const HEATER_TAPS = [5, 11, 17] as const;
+/** The stretch of the heater's tube that its tap draws from: the end of its first half. */
+export const HEATER_TAPS = [11] as const;
 /**
  * How the resistive heater behaves, editable from the Chemistry panel:
  * - feed: how fast its funnel drains into its tube, in atoms per sim second (one flask a second);
  * - transit: how long fluid takes to run the length of the tube, in sim seconds, however much is in it;
  * - rate: how fast fluid in the tube heats toward the wire's temperature, per sim second: it closes
- *   1 − e^(−rate·t) of the gap in t seconds, so by default 31% by the first tap, 53%, 68%, and 78% by the end;
+ *   1 − e^(−rate·t) of the gap in t seconds, so by default 53% by the tap, and 78% by the end;
  * - maxT: the wire's temperature with the dial turned all the way up.
  */
 export const HEATER = { feed: MAX_FLOW, transit: 6, rate: 0.25, maxT: 100 };
@@ -511,15 +511,16 @@ export function restoreDefaultHeater(): void {
 
 /**
  * The heater's tube, in local units: from x0 to x1 (cut into HEATER_CELLS equal stretches), centered at y, of radius r.
- * Its taps' stretches, and its last, are a grid cell apart (see CELL), so each tap's spout and the end's can be over one.
+ * Its tap's stretch and its last are a grid cell apart (see CELL), the tap's a cell on from the funnel, so the tap's
+ * spout and the end's can each be over one.
  */
-export const HEATER_TUBE = { x0: -11.5 * (CELL / 6), x1: 12.5 * (CELL / 6), y: 48, r: 7 };
+export const HEATER_TUBE = { x0: -CELL - 11.5 * (CELL / 12), x1: 0.5 * (CELL / 12), y: 48, r: 7 };
 /** The middle of stretch c of the heater's tube, in local units. */
 export function heaterCellX(c: number): number {
   return HEATER_TUBE.x0 + ((c + 0.5) * (HEATER_TUBE.x1 - HEATER_TUBE.x0)) / HEATER_CELLS;
 }
 /** The heater's control box, above the right end of its tube, with the dial (see SHAPES.heater.valves) on it. */
-export const HEATER_BOX = { x0: 150, x1: 190, y0: 2, y1: 36 };
+export const HEATER_BOX = { x0: -50, x1: -10, y0: 2, y1: 36 };
 
 /**
  * The heater's wire temperature for a dial setting from 0 to 1: off at 0 (it heats nothing), then rising
@@ -1138,32 +1139,32 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   },
   separator: {
     tanks: [{ name: 'tank', x0: -30, x1: 30 }],
-    // two outlets (see SEPARATOR_OUTLET), a grid cell (see CELL) either side of its tank, so a flask or a tool's
-    // tank fits under each
-    spouts: [-CELL, CELL],
+    // two outlets (see SEPARATOR_OUTLET), a grid cell (see CELL) apart, the first under its tank, so the tool is
+    // two cells across and a flask or a tool's tank fits under each
+    spouts: [0, CELL],
     sump: { w: 14, h: 7 },
     valveY: 96,
     spoutY: 126,
     // the manifold under it (see the engine's SEP_BODY), with a handle on its left end
-    box: { x0: -120, x1: 114, y0: -6, y1: 128 },
+    box: { x0: -34, x1: 116, y0: -6, y1: 128 },
   },
   splitter: {
     tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
     tankH: 30,
     tankCap: FUNNEL_CAP,
     funnel: true,
-    // a grid cell either side of its funnel, like the separator's of its tank
-    spouts: [-CELL, CELL],
+    // one straight down under its funnel and one a grid cell to its right, like the separator's
+    spouts: [0, CELL],
     valveY: 42,
     spoutY: 84,
-    box: { x0: -116, x1: 116, y0: -6, y1: 86 },
+    box: { x0: -26, x1: 116, y0: -6, y1: 86 },
   },
   multiplexer: {
-    // the splitter turned upside down: a funnel a grid cell either side of its one spout, their stems joining over the
-    // valve, which picks how much of each goes through
+    // the splitter turned upside down: two funnels a grid cell apart, the second over its one spout, their stems
+    // joining over the valve, which picks how much of each goes through
     tanks: [
       { name: 'A', x0: -CELL - 22, x1: -CELL + 22 },
-      { name: 'B', x0: CELL - 22, x1: CELL + 22 },
+      { name: 'B', x0: -22, x1: 22 },
     ],
     tankH: 30,
     tankCap: FUNNEL_CAP,
@@ -1172,7 +1173,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spouts: [0],
     valveY: 64,
     spoutY: 88,
-    box: { x0: -126, x1: 126, y0: -6, y1: 90 },
+    box: { x0: -126, x1: 26, y0: -6, y1: 90 },
   },
   sorter: {
     // a funnel at the high end of the chute (see SORTER_CHUTE), which drops through three screens, then off its end
@@ -1188,20 +1189,20 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -126, x1: 306, y0: -6, y1: 106 },
   },
   heater: {
-    // a funnel over the left end of a long tube (see HEATER_TUBE) with a wire down its middle; three taps
+    // a funnel over the left end of a tube (see HEATER_TUBE) with a wire down its middle; a tap halfway
     // along it and its far end turning down are the spouts, and the dial on a box above its right end sets
     // the wire's heat
     tanks: [{ name: 'funnel', x0: -2 * CELL - 22, x1: -2 * CELL + 22 }],
     tankH: 30,
     tankCap: FUNNEL_CAP,
     funnel: true,
-    valves: [...HEATER_TAPS.map((_, j) => ({ x: (j - 1) * CELL, y: 72 })), { x: 170, y: 20 }],
+    valves: [...HEATER_TAPS.map((_, j) => ({ x: (j - 1) * CELL, y: 72 })), { x: -30, y: 20 }],
     dial: HEATER_TAPS.length,
-    // a grid cell apart, like the separator's, under the taps' stretches (see heaterCellX) and then the last
-    spouts: [-CELL, 0, CELL, 2 * CELL],
+    // a grid cell apart, like the separator's, under the tap's stretch (see heaterCellX) and then the last
+    spouts: [-CELL, 0],
     valveY: 72,
     spoutY: 92,
-    box: { x0: -228, x1: 216, y0: -6, y1: 94 },
+    box: { x0: -228, x1: 16, y0: -6, y1: 94 },
   },
   tank: {
     // a hundred flasks' worth, drawn as big as a hundred flasks, with ten faint graduations across it
@@ -1597,14 +1598,14 @@ export class Blotter extends Vessel {
  *   FUNNEL_RATE) to two spouts. Its valve doesn't open or close: it sets the
  *   share that goes right, from 0 (all left) to 1 (all right).
  * - A **multiplexer** is a splitter the other way up: two funnels, each draining (at FUNNEL_RATE times how high
- *   its fluid stands) into one spout between them. Its valve picks which: the share of FUNNEL_RATE the right funnel
+ *   its fluid stands) into one spout, under the right one. Its valve picks which: the share of FUNNEL_RATE the right funnel
  *   gets, from 0 (only the left drains) to 1 (only the right), the left getting the rest.
  * - A **size sorter** has a funnel like the splitter's, with no valve, draining down a chute through three
  *   screens and off its end, each with a spout under it (see sieve).
- * - A **resistive heater** has a funnel draining (at HEATER.feed) into one end of a long tube, which carries
+ * - A **resistive heater** has a funnel draining (at HEATER.feed) into one end of a tube, which carries
  *   it to the other end in HEATER.transit and out a spout there, heating it all the way (see heatBy) with a
- *   wire whose temperature its dial sets (see wireTemperature). Three taps along the tube, each a valve over
- *   a spout, let fluid out sooner, less heated.
+ *   wire whose temperature its dial sets (see wireTemperature). A tap halfway along the tube, a valve over
+ *   a spout, lets fluid out sooner, less heated.
  * - A **tank** is a dispenser holding a hundred flasks, drawn as big as a hundred flasks, with ten faint
  *   graduations across it.
  * - A **receptacle** is the station, built into the wall (see STATION): a funnel and the ship's
