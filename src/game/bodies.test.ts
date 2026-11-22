@@ -75,9 +75,9 @@ describe('spoutNear', () => {
     const sep = new Tool('separator', 0);
     const y = sep.shape.spoutY;
     expect(spoutNear(sep, sep.shape.spouts[1] + 3, y - 2)).toBe(1);
-    expect(spoutNear(sep, sep.shape.spouts[4], y - 25)).toBe(4);
-    expect(spoutNear(sep, sep.shape.spouts[4], y - 60)).toBeNull();
-    expect(spoutNear(sep, (sep.shape.spouts[1] + sep.shape.spouts[2]) / 2, y)).toBeNull();
+    expect(spoutNear(sep, sep.shape.spouts[0], y - 25)).toBe(0);
+    expect(spoutNear(sep, sep.shape.spouts[0], y - 60)).toBeNull();
+    expect(spoutNear(sep, (sep.shape.spouts[0] + sep.shape.spouts[1]) / 2, y)).toBeNull();
   });
 });
 
@@ -326,7 +326,7 @@ describe('arms', () => {
   });
 
   it('hold a wide tool up by two, one near each end', () => {
-    const t = new Tool('separator', 0, at(1000, 800, PLANE_Z));
+    const t = new Tool('heater', 0, at(1000, 800, PLANE_Z));
     const b = t.shape.box;
     const arms = toolArms(t);
     expect(arms).toHaveLength(2);

@@ -2003,37 +2003,41 @@ describe('separator', () => {
     }
   };
 
-  it('gives each molecule its own outlet by its share of black atoms: none, ¼, ⅓, ½, all', () => {
-    expect(SEPARATOR_OUTLET[R]).toBe(0);
-    expect(SEPARATOR_OUTLET[SOLVENT_SPECIES]).toBe(0);
-    expect(SEPARATOR_OUTLET[tri('△RGB')]).toBe(0);
-    expect(SEPARATOR_OUTLET[pair('R–G')]).toBe(0);
-    expect(SEPARATOR_OUTLET[tri('⊠RGBK')]).toBe(1);
-    expect(SEPARATOR_OUTLET[tri('R–G–B–K')]).toBe(1);
-    expect(SEPARATOR_OUTLET[tri('△RGK')]).toBe(2);
-    expect(SEPARATOR_OUTLET[pair('R–K')]).toBe(3);
-    expect(SEPARATOR_OUTLET[K]).toBe(4);
+  // one of each kind of molecule: with black in it, the outlet on the left (0), and without, the right (1)
+  const sample = () => [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K, SOLVENT_SPECIES, tri('△RGB')];
+  const ownOf = (sp: number) => (SPECIES[sp].atoms.includes('K') ? 0 : 1);
+
+  it('gives every molecule with a black atom in it the left outlet, and every other the right', () => {
+    expect(SEPARATOR_OUTLETS).toBe(2);
+    expect(SEPARATOR_OUTLET[K]).toBe(0);
+    expect(SEPARATOR_OUTLET[pair('R–K')]).toBe(0);
+    expect(SEPARATOR_OUTLET[tri('△RGK')]).toBe(0);
+    expect(SEPARATOR_OUTLET[tri('R–G–B–K')]).toBe(0);
+    expect(SEPARATOR_OUTLET[tri('⊠RGBK')]).toBe(0);
+    expect(SEPARATOR_OUTLET[R]).toBe(1);
+    expect(SEPARATOR_OUTLET[SOLVENT_SPECIES]).toBe(1);
+    expect(SEPARATOR_OUTLET[pair('R–G')]).toBe(1);
+    expect(SEPARATOR_OUTLET[tri('△RGB')]).toBe(1);
+    for (const sp of SPECIES) expect(SEPARATOR_OUTLET[sp.i]).toBe(ownOf(sp.i));
   });
 
-  it('sends most of each molecule out its own outlet, the rest mostly next door, and more so the sharper it is', () => {
+  it('sends most of each molecule out its own outlet, the rest out the other, and more so the sharper it is', () => {
     const f = new Vessel(Infinity);
-    for (const sp of [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K]) f.n[sp] = CAP;
+    for (const sp of sample()) f.n[sp] = CAP;
     f.N = atomTotal(f);
     let last = 0;
     for (const k of [1, 3, 6]) {
       withSharpness(k, () => {
         const out = separate(f);
         expect(out).toHaveLength(SEPARATOR_OUTLETS);
-        const ownShare = out[2].n[tri('△RGK')] / CAP;
+        const ownShare = out[0].n[tri('△RGK')] / CAP;
         expect(ownShare).toBeGreaterThan(last);
         last = ownShare;
-        [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K].forEach((sp, own) => {
+        for (const sp of sample()) {
           const shares = out.map((v) => v.n[sp] / CAP);
-          expect(Math.max(...shares)).toBe(shares[own]);
-          for (let j = 0; j < SEPARATOR_OUTLETS; j++)
-            if (Math.abs(j - own) > 1) expect(shares[j]).toBeLessThan(shares[own - Math.sign(own - j)] + 1e-9);
+          expect(shares[ownOf(sp)]).toBeGreaterThan(0.5);
           expect(shares.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 12);
-        });
+        }
       });
     }
   });
@@ -2041,16 +2045,14 @@ describe('separator', () => {
   it('sorts perfectly from SEPARATOR_PERFECT up', () => {
     withSharpness(SEPARATOR_PERFECT, () => {
       const f = new Vessel(Infinity);
-      for (const sp of [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K]) f.n[sp] = CAP;
+      for (const sp of sample()) f.n[sp] = CAP;
       f.N = atomTotal(f);
       const out = separate(f);
-      [R, tri('⊠RGBK'), tri('△RGK'), pair('R–K'), K].forEach((sp, own) =>
-        out.forEach((v, j) => expect(v.n[sp]).toBe(j === own ? CAP : 0)),
-      );
+      for (const sp of sample()) out.forEach((v, j) => expect(v.n[sp]).toBe(j === ownOf(sp) ? CAP : 0));
     });
   });
 
-  it('splits everything evenly five ways at sharpness 0', () => {
+  it('splits everything evenly both ways at sharpness 0', () => {
     withSharpness(0, () => {
       const f = filled(new Vessel(Infinity), R, CAP, 1);
       for (const v of separate(f)) expect(v.n[R] / CAP).toBeCloseTo(1 / SEPARATOR_OUTLETS, 4);

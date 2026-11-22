@@ -112,15 +112,13 @@ describe('presets', () => {
     dispensers.forEach((d, k) => expect(mouthBelow(mouths, spoutAt(d, 0))?.v).toBe(ex.tanks[k]));
   });
 
-  it("has the separator demo's dispensers under its two end spouts", () => {
+  it("has the separator demo's dispensers under its two spouts", () => {
     const tools = toolsOf(PRESETS.find((p) => p.id === 'separator')!);
     const sep = tools.find((t) => t.kind === 'separator')!;
     const [left, right] = tools.filter((t) => t.kind === 'dispenser');
     const mouths = [tankMouth(left, 0), tankMouth(right, 0)];
     expect(mouthBelow(mouths, spoutAt(sep, 0))?.v).toBe(left.tanks[0]);
-    expect(mouthBelow(mouths, spoutAt(sep, sep.shape.spouts.length - 1))?.v).toBe(right.tanks[0]);
-    // and nothing else of it pours into them
-    for (let j = 1; j < sep.shape.spouts.length - 1; j++) expect(mouthBelow(mouths, spoutAt(sep, j))).toBeNull();
+    expect(mouthBelow(mouths, spoutAt(sep, 1))?.v).toBe(right.tanks[0]);
   });
 
   it("fills the ship's reservoir with what's left on board, and starts the default game with no supply flask", () => {

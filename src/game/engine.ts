@@ -737,6 +737,7 @@ export class GameEngine {
       v: 1,
       wall: true,
       stationLeft: true,
+      twoSpoutSeparator: true,
       preset: this.preset.id,
       flasks: this.flasks.map((f) => ({ ...saveVessel(f), x: f.pose.x / HOME_W, up: f.pose.y - LIFT, glass: f.glass })),
       tools: this.tools.map((t) => ({

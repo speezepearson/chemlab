@@ -22,6 +22,11 @@ export interface SaveState {
    * the station past them (see BEFORE_LEFT in presets.ts), and is hooked up as it was then as it loads.
    */
   stationLeft?: boolean;
+  /**
+   * Whether the separator had two spouts, what has black in it out the left and the rest out the right, when this was
+   * saved, as it's had since. A save without this had five, and its separators are refitted as it loads (see refit).
+   */
+  twoSpoutSeparator?: boolean;
   /** The preset Reset goes back to. */
   preset: string;
   flasks: SavedFlask[];

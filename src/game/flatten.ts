@@ -144,14 +144,14 @@ const flaskKey = (i: number) => `flask ${i}`;
 const tankKey = (id: number, k: number) => `tank ${id}.${k}`;
 
 /** An open top in the lab: its vessel's name (see flaskKey, tankKey), its mouth, and how high its floor is. */
-interface Top {
+export interface Top {
   key: string;
   m: Mouth;
   floor: number;
 }
 
 /** Every open top in a lab: each flask's mouth (none are tipped), and each tool's open tanks'. */
-function tops(lab: Lab): Top[] {
+export function tops(lab: Lab): Top[] {
   const out: Top[] = lab.flasks.map((f, i) => ({ key: flaskKey(i), m: flaskMouth(f), floor: f.pose.y - FLASK_H }));
   for (const t of lab.tools) {
     t.tanks.forEach((_, k) => {
@@ -162,7 +162,7 @@ function tops(lab: Lab): Top[] {
 }
 
 /** The first open top that something falling from p lands in (see mouthBelow), or null if it falls to the sink. */
-function landing(all: readonly Top[], p: Vec3): Top | null {
+export function landing(all: readonly Top[], p: Vec3): Top | null {
   let best: Top | null = null;
   for (const t of all) if (t.m.y < p.y && overMouth(t.m, p.x, p.z) && (!best || t.m.y > best.m.y)) best = t;
   return best;

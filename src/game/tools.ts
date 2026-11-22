@@ -1195,14 +1195,14 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
   },
   separator: {
     tanks: [{ name: 'tank', x0: -30, x1: 30 }],
-    // one outlet per share of black (see SEPARATOR_OUTLET), CELL apart, so a flask
-    // or a tool's tank fits under each
-    spouts: [-2 * CELL, -CELL, 0, CELL, 2 * CELL],
+    // two outlets, for what has black in it and what hasn't (see SEPARATOR_OUTLET), CELL either side of its
+    // tank, so a flask or a tool's tank fits under each
+    spouts: [-CELL, CELL],
     sump: { w: 14, h: 7 },
     valveY: 96,
     spoutY: 126,
-    // the manifold under it (see the engine's SEP_BODY), with a handle on its left end
-    box: { x0: -220, x1: 214, y0: -6, y1: 128 },
+    // the manifold under it (see SEP_BODY in flatTools.ts), with a handle on its left end
+    box: { x0: -120, x1: 114, y0: -6, y1: 128 },
   },
   splitter: {
     tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
@@ -1566,9 +1566,9 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
 
 /**
  * How sharply the separator sorts, editable from the Chemistry panel: each molecule goes to outlet j in proportion
- * to e^(−sharpness·(j − its own outlet)²) (see SEPARATOR_OUTLET). At 0 everything splits evenly five ways; at 3 a
- * molecule goes 91% to its own outlet if it's one of the middle three, 95% if it's at an end, and the rest mostly to
- * the next outlet over; and from SEPARATOR_PERFECT up, which is the default, every molecule goes out its own.
+ * to e^(−sharpness·(j − its own outlet)²) (see SEPARATOR_OUTLET). At 0 everything splits evenly both ways; at 3 a
+ * molecule goes 95% out its own outlet and 5% out the other; and from SEPARATOR_PERFECT up, which is the default,
+ * every molecule goes out its own.
  */
 export const SEPARATOR = { sharpness: 10 };
 const DEFAULT_SEPARATOR = { ...SEPARATOR };
@@ -1580,17 +1580,14 @@ export function restoreDefaultSeparator(): void {
 /** The sharpness from which the separator sorts perfectly: the top of its slider. */
 export const SEPARATOR_PERFECT = 10;
 
-/** How many outlets the separator has, one per share of black atoms a molecule can have. */
-export const SEPARATOR_OUTLETS = 5;
+/** How many outlets the separator has: one for molecules with a black atom in them, one for the rest. */
+export const SEPARATOR_OUTLETS = 2;
 
 /**
- * Each species' own outlet on the separator, left to right, by the share of its atoms that are black (K): none (0),
- * one in four (1), one in three (2), half (3), all (4).
+ * Each species' own outlet on the separator: the left (0) if it has a black atom (K) in it, K itself included, and
+ * the right (1) if not, the solvent included.
  */
-export const SEPARATOR_OUTLET: Uint8Array = Uint8Array.from(SPECIES, (sp) => {
-  if (!sp.atoms.includes('K')) return 0;
-  return sp.size === 1 ? 4 : 5 - sp.size;
-});
+export const SEPARATOR_OUTLET: Uint8Array = Uint8Array.from(SPECIES, (sp) => (sp.atoms.includes('K') ? 0 : 1));
 
 let shareCache = { sharpness: NaN, shares: [] as number[][] };
 
@@ -1661,8 +1658,8 @@ export class Blotter extends Vessel {
  *   through a little funnel on top, that lets out PIPETTE_FLOW full and fully open.
  * - A **heat exchanger** has two tanks, whose streams pass each other in
  *   counterflow on the way to their spouts, trading heat but never mixing.
- * - A **separator** has one tank and five spouts, and sorts what drains
- *   among them by the share of its atoms that are black (see separate).
+ * - A **separator** has one tank and two spouts, and sorts what drains
+ *   between them by whether it has a black atom in it (see separate).
  * - A **splitter** has a small funnel that drains straight through (at
  *   FUNNEL_RATE) to two spouts. Its valve doesn't open or close: it sets the
  *   share that goes right, from 0 (all left) to 1 (all right).

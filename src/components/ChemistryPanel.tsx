@@ -142,7 +142,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
             </tr>
             <tr>
               <td colSpan={4}>
-                <label className="slider" title="0 splits everything evenly five ways; higher sorts more cleanly, and the top is perfect">
+                <label className="slider" title="0 splits everything evenly both ways; higher sorts more cleanly, and the top is perfect">
                   <span>sharpness</span>
                   <input
                     type="range"
@@ -156,7 +156,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
                 </label>
                 <span>
                   {' '}
-                  middle outlets keep {(100 * separatorShares()[2][2]).toFixed(1)}%, ends {(100 * separatorShares()[0][0]).toFixed(1)}%
+                  each outlet keeps {(100 * separatorShares()[0][0]).toFixed(1)}%
                 </span>
               </td>
             </tr>

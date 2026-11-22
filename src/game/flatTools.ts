@@ -22,7 +22,7 @@ import type { Pick } from './view';
  */
 
 /** The separator's manifold, below its valve, in its frame. */
-const SEP_BODY = { x0: -210, x1: 210, y0: 100, y1: 112 };
+const SEP_BODY = { x0: -110, x1: 110, y0: 100, y1: 112 };
 /** How far above a flask's mouth or a scale's platform its note sits, to the note's middle. */
 const NOTE_Y = 13;
 /** How long a valve's lever is from its pivot, and how wide; and the radius of the round core it turns on. */
