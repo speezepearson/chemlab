@@ -109,10 +109,11 @@ export function faucetRate(valve: number): number {
 /**
  * A faucet's knob: a glossy ball of its fluid's color, `r` in radius, at the elbow where its pipe from the wall (or its
  * riser) turns down to its spout; and on its front, the way that pipe reaches out, its valve: a hub, `hub` in radius
- * and standing `hubH` proud of the ball, and a lever on it, `lever` long from the hub's middle, that points where it's
+ * and standing `hubH` proud of the ball (far enough that a shut lever, lying along the wall's manifold, stands clearly in
+ * front of it seen from the side), and a lever on it, `lever` long from the hub's middle, that points where it's
  * turned to, as a tool's valve's does: straight up open, straight right shut, as seen from in front.
  */
-export const KNOB = { r: 10, hub: 3.5, hubH: 4, lever: 17 };
+export const KNOB = { r: 10, hub: 3.5, hubH: 12, lever: 17 };
 
 /** A faucet's knob's middle, where its lever turns: the elbow over its spout, level with the pipe it's on. */
 export function knobAt(fa: { spout: Vec3; wall: Vec3 }): Vec3 {
