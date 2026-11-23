@@ -18,6 +18,7 @@ import { Flask, Vessel, fluidAlpha, fluidRGB, volume } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, Scale } from './scale';
 import { COUNTERS, LIFT, ROOM, groundAt, toWorld, type Pose, type Vec3 } from './space';
+import { KNOB, knobPose } from './faucets';
 import { PORT_FRAC, PORT_WALL, porthole, type Porthole } from './porthole';
 import { AIRLOCK, POD } from './airlock';
 import { arrival, notice, type Block } from '../intro/notice';
@@ -40,8 +41,11 @@ export type Pick =
   | { kind: 'scale'; sc: Scale; part: 'body' | 'tare' }
   /** A hose's nozzle. */
   | { kind: 'hose'; h: Hose }
-  /** A faucet: its spout, or the pipe down to it, if `spout`; else its knob or the pipe from the wall. */
-  | { kind: 'faucet'; i: number; spout?: boolean }
+  /**
+   * A faucet: its spout, or the pipe down to it, if `spout`; its knob, or the hub and lever on it, if `valve` (see
+   * KNOB); else the pipe from the wall.
+   */
+  | { kind: 'faucet'; i: number; spout?: boolean; valve?: boolean }
   /** The button under the beacon that silences the alarms. */
   | { kind: 'alarm' }
   /** The button by the porthole that shuts its blinds, or opens them. */
@@ -67,6 +71,8 @@ export interface FaucetSpot {
   output: Fluid;
   /** The player's note, written above its knob; empty for none. */
   note: string;
+  /** How far its valve is open: 0 (shut) to 1 (fully open, FILL_RATE), as a tool's valve is (see faucetRate). */
+  valve: number;
 }
 
 /** Everything the view needs to draw one frame. */
@@ -3885,8 +3891,8 @@ function buildFaucets(
   scene: THREE.Scene,
   faucets: readonly FaucetSpot[],
   pickables: Map<THREE.Object3D, Pick>,
-): { mats: THREE.MeshPhysicalMaterial[]; notes: Label[] } {
-  if (!faucets.length) return { mats: [], notes: [] };
+): { mats: THREE.MeshPhysicalMaterial[]; notes: Label[]; levers: THREE.Group[] } {
+  if (!faucets.length) return { mats: [], notes: [], levers: [] };
   const g = new THREE.Group();
   const at = (p: Vec3) => new THREE.Vector3(p.x, p.y, p.z);
   const onWall = faucets.filter((fa) => !fa.base);
@@ -3914,6 +3920,7 @@ function buildFaucets(
     }
   }
   const notes: Label[] = [];
+  const levers: THREE.Group[] = [];
   const mats = faucets.map(({ wall, spout, base }, i) => {
     const elbow = new THREE.Vector3(spout.x, wall.y, spout.z);
     pickables.set(rod(g, chromeMat, at(wall), elbow, 3.5), { kind: 'faucet', i });
@@ -3950,12 +3957,33 @@ function buildFaucets(
     knob.position.copy(elbow);
     knob.castShadow = true;
     g.add(knob);
-    pickables.set(knob, { kind: 'faucet', i });
+    pickables.set(knob, { kind: 'faucet', i, valve: true });
     pickables.set(tip, { kind: 'faucet', i, spout: true });
+    // its valve on the knob's front, as a tool's is on its face: a dark hub, and a black lever on it that points
+    // where it's turned (see View.update), turning about the way the pipe reaches out
+    const valve = new THREE.Group();
+    const pose = knobPose({ spout, wall });
+    valve.position.copy(at(pose));
+    valve.rotation.y = pose.yaw;
+    const hub = new THREE.Mesh(unitCylinder, leverMat);
+    hub.rotation.x = Math.PI / 2;
+    hub.scale.set(KNOB.hub, KNOB.r + KNOB.hubH, KNOB.hub);
+    hub.position.z = (KNOB.r + KNOB.hubH) / 2;
+    valve.add(hub);
+    pickables.set(hub, { kind: 'faucet', i, valve: true });
+    const pivot = new THREE.Group();
+    pivot.position.z = KNOB.r + KNOB.hubH + 1;
+    const lever = new THREE.Mesh(new THREE.BoxGeometry(KNOB.lever + 2, 3, 2).translate(KNOB.lever / 2 - 1, 0, 0), leverMat);
+    lever.castShadow = true;
+    pivot.add(lever);
+    valve.add(pivot);
+    pickables.set(lever, { kind: 'faucet', i, valve: true });
+    g.add(valve);
+    levers.push(pivot);
     return mat;
   });
   scene.add(g);
-  return { mats, notes };
+  return { mats, notes, levers };
 }
 
 /* ---------------- the view ---------------- */
@@ -4833,6 +4861,8 @@ export class View {
   private ghost: GhostView;
   private faucetMats: THREE.MeshStandardMaterial[] = [];
   private faucetNotes: Label[] = [];
+  /** Each faucet's valve's lever, turned to its setting (see buildFaucets). */
+  private faucetLevers: THREE.Group[] = [];
   private streams: THREE.Mesh[] = [];
   private guides: THREE.Mesh[] = [];
   private rims: { g: THREE.Group; mat: THREE.MeshBasicMaterial; sides: THREE.Mesh[]; ring: THREE.Mesh }[] = [];
@@ -4905,6 +4935,7 @@ export class View {
     const fs = buildFaucets(this.scene, faucets, this.pickables);
     this.faucetMats = fs.mats;
     this.faucetNotes = fs.notes;
+    this.faucetLevers = fs.levers;
   }
 
   /** A little picture of each kind of thing the equipment wheels make (see IconStudio). */
@@ -4977,6 +5008,9 @@ export class View {
         }
       }
       this.faucetNotes[i]?.set(fa.note);
+      // shut points right, open straight up, as a tool's valve's lever does
+      const lever = this.faucetLevers[i];
+      if (lever) lever.rotation.z = (fa.valve * Math.PI) / 2;
     });
 
     this.updateStands(fr);

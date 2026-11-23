@@ -647,28 +647,39 @@ export function valveNear(t: Tool, x: number, y: number): number | null {
   return best;
 }
 
+/** How a lever turns (see leverAt): a valve's, a splitter's or a multiplexer's, or a dial. */
+export type LeverKind = 'valve' | 'split' | 'dial';
+
 /**
- * Point valve k's lever at (x, y) in the tool's flat frame as it stands (y down): straight up from the valve is fully
- * open, straight right is closed, and in between is partly open. Below the valve it closes, and left
- * of it (past the down-left diagonal) it opens, so a wild swing lands at the nearer end. A splitter's lever instead
- * sweeps the upper half: straight left sends everything left, straight right everything right, and below the valve
- * it goes to the nearer side; a multiplexer's the same, taking everything from the left or the right. A dial points at (x, y), turning clockwise from down-left (0) to down-right (1), and
- * straight below it goes to the nearer end. Within VALVE_DEADZONE of the valve the angle is too jumpy to mean
- * anything, so the lever stays put.
+ * The setting a lever pointed at (dx, dy) from its valve's center, on the face it lies on (x right, y down), comes to:
+ * a valve's straight up is fully open (1), straight right closed (0), and partly open in between, so its lever stands at
+ * its setting times a quarter turn up from right. Below the valve it closes, and left of it (past the down-left
+ * diagonal) it opens, so a wild swing lands at the nearer end. A splitter's lever instead sweeps the upper half:
+ * straight left sends everything left, straight right everything right, and below the valve it goes to the nearer
+ * side; a multiplexer's the same, taking everything from the left or the right. A dial points at (dx, dy), turning
+ * clockwise from down-left (0) to down-right (1), and straight below it goes to the nearer end. Within VALVE_DEADZONE
+ * of the center the angle is too jumpy to mean anything, so the lever stays put: null.
  */
+export function leverAt(kind: LeverKind, dx: number, dy: number): number | null {
+  if (Math.hypot(dx, dy) < VALVE_DEADZONE) return null;
+  if (kind === 'dial') {
+    const cw = Math.atan2(dx, -dy); // clockwise from straight up
+    return Math.max(0, Math.min(1, (cw + 0.75 * Math.PI) / (1.5 * Math.PI)));
+  }
+  const a = Math.atan2(-dy, dx); // counterclockwise from right
+  if (kind === 'split') return a >= 0 ? 1 - a / Math.PI : a > -Math.PI / 2 ? 1 : 0;
+  const open = a < -0.75 * Math.PI ? 1 : a / (Math.PI / 2);
+  return Math.max(0, Math.min(1, open));
+}
+
+/** How valve k of tool t turns (see leverAt). */
+export function leverKind(t: Tool, k: number): LeverKind {
+  return k === t.shape.dial ? 'dial' : t.kind === 'splitter' || t.kind === 'multiplexer' ? 'split' : 'valve';
+}
+
+/** Point valve k's lever at (x, y) in the tool's flat frame as it stands (y down); see leverAt. */
 export function aimValve(t: Tool, k: number, x: number, y: number): void {
   const vc = valveLocal(t, k);
-  if (Math.hypot(x - vc.x, y - vc.y) < VALVE_DEADZONE) return;
-  if (k === t.shape.dial) {
-    const cw = Math.atan2(x - vc.x, vc.y - y); // clockwise from straight up
-    t.valves[k] = Math.max(0, Math.min(1, (cw + 0.75 * Math.PI) / (1.5 * Math.PI)));
-    return;
-  }
-  const a = Math.atan2(vc.y - y, x - vc.x); // counterclockwise from right
-  if (t.kind === 'splitter' || t.kind === 'multiplexer') {
-    t.valves[k] = a >= 0 ? 1 - a / Math.PI : a > -Math.PI / 2 ? 1 : 0;
-    return;
-  }
-  const open = a < -0.75 * Math.PI ? 1 : a / (Math.PI / 2);
-  t.valves[k] = Math.max(0, Math.min(1, open));
+  const v = leverAt(leverKind(t, k), x - vc.x, y - vc.y);
+  if (v !== null) t.valves[k] = v;
 }

@@ -3,7 +3,7 @@ import { BOND_KEYS } from '../chem/atoms';
 import { ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
-import { FLASK_R, MAGNET, NEAR, NEAR_STEP, SCALE_SLOTS, flaskLip, onScale, spoutAt, tankMouth, scaleBox, standBase, toolBox, toolStands } from './bodies';
+import { FLASK_R, MAGNET, NEAR, NEAR_STEP, NOZZLE_REACH, SCALE_SLOTS, flaskLip, flaskMouth, onScale, spoutAt, tankMouth, scaleBox, standBase, toolBox, toolStands } from './bodies';
 import { boxesOverlap } from './physics';
 import { STOCK } from './cabinet';
 import { WHEELS } from './wheel';
@@ -12,11 +12,16 @@ import type { GameEngine } from './engine';
 import { Vessel, volume, type Flask } from './flask';
 import type { Scale } from './scale';
 import { FLASK_H } from './flaskShape';
-import { DEFAULT_PRESET, LAMP_POSE } from './presets';
+import { DEFAULT_PRESET, LAMP_POSE, PRESETS } from './presets';
+import { FAUCETS, faucetRate, faucetTarget } from './faucets';
+import { FILL_RATE } from './config';
 import type { SaveState } from './save';
 import { CELL, LAMP_FLOOR, LIFT, counterUnder, toWorld } from './space';
 import { toCell } from './testLayout';
-import { DRIP, INLINE_TOOLS, PAPER_TAU, SCREEN, SHAPES, TEST_PAPER, UNIQUE_TOOLS, bondReading, bondShares, paperReading, type Blotter, type Tool } from './tools';
+import {
+  DRIP, DRIP_FLOW, Hose, INLINE_TOOLS, MAX_FLOW, PAPER_TAU, SCREEN, SHAPES, TEST_PAPER, UNIQUE_TOOLS, bondReading, bondShares, paperReading,
+  type Blotter, type Mouth, type Tool,
+} from './tools';
 
 /*
  * The engine itself, with nothing to draw on and nothing to hear: the view and the sounds are stood in for, as they
@@ -62,7 +67,7 @@ interface Inside {
   leftDown(shift: boolean): void;
   rightDown(): void;
   endTurn(): void;
-  valveAimed(): { t: Tool; k: number } | null;
+  valveAimed(): { t: Tool; k: number } | { faucet: number } | null;
   viewW: number;
   grabOrRelease(linked: boolean): void;
   release(): void;
@@ -532,7 +537,7 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
   /** Yet more of the engine's own things: what's on its way down, and the faucets. */
   interface Falls {
     falling: { v: Vessel }[];
-    faucets: { start: { start: number }; spout: { x: number; y: number; z: number } }[];
+    faucets: { start: { start: number }; spout: { x: number; y: number; z: number }; valve: number }[];
   }
   const falls = (l: Lab) => l.in as unknown as Falls;
 
@@ -665,6 +670,7 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
   it("is wetted under a faucet, which runs on into a flask under it", () => {
     const l = lab();
     const [faucet] = falls(l).faucets;
+    faucet.valve = 1;
     const sp = faucet.spout;
     holdAt(l, 'flask', { x: sp.x, y: sp.y - 80, z: sp.z, yaw: 0 });
     const f = hands(l).held!.f!;
@@ -1187,7 +1193,7 @@ const lampOf = (l: Inside) => l.tools.filter((t) => t.kind === 'shadowlamp');
 describe('setting things down', () => {
   /** More of the engine's own things: the faucets, the scales, and where things are made to face. */
   interface More {
-    faucets: { start: { start: number }; spout: { x: number; y: number; z: number } }[];
+    faucets: { start: { start: number }; spout: { x: number; y: number; z: number }; valve: number }[];
     scales: Scale[];
     flasks: Flask[];
     player: { x: number; z: number; yaw: number; pitch: number };
@@ -1347,6 +1353,7 @@ describe('setting things down', () => {
   it('pulls an empty scale under two faucets side by side, its places for a flask under them, and both flasks on it catch', () => {
     const l = lab();
     const [a, b] = more(l).faucets.map((fa) => fa.spout);
+    for (const fa of more(l).faucets.slice(0, 2)) fa.valve = 1;
     expect(Math.hypot(a.x - b.x, a.z - b.z)).toBeCloseTo(SCALE_SLOTS[1] - SCALE_SLOTS[0], 6);
     const mid = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
     const yaw = Math.atan2(-(b.z - a.z), b.x - a.x);
@@ -1387,7 +1394,7 @@ describe('ghost moves', () => {
     hoses: { on: object; outlet: { x: number; y: number; z: number } }[];
     scales: Scale[];
     flasks: Flask[];
-    faucets: { spout: { x: number; y: number; z: number }; start: { start: number } }[];
+    faucets: { spout: { x: number; y: number; z: number }; start: { start: number }; valve: number }[];
     history: { canUndo: boolean };
     target: unknown;
     grabOrRelease(linked: boolean): void;
@@ -1478,7 +1485,8 @@ describe('ghost moves', () => {
     const l = lab();
     g(l).ghostMoves = true;
     const fa = g(l).faucets[0];
-    // a scale with a flask on it under a faucet, which pours into it
+    fa.valve = 1;
+    // a scale with a flask on it under a faucet, open, which pours into it
     holdAt(l, 'scale' as 'pipette', { x: fa.spout.x, y: LIFT + 100, z: fa.spout.z + 30, yaw: Math.PI / 2 });
     const sc = (l.in.held as unknown as { sc: Scale }).sc;
     l.in.release();
@@ -1803,5 +1811,170 @@ describe('shadow paper, which is gone', () => {
     const again = JSON.stringify(l.e.snapshot());
     expect(again).not.toContain('sheet');
     expect(again).not.toContain('image');
+  });
+});
+
+describe('faucets’ valves', () => {
+  /** The engine's faucets, and the rest of its own things these tests reach into. */
+  interface Taps {
+    faucets: {
+      start: { start: number };
+      spout: { x: number; y: number; z: number };
+      wall: { x: number; y: number; z: number };
+      valve: number;
+      drop: Vessel;
+      out: Vessel | null;
+      flow: number;
+      streaming: boolean;
+    }[];
+    flasks: Flask[];
+    falling: { v: Vessel }[];
+    hoses: Hose[];
+    open: Mouth[];
+    view: { ray(x: number, y: number): { o: { x: number; y: number; z: number }; d: { x: number; y: number; z: number } } };
+    history: { canUndo: boolean };
+    look(dx: number, dy: number, shift: boolean): void;
+  }
+  const taps = (l: Lab) => l.in as unknown as Taps;
+
+  /** A flask set down under faucet i's spout, emptied. */
+  function under(l: Lab, i = 0): Flask {
+    const sp = taps(l).faucets[i].spout;
+    holdAt(l, 'flask', { x: sp.x, y: sp.y - 80, z: sp.z, yaw: 0 });
+    const f = hands(l).held!.f!;
+    l.in.release();
+    expect([f.pose.x, f.pose.z]).toEqual([sp.x, sp.z]);
+    f.n.fill(0);
+    f.N = f.Q = 0;
+    return f;
+  }
+
+  it('are all shut in a new lab, after Reset and in every preset, and a shut one lets out nothing', () => {
+    const l = lab();
+    expect(taps(l).faucets.length).toBe(FAUCETS.length);
+    expect(taps(l).faucets.every((fa) => fa.valve === 0)).toBe(true);
+    const f = under(l);
+    run(l, 2);
+    expect(f.N).toBe(0);
+    expect(taps(l).faucets.every((fa) => !fa.out && fa.drop.N === 0)).toBe(true);
+    for (const p of PRESETS) {
+      for (const fa of taps(l).faucets) fa.valve = 1;
+      l.e.load(p);
+      expect(taps(l).faucets.every((fa) => fa.valve === 0), p.id).toBe(true);
+    }
+    for (const fa of taps(l).faucets) fa.valve = 0.5;
+    l.e.reset();
+    expect(taps(l).faucets.every((fa) => fa.valve === 0)).toBe(true);
+  });
+
+  it('fill what is under one at its valve’s rate, open, and stop when it is shut', () => {
+    const l = lab();
+    const fa = taps(l).faucets[0];
+    const f = under(l);
+    fa.valve = 0.5;
+    run(l, 1);
+    expect(fa.streaming).toBe(true);
+    // what it pours is its one atom, at the valve's rate
+    expect(f.n[fa.start.start]).toBe(volume(f));
+    expect(volume(f) / faucetRate(0.5)).toBeCloseTo(1, 4);
+    expect(fa.flow).toBeCloseTo(faucetRate(0.5) / MAX_FLOW, 4);
+    // fully open is the faucets' full rate
+    expect(faucetRate(1)).toBe(FILL_RATE);
+    fa.valve = 0;
+    const had = volume(f);
+    run(l, 1);
+    expect(volume(f)).toBe(had);
+    expect(fa.out).toBeNull();
+  });
+
+  it('runs away to the sink with nothing under it, drawn falling to the counter', () => {
+    const l = lab();
+    const fa = taps(l).faucets[1];
+    expect(faucetTarget(taps(l).open, fa.spout)).toBeNull();
+    const before = taps(l).flasks.map((f) => f.N);
+    fa.valve = 1;
+    run(l, 0.5);
+    expect(fa.streaming).toBe(true);
+    expect(fa.flow).toBeCloseTo(FILL_RATE / MAX_FLOW, 4);
+    expect(taps(l).flasks.map((f) => f.N)).toEqual(before);
+  });
+
+  it('drips at a low enough setting, in drops, as a tool’s spout does, losing nothing on the way', () => {
+    const l = lab();
+    const fa = taps(l).faucets[0];
+    const f = under(l);
+    fa.valve = DRIP_FLOW / FILL_RATE / 3;
+    let t = 0;
+    let hung = false;
+    for (; t < 60 && f.N === 0; t += 0.05) {
+      l.in.simulate(0.05);
+      expect(fa.streaming).toBe(false);
+      hung ||= fa.drop.N > 0;
+    }
+    expect(hung).toBe(true);
+    expect(f.N).toBeGreaterThan(0);
+    // all of what it let out is hanging, falling, or in the flask
+    const falling = taps(l).falling.reduce((s, d) => s + volume(d.v), 0);
+    expect((volume(fa.drop) + falling + volume(f)) / (faucetRate(fa.valve) * t)).toBeCloseTo(1, 1);
+  });
+
+  it('runs out of its hose’s nozzle, if it’s out, and not out of its spout', () => {
+    const l = lab();
+    const fa = taps(l).faucets[0];
+    const atSpout = under(l);
+    const away = under(l, 2);
+    const m = flaskMouth(away);
+    taps(l).hoses.push(new Hose({ faucet: 0 }, { x: m.x, y: m.y + 24, z: m.z }, NOZZLE_REACH.min));
+    fa.valve = 1;
+    run(l, 1);
+    expect(atSpout.N).toBe(0);
+    expect(away.n[fa.start.start] / faucetRate(1)).toBeCloseTo(1, 4);
+  });
+
+  it('load as saved, and a save that doesn’t say loads them all open', () => {
+    const l = lab();
+    const set = taps(l).faucets.map((_, i) => [0, 0.25, 1][i % 3]);
+    taps(l).faucets.forEach((fa, i) => (fa.valve = set[i]));
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    for (const fa of taps(l).faucets) fa.valve = 0.5;
+    l.e.restore(s, DEFAULT_PRESET);
+    expect(taps(l).faucets.map((fa) => fa.valve)).toEqual(set);
+    // a save from before faucets had valves
+    for (const f of s.faucets!) delete f.valve;
+    l.e.restore(s, DEFAULT_PRESET);
+    expect(taps(l).faucets.every((fa) => fa.valve === 1)).toBe(true);
+    l.e.restore(bare(), DEFAULT_PRESET);
+    expect(taps(l).faucets.every((fa) => fa.valve === 1)).toBe(true);
+  });
+
+  it('turns by its knob as a tool’s valve does, from press to let go one step to undo', () => {
+    const l = lab();
+    const fa = taps(l).faucets[0];
+    l.e.debug({ x: fa.spout.x - 300, z: fa.spout.z, yaw: -Math.PI / 2, pitch: 0, locked: true });
+    l.in.target = { kind: 'faucet', i: 0, valve: true };
+    expect(l.in.valveAimed()).toEqual({ faucet: 0 });
+    // the rest of the faucet isn't its valve
+    l.in.target = { kind: 'faucet', i: 0 };
+    expect(l.in.valveAimed()).toBeNull();
+    l.in.target = { kind: 'faucet', i: 0, valve: true };
+    expect(taps(l).history.canUndo).toBe(false);
+    // the pointer, on the knob's front, straight above its middle, then a little right of it
+    const knob = { x: fa.spout.x, y: fa.wall.y, z: fa.spout.z };
+    let at = { x: knob.x, y: knob.y + 20, z: knob.z };
+    taps(l).view.ray = () => ({ o: { x: at.x - 300, y: at.y, z: at.z }, d: { x: 1, y: 0, z: 0 } });
+    l.e.hand(true);
+    taps(l).look(0, -1, false);
+    expect(fa.valve).toBeCloseTo(1, 9);
+    // (as seen facing the wall, right is +z; up and right, half open)
+    at = { x: knob.x, y: knob.y + 20, z: knob.z + 20 };
+    taps(l).look(1, 0, false);
+    expect(fa.valve).toBeCloseTo(0.5, 9);
+    l.e.hand(false);
+    expect(taps(l).history.canUndo).toBe(true);
+    l.e.undo();
+    expect(fa.valve).toBe(0);
+    expect(taps(l).history.canUndo).toBe(false);
+    l.e.undo(true);
+    expect(fa.valve).toBeCloseTo(0.5, 9);
   });
 });

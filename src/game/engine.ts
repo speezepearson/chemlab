@@ -4,7 +4,7 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
-  FLASK_CENTER, FLASK_LIP, NEAR, NEAR_STEP, NOZZLE_H, NOZZLE_REACH, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
+  FLASK_CENTER, FLASK_LIP, NEAR, NEAR_STEP, NOZZLE_H, NOZZLE_REACH, SCALE_SLOTS, STAND_MAX, aimValve, leverAt, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
   FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, magnetShift, nozzleMounts, nozzleStand, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolBox, toolCenter, toolStands, valveNear, valveZ, type Magnets, type NozzleMount, type Stand,
 } from './bodies';
@@ -12,9 +12,9 @@ import { CABINET, endless, isStocked, putIn, stockWith, takeFrom, takeSlot, type
 import { changeover, type ChangeoverSound } from './changeover';
 import { chime } from './chime';
 import { diverter, type Diverter } from './diverter';
-import { CAP, DELIVERY, FILL_RATE, HOME_H, HOME_W, POUR_RATE, TRACE } from './config';
+import { CAP, DELIVERY, HOME_H, HOME_W, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
-import { FAUCETS, WALL_FAUCETS, faucetIndex, faucetOutput, faucetTarget } from './faucets';
+import { FAUCETS, WALL_FAUCETS, faucetIndex, faucetOutput, faucetRate, faucetTarget, knobPose, KNOB } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
 import { Flask, Vessel, roomFor, sustenance, transfer, volume, volumeUnit } from './flask';
 import { History, arrange, arrangement, type Arrangement } from './history';
@@ -327,6 +327,29 @@ const FAUCET_OUT = 50;
 const ISLAND_FAUCET_OUT = CELL / 2;
 /** How thick an island faucet's riser is, round, for bumping into: its radius. */
 const RISER_R = 6;
+
+/**
+ * A faucet in the lab: where it is and what it pours (see FaucetSpot), the faucet it is, and, as a tool's spout has
+ * (see Tool.drops, out, flow and streaming), the drop hanging at its outlet, what it let out over the last frame, for
+ * drawing, that as a share of MAX_FLOW a sim second, and whether it streamed; and `packet`, its own, for what it lets
+ * out in a substep.
+ */
+type LabFaucet = FaucetSpot & {
+  start: (typeof FAUCETS)[number];
+  drop: Vessel;
+  packet: Vessel;
+  out: Vessel | null;
+  flow: number;
+  streaming: boolean;
+};
+
+/** A faucet's valve set to `valve`, with nothing hanging from it or let out yet. */
+function faucetFlow(valve = 0): Omit<LabFaucet, keyof FaucetSpot | 'start'> & { valve: number } {
+  return { valve, drop: new Vessel(Infinity), packet: new Vessel(Infinity), out: null, flow: 0, streaming: false };
+}
+
+/** A valve the player can turn: valve k of tool t, or faucet `faucet`'s (see KNOB). */
+type ValveRef = { t: Tool; k: number } | { faucet: number };
 /** How long a note stays up, in ms. */
 const NOTE_MS = 1600;
 /**
@@ -381,7 +404,7 @@ export class GameEngine {
   private tools: Tool[] = [];
   private scales: Scale[] = [];
   private hoses: Hose[] = [];
-  private faucets: (FaucetSpot & { start: (typeof FAUCETS)[number] })[];
+  private faucets: LabFaucet[];
   /** What's in the equipment cabinet (see cabinet.ts): what the equipment wheels make comes out of it, and goes back in. */
   private stock: Stock = stockWith({});
   /** Where the player stands, and which way they look (yaw about the vertical, pitch up). */
@@ -392,8 +415,8 @@ export class GameEngine {
   private held: Held | null = null;
   /** Whether the right button is held: a held flask tips and pours, and a held tool or hose lets fluid out, only while it is. */
   private rightHeld = false;
-  /** A valve being turned with the right button, and where on screen the pointer aiming its lever is. */
-  private turning: { t: Tool; k: number; aim: { x: number; y: number } } | null = null;
+  /** A valve being turned with the right button (a tool's or a faucet's), and where on screen the pointer aiming its lever is. */
+  private turning: (ValveRef & { aim: { x: number; y: number } }) | null = null;
   /** How far the view is zoomed in (see ZOOM), from 0, not at all, to 1. */
   private zoom = 0;
   /**
@@ -411,8 +434,6 @@ export class GameEngine {
   private spillTime = 1;
   /** Drops that have let go of an outlet and are on their way down. */
   private falling: { v: Vessel; x: number; y: number; z: number; vy: number }[] = [];
-  /** The faucets pouring into something this frame: where from (the faucet, or its hose's nozzle), and into what. */
-  private faucetFlows: { fa: FaucetSpot; from: Vec3; m: Mouth }[] = [];
   /** Where the held flask is kept, over the mouth the right button was pressed on, while it's held (see pourPose). */
   private pinned: Pose | null = null;
   /** How far a held dipper aimed at an open top is lowered into it, from 0 (hovering) to 1 (dipped; see dipAim). */
@@ -532,7 +553,7 @@ export class GameEngine {
       if (i < WALL_FAUCETS) {
         const z = FAUCET_Z0 + i * FAUCET_GAP;
         return {
-          start, output, note: '',
+          start, output, note: '', ...faucetFlow(),
           spout: { x: ROOM.x1 - FAUCET_OUT, y: FAUCET_Y, z },
           wall: { x: ROOM.x1 - 14, y: FAUCET_Y + FAUCET_NECK, z },
         };
@@ -541,7 +562,7 @@ export class GameEngine {
       const x = (c.x0 + c.x1) / 2;
       const z = (c.z0 + c.z1) / 2;
       return {
-        start, output, note: '',
+        start, output, note: '', ...faucetFlow(),
         spout: { x: x + ISLAND_FAUCET_OUT, y: FAUCET_Y, z: z + ISLAND_FAUCET_OUT },
         wall: { x, y: FAUCET_Y + FAUCET_NECK, z },
         base: { x, y: LIFT, z },
@@ -685,6 +706,8 @@ export class GameEngine {
       const m = tankMouth(this.tools[to.tool], to.tank ?? 0);
       return new Hose({ tool: this.tools[from.tool], spout: from.spout }, { x: m.x, y: m.y + (to.up ?? 24), z: m.z }, NOZZLE_REACH.min);
     });
+    // a new lab's faucets are all shut
+    for (const fa of this.faucets) Object.assign(fa, faucetFlow());
     this.restAll();
     this.stock = stockWith(this.outOfCabinet());
     this.afterLoad();
@@ -840,7 +863,9 @@ export class GameEngine {
         on: 'tool' in h.on ? { tool: h.on.tool.id, spout: h.on.spout } : { faucet: h.on.faucet },
       })),
       // where they started on the old flat bench, so the save still loads there, with their notes
-      faucets: this.faucets.map((fa, i, all) => ({ x: (i + 0.5) / all.length, y: 30 / HOME_H, ...(fa.note ? { note: fa.note } : {}) })),
+      faucets: this.faucets.map((fa, i, all) => ({
+        x: (i + 0.5) / all.length, y: 30 / HOME_H, valve: fa.valve, ...(fa.note ? { note: fa.note } : {}),
+      })),
       cabinet: Object.fromEntries(
         (Object.keys(stock) as Stocked[]).filter((k) => !endless(k)).map((k) => [k, stock[k].flatMap((on, i) => (on ? [i] : []))]),
       ),
@@ -931,10 +956,14 @@ export class GameEngine {
       h.turn = num(o.yaw, 0);
       this.hoses.push(h);
     }
-    for (const fa of this.faucets) fa.note = '';
+    // a faucet's valve is as it was saved; a save from before faucets had valves, which ran all the time, says nothing,
+    // and its faucets run on, fully open, so that a line fed from them keeps running
+    for (const fa of this.faucets) Object.assign(fa, faucetFlow(1), { note: '' });
     fs.forEach((f, i) => {
       const j = faucetIndex(i, fs.length);
-      if (j !== null && typeof f?.note === 'string') this.faucets[j].note = f.note;
+      if (j === null) return;
+      if (typeof f?.note === 'string') this.faucets[j].note = f.note;
+      if (Number.isFinite(f?.valve)) this.faucets[j].valve = Math.max(0, Math.min(1, f.valve!));
     });
     this.setAlarmsOff(!!s.alarmsOff);
     this.blindsShut = !!s.blindsShut;
@@ -1648,20 +1677,31 @@ export class GameEngine {
     return FOV + (ZOOM.fov - FOV) * ease(this.zoom);
   }
 
-  /** Point the lever of the valve being turned at where the aim is, on the tool's front face. */
+  /**
+   * Point the lever of the valve being turned at where the aim is, on the face it lies on: a tool's front face, or the
+   * front of a faucet's knob (see knobPose).
+   */
   private aimTurning(): void {
     const tr = this.turning;
     if (!tr || !this.viewW) return;
-    const { t, k, aim } = tr;
+    const { aim } = tr;
     const { o, d } = this.view.ray((aim.x / this.viewW) * 2 - 1, 1 - (aim.y / this.viewH) * 2);
-    const n = { x: Math.sin(t.pose.yaw), y: 0, z: Math.cos(t.pose.yaw) };
-    const p0 = onTool(t, 0, 0, valveZ(t));
+    const t = 't' in tr ? tr.t : null;
+    const fa = 'faucet' in tr ? this.faucets[tr.faucet] : null;
+    const pose = t ? t.pose : knobPose(fa!);
+    const n = { x: Math.sin(pose.yaw), y: 0, z: Math.cos(pose.yaw) };
+    const p0 = t ? onTool(t, 0, 0, valveZ(t)) : toWorld(pose, { x: 0, y: 0, z: KNOB.r + KNOB.hubH });
     const dn = d.x * n.x + d.z * n.z;
     if (Math.abs(dn) < 1e-3) return;
     const s = ((p0.x - o.x) * n.x + (p0.z - o.z) * n.z) / dn;
     if (s <= 0) return;
-    const l = toLocal(t.pose, { x: o.x + d.x * s, y: o.y + d.y * s, z: o.z + d.z * s });
-    aimValve(t, k, l.x, -l.y);
+    const l = toLocal(pose, { x: o.x + d.x * s, y: o.y + d.y * s, z: o.z + d.z * s });
+    if ('t' in tr) aimValve(tr.t, tr.k, l.x, -l.y);
+    else if (fa) {
+      // a faucet's valve is a tool's (see leverAt), its center the knob's
+      const v = leverAt('valve', l.x, -l.y);
+      if (v !== null) fa.valve = v;
+    }
   }
 
   /**
@@ -1746,7 +1786,7 @@ export class GameEngine {
   private pouringOut(t: Tool): number[] {
     const out: number[] = [];
     for (let j = 0; j < t.shape.spouts.length; j++) {
-      if (this.hoseOn({ tool: t, spout: j }) || !this.flowing(t, j)) continue;
+      if (this.hoseOn({ tool: t, spout: j }) || !this.flowing({ tool: t, spout: j })) continue;
       const m = mouthBelow(this.open, spoutAt(t, j));
       if (m && !t.tanks.includes(m.v)) out.push(j);
     }
@@ -1791,7 +1831,7 @@ export class GameEngine {
     const add = (m: HoseMount, at: Vec3) => {
       const mouth = mouthBelow(this.open, at);
       if (!mouth || !vs.has(mouth.v)) return;
-      if (!this.hoseOn(m) && 'tool' in m && !this.flowing(m.tool, m.spout)) return;
+      if (!this.hoseOn(m) && !this.flowing(m)) return;
       out.push({ m, at, into: mouth.v });
     };
     this.faucets.forEach((_, i) => add({ faucet: i }, this.faucetOutlet(i)));
@@ -1803,9 +1843,13 @@ export class GameEngine {
     return out;
   }
 
-  /** Whether spout j of tool t is letting something out: streaming, or gathering a drop. */
-  private flowing(t: Tool, j: number): boolean {
-    return !!t.out[j] || t.drops[j].N > 0;
+  /** Whether a spout or a faucet is letting something out: streaming, or gathering a drop. */
+  private flowing(m: HoseMount): boolean {
+    if ('faucet' in m) {
+      const fa = this.faucets[m.faucet];
+      return !!fa.out || fa.drop.N > 0;
+    }
+    return !!m.tool.out[m.spout] || m.tool.drops[m.spout].N > 0;
   }
 
   /** The frame the hoses following what's held (see gather) go along in, with it at pose p: a flask's doesn't turn. */
@@ -2369,10 +2413,12 @@ export class GameEngine {
 
   /**
    * The valve the crosshair is on, or within VALVE_REACH of on its tool's front face (see valveNear), if any. Where
-   * valves crowd together, the nearest.
+   * valves crowd together, the nearest. A faucet's, if it's on its knob.
    */
-  private valveAimed(): { t: Tool; k: number } | null {
+  private valveAimed(): ValveRef | null {
     const p = this.target;
+    // a faucet's valve is its knob, and the lever on it
+    if (p?.kind === 'faucet') return p.valve ? { faucet: p.i } : null;
     if (p?.kind !== 'tool' || p.t.shape.noValve || p.t.swap !== null) return null;
     if (p.part === 'valve') return { t: p.t, k: p.k };
     const l = toLocal(p.t.pose, p.point);
@@ -2686,7 +2732,19 @@ export class GameEngine {
     return this.held?.kind === 'tool' && this.held.t === t && !this.held.ghost && !this.hoseOn({ tool: t, spout: j });
   }
 
-  /** The thing the player holds, as the view knows it. */
+  /**
+   * What faucet fa lets out in a substep of h sim seconds, with its valve as it is (see faucetRate), in its own packet,
+   * good only until its next: what it pours, in whole molecules.
+   */
+  private faucetLets(fa: LabFaucet, h: number): Vessel | null {
+    const p = fa.packet;
+    if (p.N) p.n.fill(0);
+    p.N = 0;
+    p.Q = 0;
+    p.addFrom(fa.output, faucetRate(fa.valve) * h, true);
+    return p.N > 0 ? p : null;
+  }
+
   /**
    * Whether letting go of what's held would put it in the equipment cabinet: it's aimed at the cabinet, or at
    * something in it, and it's something the cabinet holds.
@@ -2740,14 +2798,8 @@ export class GameEngine {
       else stillFaucet = h.h.on.faucet;
     }
 
-    // each faucet fills whatever is right under it, or under its hose's nozzle
-    this.faucetFlows = [];
-    this.faucets.forEach((fa, i) => {
-      fa.output = faucetOutput(fa.start, this.chem); // cheap, and follows edits to the chemistry
-      const from = this.faucetOutlet(i);
-      const m = faucetTarget(mouths, from);
-      if (m && simDt > 0 && i !== stillFaucet) this.faucetFlows.push({ fa, from, m });
-    });
+    // (cheap, and follows edits to the chemistry)
+    for (const fa of this.faucets) fa.output = faucetOutput(fa.start, this.chem);
 
     this.clearStation();
     const gateFrom = this.tools.map((t) => t.gate);
@@ -2766,6 +2818,9 @@ export class GameEngine {
       // a held tool keeps running, but what leaves a spout of it with no hose out goes down the drain, not into
       // whatever it's swung over (see loose)
       const targets = this.tools.map((t, i) => spouts[i].map((sp, j) => (this.loose(t, j) ? null : mouthBelow(mouths, sp))));
+      // and each faucet's, and what it runs into, if anything: with nothing under it, it runs away down the sink
+      const taps = this.faucets.map((_, i) => this.faucetOutlet(i));
+      const tapTargets = taps.map((sp) => faucetTarget(mouths, sp));
       // a fast flow streams straight into what's below (overflowing it if it's full); a slow one gathers
       // in a drop, which falls on its own time
       const pour = (drop: Vessel, out: Vessel | null, sp: Vec3, target: Mouth | null, loose: boolean): boolean => {
@@ -2778,6 +2833,7 @@ export class GameEngine {
       // wide-open valve drains its tank in the first one
       const total = () => ({ v: new Vessel(Infinity), streamed: false });
       const toolTotals = this.tools.map((t) => t.shape.spouts.map(total));
+      const tapTotals = this.faucets.map(total);
       const tally = (tot: { v: Vessel; streamed: boolean }, out: Vessel | null, streamed: boolean) => {
         if (out) tot.v.addFrom(out, volume(out), true);
         tot.streamed ||= streamed;
@@ -2789,7 +2845,18 @@ export class GameEngine {
           transfer(D, out, POUR_RATE * step);
           this.land(this.pour.into, this.pour.from, out);
         }
-        for (const { fa, from, m } of this.faucetFlows) this.land(m, from, fa.output, FILL_RATE * step);
+        // each faucet runs as far as its valve is open, as a tool's spout does, dripping if that's slow enough
+        this.faucets.forEach((fa, i) => {
+          if (i === stillFaucet) return;
+          const out = fa.valve > 0 ? this.faucetLets(fa, step) : null;
+          if (!out && fa.drop.N <= 0) return;
+          if (quiet) {
+            pour(fa.drop, out, taps[i], tapTargets[i], false);
+            return;
+          }
+          tally(tapTotals[i], out, false);
+          tally(tapTotals[i], null, pour(fa.drop, out, taps[i], tapTargets[i], false));
+        });
         this.tools.forEach((t, j) => {
           if (t === stillTool) return;
           t.step(step).forEach((out, k) => {
@@ -2834,6 +2901,13 @@ export class GameEngine {
           t.streaming[k] = streamed;
         }),
       );
+      if (!quiet)
+        this.faucets.forEach((fa, i) => {
+          const { v, streamed } = tapTotals[i];
+          fa.out = v.N > 0 ? v : null;
+          fa.flow = volume(v) / (MAX_FLOW * simDt);
+          fa.streaming = streamed;
+        });
     }
     this.spillTime = simDt;
     if (quiet) {
@@ -2843,6 +2917,7 @@ export class GameEngine {
         t.flow.fill(0);
         t.streaming.fill(false);
       }
+      for (const fa of this.faucets) Object.assign(fa, { out: null, flow: 0, streaming: false });
       return;
     }
 
@@ -2928,7 +3003,7 @@ export class GameEngine {
     const st = this.station();
     if (st.swap === null) return;
     const its = (h: Hose) => 'tool' in h.on && h.on.tool === st;
-    if (this.turning?.t === st) this.endTurn();
+    if (this.turning && 't' in this.turning && this.turning.t === st) this.endTurn();
     const held = this.held?.kind === 'hose' && its(this.held.h);
     this.hoses = this.hoses.filter((h) => !its(h));
     if (held) {
@@ -3314,18 +3389,23 @@ export class GameEngine {
       });
     for (const { at, v } of this.spills.values())
       if (v.N > TRACE) streams.push({ from: at, toY: this.landsAt(at, mouths), fluid: v, flow: volume(v) / (MAX_FLOW * this.spillTime) });
-    for (const { fa, from } of this.faucetFlows) streams.push({ from, toY: this.landsAt(from, mouths), fluid: fa.output, flow: FILL_RATE / CAP });
+    this.faucets.forEach((fa, i) => {
+      if (!fa.out || !fa.streaming) return;
+      const from = this.faucetOutlet(i);
+      streams.push({ from, toY: this.landsAt(from, mouths), fluid: fa.out, flow: fa.flow });
+    });
     const h = this.held;
     if (this.pour && h?.kind === 'flask' && h.f.N > TRACE)
       streams.push({ from: this.pour.from, toY: this.landsAt(this.pour.from, mouths), fluid: h.f, flow: POUR_RATE / CAP });
     const drops: Frame['drops'][number][] = [];
     for (const t of this.tools) t.drops.forEach((v, k) => drops.push({ at: this.outletAt(t, k), v, hanging: true }));
+    this.faucets.forEach((fa, i) => drops.push({ at: this.faucetOutlet(i), v: fa.drop, hanging: true }));
     for (const d of this.falling) drops.push({ at: d, v: d.v, hanging: false });
     const pl = (this.placed = h ? this.placement(h) : null);
     // each hose from its spout or faucet to its nozzle, with what's running through it
     const hoses = this.hoses.map((hose) => {
       const on = hose.on;
-      const fluid = 'tool' in on ? on.tool.out[on.spout] : (this.faucetFlows.find((f) => f.fa === this.faucets[on.faucet])?.fa.output ?? null);
+      const fluid = 'tool' in on ? on.tool.out[on.spout] : this.faucets[on.faucet].out;
       return { h: hose, from: this.mountAt(on), fluid };
     });
     this.view.render({
@@ -3824,8 +3904,8 @@ export class GameEngine {
     if (h?.kind === 'tool' && isDipper(h.t.kind)) return !!this.mouthAimed();
     // a held tool runs anyway
     if (h?.kind === 'tool') return false;
-    // a faucet always runs
-    if (h?.kind === 'hose') return 'tool' in h.h.on ? this.wouldFlow(h.h.on.tool) : true;
+    // a faucet runs if its valve's open
+    if (h?.kind === 'hose') return 'tool' in h.h.on ? this.wouldFlow(h.h.on.tool) : this.faucets[h.h.on.faucet].valve > 0;
     return !!this.valveAimed();
   }
 

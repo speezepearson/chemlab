@@ -123,7 +123,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `cabinet.ts` is the equipment cabinet: its layout (each kind's slots on its shelves) and its stock, which the
     equipment wheels take from and putting away puts back into. The view draws what's in it as instanced meshes
     (`CabinetView`), so it's cheap however much it holds.
-  - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
+  - `faucets.ts` is the faucets: what each pours, and its knob, a valve turned just as a tool's is (the engine's
+    `turning` and `valveAimed` take either; `leverAt` in `bodies.ts` is the lever law they share), letting out
+    `faucetRate` through the same `drip` as a spout.
+  - Also here: `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
     `volumes.ts`); `diverter.ts` is the supply station's diverter, `changeover.ts` its changeover, `ambience.ts` the ship, `water.ts` drips and streams, `shatter.ts` a thermometer
     shattering.

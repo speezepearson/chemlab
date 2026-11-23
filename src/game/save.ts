@@ -17,10 +17,11 @@ export interface SaveState {
   scales: SavedScale[];
   hoses: SavedHose[];
   /**
-   * Each faucet's note, with where it was on the old flat bench. The lab's faucets are fixed to its right wall, so
-   * where is ignored; it's kept so saves still load on the old bench.
+   * Each faucet's note and how far its valve is open (0 shut to 1 fully open), with where it was on the old flat bench.
+   * The lab's faucets are fixed, so where is ignored; it's kept so saves still load on the old bench. A save from
+   * before faucets had valves, when they ran all the time, has none: its faucets load fully open.
    */
-  faucets?: { x: number; y: number; note?: string }[];
+  faucets?: { x: number; y: number; note?: string; valve?: number }[];
   chem?: { bonds: ChemParams['bonds']; swapA: number; heatCap: number };
   /** The target the receptacle has taken so far, by volume, toward the goal; none if left out. */
   delivered?: number;
