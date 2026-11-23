@@ -2238,6 +2238,87 @@ describe('stopcocks', () => {
     expect(ts.flatMap((t) => t.cocks.map((c) => c?.valve))).toEqual([0.25, 0.25, 0.25, 0.25]);
   });
 
+  it('go on the end of a hose, under its nozzle, which then lets out at their foot, and up to the spout as it rolls up', () => {
+    const l = lab();
+    const pip = bare(l);
+    const tip = spoutTip(pip, 0);
+    // a spout's stopcock stays at its tip as the hose is pulled out, and the hose runs from its foot
+    pip.cocks[0] = { valve: 1, nozzle: false };
+    atSpout(l, pip);
+    l.in.leftDown(false);
+    expect(cocks(l).held?.kind).toBe('hose');
+    const hose = cocks(l).hoses[0];
+    const I = l.in as unknown as { mountAt(m: unknown): unknown; outletAt(t: Tool, j: number): { x: number; y: number; z: number } };
+    expect(I.mountAt(hose.on)).toEqual({ ...tip, y: tip.y - STOPCOCK.drop });
+    l.in.putBack();
+    expect(cocks(l).hoses).toHaveLength(0);
+    // with the hose's nozzle set down out to one side, a stopcock goes on under it, pointed at
+    pip.cocks[0] = null;
+    const nozzle = new Hose({ tool: pip, spout: 0 }, { x: tip.x + 2 * CELL, y: tip.y, z: tip.z }, NOZZLE_REACH.min);
+    cocks(l).hoses.push(nozzle);
+    expect(l.e.spawn('stopcock')).toBe(true);
+    l.in.target = { kind: 'hose', h: nozzle, point: nozzle.outlet };
+    l.in.leftDown(false);
+    expect(cocks(l).held).toBeNull();
+    expect(pip.cocks[0]).toEqual({ valve: 0, nozzle: true });
+    // the hose still runs from the spout's bare tip, and what it lets out leaves the stopcock's foot
+    expect(I.mountAt(nozzle.on)).toEqual(tip);
+    expect(I.outletAt(pip, 0)).toEqual({ ...nozzle.outlet, y: nozzle.outlet.y - STOPCOCK.drop });
+    expect(spoutAt(pip, 0)).toEqual(tip);
+    pip.tanks[0].setMolecules(singleOf('R'), CAP / 20);
+    run(l, 1);
+    expect(pip.tanks[0].N).toBe(CAP / 20);
+    // it's turned, and taken off, there just as at a tip
+    l.in.target = { kind: 'hose', h: nozzle, cock: true, turns: true, point: nozzle.outlet };
+    expect(l.in.valveAimed()).toEqual({ cock: { tool: pip, spout: 0 } });
+    l.in.target = { kind: 'hose', h: nozzle, cock: true, point: nozzle.outlet };
+    l.in.leftDown(false);
+    expect(pip.cocks[0]).toBeNull();
+    l.in.putBack();
+    expect(pip.cocks[0]).toEqual({ valve: 0, nozzle: true });
+    // the hose rolled up, the stopcock goes up to the spout's tip
+    l.in.target = { kind: 'hose', h: nozzle, point: nozzle.outlet };
+    l.in.leftDown(false);
+    expect(cocks(l).held?.kind).toBe('hose');
+    l.in.putAway();
+    expect(cocks(l).hoses).toHaveLength(0);
+    expect(pip.cocks[0]).toEqual({ valve: 0, nozzle: false });
+    expect(I.outletAt(pip, 0)).toEqual({ ...tip, y: tip.y - STOPCOCK.drop });
+    // and a save keeps one on a hose's end there
+    pip.cocks[0]!.nozzle = true;
+    cocks(l).hoses.push(nozzle);
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    expect(s.tools.find((t) => t.id === pip.id)!.cocks).toEqual([{ valve: 0, nozzle: true }]);
+    l.e.restore(s, DEFAULT_PRESET);
+    expect(l.in.tools.find((t) => t.id === pip.id)!.cocks).toEqual([{ valve: 0, nozzle: true }]);
+    // one saved on a hose's end with no hose out is at the spout's tip
+    s.hoses = [];
+    l.e.restore(s, DEFAULT_PRESET);
+    expect(l.in.tools.find((t) => t.id === pip.id)!.cocks).toEqual([{ valve: 0, nozzle: false }]);
+  });
+
+  it('go on no nozzle docked on an instrument’s tube; and one docking with a stopcock on its end sends it to the spout', () => {
+    const l = lab();
+    const pip = bare(l);
+    const meter = new Tool('meter', 97, { x: SPOT.x + 4 * CELL, y: LIFT + 300, z: SPOT.z, yaw: 0 });
+    l.in.tools.push(meter);
+    const top = tankMouth(meter, 0);
+    const nozzle = new Hose({ tool: pip, spout: 0 }, { x: top.x, y: top.y + 1, z: top.z }, NOZZLE_REACH.min);
+    cocks(l).hoses.push(nozzle);
+    expect(l.e.spawn('stopcock')).toBe(true);
+    l.in.target = { kind: 'hose', h: nozzle, point: nozzle.outlet };
+    expect(l.in.placement(l.in.held)).toEqual({ why: 'No room for a stopcock there' });
+    l.in.putAway();
+    // a nozzle with one on its end, taken up and docked, leaves it at the spout's tip
+    nozzle.outlet = { x: top.x + CELL, y: top.y + 60, z: top.z };
+    pip.cocks[0] = { valve: 0.5, nozzle: true };
+    l.in.target = { kind: 'hose', h: nozzle, point: nozzle.outlet };
+    l.in.leftDown(false);
+    expect(cocks(l).held?.kind).toBe('hose');
+    (l.in as unknown as { setDown(h: unknown, r: unknown): void }).setDown(l.in.held, { pose: { x: top.x, y: top.y + 1, z: top.z, yaw: 0 }, hose: { turn: 0, reach: NOZZLE_REACH.min } });
+    expect(pip.cocks[0]).toEqual({ valve: 0.5, nozzle: false });
+  });
+
   /** A flask set down with its mouth just under p. */
   function setAtFlask(l: Lab, p: { x: number; y: number; z: number }): Flask {
     holdAt(l, 'flask', { x: p.x, y: LIFT + 150, z: p.z, yaw: 0 });

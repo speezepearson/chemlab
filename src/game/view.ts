@@ -43,8 +43,11 @@ export type Pick =
    */
   | { kind: 'tool'; t: Tool; part: 'body' | 'tank' | 'valve' | 'spout' | 'button' | 'cock'; k: number; turns?: boolean }
   | { kind: 'scale'; sc: Scale; part: 'body' | 'tare' }
-  /** A hose's nozzle. */
-  | { kind: 'hose'; h: Hose }
+  /**
+   * A hose's nozzle; or the stopcock on its end (see Cock), its handwheel and the hub it's on if `turns`, but for its
+   * foot, which is the nozzle's.
+   */
+  | { kind: 'hose'; h: Hose; cock?: boolean; turns?: boolean }
   /**
    * A faucet: its spout, or the pipe down to it, if `spout`; its valve's handwheel, or the hub it's on, if `valve`
    * (see FAUCET_VALVE); else the pipe from the wall, and the elbow.
@@ -89,8 +92,11 @@ export interface Frame {
   flasks: readonly Flask[];
   tools: readonly Tool[];
   scales: readonly Scale[];
-  /** Each hose, from the spout or faucet it's pulled out of, with what's running through it. */
-  hoses: readonly { h: Hose; from: Vec3; fluid: Fluid | null }[];
+  /**
+   * Each hose, from the spout or faucet it's pulled out of, with what's running through it, and the stopcock on its
+   * end, if there is one (see Cock).
+   */
+  hoses: readonly { h: Hose; from: Vec3; fluid: Fluid | null; cock: Cock | null }[];
   faucets: readonly FaucetSpot[];
   /** What's in the equipment cabinet. */
   stock: Stock;
@@ -2962,6 +2968,8 @@ const nozzleGeom = new THREE.CylinderGeometry(4, 3, NOZZLE_H, 12).translate(0, N
  */
 class HoseView {
   private outlet = new THREE.Group();
+  /** The stopcock drawn under its nozzle, if one's on its end, and the one it was drawn for. */
+  private cock: { v: CockView; c: Cock } | null = null;
   /** Not hit (only its nozzle is), but outlined with it (see View.renderOutline). */
   readonly tube: THREE.Mesh;
   private core: THREE.Mesh;
@@ -2971,7 +2979,7 @@ class HoseView {
   constructor(
     readonly h: Hose,
     scene: THREE.Object3D,
-    pickables: Map<THREE.Object3D, Pick>,
+    private pickables: Map<THREE.Object3D, Pick>,
   ) {
     const nozzle = new THREE.Mesh(nozzleGeom, pipeMat);
     nozzle.castShadow = true;
@@ -2982,9 +2990,22 @@ class HoseView {
     scene.add(this.outlet, this.tube, this.core);
   }
 
-  update(from: Vec3, fluid: Fluid | null): void {
+  update(from: Vec3, fluid: Fluid | null, cock: Cock | null): void {
     const { h } = this;
     this.outlet.position.set(h.outlet.x, h.outlet.y, h.outlet.z);
+    // a stopcock on its end hangs under the nozzle, facing the way the nozzle does; its foot is the nozzle's
+    if (this.cock && this.cock.c !== cock) {
+      this.cock.v.dispose();
+      this.cock = null;
+    }
+    if (cock && !this.cock) {
+      const picks = { cock: { kind: 'hose', h, cock: true } as const, turns: { kind: 'hose', h, cock: true, turns: true } as const, foot: { kind: 'hose', h } as const };
+      this.cock = { v: new CockView(this.outlet, this.pickables, picks), c: cock };
+    }
+    if (this.cock) {
+      this.cock.v.group.rotation.y = h.turn;
+      this.cock.v.set(this.cock.c);
+    }
     const key = [from.x, from.y, from.z, h.outlet.x, h.outlet.y, h.outlet.z].map((x) => x.toFixed(1)).join();
     if (key !== this.key) {
       this.key = key;
@@ -3007,6 +3028,7 @@ class HoseView {
   }
 
   dispose(): void {
+    this.cock?.v.dispose();
     for (const o of [this.outlet, this.tube, this.core]) o.removeFromParent();
     this.tube.geometry.dispose();
     this.core.geometry.dispose();
@@ -4217,6 +4239,8 @@ function partOf(p: Pick): unknown {
     case 'scale': return p.sc;
     case 'hose': {
       const m = p.h.on;
+      // (a stopcock on its end is a part of its own, as one at the spout's tip is)
+      if (p.cock) return 'tool' in m ? `tool ${m.tool.id} cock ${m.spout}` : `faucet ${m.faucet} cock`;
       return 'tool' in m ? `tool ${m.tool.id} spout ${m.spout}` : `faucet ${m.faucet} spout`;
     }
     case 'faucet': return p.spout ? `faucet ${p.i} spout` : p.valve ? `faucet ${p.i} valve` : `faucet ${p.i}`;
@@ -5265,7 +5289,7 @@ export class View {
     for (const v of this.flasks.values()) v.update(targets);
     for (const v of this.tools.values()) v.update(fr.clock, fr.energies, targets);
     for (const v of this.scales.values()) v.update(fr.tarePress === v.sc, fr.hot);
-    for (const { h, from, fluid } of fr.hoses) this.hoses.get(h)!.update(from, fluid);
+    for (const { h, from, fluid, cock } of fr.hoses) this.hoses.get(h)!.update(from, fluid, cock);
     fr.faucets.forEach((fa, i) => {
       const rgb = fluidRGB(fa.output);
       const mat = this.faucetMats[i];
