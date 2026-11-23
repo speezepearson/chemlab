@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   FLASK_R, MAGNET, NOZZLE_REACH, SCALE_SLOTS, magnetShift, STAND_BASE, aimValve, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
   docked, nozzleBox, nozzleMounts, nozzleStand, onScale, scaleBox, scaleSpot, snapReach, spoutAt, standBase, tankMouth, toolBox, toolStands, valveLocal,
-  valveNear,
+  valveNear, plumbZ,
 } from './bodies';
 import { SOLVENT_SPECIES, singleOf } from '../chem/species';
 import { CAP } from './config';
@@ -257,8 +257,9 @@ describe('tools in the room', () => {
   it('turn their spouts with them', () => {
     const sep = new Tool('separator', 0, at(0, 500, 0, Math.PI / 2));
     const last = sep.shape.spouts.length - 1;
-    // turned a quarter, left to right becomes front to back
-    expect(spoutAt(sep, 0).x).toBeCloseTo(0);
+    // turned a quarter, left to right becomes front to back, and its front (where its spouts are, see plumbZ) faces +x
+    expect(plumbZ(sep)).toBeGreaterThan(0);
+    expect(spoutAt(sep, 0).x).toBeCloseTo(plumbZ(sep));
     expect(spoutAt(sep, 0).z).toBeCloseTo(-sep.shape.spouts[0]);
     expect(spoutAt(sep, last).z).toBeCloseTo(-sep.shape.spouts[last]);
   });
@@ -565,6 +566,16 @@ describe('dippers', () => {
     expect(bathAt({ ...mid, y: surface + 2 }, [], [t])).toBeNull();
     t.tanks[0].setMolecules(R, 0);
     expect(bathAt(mid, [], [t])).toBeNull();
+  });
+
+  it("are in the hopper under a tank that drains at its front only where it is, leaning forward to its tip", () => {
+    const t = new Tool('dispenser', 0, at(300, 700, 150));
+    t.tanks[0].setMolecules(R, t.tanks[0].cap / 2);
+    const { floor } = tankFluid(t, 0);
+    // just above the tip, at the front, it's in it; as far back, it's outside the hopper's sloping floor
+    const low = { x: 300, y: floor + 1, z: 150 + plumbZ(t) };
+    expect(bathAt(low, [], [t])).toBe(t.tanks[0]);
+    expect(bathAt({ ...low, z: 150 - plumbZ(t) }, [], [t])).toBeNull();
   });
   it("have a strip's foot at the tip of its paper, and only its clip bumps into anything", () => {
     const t = new Tool('strip', 9, at(150, LIFT + 200, 150));

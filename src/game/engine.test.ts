@@ -3,7 +3,7 @@ import { BOND_KEYS } from '../chem/atoms';
 import { ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
-import { FLASK_R, MAGNET, NEAR, NEAR_STEP, NOZZLE_REACH, SCALE_SLOTS, flaskLip, flaskMouth, onScale, spoutAt, tankMouth, scaleBox, standBase, toolBox, toolStands, type Stand } from './bodies';
+import { FLASK_R, MAGNET, NEAR, NEAR_STEP, NOZZLE_REACH, SCALE_SLOTS, flaskLip, flaskMouth, onScale, plumbZ, spoutAt, tankMouth, scaleBox, standBase, toolBox, toolStands, type Stand } from './bodies';
 import { boxesOverlap } from './physics';
 import { STOCK } from './cabinet';
 import { WHEELS } from './wheel';
@@ -1283,7 +1283,8 @@ describe('setting things down', () => {
       const lined = t.shape.spouts.filter((_, j) => mouths.some((m) => apart(j, m) < 1e-6)).length;
       if (pitch === CELL) {
         expect(lined).toBe(2);
-        expect([to.x, to.z].map((v) => +v.toFixed(6))).toEqual([SPOT.x, SPOT.z]);
+        // facing the other way, its spouts (in front of its middle, see plumbZ) are behind it as the room goes
+        expect([to.x, to.z].map((v) => +v.toFixed(6))).toEqual([SPOT.x, +(SPOT.z + plumbZ(t)).toFixed(6)]);
       } else {
         // no two line up at once, so just the pair nearest lining up does
         expect(lined).toBe(1);

@@ -4,7 +4,7 @@ import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { CELL, groundAt, toLocal, toWorld, wrapAngle, type Pose, type Vec3 } from './space';
 import {
-  HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, LAMP, METER_BODY, SHAPES, STATION, STRIP, TANK_H, TEST_PAPER, THERMOMETER_ROD, dipUnder, footY, isThermometer, levelIn,
+  HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, LAMP, METER_BODY, SHAPES, STATION, STRIP, SUMP_TIP, TANK_H, TEST_PAPER, THERMOMETER_ROD, dipUnder, footY, isThermometer, levelIn,
   tankDepth, tankPieces, tankX, mouthBelow, overMouth, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
 } from './tools';
 
@@ -99,14 +99,24 @@ export function onTool(t: Tool, x: number, y: number, z = 0): Vec3 {
   return toWorld(t.pose, { x, y: -y, z });
 }
 
+/**
+ * How far in front of a tool's middle its plumbing is: the pipes under its tanks, its valves' stems and its spouts. For
+ * a tool whose tanks drain at their front (see ToolShape.front), the tip of their hoppers, the pipe just inside their
+ * front walls; for every other, its middle.
+ */
+export function plumbZ(t: Tool | ToolKind): number {
+  const kind = typeof t === 'string' ? t : t.kind;
+  return SHAPES[kind].front ? TOOL_DEPTH[kind].tank / 2 - SUMP_TIP / 2 : 0;
+}
+
 /** The tip of spout j, where fluid leaves the tool. */
 export function spoutAt(t: Tool, j: number): Vec3 {
-  return onTool(t, t.shape.spouts[j], t.shape.spoutY);
+  return onTool(t, t.shape.spouts[j], t.shape.spoutY, plumbZ(t));
 }
 
 /**
- * How far in front of the tool's middle its valves sit: on its front face, where they're easy to see and reach; for a
- * round tank, out in front of the tank on a stem from the pipe under it, so the tank's lower edge doesn't hide it.
+ * How far in front of the tool's middle its valves sit: on its front face, where they're easy to see and reach, on a
+ * short stem out from the pipe they're on; for a tool that drains at its front (see plumbZ), a little in front of it.
  */
 export const valveZ = (t: Tool) => (t.shape.wall ? 7 : TOOL_DEPTH[t.kind].body / 2 + 3);
 
@@ -274,15 +284,19 @@ export function toolCenter(t: Tool): Vec3 {
 
 /**
  * Tank k's inside as it's drawn (see tankPieces): its pieces, bottom up from `bottom` in the tool's flat frame (y
- * down), and the middle across of each (a swell bulb's neck isn't over its bulb, see ToolShape.neck).
+ * down), the middle across of each (a swell bulb's neck isn't over its bulb, see ToolShape.neck), and how far in front
+ * of the tool's middle each one's bottom is centred (a hopper's at the front, see ToolShape.front), its top always
+ * being on the middle.
  */
-export function tankInside(t: Tool, k: number): { pieces: Piece[]; bottom: number; xs: number[] } {
+export function tankInside(t: Tool, k: number): { pieces: Piece[]; bottom: number; xs: number[]; zs: number[] } {
   const sh = t.shape;
   const pieces = tankPieces(sh, k, TOOL_DEPTH[t.kind].tank);
   const bottom = (sh.tankH ?? TANK_H) + (sh.cup || sh.funnel ? 0 : (sh.sump?.h ?? 0));
   const n = sh.neck;
   const xs = pieces.map((_, i) => (!n ? tankX(sh.tanks[k]) : i === pieces.length - 1 ? n.necks[k] : n.bodies[k]));
-  return { pieces, bottom, xs };
+  // a hopper that leans forward to its tip (see ToolShape.front) has its bottom's middle at the tip
+  const zs = pieces.map((_, i) => (i === 0 && sh.front && sh.sump ? plumbZ(t) : 0));
+  return { pieces, bottom, xs, zs };
 }
 
 /** How full a vessel is, by volume, from 0 to 1. */
@@ -303,7 +317,7 @@ export function tankFluid(t: Tool, k: number): { floor: number; surface: number 
 function inTank(t: Tool, k: number, p: Vec3): number | null {
   const v = t.tanks[k];
   if (v.N <= 0) return null;
-  const { pieces, bottom, xs } = tankInside(t, k);
+  const { pieces, bottom, xs, zs } = tankInside(t, k);
   const l = toLocal(t.pose, p);
   const up = bottom + l.y;
   const level = levelIn(pieces, fullness(v));
@@ -316,7 +330,8 @@ function inTank(t: Tool, k: number, p: Vec3): number | null {
       const w = pc.w0 + (pc.w1 - pc.w0) * f;
       const d = pc.d0 + (pc.d1 - pc.d0) * f;
       const dx = l.x - xs[i];
-      return (pc.round ? Math.hypot(dx, l.z) <= w / 2 : Math.abs(dx) <= w / 2 && Math.abs(l.z) <= d / 2) ? level - up : null;
+      const dz = l.z - zs[i] * (1 - f);
+      return (pc.round ? Math.hypot(dx, dz) <= w / 2 : Math.abs(dx) <= w / 2 && Math.abs(dz) <= d / 2) ? level - up : null;
     }
     base += pc.h;
   }
@@ -538,7 +553,7 @@ export const STAND_MAX = STAND_ROD - 10;
 const TWO_STANDS = 240;
 /**
  * How far behind the middle of what it holds a stand's rod is: far enough that its base clears a flask standing
- * under what it holds (or under the tool's spouts, which are along its middle), by this much.
+ * under what it holds (or under the tool's spouts, which are along its middle or in front of it), by this much.
  */
 const STAND_CLEAR = 6;
 const rodBack = (body: number) => Math.max(body / 2, FLASK_R) + STAND_CLEAR + STAND_BASE.hz;

@@ -10,7 +10,7 @@ import type { Fluid } from '../chem/reactions';
 import { OUTLINE } from './outline';
 import { glowFalloff } from './appearance';
 import {
-  NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onScale, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
+  NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onScale, onTool, openingOf, plumbZ, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
 } from './bodies';
 import { SPECIES } from '../chem/species';
 import { CAP, DELIVERY, GOAL_PURITY, TRACE } from './config';
@@ -579,10 +579,10 @@ class FluidMesh {
 /* ---------------- geometry helpers ---------------- */
 
 /** A glass box with no top, edges drawn, x0..x1 by y0..y1 (flat frame, y down), `d` deep. */
-function openBox(parent: THREE.Object3D, x0: number, x1: number, y0: number, y1: number, d: number): THREE.Mesh {
+function openBox(parent: THREE.Object3D, x0: number, x1: number, y0: number, y1: number, d: number, floor = true): THREE.Mesh {
   const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, d);
-  // faces go +x, −x, +y, −y, +z, −z: no top
-  const m = new THREE.Mesh(g, [glassMat, glassMat, hidden, floorGlassMat, glassMat, glassMat]);
+  // faces go +x, −x, +y, −y, +z, −z: no top, and no floor if a hopper under it is its floor
+  const m = new THREE.Mesh(g, [glassMat, glassMat, hidden, floor ? floorGlassMat : hidden, glassMat, glassMat]);
   m.position.copy(v3((x0 + x1) / 2, (y0 + y1) / 2));
   parent.add(m);
   const e = new THREE.LineSegments(new THREE.EdgesGeometry(g), edgeMat);
@@ -609,6 +609,18 @@ function frustum(x: number, y0: number, y1: number, wTop: number, dTop: number, 
   }
   g.computeVertexNormals();
   g.translate(x, -(y0 + y1) / 2, 0);
+  return g;
+}
+
+/**
+ * Geometry `g`, drawn between depths y0 (its top) and y1 (its bottom) in a flat frame (y down), leaned forward by its
+ * depth: its top stays where it is and its bottom moves `dz` toward the front, evenly in between, so each level slice
+ * of it is as it was, only further forward. A hopper narrowing to its front (see ToolShape.front).
+ */
+function lean(g: THREE.BufferGeometry, y0: number, y1: number, dz: number): THREE.BufferGeometry {
+  const pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) pos.setZ(i, pos.getZ(i) + (dz * (-pos.getY(i) - y0)) / (y1 - y0));
+  g.computeVertexNormals();
   return g;
 }
 
@@ -1614,13 +1626,16 @@ class ToolView {
 
     // drain pipes and spouts, from the bottom of the tanks (and their sumps); the pipe that runs to a spout alone is
     // part of that spout, as a faucet's is, so the crosshair on it is on the spout (and pulls its hose out)
-    const outlet = (k: number, pts: number[][]) => pipes(art, pts).forEach((m) => pick(m, 'spout', k));
+    // all of it at the depth of the tool's plumbing: its middle, or for a tool that drains at its front, there (see
+    // plumbZ)
+    const pz = plumbZ(t);
+    const outlet = (k: number, pts: number[][]) => pipes(art, pts, 2, pz).forEach((m) => pick(m, 'spout', k));
     const TH = sh.tankH ?? TANK_H;
     const floor = TH + (sh.sump?.h ?? 0);
     if (sh.wall) this.buildStation(pick);
     else if (t.kind === 'exchanger')
       sh.tanks.forEach((tk, k) => {
-        pipes(art, [[tankX(tk), floor], [tankX(tk), HELIX.y - HELIX.r]]);
+        pipes(art, [[tankX(tk), floor], [tankX(tk), HELIX.y - HELIX.r]], 2, pz);
         outlet(k, [[sh.spouts[k], HELIX.y + HELIX.r], [sh.spouts[k], sh.spoutY - 4]]);
       });
     else if (t.kind === 'separator') {
@@ -1630,13 +1645,13 @@ class ToolView {
       const [x0, x1] = sh.spouts;
       const peak = (x0 + x1) / 2;
       const mid = top + thick / 2;
-      pipes(art, [[peak, floor], [peak, mid]]);
+      pipes(art, [[peak, floor], [peak, mid]], 2, pz);
       [x0, x1].forEach((x, k) => {
         const reach = Math.abs(x - peak) + over;
         const dir = Math.sign(x - peak);
         // (its middle, half its reach out from the peak and as far down as its slope takes it by there)
         const [cx, cy, len] = [peak + (dir * reach) / 2, mid + (reach / 2) * Math.tan(slope), reach / Math.cos(slope) + thick / 2];
-        const arm = block(art, k ? blackSideMat : panelMat, cx - len / 2, cx + len / 2, cy - thick / 2, cy + thick / 2, -deep / 2, deep / 2, 2);
+        const arm = block(art, k ? blackSideMat : panelMat, cx - len / 2, cx + len / 2, cy - thick / 2, cy + thick / 2, pz - deep / 2, pz + deep / 2, 2);
         arm.rotation.z = -dir * slope;
         outlet(k, [[x, mid + Math.abs(x - peak) * Math.tan(slope)], [x, sh.spoutY - 4]]);
       });
@@ -1679,7 +1694,7 @@ class ToolView {
       outlet(0, [[0, COLUMN.tube.y1], [0, sh.spoutY - 4]]);
     }
     else outlet(0, [[0, floor], [0, sh.spoutY - 4]]);
-    sh.spouts.forEach((x, k) => pick(block(art, pipeMat, x - 4, x + 4, sh.spoutY - 6, sh.spoutY, -4, 4), 'spout', k));
+    sh.spouts.forEach((x, k) => pick(block(art, pipeMat, x - 4, x + 4, sh.spoutY - 6, sh.spoutY, pz - 4, pz + 4), 'spout', k));
 
     // tanks, with their fluid (the station's are built in buildStation)
     if (!sh.wall) t.tanks.forEach((_, k) => {
@@ -1708,23 +1723,28 @@ class ToolView {
         glassFrom(art, frustum(cx, r.y0, r.y1, w, d, FUNNEL_TIP, FUNNEL_TIP, true));
         geoms = [frustum(cx, r.y0 + 0.5, r.y1 - 0.5, w - 1.5, d - 1.5, FUNNEL_TIP - 1, FUNNEL_TIP - 1, false)];
       } else if (sh.round) {
-        // an upright glass cylinder with a thin metal rim, over a round sump
+        // an upright glass cylinder with a thin metal rim, over a round sump, or a shallow hopper leaning to its front
         const rr = w / 2;
         const mid = -(r.y0 + r.y1) / 2;
+        const sump = sh.sump;
         glassFrom(art, new THREE.CylinderGeometry(rr, rr, r.y1 - r.y0, 48, 1, true).translate(cx, mid, 0));
-        art.add(new THREE.Mesh(new THREE.CircleGeometry(rr, 48).rotateX(Math.PI / 2).translate(cx, -r.y1, 0), floorGlassMat));
+        if (!sh.front) art.add(new THREE.Mesh(new THREE.CircleGeometry(rr, 48).rotateX(Math.PI / 2).translate(cx, -r.y1, 0), floorGlassMat));
         geoms = [new THREE.CylinderGeometry(rr - 0.5, rr - 0.5, r.y1 - r.y0 - 0.5, 48).translate(cx, mid - 0.25, 0)];
         const rim = new THREE.Mesh(new THREE.TorusGeometry(rr + 0.6, 0.8, 6, 48).rotateX(Math.PI / 2).translate(cx, 0, 0), pipeMat);
         art.add(rim);
-        const sump = sh.sump;
         if (sump) {
           const sm = -(r.y1 + sump.h / 2);
-          glassFrom(art, new THREE.CylinderGeometry(sump.w / 2, SUMP_TIP / 2, sump.h, 24, 1, true).translate(cx, sm, 0));
-          geoms.push(new THREE.CylinderGeometry(sump.w / 2 - 0.5, SUMP_TIP / 2 - 0.3, sump.h - 0.3, 24).translate(cx, sm, 0));
+          const segs = sh.front ? 64 : 24;
+          const [ya, yb] = [r.y1, r.y1 + sump.h];
+          // leaned so its tip's middle is at the plumbing's depth, its front running straight down the tank's
+          const glass = new THREE.CylinderGeometry(sump.w / 2, SUMP_TIP / 2, sump.h, segs, 1, true).translate(cx, sm, 0);
+          const fluid = new THREE.CylinderGeometry(sump.w / 2 - 0.5, SUMP_TIP / 2 - 0.3, sump.h - 0.3, segs).translate(cx, sm, 0);
+          glassFrom(art, sh.front ? lean(glass, ya, yb, pz) : glass);
+          geoms.push(sh.front ? lean(fluid, ya, yb, pz) : fluid);
         }
         if (t.kind === 'tank') this.tankLines(r, bottom, d, pieces, rr);
       } else {
-        openBox(art, r.x0, r.x1, r.y0, r.y1, d);
+        openBox(art, r.x0, r.x1, r.y0, r.y1, d, !sh.front);
         // a thin metal rim
         const rw = 1.2;
         for (const [x0, x1, z0, z1] of [
@@ -1735,10 +1755,14 @@ class ToolView {
         geoms = [new THREE.BoxGeometry(w - 1, r.y1 - r.y0 - 0.5, d - 1).translate(cx, -(r.y0 + r.y1) / 2 - 0.25, 0)];
         const sump = sh.sump;
         if (sump) {
-          // a narrow point under the middle of the floor, which fills first
-          const sd = Math.min(d, sump.w);
-          glassFrom(art, frustum(cx, r.y1, r.y1 + sump.h, sump.w, sd, SUMP_TIP, SUMP_TIP, true));
-          geoms.push(frustum(cx, r.y1 - 0.5, r.y1 + sump.h - 0.3, sump.w - 1, sd - 1, SUMP_TIP - 0.6, SUMP_TIP - 0.6, false));
+          // a narrow point under the middle of the floor, which fills first; or a shallow hopper under all of it,
+          // leaned forward so its tip is at the middle of its front edge, its front straight down the tank's
+          const sd = sh.front ? d : Math.min(d, sump.w);
+          const [ya, yb] = [r.y1, r.y1 + sump.h];
+          const glass = frustum(cx, ya, yb, sump.w, sd, SUMP_TIP, SUMP_TIP, true);
+          const fluid = frustum(cx, ya - 0.5, yb - 0.3, sump.w - 1, sd - 1, SUMP_TIP - 0.6, SUMP_TIP - 0.6, false);
+          glassFrom(art, sh.front ? lean(glass, ya, yb, pz) : glass);
+          geoms.push(sh.front ? lean(fluid, ya, yb, pz) : fluid);
           if (t.kind === 'tank') this.tankLines(r, bottom, d, pieces);
         }
       }
@@ -1789,7 +1813,7 @@ class ToolView {
           art.traverse((m) => m.parent === this.dial && pick(m, 'valve', k));
           return;
         }
-        rod(art, pipeMat, v3(vc.x, vc.y, 0), v3(vc.x, vc.y, z), 1.5);
+        rod(art, pipeMat, v3(vc.x, vc.y, pz), v3(vc.x, vc.y, z), 1.5);
         const core = new THREE.Mesh(unitCylinder, panelMat);
         core.rotation.x = Math.PI / 2;
         core.scale.set(5, 4, 5);
@@ -1881,7 +1905,7 @@ class ToolView {
         const sg = k ? -1 : 1;
         // strand A enters at the left and B at the right
         const x = k ? x1 + (x0 - x1) * u : x0 + (x1 - x0) * u;
-        pts.push(v3(x, y - sg * r * Math.cos(th), sg * r * Math.sin(th)));
+        pts.push(v3(x, y - sg * r * Math.cos(th), plumbZ(this.t) + sg * r * Math.sin(th)));
       }
       const curve = new THREE.CatmullRomCurve3(pts);
       const glass = new THREE.TubeGeometry(curve, halfTwists * 16, 3.4, 8);

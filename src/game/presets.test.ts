@@ -4,8 +4,8 @@ import { NS, TARGET } from '../chem/species';
 import { CAP, N_FLASKS } from './config';
 import { Flask, roomFor } from './flask';
 import { CRYOSTABILIZER } from './supply';
-import { SHAPES, TANK_CAP, Tool } from './tools';
-import { toolBox } from './bodies';
+import { SHAPES, TANK_CAP, Tool, mouthBelow } from './tools';
+import { LINED_UP, spoutAt, tankMouth, toolBox } from './bodies';
 import { onCell, toolAnchor } from './testLayout';
 import { boxesOverlap } from './physics';
 import { fromFrac } from './space';
@@ -48,14 +48,20 @@ describe('presets', () => {
   }
 
   for (const p of PRESETS) {
-    it(`${p.name} lays its tools out in whole cells, so that they line up, clear of each other`, () => {
+    it(`${p.name} lays its tools out across in whole cells, each spout over the middle of what it pours into, clear of each other`, () => {
       const tools = (p.tools ?? []).map((spec, i) => {
         const t = new Tool(spec.kind, i, { ...fromFrac({ x: spec.at[0], y: spec.at[1] }, spec.z), yaw: spec.yaw ?? 0 });
-        const g = onCell(t.pose, toolAnchor(t));
-        expect(g.x).toBeCloseTo(t.pose.x, 6);
-        expect(g.z).toBeCloseTo(t.pose.z, 6);
+        expect(onCell(t.pose, toolAnchor(t)).x).toBeCloseTo(t.pose.x, 6);
         return t;
       });
+      // (front to back they needn't be on cells: a spout can be in front of its tool's middle, see plumbZ)
+      const mouths = tools.flatMap((t) => t.tanks.map((_, k) => tankMouth(t, k)));
+      for (const t of tools)
+        t.shape.spouts.forEach((_, j) => {
+          const s = spoutAt(t, j);
+          const m = mouthBelow(mouths, s);
+          if (m) expect(Math.hypot(s.x - m.x, s.z - m.z)).toBeLessThanOrEqual(LINED_UP);
+        });
       for (const a of tools) for (const b of tools) if (a !== b) expect(boxesOverlap(toolBox(a), toolBox(b))).toBe(false);
     });
   }

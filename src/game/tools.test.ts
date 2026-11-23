@@ -14,7 +14,7 @@ import { FLASK_R, tankMouth } from './bodies';
 import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
-  DRIP_FLOW, EXCHANGE_RATE, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, BOND_KEYS, SPECTROSCOPE, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
+  DRIP_FLOW, SUMP_TIP, EXCHANGE_RATE, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, BOND_KEYS, SPECTROSCOPE, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
   clockText, needleAt, STRIP, STRIP_FOOT, STRIP_RUN, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SCREEN, lampLight, type Mouth,
 } from './tools';
 
@@ -1536,9 +1536,11 @@ describe('dispenser', () => {
 
   it('measures its fluid from the tip of its sump, so a thin layer across the floor still drains steadily', () => {
     const d = new Tool('dispenser', 0, undefined, [1]);
-    const { sump, tankH = 84 } = d.shape;
-    // a little more than the sump holds: a thin layer across the floor
-    filled(d.tanks[0], R, 0.02 * TANK_CAP, 1);
+    const { sump, tankH = 84, tanks } = d.shape;
+    // a little more than the sump holds, by its flat outline: a thin layer across the floor
+    const w = tanks[0].x1 - tanks[0].x0;
+    const inSump = ((sump!.w + SUMP_TIP) / 2) * sump!.h;
+    filled(d.tanks[0], R, (inSump / (inSump + w * tankH) + 0.01) * TANK_CAP, 1);
     expect(d.level(0)).toBeGreaterThan(sump!.h / (tankH + sump!.h));
     expect(d.level(0)).toBeLessThan((sump!.h + 3) / (tankH + sump!.h));
     // down in the narrow sump, it stands far higher for how little there is than it would in a flat tank, so the

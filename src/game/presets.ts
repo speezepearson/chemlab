@@ -2,6 +2,7 @@ import { type Atom } from '../chem/atoms';
 import { T_ROOM } from '../chem/params';
 import { SPECIES, TARGET, singleOf } from '../chem/species';
 import { CAP, HOME_W } from './config';
+import { plumbZ } from './bodies';
 import type { Vessel } from './flask';
 import { CELL, LAMP_AREA, LAMP_Z, LIFT, ROOM, type Pose } from './space';
 import { CRYOSTABILIZER } from './supply';
@@ -118,10 +119,11 @@ export const PRESETS: readonly Preset[] = [
       'mixing: the red comes out cool and the green hot. Slower flows trade more. Look at a valve and hold the right button: point up to open it, right to close it.',
     flasks: [],
     tools: [
-      // over the exchanger's two tanks, half a cell either side of its middle
+      // over the exchanger's two tanks, half a cell either side of its middle; it stands as far forward as their
+      // spouts are in front of their middles (see plumbZ), so they're over its tanks' middles
       { kind: 'dispenser', at: [cellX(5), 0.22], z: DEMO_Z, valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('R'), 4 * CAP)], T: 10 }] },
       { kind: 'dispenser', at: [cellX(6), 0.22], z: DEMO_Z, valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('G'), 4 * CAP)], T: T_ROOM }] },
-      { kind: 'exchanger', at: [cellX(5.5), 0.48], z: DEMO_Z, valves: [0.25, 0.25] },
+      { kind: 'exchanger', at: [cellX(5.5), 0.48], z: DEMO_Z + plumbZ('dispenser'), valves: [0.25, 0.25] },
     ],
   },
   {
@@ -137,9 +139,9 @@ export const PRESETS: readonly Preset[] = [
         kind: 'separator', at: [cellX(5), 0.2], z: DEMO_Z, valves: [0.3],
         tanks: [{ contents: [atomsOf(singleOf('R'), 2 * CAP), atomsOf(singleOf('K'), 2 * CAP)], T: T_ROOM }],
       },
-      // under its spouts, a cell either side of its middle
-      { kind: 'dispenser', at: [cellX(4), 0.5], z: DEMO_Z },
-      { kind: 'dispenser', at: [cellX(6), 0.5], z: DEMO_Z },
+      // under its spouts, a cell either side of its middle, and as far forward as they are (see plumbZ)
+      { kind: 'dispenser', at: [cellX(4), 0.5], z: DEMO_Z + plumbZ('separator') },
+      { kind: 'dispenser', at: [cellX(6), 0.5], z: DEMO_Z + plumbZ('separator') },
     ],
   },
   {

@@ -250,7 +250,11 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     `tanks[0]` must allow for there being none.
   - A tank needn't be under its opening: one with a `neck` (the swell bulbs') has its bulb and neck where the flag
     says, and its own `x0` and `x1` are its inlet's, since it's the openings and spouts that line up (see the magnet).
-  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `neck`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `flat`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
+  - A tank needn't drain under its middle: one with `front` (the box tanks and the big tank) has a shallow hopper
+    under its whole floor leaning forward to its tip at the front, and all its plumbing (pipes, valves, spouts) is
+    `plumbZ` (`bodies.ts`) in front of the tool's middle. Build anything under its tanks at that depth, and get a
+    spout's place from `spoutAt`, never by assuming z = 0.
+  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `front`, `neck`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `flat`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
 - **Unique tools** (`UNIQUE_TOOLS`: the spectroscope, the receptacle and the shadow lamp) aren't on
   an equipment wheel and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
   whole supply station (`STATION` in `tools.ts`): its tanks are the funnel and the ship's reservoir, in that

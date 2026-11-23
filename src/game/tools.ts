@@ -26,6 +26,8 @@ export const TANK_H = 84;
  * fits in a cell, with room to spare for its neighbour's in the next.
  */
 export const TANK_SECTION = { w: 52, h: 92 };
+/** How deep the shallow hopper under the floor of a tank of that section is, down to its tip at the front (see ToolShape.front). */
+export const TANK_SUMP_H = 8;
 
 /**
  * How much room fluid takes up as it's drawn, in world units cubed per atom a vessel holds: a flask's inside over
@@ -109,7 +111,9 @@ export function tankPieces(sh: ToolShape, k: number, d: number): Piece[] {
   const box = { h, w0: w, d0: d, w1: w, d1: d };
   if (sh.cup) return [box, { h: sh.cup.h, w0: w, d0: d, w1: 2 * sh.cup.w, d1: 2 * sh.cup.w }];
   const sump = sh.sump;
-  if (sump) return [{ h: sump.h, w0: SUMP_TIP, d0: SUMP_TIP, w1: sump.w, d1: Math.min(d, sump.w) }, box];
+  // a hopper under a tank that drains at its front (see ToolShape.front) is as deep as the tank; leaning forward
+  // doesn't change how wide and deep it is at each height, so it holds what an upright one would
+  if (sump) return [{ h: sump.h, w0: SUMP_TIP, d0: SUMP_TIP, w1: sump.w, d1: sh.front ? d : Math.min(d, sump.w) }, box];
   return [box];
 }
 
@@ -228,10 +232,13 @@ export function sorterShares(): number[][] {
 
 /** How much the big tank holds, by volume: a hundred flasks. */
 export const BIG_TANK_CAP = 100 * CAP;
-/** The big tank's inside: an upright cylinder this wide, over a round sump this wide and deep. */
+/**
+ * The big tank's inside: an upright cylinder this wide, over a shallow round hopper as wide as it and this deep, which
+ * narrows to its tip at the front (see ToolShape.front).
+ */
 export const BIG_TANK_W = 200;
-const BIG_TANK_SUMP = { w: 30, h: 20 };
-/** The big tank's inside height, in local units: enough, with its sump, to hold a hundred flasks. */
+const BIG_TANK_SUMP = { w: BIG_TANK_W, h: 20 };
+/** The big tank's inside height, in local units: enough, with its hopper, to hold a hundred flasks. */
 export const BIG_TANK_H =
   (BIG_TANK_CAP * SPACE_PER_ATOM -
     spaceOf([{ h: BIG_TANK_SUMP.h, w0: SUMP_TIP, d0: SUMP_TIP, w1: BIG_TANK_SUMP.w, d1: BIG_TANK_SUMP.w, round: true }])) /
@@ -1037,7 +1044,8 @@ export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectroscope', 'receptacle', 
  * A tool's geometry in local units: multiply by the stage scale and offset by
  * the tool's position, which is the top center of its bounding box.
  * Every tank is open at y = 0 and has its floor at y = tankH (TANK_H unless
- * set), and drains through its own valve, straight below its center.
+ * set), and drains through its own valve, straight below its center (in front of it, if it drains at its front: see
+ * front).
  */
 export interface ToolShape {
   /**
@@ -1057,12 +1065,19 @@ export interface ToolShape {
    */
   cup?: { w: number; h: number };
   /**
-   * A narrow point under each tank's flat floor, `w` wide at the floor and `h` deep, narrowing to SUMP_TIP, which its
-   * valve drains from. A valve pours by how high the fluid stands above the tip (see Tool.level), so with a sump the
+   * A narrow point under the middle of each tank's flat floor, `w` wide at the floor and `h` deep, narrowing to
+   * SUMP_TIP, which its valve drains from; or with `front`, a shallow hopper under all of it, narrowing to its front. A valve pours by how high the fluid stands above the tip (see Tool.level), so with a sump the
    * last of it, down in the narrow point, still drains quickly, rather than a thin layer across the whole floor
    * trickling out ever more slowly.
    */
   sump?: { w: number; h: number };
+  /**
+   * Whether each tank's sump is a shallow hopper under its whole floor (`sump.w` its full width, and its full depth),
+   * narrowing to its tip at the middle of the floor's front edge, so its front wall runs straight down to the tip and
+   * its floor slopes down to it from the back and both sides: it drains at its front, and all its plumbing (pipes,
+   * valves and spouts) is there, just inside its front wall (see plumbZ in bodies.ts), not under its middle.
+   */
+  front?: boolean;
   /**
    * A narrow neck on top of each tank (a round one, `body` across), `w` across and `h` tall. The tank fills first,
    * then its neck, so a small change in how much it holds shows as a big change in how high it stands. Such a tank
@@ -1126,7 +1141,8 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     // a glass tank of the standard section (see TANK_SECTION), so it fits in a cell, beside another
     tanks: [{ name: 'tank', x0: -TANK_SECTION.w / 2, x1: TANK_SECTION.w / 2 }],
     tankH: TANK_SECTION.h,
-    sump: { w: 14, h: 7 },
+    sump: { w: TANK_SECTION.w, h: TANK_SUMP_H },
+    front: true,
     spouts: [0],
     valveY: TANK_SECTION.h + 14,
     spoutY: TANK_SECTION.h + 30,
@@ -1150,7 +1166,8 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
       { name: 'B', x0: CELL / 2 - TANK_SECTION.w / 2, x1: CELL / 2 + TANK_SECTION.w / 2 },
     ],
     tankH: TANK_SECTION.h,
-    sump: { w: 14, h: 7 },
+    sump: { w: TANK_SECTION.w, h: TANK_SUMP_H },
+    front: true,
     // the streams cross over in the exchanger, so each leaves on the other side, a cell apart (see CELL)
     spouts: [CELL / 2, -CELL / 2],
     valveY: TANK_SECTION.h + 13,
@@ -1164,7 +1181,8 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     // two outlets (see SEPARATOR_OUTLET), a cell (see CELL) either side of its tank, so a flask or a tool's tank fits
     // under each
     spouts: [-CELL, CELL],
-    sump: { w: 14, h: 7 },
+    sump: { w: TANK_SECTION.w, h: TANK_SUMP_H },
+    front: true,
     valveY: TANK_SECTION.h + 12,
     // under the manifold's arms, which slope down to them (see the view's SEP_ARMS): its peak's middle
     // TANK_SECTION.h + 24 down, a cell's run at 15° lower again, and a short pipe down from each arm's end
@@ -1234,6 +1252,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tankCap: BIG_TANK_CAP,
     round: true,
     sump: BIG_TANK_SUMP,
+    front: true,
     spouts: [0],
     valveY: BIG_TANK_H + 28,
     spoutY: BIG_TANK_H + 44,
