@@ -1,11 +1,10 @@
 import { volume, type Flask, type Vessel } from './flask';
 import { FLASK_H, fillLevel, flaskRadius } from './flaskShape';
 import { placeBox, type Box, type Part } from './physics';
-import { LAMP_POSE } from './presets';
 import { SCALE_SHAPE, type Scale } from './scale';
-import { CELL, groundAt, toCardinal, toCell, toLocal, toWorld, wrapAngle, type Pose, type Vec3 } from './space';
+import { CELL, groundAt, toCardinal, toCell, toLocal, toWorld, type Pose, type Vec3 } from './space';
 import {
-  HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, LAMP, METER_BODY, SHAPES, SHEET, STATION, STRIP, TANK_H, TEST_PAPER, THERMOMETER_ROD, dipUnder, footY, isThermometer, levelIn,
+  HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, LAMP, METER_BODY, SHAPES, STATION, STRIP, TANK_H, TEST_PAPER, THERMOMETER_ROD, dipUnder, footY, isThermometer, levelIn,
   tankDepth, tankPieces, tankX, overMouth, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
 } from './tools';
 
@@ -134,7 +133,7 @@ export function tankNoteY(t: Tool, k: number): number {
  * flow meter's readout round the pipe; the tube's top is flush with its opening, for a nozzle to snap onto (see
  * INLINE_DOCK). A dipper's (see DIPPERS) is only its top, where its stand's clamp holds it: a thermometer's rod's, or
  * a wicking strip's clip; the rest of it bumps into nothing, so it can stand down in a flask or a tank. A sheet of
- * shadow paper's is all of it, its bar and its paper, and so is a sheet of test paper's or bond paper's, lying flat. The shadow
+ * test paper's or bond paper's, lying flat, is all of it. The shadow
  * lamp's are its enclosure, its channel's two side walls, its end wall and the channel's floor (see LAMP): the
  * channel between them is clear, for things to stand in its light on its floor, and so is the bench round the trough.
  */
@@ -154,14 +153,14 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
     ];
   }
   if (t.kind === 'shadowlamp') {
-    const { h, wall, floor, slot, box, channel: ch } = LAMP;
+    const { h, wall, floor, box, channel: ch } = LAMP;
     const side = { x0: ch.x0, x1: ch.x1, y0: 0, y1: h, hz: wall / 2 };
     return [
       { x0: box.x0, x1: box.x1, y0: 0, y1: h, hz: ch.z + wall },
       { ...side, z: ch.z + wall / 2 },
       { ...side, z: -ch.z - wall / 2 },
       { x0: ch.x1, x1: ch.x1 + wall, y0: 0, y1: h, hz: ch.z + wall },
-      { x0: ch.x0, x1: ch.x1 - slot, y0: h - floor, y1: h, hz: ch.z },
+      { x0: ch.x0, x1: ch.x1, y0: h - floor, y1: h, hz: ch.z },
     ];
   }
   if (isThermometer(t.kind)) {
@@ -171,14 +170,6 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
   if (t.kind === 'strip') {
     // its clip, and the top of the paper it holds
     return [{ x0: b.x0, x1: b.x1, y0: b.y0, y1: Math.max(STRIP.clip.h, 24), hz: STRIP.clip.d / 2 }];
-  }
-  // all of a sheet, as thick as the bar clipped along its top: the bar, and under it the paper, which is narrower
-  if (t.kind === 'sheet') {
-    const hz = SHEET.clip.d / 2;
-    return [
-      { x0: b.x0, x1: b.x1, y0: b.y0, y1: SHEET.clip.h, hz },
-      { x0: -SHEET.side / 2, x1: SHEET.side / 2, y0: SHEET.clip.h, y1: b.y1, hz },
-    ];
   }
   // all of a sheet of test paper or bond paper, lying flat
   if (sh.flat) return [{ x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, hz: TEST_PAPER.d / 2 }];
@@ -476,61 +467,6 @@ export function docked(p: Pose, tools: readonly Tool[]): Pose {
   return p;
 }
 
-/* ---------------- the shadow lamp's slot ---------------- */
-
-/**
- * Where a sheet of shadow paper stands in the shadow lamp (see LAMP), facing the lamp: across the far end of its
- * channel, its back against the end wall's inner face, its foot on the bench, in the slot between the end wall and
- * the end of the channel's floor (see LAMP.slot), and its paper reaching from one side wall to the other, as high as
- * they are, with the bar along its top standing above them. It's slid in from above. The lamp never moves (see LAMP_POSE), so nor does this.
- */
-export const SHEET_SLOT: Pose = {
-  ...toWorld(LAMP_POSE, { x: LAMP.channel.x1 - SHEET.clip.d / 2, y: SHEET.top + SHEET.side - LAMP.h, z: 0 }),
-  yaw: wrapAngle(LAMP_POSE.yaw - Math.PI / 2),
-};
-
-/**
- * How near the slot a sheet let go of has to be held to go into it (see slotted): its middle no further than `along`
- * from the slot's along the channel; across the channel, no further than `out` from it toward the lamp's front (the
- * room), nor `back` the other way; and its top no more than `up` above where it would stand, nor `down` below.
- */
-export const SLOT_REACH = { along: 0.6 * CELL, out: CELL, back: 0.6 * CELL, up: 2 * CELL, down: CELL };
-
-/** Whether a pose is a sheet's in the shadow lamp's slot (see SHEET_SLOT), facing the lamp or with its back to it. */
-export function inSlot(p: Pose): boolean {
-  const s = SHEET_SLOT;
-  return Math.hypot(p.x - s.x, p.y - s.y, p.z - s.z) < 1 && Math.abs(Math.sin(p.yaw - s.yaw)) < 0.01;
-}
-
-/**
- * Where a sheet turned by `yaw` stands in the slot: in SHEET_SLOT, facing the lamp or with its back to it, whichever
- * is nearer how it's turned.
- */
-export function slotPose(yaw: number): Pose {
-  const s = SHEET_SLOT;
-  return { ...s, yaw: Math.cos(yaw - s.yaw) < -1e-6 ? wrapAngle(s.yaw + Math.PI) : s.yaw };
-}
-
-/** The sheet of shadow paper among `tools` that's in the shadow lamp's slot (see inSlot), if any, but for `but`. */
-export function sheetIn(tools: readonly Tool[], but: Tool | null = null): Tool | null {
-  return tools.find((t) => t.kind === 'sheet' && t !== but && inSlot(t.pose)) ?? null;
-}
-
-/**
- * A sheet of shadow paper `t` at p, snapped into the shadow lamp's slot (see SHEET_SLOT) if it's held near enough it
- * (see SLOT_REACH) and there's no sheet among `tools` in it already: where it would stand in it (see slotPose).
- * Otherwise just p. In the spirit of docked, a hose's nozzle
- * onto an instrument's tube.
- */
-export function slotted(t: Tool, p: Pose, tools: readonly Tool[]): Pose {
-  // from the slot, in the lamp's own frame: along its channel, up, and toward its front
-  const l = toLocal({ ...SHEET_SLOT, yaw: LAMP_POSE.yaw }, p);
-  const R = SLOT_REACH;
-  if (Math.abs(l.x) > R.along || l.z > R.out || l.z < -R.back || l.y > R.up || l.y < -R.down) return p;
-  if (!tools.some((u) => u.kind === 'shadowlamp') || sheetIn(tools, t)) return p;
-  return slotPose(p.yaw);
-}
-
 /** How tall a hose's nozzle is, up from its tip, and how far it reaches either side of its middle. */
 export const NOZZLE_H = 10;
 export const NOZZLE_R = 5;
@@ -573,11 +509,10 @@ const rodBack = (body: number) => Math.max(body / 2, FLASK_R) + STAND_CLEAR + ST
 
 /**
  * The stands holding up a tool, unless it's fixed where it is (built into a wall, or on its own bench), or it lies
- * flat on the counter (a sheet of test paper or bond paper), or it's a sheet in the shadow lamp's slot (see inSlot): clamped near
- * its top, behind it.
+ * flat on the counter (a sheet of test paper or bond paper): clamped near its top, behind it.
  */
 export function toolStands(t: Tool, pose = t.pose): Stand[] {
-  if (t.shape.fixed || t.shape.flat || (t.kind === 'sheet' && inSlot(pose))) return [];
+  if (t.shape.fixed || t.shape.flat) return [];
   const at = (x: number, y: number, z: number) => toWorld(pose, { x, y: -y, z });
   const b = t.shape.box;
   const body = TOOL_DEPTH[t.kind].body;

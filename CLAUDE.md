@@ -38,13 +38,13 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   the sandbox's proxy and pages render in a fallback font, hiding font-specific bugs.
 - Tools drain fast at 16×. Use slow valves, or screenshot early, to catch something mid-flow.
 - The dev server reloads the lab when a source file changes, so don't edit `src/` while a script is driving a page.
-- The shadow lamp's bench is in the front left corner (`LAMP_AREA`), its trough along the bench's edge toward the room
-  (stand at about z = 2650 and look down to see into its channel). `tool.press()` is its button, lighting it for
-  `lampShot(tool.valves[0])` sim seconds (the dial; `tool.lit` and `tool.left` say how it's going), and a sheet's
-  image is `tool.dose` (`SHEET.cells` a side over the square the light falls on, from its bottom row up, in sim seconds
-  of light): print that as text to
-  see a shadow's shape and depth, which a screenshot of a dark sheet shows poorly. It only darkens while frames are
-  drawn, so in software rendering a sim second of light takes many real ones.
+- The shadow lamp's bench is in the front left corner (`LAMP_AREA`), its trough along the bench's edge toward the room,
+  its screen at the left wall's end, facing the lamp (stand at about x = −380, z = 2690, yaw π − 1.3, pitch −0.6 to
+  look down the channel at it). `tool.press()` is its button, lighting it or putting it out (`tool.lit`), and what its
+  screen shows is `tool.glow` (`SCREEN.cells` a side, from its bottom row up, each row from its left as the lamp
+  faces it, 0 dark to 1 bright): print that as text to see a shadow's shape and depth exactly. It only follows the
+  light while frames are drawn, but catches up by the sim time gone by at each one, so in software rendering it's
+  settled within a few frames.
 - A sniff (F) goes in real time, and what she says of it comes up by the clock, so in software rendering, at a frame
   every few seconds, it's all been said and she's straightened up again within a frame or two. To look at it, hold
   her at the rim (set `lab.sniffing.until = Infinity` once it's a number, which is when her nose gets there), keep
@@ -69,14 +69,14 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `engine.ts` owns the lab: what's in it, the player, input, carrying and the sim loop.
   - `view.ts` draws it all with Three.js, and raycasts for what the crosshair is on. It also draws the equipment
     wheels' icons (`IconStudio`): a new one of each kind, drawn as in the lab, so there are no icons to keep up to date.
-    And it works out where the shadow lamp's light falls on the sheet in its slot (`Exposer`), from what's drawn
-    between them, seen from the bulb: the engine only counts the sim seconds of light the sheet is owed (`Tool.owed`),
-    which wait while nothing's drawn (the headless bench, sleep).
+    And it works out where the shadow lamp's light falls on its screen (`Exposer`), from what's drawn
+    between them, seen from the bulb: the engine only counts the sim seconds the screen has yet to catch up by
+    (`Tool.owed`), which wait while nothing's drawn (the headless bench, sleep).
+    The screen's cells each close on that light over a couple of sim seconds (`Tool.fluoresce`, `SCREEN.tau`).
   - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room, what fluid a
     dipper's foot (a thermometer's bulb, a wicking strip's tip) is in (`bathAt`), which the engine hands each one every
     frame (`Tool.bath`, or for a strip `Tool.dipIn`, which also says whether it may drink), where a dipper aimed at
-    a mouth hovers and dips (`dipPoses`), and where a sheet of shadow paper stands in the shadow lamp's slot
-    (`SHEET_SLOT`, `slotted`).
+    a mouth hovers and dips (`dipPoses`).
   - `physics.ts` is the collisions: yawed boxes, the player's cylinder and `walk`. What's held collides with nothing; only
     where it would be set down is checked (the engine's `placement` and `rest`).
   - `space.ts` is the room, poses, and the mapping from the old flat bench to its back wall.
@@ -135,7 +135,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Volume isn't atoms.** Capacities and flows are in `volume()` units: molecules by default, or atoms when the
   "volume counts molecules" toggle is off. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
 - **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
-  chemistry, cooling, the instruments' readings, the supply station's diverter, display and needle, and its changeover (block, door, lamp and alarm), a thermometer's bulb and its crack as it shatters, the shadow lamp's exposure and its light on the sheet in its slot, what a sheet of test paper or bond paper shows coming up (`Tool.showing`, over about 2 sim s, `PAPER_TAU`), and the drip and stream sounds. All of it
+  chemistry, cooling, the instruments' readings, the supply station's diverter, display and needle, and its changeover (block, door, lamp and alarm), a thermometer's bulb and its crack as it shatters, the shadow lamp's screen coming up and fading (`Tool.fluoresce`), what a sheet of test paper or bond paper shows coming up (`Tool.showing`, over about 2 sim s, `PAPER_TAU`), and the drip and stream sounds. All of it
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The one exception to the
   substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
@@ -186,6 +186,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     along it, with every mouth and spout over a cell's middle (`onGrid`, `toolAnchor` and `SCALE_ANCHOR` in
     `bodies.ts`; the engine's `gridded` and `toGrid`). So a tool's tanks and spouts must be a whole number of cells
     apart along it (`bodies.test.ts` checks every shape), and the counters' edges run along cells' edges. Height is free.
+    That's why the splitter, the multiplexer and the separator are three cells across for two outlets or inlets:
+    the one in the middle has to be over a cell too. The user prefers that to a narrower tool that isn't symmetrical.
 - **Hoses** aren't a tool: every spout and faucet has one, pulled out with the left button (`Hose.on` says which). A
   spout's fluid leaves at its hose's nozzle if it's out, so wherever fluid leaves a spout or faucet, use the engine's
   `outletAt` and `faucetOutlet`, not `spoutAt` or `fa.spout`.
@@ -202,7 +204,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   it, and what the buttons act on, never a neighbour chosen by nearness to where it's hit. Clamp stands are never
   outlined, which is why they aren't hit.
 - **What's drawn is what casts a shadow.** The shadow lamp's light (`Exposer` in `view.ts`) goes by the meshes in the
-  scene in its channel, between its pane and its sheet: opaque ones stop it, see-through ones (`transparent` materials) don't, and
+  scene in its channel, between its pane and its screen: opaque ones stop it, see-through ones (`transparent` materials) don't, and
   fluid dims it by its rings. So whatever draws fluid, in any material, must mark that material with `shade()` each
   time it's drawn (`FluidMesh` and `fluidOpacity` do), or it'll be taken for glass or for something solid, by whether
   it happens to be see-through; and a fluid's solid must be closed, but for where it's cut off at its surface.
@@ -218,7 +220,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     used up. `cabinet.test.ts` checks it fits.
   - If it has state of its own that a save should keep, `Tool.memory` and `Tool.remember`.
   - Tests and the README.
-  - A tool needn't have tanks at all: the thermometers and the wicking strip (the `DIPPERS`), a sheet of shadow paper,
+  - A tool needn't have tanks at all: the thermometers and the wicking strip (the `DIPPERS`),
     a sheet of test paper or bond paper and the shadow lamp have none, nor spouts nor
     valves. Then its grid anchor is its middle (`toolAnchor`), Enter writes its own `note`, and its collision is whatever
     `toolParts` gives it (a thermometer's, only the top of its rod; a strip's, its clip), so code that reaches for
@@ -234,7 +236,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   `COUNTERS`): a trough, with no tanks and no stand, whose channel things are set down in like anywhere on the grid,
   on its floor, which is a little higher than the bench (`LAMP_FLOOR` in `space.ts`: the one place `counterUnder` and
   `groundAt` don't say `LIFT` over a counter, so use what they say); its button is a part of its own for the crosshair
-  (`'button'`), and its dial is its one valve.
+  (`'button'`), and it has no valves. Its screen, on the inner face of its end wall, is part of it (`SCREEN`,
+  `Tool.glow`): never saved, it comes up from dark.
 - **The station is fitted for a supply** (`Tool.supply`, see `supply.ts`): the antinucleant in a new lab, the
   cryostabilizer in a save from before there was any other. Anything about what it takes or wants goes by
   `t.supply` (its species, goal, start and reservoir's capacity), never by `TARGET` or `GOAL_TARGET`. With enough in
@@ -248,17 +251,16 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   it's fitted for the last of `SUPPLIES`), not what's lying around in vessels.
 - **Saves** stay at format v1. New fields are optional and the loaders tolerate their absence. Species are stored by
   name. A tool's own state goes in `Tool.memory` as numbers (a sheet of blotting paper keeps what it shows there
-  only while that's still coming up; with none, it loads showing all it holds); a sheet of shadow paper's image, which is thousands of
-  cells, goes beside it as a packed string (`Tool.image`, `Tool.develop`).
+  only while that's still coming up; with none, it loads showing all it holds).
   A saved tool of a kind there no longer is (the composition analyzer, which the test paper replaced, the bond
-  visualizer, which the bond paper replaced, the dish and the sleeper culture) is dropped as
+  visualizer, which the bond paper replaced, the dish, the sleeper culture and the shadow paper, which the shadow lamp's own screen replaced) is dropped as
   the save loads, with the hoses on its spouts (its id isn't given to a tool the load adds, or that tool would get
   them); so is a stored volume slider for a sound that's gone (`parseVolumes`).
 
 ## Design preferences
 
 - Don't give away the chemistry. The player is meant to work it out. A sheet of bond paper has nothing written on it: its four dots are in the four colors' own colors, at the user's request, and the lines between them are
-  unlabeled, the size sorter's screens look plain, nothing is written on the shadow lamp or its paper (and nothing says what dims its light), the equipment wheels have no names, and the faucets aren't labeled (they're the five pure
+  unlabeled, the size sorter's screens look plain (the separator's arm for what has a black atom is dark gray, at the user's request), nothing is written on the shadow lamp or its screen (and nothing says what dims its light), the equipment wheels have no names, and the faucets aren't labeled (they're the five pure
   atoms, the four colors and the solvent, which the user chose). A sheet of test paper has no text either, but its four sectors are outlined in black, at the user's request. The spectroscope's axes are labeled E (uB) and f (in S, with an SI prefix to suit the range, as mS), at the user's request: both on log scales with
   base-10 log-paper ticks, only the powers of ten numbered, f's ranging itself to the tallest line, and no peak labeled. It plots each bond at the size of its
   energy, a stable one as a peak above the baseline and an uphill one as a dip below it, at the user's request. Ask before adding any visual cue that reveals how a tool or reaction works.

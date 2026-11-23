@@ -17,7 +17,7 @@ import { CAP, DELIVERY, GOAL_PURITY, TRACE } from './config';
 import { Flask, Vessel, fluidAlpha, fluidRGB, volume } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, Scale } from './scale';
-import { COUNTERS, LIFT, ROOM, groundAt, toLocal, toWorld, type Vec3 } from './space';
+import { COUNTERS, LIFT, ROOM, groundAt, toWorld, type Vec3 } from './space';
 import { PORT_FRAC, PORT_WALL, porthole, type Porthole } from './porthole';
 import { AIRLOCK, POD } from './airlock';
 import { arrival, notice, type Block } from '../intro/notice';
@@ -26,7 +26,7 @@ import { litresOf, type Supply } from './supply';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
-  clockText, LAMP, SHEET, sheetLit, darkness, ringShare, atomSector, BOND_ENDS, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
+  clockText, LAMP, SCREEN, ringShare, atomSector, BOND_ENDS, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, TEST_PAPER, paperTriangles, sectorInset, BOND_PAPER, bondDots, isBlotter, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, Tool,
 } from './tools';
@@ -183,8 +183,12 @@ const DROP_R = 3;
 const DROP_R_ATOMS = 1.5e6;
 /** A CRT's phosphor green. */
 const PHOSPHOR = '64, 255, 110';
-/** The separator's splitter, below its valve, in local units (y down). */
-const SEP_BODY = { x0: -210, x1: 210, y0: 100, y1: 112 };
+/**
+ * The separator's manifold, below its valve, in local units (y down): two arms sloping down from a peak under its
+ * tank, midway between its spouts, each `slope` (radians) below level, `thick` through and `deep` front to back,
+ * reaching `over` past its spout; `top` is how far down the peak's top is.
+ */
+const SEP_ARMS = { top: 102, slope: Math.PI / 12, thick: 12, deep: 20, over: 10 };
 /** Height of each line of a label, in world units. */
 const LABEL_H = 10;
 /** How far above a flask's mouth or a scale's platform its note sits, to the note's middle. */
@@ -255,6 +259,8 @@ const darkMat = new THREE.MeshStandardMaterial({ color: 0x30373a, metalness: 0.6
 const markMat = new THREE.MeshStandardMaterial({ color: 0x30373a, metalness: 0.2, roughness: 0.6, side: THREE.DoubleSide });
 const MARK_LIFT = 0.08;
 const panelMat = new THREE.MeshPhysicalMaterial({ color: 0xc4cbc7, metalness: 0.1, roughness: 0.5, clearcoat: 0.4, clearcoatRoughness: 0.35 });
+/** The separator's arm that molecules with a black atom leave by: the same paint, in a dark gray, at the user's request. */
+const blackSideMat = new THREE.MeshPhysicalMaterial({ color: 0x45494b, metalness: 0.1, roughness: 0.5, clearcoat: 0.4, clearcoatRoughness: 0.35 });
 const leverMat = new THREE.MeshPhysicalMaterial({ color: 0x15191a, metalness: 0, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.2 });
 /** A thermometer's white enamel backing (see THERMOMETER_ROD). */
 const enamelMat = new THREE.MeshStandardMaterial({ color: 0xf1efe6, roughness: 0.4 });
@@ -266,10 +272,12 @@ const keyMats = {
 /** The shadow lamp's light, as its pane glows with it: a faint lavender, like a blacklight's. */
 const LAMP_GLOW = 0xb9a6ff;
 /**
- * Shadow paper (see SHEET): its color as new, a paper cream, and where the shadow lamp's light has darkened it all
- * the way, a dark purple-brown; in between, a blend of the two by how dark it is (see darkness). 0 to 255 a channel.
+ * The shadow lamp's screen (see SCREEN), a wall of green phosphor: what it gives off where no light falls on it, a
+ * deep, dark green; and where the lamp's light falls on it unshadowed, a bright phosphor green; in between, a blend
+ * of the two by how brightly it's fluorescing (see Tool.glow). All of it is light of its own (0 to 255 a channel),
+ * so a shadow on it is green too, whatever the room's light; `back` is what's behind that, all but black.
  */
-const SHEET_COLORS = { fresh: [230, 223, 200], dark: [46, 29, 41] } as const;
+const SCREEN_COLORS = { back: 0x04120c, dark: [18, 88, 62], bright: [74, 234, 142] } as const;
 /** Blotting paper, for the wicking strip and the sheets of test paper and bond paper. */
 const paperMat = new THREE.MeshStandardMaterial({ color: 0xe6dfc8, roughness: 0.95, metalness: 0 });
 /** Its cream, as drawn on a canvas. */
@@ -1561,13 +1569,14 @@ class ToolView {
    * and its column), and the jagged end it's left with once it's shattered (see buildThermometer).
    */
   private spirit?: { column: THREE.Mesh; whole: THREE.Group; stump: THREE.Group };
-  /** The shadow lamp's pane and its button's cap, which glow while it's lit, the cap pushed in (see buildLamp). */
-  private lamp?: { pane: THREE.MeshStandardMaterial; cap: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>; out: number };
   /**
-   * A sheet of shadow paper's picture (see buildSheet), how many of its pixels wide the margin round the image is,
-   * and the dose it was last drawn from (see Tool.dosed).
+   * The shadow lamp's pane and its button's cap, which glow while it's lit, the cap pushed in (see buildLamp); and
+   * its screen's picture of what it's fluorescing, with the glow it was last drawn from (see Tool.glowed).
    */
-  private sheet?: { tex: THREE.DataTexture; mat: THREE.MeshStandardMaterial; edge: number; drawn: number };
+  private lamp?: {
+    pane: THREE.MeshStandardMaterial; cap: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>; out: number;
+    tex: THREE.DataTexture; screen: THREE.MeshStandardMaterial; drawn: number;
+  };
   /** The supply station's gauge's segments, bottom up. */
   private segments: THREE.MeshStandardMaterial[] = [];
   /**
@@ -1602,16 +1611,22 @@ class ToolView {
         outlet(k, [[sh.spouts[k], HELIX.y + HELIX.r], [sh.spouts[k], sh.spoutY - 4]]);
       });
     else if (t.kind === 'separator') {
-      // the manifold: one pipe in, five out, with a divider between each two outlets, and a handle on its left end
-      pipes(art, [[0, floor], [0, SEP_BODY.y0]]);
-      sh.spouts.forEach((x, k) => outlet(k, [[x, SEP_BODY.y1], [x, sh.spoutY - 4]]));
-      block(art, panelMat, SEP_BODY.x0, SEP_BODY.x1, SEP_BODY.y0, SEP_BODY.y1, -10, 10, 2);
-      for (let k = 1; k < sh.spouts.length; k++) {
-        const x = (sh.spouts[k - 1] + sh.spouts[k]) / 2;
-        block(art, darkMat, x - 0.8, x + 0.8, SEP_BODY.y0 + 4, SEP_BODY.y1, 10, 10.6);
-      }
-      const { x0, y0, y1 } = SEP_BODY;
-      pipes(art, [[x0, y0 + 3], [x0 - 6, y0 + 3], [x0 - 6, y1 - 3], [x0, y1 - 3]], 1.3);
+      // the manifold: the pipe from the tank runs down to a peak midway between the spouts, and from there an arm
+      // slopes down to each, the one for what has a black atom in a dark gray, which is how its two sides are told apart
+      const { top, slope, thick, deep, over } = SEP_ARMS;
+      const [x0, x1] = sh.spouts;
+      const peak = (x0 + x1) / 2;
+      const mid = top + thick / 2;
+      pipes(art, [[peak, floor], [peak, mid]]);
+      [x0, x1].forEach((x, k) => {
+        const reach = Math.abs(x - peak) + over;
+        const dir = Math.sign(x - peak);
+        // (its middle, half its reach out from the peak and as far down as its slope takes it by there)
+        const [cx, cy, len] = [peak + (dir * reach) / 2, mid + (reach / 2) * Math.tan(slope), reach / Math.cos(slope) + thick / 2];
+        const arm = block(art, k ? blackSideMat : panelMat, cx - len / 2, cx + len / 2, cy - thick / 2, cy + thick / 2, -deep / 2, deep / 2, 2);
+        arm.rotation.z = -dir * slope;
+        outlet(k, [[x, mid + Math.abs(x - peak) * Math.tan(slope)], [x, sh.spoutY - 4]]);
+      });
     } else if (t.kind === 'splitter') {
       const fork = sh.valveY + 10;
       pipes(art, [[0, TH], [0, fork]]);
@@ -1642,7 +1657,6 @@ class ToolView {
     }
     else if (t.kind === 'strip') this.buildStrip();
     else if (t.kind === 'shadowlamp') this.buildLamp(pick);
-    else if (t.kind === 'sheet') this.buildSheet();
     else if (isBlotter(t.kind)) this.buildBlotter();
     else if (isThermometer(t.kind)) this.buildThermometer(t.kind);
     else if (t.kind === 'column') {
@@ -1958,22 +1972,21 @@ class ToolView {
   /**
    * The shadow lamp (see LAMP): one long, low trough. At one end its enclosure, a closed box with a square pane in a
    * dark bezel in its face onto the channel, which its light leaves by, and on its front a round button in a dark
-   * collar, beside its dial (which is built with the valves, like any tool's dial); from it
-   * the channel's two side walls, and its floor between them, a plate that stops a little short of the end wall; and
-   * the end wall across their far ends, which a sheet stands against, in the slot the floor leaves. The pane
-   * glows lavender while it's lit, and the button's cap with it, pushed in, and that's all the light it gives: it
-   * lights nothing in the room.
+   * collar; from it the channel's two side walls, and its floor between them; and the end wall across their far ends,
+   * with the screen set in its inner face, straight across from the pane: a square of green phosphor, dark where no
+   * light falls on it and bright where it's fluorescing (see drawScreen). The pane glows lavender while it's lit, and the
+   * button's cap with it, pushed in. None of it lights anything in the room.
    */
   private buildLamp(pick: (m: THREE.Object3D, part: 'button') => void): void {
     const { art } = this;
-    const { h, wall, floor, slot, box, channel: ch, window: win } = LAMP;
+    const { h, wall, floor, box, channel: ch, window: win } = LAMP;
     const out = ch.z + wall;
     // the enclosure, the two side walls from its face on, and the end wall across them
     block(art, panelMat, box.x0, box.x1, 0, h, -out, out, 1.5);
     block(art, panelMat, ch.x0, ch.x1 + wall, 0, h, ch.z, out);
     block(art, panelMat, ch.x0, ch.x1 + wall, 0, h, -out, -ch.z);
     block(art, panelMat, ch.x1, ch.x1 + wall, 0, h, -ch.z, ch.z);
-    block(art, panelMat, ch.x0, ch.x1 - slot, h - floor, h, -ch.z, ch.z);
+    block(art, panelMat, ch.x0, ch.x1, h - floor, h, -ch.z, ch.z);
     // the pane in the enclosure's face: dark glass, glowing with the lamp's light while it's lit, in a dark bezel
     const glass = new THREE.MeshStandardMaterial({ color: 0x6f6a86, roughness: 0.25, metalness: 0, emissive: LAMP_GLOW, emissiveIntensity: 0 });
     const [y0, y1] = [win.y - win.r, win.y + win.r];
@@ -1981,7 +1994,7 @@ class ToolView {
     const lip = 3;
     for (const [py0, py1, z0, z1] of [[y0 - lip, y0, -win.r - lip, win.r + lip], [y0, y1, -win.r - lip, -win.r], [y0, y1, win.r, win.r + lip]])
       block(art, darkMat, ch.x0, ch.x0 + 1.5, py0, py1, z0, z1).castShadow = false;
-    // the button on the enclosure's front, beside the dial: a round cap in a dark collar, of the pane's glass
+    // the button on the enclosure's front: a round cap in a dark collar, of the pane's glass
     const bt = LAMP.button;
     const collar = new THREE.Mesh(new THREE.CylinderGeometry(bt.r + 2.5, bt.r + 3.5, 3, 24).rotateX(Math.PI / 2), darkMat);
     collar.position.set(bt.x, -bt.y, out + 1.5);
@@ -1995,35 +2008,38 @@ class ToolView {
       art.add(m);
       pick(m, 'button');
     }
-    this.lamp = { pane: glass, cap, out: out + 4 };
+    // the screen, on the end wall's inner face, facing the lamp: its picture's left is the screen's left as the lamp
+    // faces it, a pixel to each of its cells
+    const n = SCREEN.cells;
+    const px = new Uint8Array(4 * n * n);
+    for (let i = 0; i < n * n; i++) px[4 * i + 3] = 255;
+    const tex = new THREE.DataTexture(px, n, n, THREE.RGBAFormat);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.magFilter = tex.minFilter = THREE.LinearFilter;
+    tex.needsUpdate = true;
+    const screen = new THREE.MeshStandardMaterial({
+      color: SCREEN_COLORS.back, roughness: 0.9, metalness: 0, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 1,
+    });
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(SCREEN.side, SCREEN.side).rotateY(-Math.PI / 2), screen);
+    face.position.set(ch.x1 - 0.2, -win.y, 0);
+    face.receiveShadow = true;
+    art.add(face);
+    this.lamp = { pane: glass, cap, out: out + 4, tex, screen, drawn: -1 };
   }
 
   /**
-   * A sheet of shadow paper (see SHEET): a square of paper with no thickness, hanging from a dark bar clipped along
-   * its top edge, with its image on it (see drawSheet), seen from both sides, from behind as through the paper. The
-   * picture is of the whole paper, at the size of the image's cells: the image in the middle, and the margin round it.
+   * Draw what the shadow lamp's screen is fluorescing, if that's changed since it was last drawn: each cell giving off
+   * its green, from dark to bright by how brightly it is (see Tool.glow).
    */
-  private buildSheet(): void {
-    const { side, top, clip, cells } = SHEET;
-    block(this.art, darkMat, -side / 2 - 1, side / 2 + 1, 0, clip.h, -clip.d / 2, clip.d / 2, 0.8);
-    const edge = Math.round((SHEET.margin * cells) / sheetLit());
-    const n = cells + 2 * edge;
-    const px = new Uint8Array(4 * n * n);
-    for (let i = 0; i < n * n; i++) px.set([...SHEET_COLORS.fresh, 255], 4 * i);
-    const tex = new THREE.DataTexture(px, n, n, THREE.RGBAFormat);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.magFilter = THREE.LinearFilter;
-    tex.minFilter = THREE.LinearMipmapLinearFilter;
-    tex.generateMipmaps = true;
-    // lit like paper, but glowing a little with its own image too, so that shows whichever way the sheet faces the
-    // room's lights
-    const mat = new THREE.MeshStandardMaterial({
-      map: tex, roughness: 0.95, metalness: 0, side: THREE.DoubleSide, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.3,
-    });
-    const paper = new THREE.Mesh(new THREE.PlaneGeometry(side, side).translate(0, -(top + side / 2), 0), mat);
-    paper.castShadow = paper.receiveShadow = true;
-    this.art.add(paper);
-    this.sheet = { tex, mat, edge, drawn: -1 };
+  private drawScreen(): void {
+    const l = this.lamp!;
+    const { glow, glowed } = this.t;
+    if (l.drawn === glowed) return;
+    l.drawn = glowed;
+    const px = l.tex.image.data as Uint8Array;
+    const { dark, bright } = SCREEN_COLORS;
+    for (let i = 0; i < glow.length; i++) for (let c = 0; c < 3; c++) px[4 * i + c] = Math.round(dark[c] + (bright[c] - dark[c]) * glow[i]);
+    l.tex.needsUpdate = true;
   }
 
   /**
@@ -2040,27 +2056,6 @@ class ToolView {
     this.art.add(face);
     this.screen = new Screen(face, -w / 2, w / 2, -d / 2, d / 2, 0.06, 8);
     this.screen.tex.anisotropy = 8;
-  }
-
-  /**
-   * Draw a sheet of shadow paper's image, if the light it's had has changed since it was last drawn: each cell as dark
-   * as it is, in the middle of its picture; the margin round it stays as new.
-   */
-  private drawSheet(): void {
-    const sh = this.sheet!;
-    const { dose, dosed } = this.t;
-    if (sh.drawn === dosed) return;
-    sh.drawn = dosed;
-    const { fresh, dark } = SHEET_COLORS;
-    const px = sh.tex.image.data as Uint8Array;
-    const n = SHEET.cells;
-    const across = n + 2 * sh.edge;
-    for (let i = 0; i < dose.length; i++) {
-      const d = darkness(dose[i]);
-      const at = 4 * ((Math.floor(i / n) + sh.edge) * across + (i % n) + sh.edge);
-      for (let c = 0; c < 3; c++) px[at + c] = Math.round(fresh[c] + (dark[c] - fresh[c]) * d);
-    }
-    sh.tex.needsUpdate = true;
   }
 
   /**
@@ -2604,8 +2599,8 @@ class ToolView {
       pane.emissiveIntensity = t.lit ? 1.5 : 0;
       cap.material.emissiveIntensity = t.lit ? 1.1 : 0;
       cap.position.z = t.lit ? out - 2.2 : out;
+      this.drawScreen();
     }
-    if (this.sheet) this.drawSheet();
     if (t.kind === 'strip' && this.screen) drawStrip(this.screen, t);
     if (t.kind === 'testpaper' && this.screen) drawTestPaper(this.screen, t);
     if (t.kind === 'bondpaper' && this.screen) drawBondPaper(this.screen, t);
@@ -2675,8 +2670,8 @@ class ToolView {
     this.changeover?.glow.material.dispose();
     this.lamp?.pane.dispose();
     this.lamp?.cap.material.dispose();
-    this.sheet?.tex.dispose();
-    this.sheet?.mat.dispose();
+    this.lamp?.tex.dispose();
+    this.lamp?.screen.dispose();
   }
 }
 
@@ -3837,7 +3832,7 @@ function buildFaucets(
  * spout and its hose; its knob, which is for its note, stands for the whole faucet. The supply station, built into the
  * wall, is outlined a part at a time as ever: its funnel, its reservoir's window, or one of its two faucets (its
  * spout's pipe, with its valve); its plate, nothing. Of the shadow lamp, which stays where it is too, only its button
- * and its dial are. Null for nothing.
+ * is. Null for nothing.
  */
 function partOf(p: Pick): unknown {
   switch (p.kind) {
@@ -3845,7 +3840,7 @@ function partOf(p: Pick): unknown {
     case 'tool': {
       const { t } = p;
       if (p.part === 'button') return `tool ${t.id} button`;
-      if (t.kind === 'shadowlamp') return p.part === 'valve' ? `tool ${t.id} dial` : null;
+      if (t.kind === 'shadowlamp') return null;
       if (p.part === 'tank') return `tool ${t.id} tank ${p.k}`;
       if (p.part === 'spout') return `tool ${t.id} spout ${p.k}`;
       // (the station's one valve is its faucet's, so it goes with that spout)
@@ -4369,8 +4364,8 @@ class Outliner {
 
 /**
  * How the shadow lamp's light is worked out (see Exposer): how many sim seconds of it, at most, go by one look along
- * the beam (`per`), so the more light there is to cast at once, the more ways through it it's looked along, between
- * `min` and `max` a frame. And, only where the graphics card can't keep the pictures it needs to measure the light's
+ * the beam (`per`), so the more its screen has to catch up by at once, the more ways through it it's looked along,
+ * between `min` and `max` a frame. And, only where the graphics card can't keep the pictures it needs to measure the light's
  * way through fluid (see Exposer's `float`): how long each body of fluid in the way is taken to be instead, in world
  * units (`flat`), and the most dimming, as a power of e, that all the fluid in the way of one cell can then come to
  * (`most`).
@@ -4411,18 +4406,18 @@ function winding(g: THREE.BufferGeometry): number {
 }
 
 /**
- * What of the shadow lamp's light reaches each cell of the sheet in its slot (see LAMP and SHEET), past whatever
+ * What of the shadow lamp's light reaches each cell of its screen (see LAMP and SCREEN), past whatever
  * stands between them: worked out from what's drawn, so that what casts a shadow is just what's seen, with no model of
  * its own of what's where.
  *
  * The lamp's light is a beam, its rays all but parallel (see LAMP.spread). So the scene is drawn as seen looking
  * along the channel from the lamp's window, with no perspective, every line of sight running the same way, onto a
- * picture that is exactly the square of the sheet the beam lights, with a pixel to each of its cells: whatever's
- * drawn over a pixel is in the way of the ray to that cell. Only what's in the beam, between the window and the sheet,
+ * picture that is exactly the screen, with a pixel to each of its cells: whatever's
+ * drawn over a pixel is in the way of the ray to that cell. Only what's in the beam, between the window and the screen,
  * is drawn, in place of each thing a stand-in of the same shape drawn in a plain material: everything opaque counts as
  * in the way, all the way; glass, and whatever else is see-through, isn't drawn at all, so the light goes straight
- * through it, neither dimmed nor bent, and nor are labels, lines, the lamp itself (its walls stand clear of the beam)
- * or the sheet.
+ * through it, neither dimmed nor bent, and nor are labels, lines or the lamp itself (its walls stand clear of the
+ * beam, and its screen is what the light falls on).
  *
  * Fluid dims the light by how many of its molecules have a ring in them and how far through it the light goes (see
  * lampLight), whatever it looks like to the eye. Whatever draws fluid says so (see Shade), and its stand-in is drawn
@@ -4438,14 +4433,14 @@ function winding(g: THREE.BufferGeometry): number {
  *
  * That's done several times, each looking a little off straight along the channel, as far as the beam's rays stray,
  * and through its cells a little off their middles, and averaged: so a shadow's
- * edge is soft, the softer the further from the sheet what casts it is, since the lamp isn't a point, and smooth,
+ * edge is soft, the softer the further from the screen what casts it is, since the lamp isn't a point, and smooth,
  * though the cells are coarse. The ways it looks are a fixed sequence, carried on from frame to frame, so what's lit
  * over several frames is lit along more of them.
  *
- * It lights nothing: it only says where the lamp's light falls, for the sheet to darken by (see Tool.expose).
+ * It lights nothing: it only says where the lamp's light falls, for the screen to fluoresce by (see Tool.fluoresce).
  */
 class Exposer {
-  private n = SHEET.cells;
+  private n = SCREEN.cells;
   /**
    * Seen one way along the beam: in green, how many opaque things are in the way of each cell; in red, how much
    * the fluid in the way dims the light to it, as a power of e (over EXPOSURE.most, if not `float`).
@@ -4585,27 +4580,27 @@ class Exposer {
   }
 
   /**
-   * How much of `lamp`'s light reaches each cell of `sheet`, in its slot, as `scene` stands (drawn already this
-   * frame, so everything's where it is): from 0 to 1 a cell, in the order of Tool.dose; for `owed` sim seconds of it,
-   * which only sets how many ways along the beam it's worked out from. What's under `own` (the lamp's and the sheet's
-   * own drawings) casts no shadow. What's returned is good until the next call. The renderer is left drawing to the
-   * screen, as it was.
+   * How much of `lamp`'s light reaches each cell of its screen, as `scene` stands (drawn already this
+   * frame, so everything's where it is): from 0 to 1 a cell, in the order of Tool.glow; for `owed` sim seconds of it,
+   * which only sets how many ways along the beam it's worked out from. What's under `own` (the lamp's own drawing)
+   * casts no shadow. What's returned is good until the next call. The renderer is left drawing to the canvas, as it
+   * was.
    */
-  expose(renderer: THREE.WebGLRenderer, scene: THREE.Scene, lamp: Tool, sheet: Tool, own: readonly THREE.Object3D[], owed: number): Float32Array {
+  expose(renderer: THREE.WebGLRenderer, scene: THREE.Scene, lamp: Tool, own: THREE.Object3D, owed: number): Float32Array {
     const { n, camera } = this;
     const { channel: ch, window: win, spread } = LAMP;
     const half = win.r;
     const pose = lamp.pose;
-    // from the middle of the window, looking straight along the channel at the sheet, which is `far` off
+    // from the middle of the window, looking straight along the channel at the screen, which is `far` off
     const from = toWorld(pose, { x: ch.x0, y: -win.y, z: 0 });
-    const far = toLocal(pose, sheet.pose).x - ch.x0;
+    const far = ch.x1 - ch.x0;
     camera.position.set(from.x, from.y, from.z);
     camera.rotation.set(0, pose.yaw - Math.PI / 2, 0);
     camera.updateMatrixWorld();
     const right = new THREE.Vector3(1, 0, 0).applyEuler(camera.rotation);
     const ahead = new THREE.Vector3(0, 0, -1).applyEuler(camera.rotation);
 
-    // what's in the way: whatever's drawn in the beam between the window and the sheet, a stand-in for each
+    // what's in the way: whatever's drawn in the beam between the window and the screen, a stand-in for each
     const reach = half + spread * far;
     this.beam.makeEmpty();
     for (const d of [0, far])
@@ -4613,9 +4608,8 @@ class Exposer {
         for (const sy of [-reach, reach])
           this.beam.expandByPoint(new THREE.Vector3(from.x, from.y + sy, from.z).addScaledVector(ahead, d).addScaledVector(right, sx));
     this.used = 0;
-    const skip = new Set(own);
     const visit = (o: THREE.Object3D): void => {
-      if (!o.visible || skip.has(o)) return;
+      if (!o.visible || o === own) return;
       if (o instanceof THREE.Mesh && !(o instanceof THREE.InstancedMesh) && o.layers.isEnabled(0)) this.take(o);
       for (const c of o.children) visit(c);
     };
@@ -4638,8 +4632,8 @@ class Exposer {
       const a = 2 * Math.PI * corput(i, 3);
       const [sx, sy] = [r * Math.cos(a), r * Math.sin(a)];
       const [jx, jy] = [(corput(i, 5) - 0.5) * cell, (corput(i, 7) - 0.5) * cell];
-      // no perspective: each point is drawn where the line through it that way meets the sheet, and the picture is
-      // the square of the sheet the beam lights, whichever way it's looked along
+      // no perspective: each point is drawn where the line through it that way meets the screen, and the picture is
+      // the screen, whichever way it's looked along
       camera.projectionMatrix.set(
         1 / half, 0, sx / half, (far * sx - jx) / half,
         0, 1 / half, sy / half, (far * sy - jy) / half,
@@ -4664,15 +4658,9 @@ class Exposer {
     renderer.readRenderTargetPixels(this.out, 0, 0, n, n, this.pixels);
     renderer.setRenderTarget(null);
     renderer.setClearColor(this.clear, clearAlpha);
-    // as the lamp sees it, left to right is the way the sheet's own cells run if it faces the lamp; if its back is to
-    // the lamp, they run the other way
-    const flip = Math.sin(sheet.pose.yaw - pose.yaw) > 0;
+    // (as the lamp sees it, left to right and bottom to top, which is the way the screen's cells run)
     const { pixels, light } = this;
-    for (let j = 0; j < n; j++)
-      for (let i = 0; i < n; i++) {
-        const p = 4 * (j * n + (flip ? n - 1 - i : i));
-        light[j * n + i] = (pixels[p] * 256 + pixels[p + 1]) / 65535;
-      }
+    for (let i = 0; i < n * n; i++) light[i] = (pixels[4 * i] * 256 + pixels[4 * i + 1]) / 65535;
     return light;
   }
 
@@ -4916,23 +4904,19 @@ export class View {
   }
 
   /**
-   * The shadow lamp's light, for as long as the sheet in its slot is owed it (see Tool.owed): the sheet is darkened
-   * by as much of it as gets past whatever stands in the way just now (see Exposer), and nothing's owed any more.
+   * The shadow lamp's screen catches up, by the sim seconds it's owed (see Tool.owed), with as much of the lamp's
+   * light as gets past whatever stands in the way just now (see Exposer); or, with the lamp out, with the dark.
    */
   private shine(): void {
     for (const [lamp, v] of this.tools) {
-      const sheet = lamp.sheet;
-      const sv = sheet && this.tools.get(sheet);
-      if (lamp.kind !== 'shadowlamp' || !(lamp.owed > 0) || !sheet || !sv) continue;
-      // (a sheet that's as dark as it gets all over has nothing left to show, so there's nothing to work out)
-      if (sheet.spent) {
-        lamp.owed = 0;
+      if (lamp.kind !== 'shadowlamp' || !(lamp.owed > 0)) continue;
+      if (!lamp.lit) {
+        lamp.fluoresce(null);
         continue;
       }
       const ext = this.renderer.extensions;
       this.exposer ??= new Exposer(ext.has('EXT_color_buffer_float') || ext.has('EXT_color_buffer_half_float'));
-      sheet.expose(this.exposer.expose(this.renderer, this.scene, lamp, sheet, [v.root, sv.root], lamp.owed), lamp.owed);
-      lamp.owed = 0;
+      lamp.fluoresce(this.exposer.expose(this.renderer, this.scene, lamp, v.root, lamp.owed));
     }
   }
 

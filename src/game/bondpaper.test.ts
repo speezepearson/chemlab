@@ -212,7 +212,6 @@ describe("bond paper's paper", () => {
   it('is a sheet of test paper printed differently: the same shape, and as much soaked up', () => {
     expect([...BLOTTERS].sort()).toEqual(['bondpaper', 'testpaper']);
     expect(isBlotter('bondpaper')).toBe(true);
-    expect(isBlotter('sheet')).toBe(false);
     expect(isBlotter('strip')).toBe(false);
     expect(SHAPES.bondpaper).toBe(SHAPES.testpaper);
     expect(TOOL_NAMES.bondpaper).toBe('Bond paper');
