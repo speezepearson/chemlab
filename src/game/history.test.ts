@@ -13,7 +13,7 @@ function lab(): Things {
   const t = new Tool('dispenser', 0, { x: 250, y: 800, z: 150, yaw: 0 });
   const sc = new Scale({ x: 450, y: 420, z: 150, yaw: 0 });
   const h = new Hose({ tool: t, spout: 0 }, { x: 250, y: 600, z: 150 }, 50);
-  return { flasks: [f], tools: [t], scales: [sc], hoses: [h], faucets: [{ note: '' }], stock: stockWith({}) };
+  return { flasks: [f], tools: [t], scales: [sc], hoses: [h], faucets: [{ note: '', valve: 0 }], stock: stockWith({}) };
 }
 
 describe('arrangement', () => {

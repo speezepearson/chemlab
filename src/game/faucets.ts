@@ -2,7 +2,8 @@ import { type Atom } from '../chem/atoms';
 import { THERMO, T_ROOM } from '../chem/params';
 import { ReactionNetwork, heatAt, type Fluid } from '../chem/reactions';
 import { NS, SPECIES, singleOf } from '../chem/species';
-import { COUNTERS, type Vec3 } from './space';
+import { FILL_RATE } from './config';
+import { COUNTERS, type Pose, type Vec3 } from './space';
 import { mouthBelow, type Mouth } from './tools';
 
 /** A faucet dispenses an unlimited supply of one fixed fluid. */
@@ -94,4 +95,36 @@ export function faucetOutput(fa: Faucet, net: ReactionNetwork): Fluid {
  */
 export function faucetTarget(mouths: readonly Mouth[], spout: Vec3): Mouth | null {
   return mouthBelow(mouths, spout);
+}
+
+/**
+ * What a faucet with its valve at `valve` (0 shut, 1 fully open) lets out, by volume per sim second: a tool's valve's
+ * law (see Tool.step), its openness times its full flow, FILL_RATE, times how high its fluid stands as a share of its
+ * height, which for a faucet's unlimited supply is always all of it. Below DRIP_FLOW it drips, as any outlet does.
+ */
+export function faucetRate(valve: number): number {
+  return valve * FILL_RATE;
+}
+
+/**
+ * A faucet's knob: a glossy ball of its fluid's color, `r` in radius, at the elbow where its pipe from the wall (or its
+ * riser) turns down to its spout; and on its front, the way that pipe reaches out, its valve: a hub, `hub` in radius
+ * and standing `hubH` proud of the ball (far enough that a shut lever, lying along the wall's manifold, stands clearly in
+ * front of it seen from the side), and a lever on it, `lever` long from the hub's middle, that points where it's
+ * turned to, as a tool's valve's does: straight up open, straight right shut, as seen from in front.
+ */
+export const KNOB = { r: 10, hub: 3.5, hubH: 12, lever: 17 };
+
+/** A faucet's knob's middle, where its lever turns: the elbow over its spout, level with the pipe it's on. */
+export function knobAt(fa: { spout: Vec3; wall: Vec3 }): Vec3 {
+  return { x: fa.spout.x, y: fa.wall.y, z: fa.spout.z };
+}
+
+/**
+ * The frame a faucet's valve lies in (see toWorld): at its knob's middle, facing the way its pipe reaches out (out
+ * from the wall, or from the top of an island's riser), so its lever lies on the face square to that, x to the right
+ * and y up as seen from in front.
+ */
+export function knobPose(fa: { spout: Vec3; wall: Vec3 }): Pose {
+  return { ...knobAt(fa), yaw: Math.atan2(fa.spout.x - fa.wall.x, fa.spout.z - fa.wall.z) };
 }

@@ -39,8 +39,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - Tools drain fast at 16×. Use slow valves, or screenshot early, to catch something mid-flow.
 - The dev server reloads the lab when a source file changes, so don't edit `src/` while a script is driving a page.
 - The shadow lamp's bench is in the front left corner (`LAMP_AREA`), its trough along the bench's edge toward the room,
-  its screen at the left wall's end, facing the lamp (stand at about x = −380, z = 2690, yaw π − 1.3, pitch −0.6 to
-  look down the channel at it). `tool.press()` is its button, lighting it or putting it out (`tool.lit`), and what its
+  its screen at the left wall's end, facing the lamp (stand at about x = −60, z = 2790, past the enclosure's end, and
+  look along the channel at about (−600, 470, 2790), holding Z to zoom in, to see the screen over the enclosure). `tool.press()` is its button, lighting it or putting it out (`tool.lit`), and what its
   screen shows is `tool.glow` (`SCREEN.cells` a side, from its bottom row up, each row from its left as the lamp
   faces it, 0 dark to 1 bright): print that as text to see a shadow's shape and depth exactly. It only follows the
   light while frames are drawn, but catches up by the sim time gone by at each one, so in software rendering it's
@@ -78,7 +78,14 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     frame (`Tool.bath`, or for a strip `Tool.dipIn`, which also says whether it may drink), where a dipper aimed at
     a mouth hovers and dips (`dipPoses`).
   - `physics.ts` is the collisions: yawed boxes, the player's cylinder and `walk`. What's held collides with nothing; only
-    where it would be set down is checked (the engine's `placement` and `rest`).
+    where it would be set down is checked (the engine's `placement` and `rest`). What stands on stands and a scale
+    are moved by a ghost (`Held.ghost`, set for whatever `ghostly` says, as it's taken; flasks, dippers, blotters
+    and hoses' nozzles are carried in hand): the thing itself stays in the lab where it was, running and solid to the player, though
+    not aimed at (`heldObject`) nor in the way of its own move, while `heldPose`/`placeHeld` work on the ghost's pose. Code that
+    puts what's held somewhere for a moment, to see what would be (guides, magnets, followers), uses `objPose`/`putAt`,
+    which move the thing itself; and one just made is out of the lab (`inLab`) until set down, so its own mouths come
+    from `mouthsWith`. The view draws the ghost (`GhostView`, `Frame.ghost`) on a layer of its own, `GHOST_LAYER`, tinted
+    (`GHOST`), and always outlines it with the `Outliner`, red if it can't rest.
   - `space.ts` is the room, poses, and the mapping from the old flat bench to its back wall.
   - `tools.ts` holds tool shapes (flat outlines, y down) and per-step logic, plus drips and the instruments' readings (the spectroscope's graph is `spectroscopeAt`, a sheet of test paper's stains are `paperReading`, a sheet of bond paper's lines are `bondReading`, both against what a sheet soaks up, `TEST_PAPER.cap`, so they go by how much it holds as well as by what), `Bed`, the cell-by-cell carrying that the wicking strip's paper and the column's bed share, and `Blotter`, what a sheet of test paper or bond paper (the `BLOTTERS`) soaks up.
   - `flask.ts` has `Vessel`, `transfer`, volume and colors.
@@ -94,7 +101,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     their maps arrive, and gives geometry texture coordinates in world units (`boxUV`, `planeUV`).
   - `history.ts` is undo and redo of the lab's arrangement (never fluids). An action that changes the arrangement calls
     the engine's `mark()` as it starts and `commit()` as it ends (or `change()` around it, if it's instant); a carry is
-    marked at pick-up and committed at set-down.
+    marked at pick-up and committed at set-down (a ghost move too; one let go of with Q changes nothing, so it leaves no
+    step).
   - `wheel.ts` is the two equipment wheels: what's on each (`WHEELS`), where the mouse puts the pointer while a
     wheel's key (1 or 2) is held, and which sector that picks. The engine holds the open one's state (`wheel`,
     `openWheel`, `closeWheel`) and `Wheel` in `Hud.tsx` draws it.
@@ -117,7 +125,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `cabinet.ts` is the equipment cabinet: its layout (each kind's slots on its shelves) and its stock, which the
     equipment wheels take from and putting away puts back into. The view draws what's in it as instanced meshes
     (`CabinetView`), so it's cheap however much it holds.
-  - Also here: `faucets.ts`, `presets.ts`, `save.ts` and `scale.ts`.
+  - `faucets.ts` is the faucets: what each pours, and its knob, a valve turned just as a tool's is (the engine's
+    `turning` and `valveAimed` take either; `leverAt` in `bodies.ts` is the lever law they share), letting out
+    `faucetRate` through the same `drip` as a spout.
+  - Also here: `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
     `volumes.ts`); `diverter.ts` is the supply station's diverter, `changeover.ts` its changeover, `ambience.ts` the ship, `water.ts` drips and streams, `shatter.ts` a thermometer
     shattering.
@@ -179,15 +190,22 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     (the `BLOTTERS`) are the tools set down on the counter itself, lying flat (`ToolShape.flat`): each one's box is
     thin and as deep as it's wide, its face is up, and it has no stand. They're one sheet, printed differently: share
     what they do (`isBlotter`), and keep only the print and the reading apart. A sheet lying there is in nothing's
-    way but another sheet's (the engine's `obstacles`): whatever else is set down on its cell stands on the counter
+    way but another sheet's (the engine's `obstacles`): whatever else is set down on it stands on the counter
     through it, and it's laid under what's there. So it must stay thinner than the 0.6 between a flask's floor and
     its fluid's (`FLASK_FLUID` in `view.ts`), or it shows inside a flask standing on it.
-  - **The grid.** Whatever's set down is on the floor's grid of `CELL` (100) squares: facing one of the four ways
-    along it, with every mouth and spout over a cell's middle (`onGrid`, `toolAnchor` and `SCALE_ANCHOR` in
-    `bodies.ts`; the engine's `gridded` and `toGrid`). So a tool's tanks and spouts must be a whole number of cells
-    apart along it (`bodies.test.ts` checks every shape), and the counters' edges run along cells' edges. Height is free.
-    That's why the splitter, the multiplexer and the separator are three cells across for two outlets or inlets:
-    the one in the middle has to be over a cell too. The user prefers that to a narrower tool that isn't symmetrical.
+  - **Placement is free, with magnets.** What's let go of is set down where it's held (the engine's `placement`,
+    then `rest`), facing the nearest of the four ways (`facing`, `toCardinal`), or exactly as held while Alt is held
+    (`free`). There's no lattice: `CELL` (60) is only a unit of length (the counters' edges, presets, most tools'
+    pitches), and tanks and spouts may be any distance apart. What lines things up is the magnet: within `MAGNET`
+    (`bodies.ts`) it shifts what's held across so its outlets are over others' mouths, or its mouths under others'
+    outlets, the most pairs at once (`magnetShift`, fed by the engine's `magnets`; an empty scale's places count as
+    mouths). If that pose can't rest, the free one is tried, then the nearest within `NEAR` (rings `NEAR_STEP`
+    apart); keep that search cheap, since `placement()` runs every frame while something's held. The guides and
+    footprints draw whatever `placement()` says, so anything that changes where things go goes through it. The
+    special snaps sit on top (`snapped`: `docked`; `dipAim` for dippers). On load nothing's moved but
+    repairs (`toCounters`). Tests that want a scene laid out in cells use `src/game/testLayout.ts`.
+    The splitter, the multiplexer and the separator are three cells across for two outlets or inlets, symmetrical,
+    the one in the middle a cell from each of the others: the user prefers that to a narrower tool that isn't.
 - **Hoses** aren't a tool: every spout and faucet has one, pulled out with the left button (`Hose.on` says which). A
   spout's fluid leaves at its hose's nozzle if it's out, so wherever fluid leaves a spout or faucet, use the engine's
   `outletAt` and `faucetOutlet`, not `spoutAt` or `fa.spout`.
@@ -222,18 +240,18 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - Tests and the README.
   - A tool needn't have tanks at all: the thermometers and the wicking strip (the `DIPPERS`),
     a sheet of test paper or bond paper and the shadow lamp have none, nor spouts nor
-    valves. Then its grid anchor is its middle (`toolAnchor`), Enter writes its own `note`, and its collision is whatever
+    valves. Then Enter writes its own `note`, and its collision is whatever
     `toolParts` gives it (a thermometer's, only the top of its rod; a strip's, its clip), so code that reaches for
     `tanks[0]` must allow for there being none.
   - A tank needn't be under its opening: one with a `neck` (the swell bulbs') has its bulb and neck where the flag
-    says, and its own `x0` and `x1` are its inlet's, since it's the openings and spouts that go on the grid.
+    says, and its own `x0` and `x1` are its inlet's, since it's the openings and spouts that line up (see the magnet).
   - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `neck`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `flat`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
 - **Unique tools** (`UNIQUE_TOOLS`: the spectroscope, the receptacle and the shadow lamp) aren't on
   an equipment wheel and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
   whole supply station (`STATION` in `tools.ts`): its tanks are the funnel and the ship's reservoir, in that
   order. It's `fixed` and `wall`: built into the right wall at `STATION_POSE`, with no stand, never moved. The
   `shadowlamp` (`LAMP` in `tools.ts`) is `fixed` too, at `LAMP_POSE` on a bench of its own (`LAMP_AREA`, the last of
-  `COUNTERS`): a trough, with no tanks and no stand, whose channel things are set down in like anywhere on the grid,
+  `COUNTERS`): a trough, with no tanks and no stand, whose channel things are set down in like anywhere else,
   on its floor, which is a little higher than the bench (`LAMP_FLOOR` in `space.ts`: the one place `counterUnder` and
   `groundAt` don't say `LIFT` over a counter, so use what they say); its button is a part of its own for the crosshair
   (`'button'`), and it has no valves. Its screen, on the inner face of its end wall, is part of it (`SCREEN`,
@@ -246,7 +264,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Inline instruments** (`INLINE_TOOLS`: the spectroscope and the flow meter) are a tube draining straight through at a fixed rate past the spectroscope's cabinet
   (or the flow meter's little readout, `METER_BODY`), which reads what goes by, as an exponentially weighted average that fades the past smoothly (`INSTRUMENT_TAU`,
   `Tool.smooth`). A hose's nozzle let go of over the tube snaps onto its
-  top (`docked` in `bodies.ts`, via the engine's `gridded`).
+  top (`docked` in `bodies.ts`, via the engine's `snapped`).
 - **The goal** is enough cryostabilizer in the station's reservoir (`tanks[1]`, against its supply's `goal`, once
   it's fitted for the last of `SUPPLIES`), not what's lying around in vessels.
 - **Saves** stay at format v1. New fields are optional and the loaders tolerate their absence. Species are stored by

@@ -6,10 +6,11 @@ import { testChemParams } from '../chem/testChem';
 import { COOLING } from './cooling';
 import { Vessel, roomFor, transfer, volume } from './flask';
 import { FLASK_VOLUME, flaskRadius } from './flaskShape';
-import { STATION_POSE } from './presets';
+import { LAMP_POSE, STATION_POSE } from './presets';
 import { CRYOSTABILIZER, FIRST_SUPPLY, SUPPLIES, nextSupply } from './supply';
 import { CELL, WALL_PANEL } from './space';
-import { tankMouth } from './bodies';
+import { toCell } from './testLayout';
+import { FLASK_R, tankMouth } from './bodies';
 import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
@@ -684,11 +685,11 @@ describe('swell bulbs', () => {
       expect(Math.abs(neck!.necks[k])).toBeLessThan(Math.abs(bx));
     });
     expect(neck!.bodies[1] - neck!.bodies[0]).toBeGreaterThanOrEqual(neck!.body);
-    // its inlets and spouts are a grid cell apart, outside the bulbs, and each spout is under its inlet
+    // its inlets and spouts are a grid cell apart, beyond the bulbs' middles, and each spout is under its inlet
     const inlets = tanks.map((tk) => (tk.x0 + tk.x1) / 2);
     expect(inlets[1] - inlets[0]).toBe(CELL);
     expect(spouts).toEqual(inlets);
-    inlets.forEach((x, k) => expect(Math.abs(x)).toBeGreaterThan(Math.abs(neck!.bodies[k]) + neck!.body / 2));
+    inlets.forEach((x, k) => expect(Math.abs(x)).toBeGreaterThan(Math.abs(neck!.bodies[k])));
     // each inlet is at the top of its neck, wholly above it, so nothing stands in a funnel below the fluid's level;
     // fluid goes in there, and what no longer fits spills over its lip
     expect(-(neck!.inlet.y + neck!.inlet.h)).toBeGreaterThan(neck!.h);
@@ -2367,12 +2368,16 @@ describe('the shadow lamp', () => {
     expect([t.glow[0], t.glow[1]]).toEqual([0, 1]);
   });
 
-  it('is a trough a grid cell tall, with a channel a grid cell wide and a whole number of cells long', () => {
+  it('is a trough as tall as its channel is wide, with a channel wide enough for a flask and a whole number of cells long', () => {
     const { h, wall, box, channel: ch } = LAMP;
-    expect(h).toBe(CELL);
-    expect(2 * ch.z).toBe(CELL);
-    expect((ch.x1 - ch.x0) / CELL).toBe(Math.round((ch.x1 - ch.x0) / CELL));
-    expect(ch.x1 - ch.x0).toBeGreaterThanOrEqual(2 * CELL);
+    expect(h).toBe(2 * ch.z);
+    // a flask fits across it, and its middle line is over the middle of a row of cells, so one stands there
+    expect(2 * ch.z).toBeGreaterThan(2 * FLASK_R);
+    expect(toCell(LAMP_POSE.z)).toBeCloseTo(LAMP_POSE.z, 9);
+    const len = ch.x1 - ch.x0;
+    expect(len / CELL).toBe(Math.round(len / CELL));
+    expect(len).toBeGreaterThanOrEqual(3 * CELL);
+    expect((box.x1 - box.x0) / CELL).toBe(Math.round((box.x1 - box.x0) / CELL));
     // the enclosure runs up to the channel's start, and the trough's box is all of it, end wall included
     expect(box.x1).toBe(ch.x0);
     expect(box.x0).toBeLessThan(box.x1);
