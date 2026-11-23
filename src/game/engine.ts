@@ -4,9 +4,9 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
-  FLASK_CENTER, FLASK_LIP, NEAR, NEAR_STEP, NOZZLE_H, NOZZLE_REACH, SCALE_SLOTS, STAND_MAX, aimValve, leverAt, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
+  FLASK_CENTER, FLASK_LIP, NEAR, NEAR_STEP, NOZZLE_H, NOZZLE_REACH, SCALE_SLOTS, STAND_MAX, aimAngle, settleAngle, swept, sweep, turnValve, valveAt, valveFaceZ, valveLocal, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
   FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, magnetShift, nozzleMounts, nozzleStand, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, standBase,
-  tankMouth, tankNoteY, toolBox, toolCenter, toolStands, valveNear, valveZ, type Magnets, type NozzleMount, type Stand,
+  tankMouth, tankNoteY, toolBox, toolCenter, toolStands, type Magnets, type NozzleMount, type Stand,
 } from './bodies';
 import { CABINET, endless, isStocked, putIn, stockWith, takeFrom, takeSlot, type Stock, type Stocked } from './cabinet';
 import { changeover, type ChangeoverSound } from './changeover';
@@ -80,7 +80,7 @@ export interface Hud {
    * wicking strip or thermometer into what's looked at.
    */
   right: boolean;
-  /** While a valve is being turned, where the pointer that aims its lever is, in CSS pixels. */
+  /** While a valve is being turned, where the pointer that turns it by sweeping round it is, in CSS pixels. */
   aim: { x: number; y: number } | null;
   /** Whether Enter would write a note about what the crosshair is on (see GameEngine.note). */
   label: boolean;
@@ -408,8 +408,12 @@ export class GameEngine {
   private held: Held | null = null;
   /** Whether the right button is held: a held flask tips and pours, a held hose lets fluid out, and a held dipper dips, only while it is. */
   private rightHeld = false;
-  /** A valve being turned with the right button (a tool's or a faucet's), and where on screen the pointer aiming its lever is. */
-  private turning: (ValveRef & { aim: { x: number; y: number } }) | null = null;
+  /**
+   * A valve being turned with the right button (a tool's or a faucet's), where on screen the pointer turning it is, and
+   * the angle round the valve's middle it was last at (see aimAngle), which it turns the valve by sweeping round from;
+   * null while it's in the dead zone, or before it's first been taken.
+   */
+  private turning: (ValveRef & { aim: { x: number; y: number }; last: number | null }) | null = null;
   /** How far the view is zoomed in (see ZOOM), from 0, not at all, to 1. */
   private zoom = 0;
   /**
@@ -1641,7 +1645,7 @@ export class GameEngine {
     return Math.max(r + HOLD_NEAR, Math.min(r + HOLD_FAR, d));
   }
 
-  /** The mouse moved by (dx, dy) pixels: aim a valve's lever, slide a held nozzle's stand (with Shift), or look around. */
+  /** The mouse moved by (dx, dy) pixels: sweep round a valve to turn it, slide a held nozzle's stand (with Shift), or look around. */
   private look(dx: number, dy: number, shift: boolean): void {
     if (this.turning) {
       const a = this.turning.aim;
@@ -1668,8 +1672,10 @@ export class GameEngine {
   }
 
   /**
-   * Point the lever of the valve being turned at where the aim is, on the face it lies on: a tool's front face, or the
-   * front of a faucet's knob (see knobPose).
+   * Turn the valve being turned by as far as the pointer has swept round its middle since it was last taken, on the face
+   * it lies on (a tool's handwheel's or dial's, or the front of a faucet's knob, see knobPose): never to where the
+   * pointer is, only by how far it's gone round, so taking hold of it moves nothing, and nor does the pointer coming out
+   * of the dead zone round its middle.
    */
   private aimTurning(): void {
     const tr = this.turning;
@@ -1680,17 +1686,23 @@ export class GameEngine {
     const fa = 'faucet' in tr ? this.faucets[tr.faucet] : null;
     const pose = t ? t.pose : knobPose(fa!);
     const n = { x: Math.sin(pose.yaw), y: 0, z: Math.cos(pose.yaw) };
-    const p0 = t ? onTool(t, 0, 0, valveZ(t)) : toWorld(pose, { x: 0, y: 0, z: KNOB.r + KNOB.hubH });
+    const p0 = t && 't' in tr ? onTool(t, 0, 0, valveFaceZ(t, tr.k)) : toWorld(pose, { x: 0, y: 0, z: KNOB.r + KNOB.hubH });
     const dn = d.x * n.x + d.z * n.z;
     if (Math.abs(dn) < 1e-3) return;
     const s = ((p0.x - o.x) * n.x + (p0.z - o.z) * n.z) / dn;
     if (s <= 0) return;
     const l = toLocal(pose, { x: o.x + d.x * s, y: o.y + d.y * s, z: o.z + d.z * s });
-    if ('t' in tr) aimValve(tr.t, tr.k, l.x, -l.y);
+    // the pointer's angle round the valve's middle (a faucet's is its knob's), x right and y down on its face
+    const c = 't' in tr ? valveLocal(tr.t, tr.k) : { x: 0, y: 0 };
+    const a = aimAngle(l.x - c.x, -l.y - c.y);
+    const by = swept(tr.last, a);
+    tr.last = a;
+    if (!by) return;
+    if ('t' in tr) turnValve(tr.t, tr.k, by);
     else if (fa) {
-      // a faucet's valve is a tool's (see leverAt), its center the knob's
-      const v = leverAt('valve', l.x, -l.y);
-      if (v !== null) fa.valve = v;
+      // a faucet's valve turns as a tool's plain valve does
+      fa.angle = sweep('valve', settleAngle('valve', fa.angle, fa.valve), by);
+      fa.valve = valveAt('valve', fa.angle);
     }
   }
 
@@ -2322,7 +2334,7 @@ export class GameEngine {
     const k = this.valveAimed();
     if (!k) return;
     this.mark();
-    this.turning = { ...k, aim: { x: this.viewW / 2, y: this.viewH / 2 } };
+    this.turning = { ...k, aim: { x: this.viewW / 2, y: this.viewH / 2 }, last: null };
     this.aimTurning();
   }
 
@@ -2399,18 +2411,15 @@ export class GameEngine {
   }
 
   /**
-   * The valve the crosshair is on, or within VALVE_REACH of on its tool's front face (see valveNear), if any. Where
-   * valves crowd together, the nearest. A faucet's, if it's on its knob.
+   * The valve the crosshair is on, if any: a tool's handwheel or dial, or a faucet's knob, never a part beside one (see
+   * the view's partOf).
    */
   private valveAimed(): ValveRef | null {
     const p = this.target;
     // a faucet's valve is its knob, and the lever on it
     if (p?.kind === 'faucet') return p.valve ? { faucet: p.i } : null;
     if (p?.kind !== 'tool' || p.t.shape.noValve || p.t.swap !== null) return null;
-    if (p.part === 'valve') return { t: p.t, k: p.k };
-    const l = toLocal(p.t.pose, p.point);
-    const k = valveNear(p.t, l.x, -l.y);
-    return k === null ? null : { t: p.t, k };
+    return p.part === 'valve' ? { t: p.t, k: p.k } : null;
   }
 
   /** For checks in a browser: stand somewhere, look somewhere, and act as if the mouse were captured. */
@@ -3452,7 +3461,7 @@ export class GameEngine {
     const add = (keys: string[], does: string, off = false) => out.push(off ? { keys, does, off } : { keys, does });
     // turning a valve takes the mouse over until the button's let go
     if (this.turning) {
-      add(['Mouse'], 'point the lever');
+      add(['Mouse'], 'sweep round to turn it');
       add(['RMB'], 'let go when it’s set');
       return out;
     }
@@ -3506,7 +3515,7 @@ export class GameEngine {
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it back in the cabinet');
       add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it back in the cabinet') : h.ghost ? 'leave it where it is' : 'put it back');
     } else {
-      if (this.rightWouldDo()) add(['RMB'], 'hold and point to turn the valve');
+      if (this.rightWouldDo()) add(['RMB'], 'hold and sweep round it to turn the valve');
       add([WHEEL_KEYS.join(', ')], 'hold to grab equipment');
     }
     if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');

@@ -3,7 +3,7 @@ import { BOND_KEYS } from '../chem/atoms';
 import { ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
-import { FLASK_R, MAGNET, NEAR, NEAR_STEP, NOZZLE_REACH, SCALE_SLOTS, flaskLip, flaskMouth, onScale, plumbZ, spoutAt, tankMouth, scaleBox, standBase, toolBox, toolStands, type Stand } from './bodies';
+import { FLASK_R, MAGNET, NEAR, NEAR_STEP, NOZZLE_REACH, SCALE_SLOTS, flaskLip, flaskMouth, onScale, plumbZ, spoutAt, valveLocal, tankMouth, scaleBox, standBase, toolBox, toolStands, type Stand } from './bodies';
 import { boxesOverlap } from './physics';
 import { STOCK } from './cabinet';
 import { WHEELS } from './wheel';
@@ -20,7 +20,7 @@ import { CELL, LAMP_FLOOR, LIFT, counterUnder, toWorld } from './space';
 import { toCell } from './testLayout';
 import {
   DRIP, DRIP_FLOW, Hose, INLINE_TOOLS, MAX_FLOW, PAPER_TAU, SCREEN, SHAPES, TEST_PAPER, UNIQUE_TOOLS, bondReading, bondShares, paperReading,
-  type Blotter, type Mouth, type Tool,
+  type Blotter, type Mouth, Tool,
 } from './tools';
 
 /*
@@ -1971,23 +1971,64 @@ describe('faucets’ valves', () => {
     expect(l.in.valveAimed()).toBeNull();
     l.in.target = { kind: 'faucet', i: 0, valve: true };
     expect(taps(l).history.canUndo).toBe(false);
-    // the pointer, on the knob's front, straight above its middle, then a little right of it
+    // the pointer, on the knob's front, straight above its middle: taking hold of it there turns nothing
     const knob = { x: fa.spout.x, y: fa.wall.y, z: fa.spout.z };
     let at = { x: knob.x, y: knob.y + 20, z: knob.z };
     taps(l).view.ray = () => ({ o: { x: at.x - 300, y: at.y, z: at.z }, d: { x: 1, y: 0, z: 0 } });
     l.e.hand(true);
+    expect(fa.valve).toBe(0);
     taps(l).look(0, -1, false);
-    expect(fa.valve).toBeCloseTo(1, 9);
-    // (as seen facing the wall, right is +z; up and right, half open)
+    expect(fa.valve).toBe(0);
+    // swept an eighth of a turn clockwise round it (as seen facing the wall, right is +z), from shut to half open...
     at = { x: knob.x, y: knob.y + 20, z: knob.z + 20 };
     taps(l).look(1, 0, false);
     expect(fa.valve).toBeCloseTo(0.5, 9);
+    // ...and on to straight right, a quarter turn from where it was taken, fully open
+    at = { x: knob.x, y: knob.y, z: knob.z + 20 };
+    taps(l).look(1, 0, false);
+    expect(fa.valve).toBeCloseTo(1, 9);
     l.e.hand(false);
     expect(taps(l).history.canUndo).toBe(true);
     l.e.undo();
     expect(fa.valve).toBe(0);
     expect(taps(l).history.canUndo).toBe(false);
     l.e.undo(true);
-    expect(fa.valve).toBeCloseTo(0.5, 9);
+    expect(fa.valve).toBeCloseTo(1, 9);
+  });
+
+  it("turns a tool's valve only by its handwheel, and by how far it's swept round, not where it's pointed", () => {
+    const l = lab();
+    const t = new Tool('dispenser', 99, { x: SPOT.x, y: LIFT + 400, z: SPOT.z, yaw: 0 }, [1]);
+    (taps(l) as unknown as { tools: Tool[] }).tools.push(t);
+    l.e.debug({ x: SPOT.x, z: SPOT.z + 300, yaw: 0, pitch: 0, locked: true });
+    // the pipe beside it, or anything else of the tool, isn't its valve
+    l.in.target = { kind: 'tool', t, part: 'spout', k: 0, point: spoutAt(t, 0) } as never;
+    expect(l.in.valveAimed()).toBeNull();
+    l.in.target = { kind: 'tool', t, part: 'valve', k: 0, point: spoutAt(t, 0) } as never;
+    expect(l.in.valveAimed()).toEqual({ t, k: 0 });
+    // the pointer on its face, from in front: taken hold of to its right, which would have shut a lever, nothing turns
+    const c = valveLocal(t, 0);
+    const face = (dx: number, dy: number) => ({ x: t.pose.x + c.x + dx, y: t.pose.y - c.y - dy, z: t.pose.z + 400 });
+    let at = face(20, 0);
+    taps(l).view.ray = () => ({ o: at, d: { x: 0, y: 0, z: -1 } });
+    l.e.hand(true);
+    expect(t.valves[0]).toBe(1);
+    // swept a quarter turn round, down to below it (y down on its face), it shuts; and on round to the left, it opens again
+    at = face(14, 14);
+    taps(l).look(1, 0, false);
+    at = face(0, 20);
+    taps(l).look(1, 0, false);
+    expect(t.valves[0]).toBeCloseTo(0, 9);
+    at = face(-20, 0);
+    taps(l).look(1, 0, false);
+    expect(t.valves[0]).toBeCloseTo(1, 9);
+    // through its middle, nothing; coming out the other side, it goes on from where it was
+    at = face(0.5, 0.5);
+    taps(l).look(1, 0, false);
+    expect(t.valves[0]).toBeCloseTo(1, 9);
+    at = face(20, 0);
+    taps(l).look(1, 0, false);
+    expect(t.valves[0]).toBeCloseTo(1, 9);
+    l.e.hand(false);
   });
 });

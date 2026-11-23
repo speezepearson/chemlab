@@ -76,7 +76,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room, what fluid a
     dipper's foot (a thermometer's bulb, a wicking strip's tip) is in (`bathAt`), which the engine hands each one every
     frame (`Tool.bath`, or for a strip `Tool.dipIn`, which also says whether it may drink), where a dipper aimed at
-    a mouth hovers and dips (`dipPoses`).
+    a mouth hovers and dips (`dipPoses`), and how valves turn: a valve has an angle (`Tool.angles`, never saved),
+    turned by how far the aim sweeps round it (`turnValve`), which says its setting (`valveAt`); `valves` is still all
+    the sim reads and all a save keeps, and whenever it's set any other way the angle is worked out afresh from it in
+    one place (`settleAngle`, through `valveAngle`).
   - `physics.ts` is the collisions: yawed boxes, the player's cylinder and `walk`. What's held collides with nothing; only
     where it would be set down is checked (the engine's `placement` and `rest`). What stands on stands and a scale
     are moved by a ghost (`Held.ghost`, set for whatever `ghostly` says, as it's taken; flasks, dippers, blotters
@@ -128,7 +131,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     equipment wheels take from and putting away puts back into. The view draws what's in it as instanced meshes
     (`CabinetView`), so it's cheap however much it holds.
   - `faucets.ts` is the faucets: what each pours, and its knob, a valve turned just as a tool's is (the engine's
-    `turning` and `valveAimed` take either; `leverAt` in `bodies.ts` is the lever law they share), letting out
+    `turning` and `valveAimed` take either; `valveAt`, `sweep` and `settleAngle` in `bodies.ts` are the law they share), letting out
     `faucetRate` through the same `drip` as a spout.
   - Also here: `presets.ts`, `save.ts` and `scale.ts`.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see

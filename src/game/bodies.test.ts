@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FLASK_R, MAGNET, NOZZLE_REACH, SCALE_SLOTS, magnetShift, STAND_BASE, aimValve, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
-  docked, nozzleBox, nozzleMounts, nozzleStand, onScale, scaleBox, scaleSpot, snapReach, spoutAt, standBase, tankMouth, toolBox, toolStands, valveLocal,
-  valveNear, plumbZ,
+  FLASK_R, MAGNET, NOZZLE_REACH, SCALE_SLOTS, magnetShift, STAND_BASE, aimAngle, angleOf, settleAngle, swept, turnValve, valveAt, valveAngle, leverKind, VALVE_DEADZONE, VALVE_WHEEL, DIAL_STOP, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
+  docked, nozzleBox, nozzleMounts, nozzleStand, onScale, scaleBox, scaleSpot, snapReach, spoutAt, standBase, tankMouth, toolBox, toolStands,
+  plumbZ,
 } from './bodies';
 import { SOLVENT_SPECIES, singleOf } from '../chem/species';
 import { CAP } from './config';
@@ -12,9 +12,9 @@ import { AIRLOCK } from './airlock';
 import { boxesOverlap, solids } from './physics';
 import { LAMP_POSE } from './presets';
 import { SCALE_SHAPE, Scale } from './scale';
-import { CELL, COUNTERS, LAMP_AREA, LAMP_FLOOR, LAMP_Z, LIFT, ROOM, counterUnder, fromFrac, groundAt, toFrac, toWorld } from './space';
+import { CELL, COUNTERS, LAMP_AREA, LAMP_FLOOR, LAMP_Z, LIFT, ROOM, counterUnder, fromFrac, groundAt, toFrac, toWorld, wrapAngle } from './space';
 import { SCALE_ANCHOR, onCell, toCell, toolAnchor } from './testLayout';
-import { BULB_Y, Hose, INLINE_DOCK, LAMP, SCREEN, SHAPES, STRIP, STRIP_FOOT, THERMOMETER_ROD, Tool, dipUnder, footY, mouthBelow, type ToolKind } from './tools';
+import { BULB_Y, COLUMN, TANK_H, Hose, INLINE_DOCK, LAMP, SCREEN, SHAPES, STRIP, STRIP_FOOT, THERMOMETER_ROD, Tool, dipUnder, footY, mouthBelow, type ToolKind } from './tools';
 
 const at = (x: number, y: number, z: number, yaw = 0) => ({ x, y, z, yaw });
 
@@ -274,65 +274,106 @@ describe('tools in the room', () => {
   });
 });
 
-describe('valveNear', () => {
-  it('finds the nearest valve within reach of its lever, and none further off', () => {
-    const ht = new Tool('heater', 0);
-    const v = valveLocal(ht, 1);
-    expect(valveNear(ht, v.x + 5, v.y + 3)).toBe(1);
-    expect(valveNear(ht, v.x + 40, v.y + 40)).toBeNull();
-    expect(valveNear(new Tool('sorter', 0), 0, 0)).toBeNull();
-  });
-});
+describe('valves', () => {
+  const Q = Math.PI / 2;
+  /** The aim's angle round a valve, clockwise from straight up, as a point `r` from its middle (x right, y down). */
+  const aim = (a: number, r = 20) => aimAngle(r * Math.sin(a), -r * Math.cos(a));
 
-describe('aimValve', () => {
-  it("turns a dial clockwise from down-left, off, to down-right, full", () => {
+  it("open a plain valve with its bar along the pipe and shut it with the bar square to it, twice a turn", () => {
+    for (const [a, v] of [[0, 1], [Q / 2, 0.5], [Q, 0], [1.5 * Q, 0.5], [2 * Q, 1], [3 * Q, 0], [4 * Q, 1], [-Q, 0], [-Q / 2, 0.5], [Q / 3, 2 / 3]])
+      expect(valveAt('valve', a), `${a}`).toBeCloseTo(v, 12);
+  });
+
+  it("send a splitter's all left pointing left, half each way up or down, and all right pointing right", () => {
+    for (const [a, v] of [[-Q, 0], [0, 0.5], [Q, 1], [2 * Q, 0.5], [3 * Q, 0], [Q / 2, 0.75], [-Q / 2, 0.25], [2.5 * Q, 0.25], [5 * Q, 1]])
+      for (const kind of ['split', 'join'] as const) expect(valveAt(kind, a), `${kind} ${a}`).toBeCloseTo(v, 12);
+  });
+
+  it('draw any setting at an angle that comes back to it, the plain valve shut a quarter turn clockwise', () => {
+    for (const kind of ['valve', 'split', 'join', 'dial'] as const)
+      for (const v of [0, 0.1, 0.25, 0.5, 0.8, 1]) expect(valveAt(kind, angleOf(kind, v)), `${kind} ${v}`).toBeCloseTo(v, 12);
+    expect(angleOf('valve', 0)).toBeCloseTo(Q, 12);
+    expect(angleOf('valve', 1)).toBe(0);
+    // a splitter's pointer rests toward its fork, below it, and a multiplexer's toward its join, above
+    expect(wrapAngle(angleOf('split', 0))).toBeCloseTo(-Q, 12);
+    expect(Math.abs(wrapAngle(angleOf('split', 0.5)))).toBeCloseTo(2 * Q, 12);
+    expect(angleOf('split', 1)).toBeCloseTo(Q, 12);
+    expect(angleOf('join', 0)).toBeCloseTo(-Q, 12);
+    expect(angleOf('join', 0.5)).toBeCloseTo(0, 12);
+    expect(angleOf('join', 1)).toBeCloseTo(Q, 12);
+  });
+
+  it('keep the angle they were turned to while it still says how they are set, and work it out afresh once it does not', () => {
+    expect(settleAngle('valve', 3 * Q, 0)).toBe(3 * Q);
+    expect(settleAngle('valve', 3 * Q, 1)).toBe(0);
+    expect(settleAngle('valve', undefined, 0.5)).toBeCloseTo(Q / 2, 12);
+    const t = new Tool('dispenser', 0, undefined, [1]);
+    turnValve(t, 0, 2 * Q);
+    expect(t.valves[0]).toBeCloseTo(1, 12);
+    expect(valveAngle(t, 0)).toBeCloseTo(2 * Q, 12);
+    // set some other way (an undo, a load), it's drawn as that is
+    t.valves[0] = 0;
+    expect(valveAngle(t, 0)).toBeCloseTo(Q, 12);
+  });
+
+  it('shut a plain valve swept a quarter turn from open, and open it again a quarter turn on', () => {
+    const t = new Tool('dispenser', 0, undefined, [1]);
+    turnValve(t, 0, Q);
+    expect(t.valves[0]).toBeCloseTo(0, 12);
+    turnValve(t, 0, Q);
+    expect(t.valves[0]).toBeCloseTo(1, 12);
+    turnValve(t, 0, -Q / 2);
+    expect(t.valves[0]).toBeCloseTo(0.5, 12);
+  });
+
+  it('turn by how far the aim swept round, the short way, even across straight down', () => {
+    // from just left of straight down to just right of it is a small turn anticlockwise, not most of a turn
+    expect(swept(aim(2 * Q + 0.1), aim(2 * Q - 0.1))).toBeCloseTo(-0.2, 9);
+    expect(swept(aim(-2 * Q + 0.1), aim(2 * Q - 0.1))).toBeCloseTo(-0.2, 9);
+    expect(swept(aim(0.3), aim(0.5))).toBeCloseTo(0.2, 9);
+  });
+
+  it('turn nothing going into or coming out of the dead zone round the middle', () => {
+    const inside = aimAngle(VALVE_DEADZONE / 2, 0);
+    expect(inside).toBeNull();
+    expect(swept(aim(0.4), inside)).toBe(0);
+    expect(swept(inside, aim(1.2))).toBe(0);
+    expect(aimAngle(VALVE_DEADZONE * 2, 0)).toBeCloseTo(Q, 12);
+  });
+
+  it('stop a dial at its two ends, and turn it back from one at once', () => {
     const ht = new Tool('heater', 0);
     const k = ht.shape.dial!;
-    const v = valveLocal(ht, k);
-    aimValve(ht, k, v.x - 20, v.y + 20);
-    expect(ht.valves[k]).toBeCloseTo(0);
-    aimValve(ht, k, v.x, v.y - 20);
-    expect(ht.valves[k]).toBeCloseTo(0.5);
-    aimValve(ht, k, v.x + 20, v.y + 20);
-    expect(ht.valves[k]).toBeCloseTo(1);
+    expect(leverKind(ht, k)).toBe('dial');
+    ht.valves[k] = 0.5;
+    turnValve(ht, k, 4 * Q);
+    expect(ht.valves[k]).toBe(1);
+    // no winding up past the stop: the first bit back turns it back
+    turnValve(ht, k, -0.1);
+    expect(ht.valves[k]).toBeCloseTo(1 - 0.1 / (2 * DIAL_STOP), 12);
+    turnValve(ht, k, -8 * Q);
+    expect(ht.valves[k]).toBe(0);
+    turnValve(ht, k, DIAL_STOP);
+    expect(ht.valves[k]).toBeCloseTo(0.5, 12);
   });
 
-
-  it("points a splitter's or multiplexer's lever left for 0, up for even, and right for 1", () => {
-    for (const kind of ['splitter', 'multiplexer'] as const) {
-      const t = new Tool(kind, 0);
-      const v = valveLocal(t, 0);
-      aimValve(t, 0, v.x - 30, v.y);
-      expect(t.valves[0], kind).toBeCloseTo(0);
-      aimValve(t, 0, v.x, v.y - 30);
-      expect(t.valves[0], kind).toBeCloseTo(0.5);
-      aimValve(t, 0, v.x + 30, v.y);
-      expect(t.valves[0], kind).toBeCloseTo(1);
+  it('stand on a straight drop of pipe, their handwheels clear of the tank above and any spout below', () => {
+    const clear = VALVE_WHEEL.r + 2;
+    for (const kind of Object.keys(SHAPES) as ToolKind[]) {
+      const sh = SHAPES[kind];
+      if (sh.noValve || sh.valves) continue;
+      // what's above: the tank's floor, its sump's or hopper's tip, or a column's tube's foot
+      const above = kind === 'column' ? COLUMN.tube.y1 + 1.5 : (sh.tankH ?? TANK_H) + (sh.funnel || sh.cup ? 0 : (sh.sump?.h ?? 0));
+      expect(sh.valveY - clear, kind).toBeGreaterThanOrEqual(above);
+      // a spout straight under it has its tip (6 tall) below the handwheel
+      if (sh.spouts.includes(0)) expect(sh.valveY + clear, kind).toBeLessThanOrEqual(sh.spoutY - 6);
     }
   });
 
-  it('opens pointing up, closes pointing right, and ignores the core', () => {
-    const t = new Tool('dispenser', 0);
-    const v = valveLocal(t, 0);
-    aimValve(t, 0, v.x, v.y - 30);
-    expect(t.valves[0]).toBeCloseTo(1);
-    aimValve(t, 0, v.x + 30, v.y);
-    expect(t.valves[0]).toBeCloseTo(0);
-    aimValve(t, 0, v.x + 20, v.y - 20);
-    expect(t.valves[0]).toBeCloseTo(0.5);
-    aimValve(t, 0, v.x + 2, v.y - 2);
-    expect(t.valves[0]).toBeCloseTo(0.5);
-  });
-
-  it("sweeps a splitter's from all left to all right", () => {
-    const t = new Tool('splitter', 0);
-    const v = valveLocal(t, 0);
-    aimValve(t, 0, v.x - 30, v.y);
-    expect(t.valves[0]).toBeCloseTo(0);
-    aimValve(t, 0, v.x + 30, v.y);
-    expect(t.valves[0]).toBeCloseTo(1);
-    aimValve(t, 0, v.x, v.y - 30);
-    expect(t.valves[0]).toBeCloseTo(0.5);
+  it("tell a splitter's and a multiplexer's pointers from the plain valves", () => {
+    expect(leverKind(new Tool('splitter', 0), 0)).toBe('split');
+    expect(leverKind(new Tool('multiplexer', 0), 0)).toBe('join');
+    expect(leverKind(new Tool('dispenser', 0), 0)).toBe('valve');
   });
 });
 

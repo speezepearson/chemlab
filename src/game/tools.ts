@@ -1144,9 +1144,11 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     sump: { w: TANK_SECTION.w, h: TANK_SUMP_H },
     front: true,
     spouts: [0],
-    valveY: TANK_SECTION.h + 14,
-    spoutY: TANK_SECTION.h + 30,
-    box: { x0: -TANK_SECTION.w / 2 - 3, x1: TANK_SECTION.w / 2 + 3, y0: -6, y1: TANK_SECTION.h + 32 },
+    // its valve's handwheel (see VALVE_WHEEL in bodies.ts) on a straight drop from the hopper's tip, clear of the
+    // tank above it and the spout below
+    valveY: TANK_SECTION.h + TANK_SUMP_H + 12,
+    spoutY: TANK_SECTION.h + TANK_SUMP_H + 30,
+    box: { x0: -TANK_SECTION.w / 2 - 3, x1: TANK_SECTION.w / 2 + 3, y0: -6, y1: TANK_SECTION.h + TANK_SUMP_H + 32 },
   },
   pipette: {
     // a narrow dispenser, filled through a little funnel on top
@@ -1156,8 +1158,8 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     maxFlow: PIPETTE_FLOW,
     spouts: [0],
     valveY: 98,
-    spoutY: 114,
-    box: { x0: -18, x1: 18, y0: -20, y1: 116 },
+    spoutY: 116,
+    box: { x0: -18, x1: 18, y0: -20, y1: 118 },
   },
   exchanger: {
     // two tanks of the standard section (see TANK_SECTION), half a cell either side of its middle
@@ -1170,9 +1172,10 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     front: true,
     // the streams cross over in the exchanger, so each leaves on the other side, a cell apart (see CELL)
     spouts: [CELL / 2, -CELL / 2],
-    valveY: TANK_SECTION.h + 13,
-    spoutY: TANK_SECTION.h + 52,
-    box: { x0: -CELL / 2 - TANK_SECTION.w / 2 - 3, x1: CELL / 2 + TANK_SECTION.w / 2 + 3, y0: -6, y1: TANK_SECTION.h + 54 },
+    // each valve's handwheel on the drop from its tank to the coil (see HELIX), clear of both
+    valveY: TANK_SECTION.h + TANK_SUMP_H + 12,
+    spoutY: TANK_SECTION.h + 67,
+    box: { x0: -CELL / 2 - TANK_SECTION.w / 2 - 3, x1: CELL / 2 + TANK_SECTION.w / 2 + 3, y0: -6, y1: TANK_SECTION.h + 69 },
   },
   separator: {
     // the dispenser's tank (see TANK_SECTION)
@@ -1183,11 +1186,12 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spouts: [-CELL, CELL],
     sump: { w: TANK_SECTION.w, h: TANK_SUMP_H },
     front: true,
-    valveY: TANK_SECTION.h + 12,
+    // its valve's handwheel on the drop from the hopper's tip to the manifold, clear of both
+    valveY: TANK_SECTION.h + TANK_SUMP_H + 12,
     // under the manifold's arms, which slope down to them (see the view's SEP_ARMS): its peak's middle
-    // TANK_SECTION.h + 24 down, a cell's run at 15° lower again, and a short pipe down from each arm's end
-    spoutY: TANK_SECTION.h + 57,
-    box: { x0: -CELL - 16, x1: CELL + 16, y0: -6, y1: TANK_SECTION.h + 59 },
+    // TANK_SECTION.h + 41 down, a cell's run at 15° lower again, and a short pipe down from each arm's end
+    spoutY: TANK_SECTION.h + 74,
+    box: { x0: -CELL - 16, x1: CELL + 16, y0: -6, y1: TANK_SECTION.h + 76 },
   },
   splitter: {
     tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
@@ -1254,9 +1258,9 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     sump: BIG_TANK_SUMP,
     front: true,
     spouts: [0],
-    valveY: BIG_TANK_H + 28,
-    spoutY: BIG_TANK_H + 44,
-    box: { x0: -BIG_TANK_W / 2 - 4, x1: BIG_TANK_W / 2 + 4, y0: -6, y1: BIG_TANK_H + 46 },
+    valveY: BIG_TANK_H + BIG_TANK_SUMP.h + 12,
+    spoutY: BIG_TANK_H + BIG_TANK_SUMP.h + 29,
+    box: { x0: -BIG_TANK_W / 2 - 4, x1: BIG_TANK_W / 2 + 4, y0: -6, y1: BIG_TANK_H + BIG_TANK_SUMP.h + 31 },
   },
   receptacle: {
     // the station: a funnel, and the reservoir's column in the wall, behind a pane (see STATION); a waste
@@ -1317,7 +1321,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     maxFlow: PIPETTE_FLOW,
     spouts: [-CELL / 2, CELL / 2],
     valveY: 42,
-    spoutY: 58,
+    spoutY: 60,
     box: { x0: -CELL / 2 - 14, x1: CELL / 2 + 14, y0: -(BULB.neck.h + BULB.inlet.rise + BULB.inlet.h) - 6, y1: 62 },
   },
   strip: {
@@ -1336,9 +1340,9 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tankCap: COLUMN.funnel.cap,
     funnel: true,
     spouts: [0],
-    valveY: COLUMN.tube.y1 + 12,
-    spoutY: COLUMN.tube.y1 + 28,
-    box: { x0: -COLUMN.funnel.w - 2, x1: COLUMN.funnel.w + 2, y0: -6, y1: COLUMN.tube.y1 + 30 },
+    valveY: COLUMN.tube.y1 + 13,
+    spoutY: COLUMN.tube.y1 + 30,
+    box: { x0: -COLUMN.funnel.w - 2, x1: COLUMN.funnel.w + 2, y0: -6, y1: COLUMN.tube.y1 + 32 },
   },
   shadowlamp: {
     // a trough: the lamp's enclosure, a floored channel between two walls, and an end wall with its screen (see
@@ -1510,7 +1514,7 @@ export const tankX = (tk: { x0: number; x1: number }) => (tk.x0 + tk.x1) / 2;
  * one end to the bottom of the other, so a stream comes down from its tank,
  * winds across, and drops out the far side.
  */
-export const HELIX = { x0: -CELL / 2, x1: CELL / 2, y: TANK_SECTION.h + 26, r: 6, halfTwists: 9 };
+export const HELIX = { x0: -CELL / 2, x1: CELL / 2, y: TANK_SECTION.h + 41, r: 6, halfTwists: 9 };
 
 /** The inside of a tank with a neck, by kind of tool (see Tool.level): every tank of a kind is alike. */
 const necked = new Map<ToolKind, Piece[]>();
@@ -1694,6 +1698,11 @@ export class Tool {
    * half by default.
    */
   readonly valves: number[];
+  /**
+   * Per valve, the angle it's drawn and turned at (see valveAngle in bodies.ts), which says no more than `valves` does
+   * about how it's set: never saved, and worked out afresh from `valves` whenever that's been set some other way.
+   */
+  readonly angles: (number | undefined)[] = [];
   /** Per spout, what left it on the last step, for drawing the stream; null if nothing did. */
   out: (Vessel | null)[];
   /** Per spout, the drop hanging there, gathering a flow too slow to stream (see drip). */

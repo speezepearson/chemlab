@@ -10,7 +10,7 @@ import type { Fluid } from '../chem/reactions';
 import { OUTLINE } from './outline';
 import { glowFalloff } from './appearance';
 import {
-  NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onScale, onTool, openingOf, plumbZ, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
+  NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onScale, onTool, openingOf, plumbZ, tankNoteY, tankRect, valveLocal, valveZ, dialZ, settleAngle, valveAngle, VALVE_WHEEL, type Stand,
 } from './bodies';
 import { SPECIES } from '../chem/species';
 import { CAP, DELIVERY, GOAL_PURITY, TRACE } from './config';
@@ -74,6 +74,8 @@ export interface FaucetSpot {
   note: string;
   /** How far its valve is open: 0 (shut) to 1 (fully open, FILL_RATE), as a tool's valve is (see faucetRate). */
   valve: number;
+  /** The angle its valve is drawn and turned at, as a tool's (see settleAngle in bodies.ts): never saved. */
+  angle?: number;
 }
 
 /** Everything the view needs to draw one frame. */
@@ -201,7 +203,7 @@ const PHOSPHOR = '64, 255, 110';
  * tank, midway between its spouts, each `slope` (radians) below level, `thick` through and `deep` front to back,
  * reaching `over` past its spout; `top` is how far down the peak's top is, just under its valve.
  */
-const SEP_ARMS = { top: TANK_SECTION.h + 18, slope: Math.PI / 12, thick: 12, deep: 20, over: 10 };
+const SEP_ARMS = { top: TANK_SECTION.h + 35, slope: Math.PI / 12, thick: 12, deep: 20, over: 10 };
 /** Height of each line of a label, in world units. */
 const LABEL_H = 10;
 /** How far above a flask's mouth or a scale's platform its note sits, to the note's middle. */
@@ -275,6 +277,11 @@ const panelMat = new THREE.MeshPhysicalMaterial({ color: 0xc4cbc7, metalness: 0.
 /** The separator's arm that molecules with a black atom leave by: the same paint, in a dark gray, at the user's request. */
 const blackSideMat = new THREE.MeshPhysicalMaterial({ color: 0x45494b, metalness: 0.1, roughness: 0.5, clearcoat: 0.4, clearcoatRoughness: 0.35 });
 const leverMat = new THREE.MeshPhysicalMaterial({ color: 0x15191a, metalness: 0, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.2 });
+/**
+ * A handwheel's face (see handwheel): light and quite matte, with a little light of its own, so the black bar or pointer
+ * on it shows from any side and in any light, as a painted panel (which takes on what it reflects) doesn't.
+ */
+const wheelFaceMat = new THREE.MeshStandardMaterial({ color: 0xdfe4e1, metalness: 0, roughness: 0.85, emissive: 0xdfe4e1, emissiveIntensity: 0.18 });
 /** A thermometer's white enamel backing (see THERMOMETER_ROD). */
 const enamelMat = new THREE.MeshStandardMaterial({ color: 0xf1efe6, roughness: 0.4 });
 const keyMats = {
@@ -706,6 +713,50 @@ function pipes(parent: THREE.Object3D, pts: number[][], r = 2, z = 0): THREE.Mes
     meshes.push(j);
   }
   return meshes;
+}
+
+/** A handwheel's lobed outline (see VALVE_WHEEL), less `inset`, as a shape to extrude. */
+function wheelShape(inset: number): THREE.Shape {
+  const { r, lobes, notch } = VALVE_WHEEL;
+  const pts: THREE.Vector2[] = [];
+  const n = lobes * 12;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * 2 * Math.PI;
+    const rr = r - inset - (notch * (1 - Math.cos(lobes * a))) / 2;
+    pts.push(new THREE.Vector2(rr * Math.sin(a), rr * Math.cos(a)));
+  }
+  return new THREE.Shape(pts);
+}
+
+/** How rounded a handwheel's edges are, front and back. */
+const WHEEL_BEVEL = 0.45;
+/** A handwheel's disk, its back at z = 0 and its face at VALVE_WHEEL.thick, facing +z (see handwheel). */
+const wheelDisk = new THREE.ExtrudeGeometry(wheelShape(WHEEL_BEVEL), {
+  depth: VALVE_WHEEL.thick - 2 * WHEEL_BEVEL, bevelEnabled: true, bevelThickness: WHEEL_BEVEL, bevelSize: WHEEL_BEVEL, bevelSegments: 2, curveSegments: 1,
+}).translate(0, 0, WHEEL_BEVEL);
+/** How far out from its middle a handwheel's painted face reaches, inside its rim. */
+const WHEEL_FACE = VALVE_WHEEL.r - VALVE_WHEEL.notch - 1.1;
+const wheelFace = new THREE.CircleGeometry(WHEEL_FACE, 40).translate(0, 0, VALVE_WHEEL.thick + 0.02);
+/** A plain valve's bar, across a whole diameter of its face; and a splitter's pointer, from its middle to its rim, and the round boss it turns from. */
+const wheelBar = new THREE.BoxGeometry(VALVE_WHEEL.bar, 2 * WHEEL_FACE + 0.6, 0.9).translate(0, 0, VALVE_WHEEL.thick + 0.45);
+const wheelPointer = new THREE.BoxGeometry(VALVE_WHEEL.bar, WHEEL_FACE + 0.3, 0.9).translate(0, (WHEEL_FACE + 0.3) / 2, VALVE_WHEEL.thick + 0.45);
+const wheelBoss = new THREE.CylinderGeometry(1.7, 1.7, 0.9, 20).rotateX(Math.PI / 2).translate(0, 0, VALVE_WHEEL.thick + 0.45);
+
+/**
+ * A valve's handwheel (see VALVE_WHEEL): a disk with a lobed, grippy rim, in `rim`, its face inside the rim in `face`,
+ * and on the face, in `bar`, a raised bar across a whole diameter, which says how it's set (along the pipe open, square
+ * to it shut); or with `pointer`, a pointer from its middle to its rim, which says which way it sends things. Its back
+ * is at z = 0 and it faces +z, its bar upright: turn it about z (clockwise as seen from in front by −rotation.z).
+ */
+function handwheel(rim: THREE.Material, face: THREE.Material, bar: THREE.Material, pointer = false): THREE.Group {
+  const g = new THREE.Group();
+  const parts: THREE.Mesh[] = [new THREE.Mesh(wheelDisk, rim), new THREE.Mesh(wheelFace, face), new THREE.Mesh(pointer ? wheelPointer : wheelBar, bar)];
+  if (pointer) parts.push(new THREE.Mesh(wheelBoss, bar));
+  for (const m of parts) {
+    m.castShadow = true;
+    g.add(m);
+  }
+  return g;
 }
 
 /* ---------------- text and screens ---------------- */
@@ -1656,12 +1707,13 @@ class ToolView {
         outlet(k, [[x, mid + Math.abs(x - peak) * Math.tan(slope)], [x, sh.spoutY - 4]]);
       });
     } else if (t.kind === 'splitter') {
-      const fork = sh.valveY + 10;
+      // far enough under the valve to clear its handwheel
+      const fork = sh.valveY + VALVE_WHEEL.r + 4;
       pipes(art, [[0, TH], [0, fork]]);
       sh.spouts.forEach((x, k) => outlet(k, [[0, fork], [x, fork + 16], [x, sh.spoutY - 4]]));
     } else if (t.kind === 'multiplexer') {
       // the splitter's fork upside down: each funnel's stem in to where they join, over the valve
-      const join = sh.valveY - 12;
+      const join = sh.valveY - VALVE_WHEEL.r - 4;
       for (const tk of sh.tanks) pipes(art, [[tankX(tk), TH], [tankX(tk), join - 16], [0, join]]);
       outlet(0, [[0, join], [0, sh.spoutY - 4]]);
     } else if (t.kind === 'sorter') {
@@ -1803,30 +1855,22 @@ class ToolView {
     if (t.kind === 'heater') this.buildHeater();
     if (t.kind === 'dilatometer') this.buildBulbs();
 
-    // valves: a round core on the front face, and a lever that points where it was turned; or a dial
+    // valves: a handwheel on the pipe, facing the front, on a short hub out from the pipe; or a dial
     if (!sh.noValve)
       t.valves.forEach((_, k) => {
         const vc = valveLocal(t, k);
-        const z = valveZ(t);
         if (k === sh.dial) {
-          this.dial = this.buildDial(vc, z);
+          this.dial = this.buildDial(vc, dialZ(t));
           art.traverse((m) => m.parent === this.dial && pick(m, 'valve', k));
           return;
         }
-        rod(art, pipeMat, v3(vc.x, vc.y, pz), v3(vc.x, vc.y, z), 1.5);
-        const core = new THREE.Mesh(unitCylinder, panelMat);
-        core.rotation.x = Math.PI / 2;
-        core.scale.set(5, 4, 5);
-        core.position.copy(v3(vc.x, vc.y, z));
-        art.add(core);
-        pick(core, 'valve', k);
-        const pivot = new THREE.Group();
-        pivot.position.copy(v3(vc.x, vc.y, z + 2.5));
-        const lever = new THREE.Mesh(new THREE.BoxGeometry(14, 3, 2).translate(6, 0, 0), leverMat);
-        lever.castShadow = true;
-        pivot.add(lever);
+        const back = valveZ(t) - VALVE_WHEEL.thick / 2;
+        const hub = rod(art, darkMat, v3(vc.x, vc.y, pz), v3(vc.x, vc.y, back + 0.2), 2.2);
+        pick(hub, 'valve', k);
+        const pivot = handwheel(leverMat, wheelFaceMat, leverMat, t.kind === 'splitter' || t.kind === 'multiplexer');
+        pivot.position.copy(v3(vc.x, vc.y, back));
         art.add(pivot);
-        pick(lever, 'valve', k);
+        pivot.traverse((m) => m instanceof THREE.Mesh && pick(m, 'valve', k));
         this.levers.set(k, pivot);
       });
 
@@ -2209,7 +2253,7 @@ class ToolView {
     const sh = t.shape;
     const neck = sh.neck!;
     const dial = valveLocal(t, sh.dial!);
-    block(this.art, panelMat, dial.x - 14, dial.x + 14, dial.y - 14, dial.y + 14, -10, valveZ(t) - 3, 2.5);
+    block(this.art, panelMat, dial.x - 14, dial.x + 14, dial.y - 14, dial.y + 14, -10, dialZ(t) - 3, 2.5);
     this.wire = metal(new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.6 }));
     // round both: along the front, round the right bulb's far side, along the back, round the left bulb's, and on
     const R = neck.body / 2 + 1.3;
@@ -2547,14 +2591,9 @@ class ToolView {
       this.labels[k].set(v.label);
     });
     this.note.set(t.note);
-    for (const [k, pv] of this.levers)
-      // closed points right, open straight up; a splitter's points to the side that gets more, and a multiplexer's to
-      // the side it takes more from
-      pv.rotation.z = t.kind === 'splitter' || t.kind === 'multiplexer' ? Math.PI * (1 - t.valves[k]) : (t.valves[k] * Math.PI) / 2;
-    if (this.dial) {
-      const d = t.valves[t.shape.dial!];
-      this.dial.children[1].rotation.z = -(-0.75 * Math.PI + 1.5 * Math.PI * d);
-    }
+    // each handwheel and dial at the angle it's been turned to (see valveAngle), clockwise from upright
+    for (const [k, pv] of this.levers) pv.rotation.z = -valveAngle(t, k);
+    if (this.dial) this.dial.children[1].rotation.z = -valveAngle(t, t.shape.dial!);
     if (this.helix)
       for (const { geom, colors, k } of this.helix) {
         const out = t.out[k];
@@ -5103,9 +5142,9 @@ export class View {
         }
       }
       this.faucetNotes[i]?.set(fa.note);
-      // shut points right, open straight up, as a tool's valve's lever does
+      // shut points right, open straight up, at the angle it's been turned to (see settleAngle)
       const lever = this.faucetLevers[i];
-      if (lever) lever.rotation.z = (fa.valve * Math.PI) / 2;
+      if (lever) lever.rotation.z = Math.PI / 2 - settleAngle('valve', fa.angle, fa.valve);
     });
 
     this.updateStands(fr);

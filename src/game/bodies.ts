@@ -114,12 +114,6 @@ export function spoutAt(t: Tool, j: number): Vec3 {
   return onTool(t, t.shape.spouts[j], t.shape.spoutY, plumbZ(t));
 }
 
-/**
- * How far in front of the tool's middle its valves sit: on its front face, where they're easy to see and reach, on a
- * short stem out from the pipe they're on; for a tool that drains at its front (see plumbZ), a little in front of it.
- */
-export const valveZ = (t: Tool) => (t.shape.wall ? 7 : TOOL_DEPTH[t.kind].body / 2 + 3);
-
 /** A valve's center, in the tool's flat frame: as its shape places it, or under tank k. */
 export function valveLocal(t: Tool, k: number): { x: number; y: number } {
   const v = t.shape.valves?.[k] ?? { x: tankX(t.shape.tanks[k]), y: t.shape.valveY };
@@ -626,57 +620,110 @@ export function standBase(s: Stand, y = groundAt(s.x, s.z)): Box {
 
 /* ---------------- valves ---------------- */
 
-/** How close to a valve, in a tool's local units, the aim can be before the lever stops following it: its round core. */
-export const VALVE_DEADZONE = 6;
-/** How near a valve's center, in a tool's local units, the right button grabs it: the reach of its lever, or a dial's ticks. */
-export const VALVE_REACH = 15;
-
-/** The valve nearest (x, y) in a tool's flat frame as it stands, within VALVE_REACH of its center; null if none is. */
-export function valveNear(t: Tool, x: number, y: number): number | null {
-  if (t.shape.noValve) return null;
-  let best: number | null = null;
-  let reach = VALVE_REACH;
-  t.valves.forEach((_, k) => {
-    const v = valveLocal(t, k);
-    const d = Math.hypot(x - v.x, y - v.y);
-    if (d < reach) [best, reach] = [k, d];
-  });
-  return best;
-}
-
-/** How a lever turns (see leverAt): a valve's, a splitter's or a multiplexer's, or a dial. */
-export type LeverKind = 'valve' | 'split' | 'dial';
+/**
+ * A valve's handwheel (see the view's handwheel): a disk `r` in radius and `thick` through, facing the tool's front, its
+ * middle on the pipe's axis as seen from in front, standing `gap` proud of the pipe on a short hub; `lobes` rounded
+ * lobes round its rim for grip, the notches between them `notch` deep; and a raised bar `bar` wide across its face.
+ */
+export const VALVE_WHEEL = { r: 9, thick: 3, gap: 1.5, lobes: 10, notch: 0.9, bar: 1.8 };
 
 /**
- * The setting a lever pointed at (dx, dy) from its valve's center, on the face it lies on (x right, y down), comes to:
- * a valve's straight up is fully open (1), straight right closed (0), and partly open in between, so its lever stands at
- * its setting times a quarter turn up from right. Below the valve it closes, and left of it (past the down-left
- * diagonal) it opens, so a wild swing lands at the nearer end. A splitter's lever instead sweeps the upper half:
- * straight left sends everything left, straight right everything right, and below the valve it goes to the nearer
- * side; a multiplexer's the same, taking everything from the left or the right. A dial points at (dx, dy), turning
- * clockwise from down-left (0) to down-right (1), and straight below it goes to the nearer end. Within VALVE_DEADZONE
- * of the center the angle is too jumpy to mean anything, so the lever stays put: null.
+ * How far in front of the tool's middle its valves' handwheels are, at their middles: just proud of the pipe they're
+ * on (see VALVE_WHEEL), which is in front of the middle if it drains at its front (see plumbZ). The supply station's
+ * pipes are a little thicker.
  */
-export function leverAt(kind: LeverKind, dx: number, dy: number): number | null {
-  if (Math.hypot(dx, dy) < VALVE_DEADZONE) return null;
-  if (kind === 'dial') {
-    const cw = Math.atan2(dx, -dy); // clockwise from straight up
-    return Math.max(0, Math.min(1, (cw + 0.75 * Math.PI) / (1.5 * Math.PI)));
-  }
-  const a = Math.atan2(-dy, dx); // counterclockwise from right
-  if (kind === 'split') return a >= 0 ? 1 - a / Math.PI : a > -Math.PI / 2 ? 1 : 0;
-  const open = a < -0.75 * Math.PI ? 1 : a / (Math.PI / 2);
-  return Math.max(0, Math.min(1, open));
+export const valveZ = (t: Tool) => plumbZ(t) + (t.shape.wall ? 2.5 : 2) + VALVE_WHEEL.gap + VALVE_WHEEL.thick / 2;
+
+/** How far in front of the tool's middle a dial is (see ToolShape.dial): on the front face of the box it's set in. */
+export const dialZ = (t: Tool) => TOOL_DEPTH[t.kind].body / 2 + 3;
+
+/** How far in front of the tool's middle valve k's face is, which the aim is taken on to turn it: a handwheel's or a dial's. */
+export const valveFaceZ = (t: Tool, k: number) => (k === t.shape.dial ? dialZ(t) : valveZ(t));
+
+/** How close to a valve's middle, in a tool's local units, the aim can be before its angle stops meaning anything: its hub. */
+export const VALVE_DEADZONE = 3;
+
+/**
+ * How a valve turns (see valveAt): a plain valve's handwheel, a splitter's, a multiplexer's (which turns as a splitter's
+ * does, and differs only in where it rests, see angleOf), or a dial.
+ */
+export type LeverKind = 'valve' | 'split' | 'join' | 'dial';
+
+/** How far either way from straight up a dial turns, to its stops (see valveAt). */
+export const DIAL_STOP = 0.75 * Math.PI;
+
+/**
+ * What a valve at angle `a` (radians clockwise from straight up, as seen from in front) is set to. A plain valve's bar
+ * runs across its handwheel: along the pipe (upright) it's fully open (1), square to it shut (0), and partly open in
+ * between, so it opens and shuts twice a turn. A splitter's or multiplexer's handwheel has a pointer instead: straight
+ * left sends everything left (0), straight up half each way, straight right everything right (1), straight down half
+ * each way again, and on round to the left. Both turn all the way round. A dial turns clockwise from down-left (0) to
+ * down-right (1), and no further (see sweep).
+ */
+export function valveAt(kind: LeverKind, a: number): number {
+  const turn = 2 * Math.PI;
+  if (kind === 'dial') return Math.max(0, Math.min(1, (a + DIAL_STOP) / (2 * DIAL_STOP)));
+  if (kind === 'valve') return Math.abs(1 - ((((a % Math.PI) + Math.PI) % Math.PI) / (Math.PI / 2)));
+  return 1 - Math.abs((((a + Math.PI / 2) % turn) + turn) % turn - Math.PI) / Math.PI;
 }
 
-/** How valve k of tool t turns (see leverAt). */
+/**
+ * Where a valve set to `v` is drawn, when nothing says otherwise (see valveAngle): a plain valve's bar a quarter turn
+ * clockwise from upright when shut; a splitter's pointer on the lower half (left for 0, right for 1), toward the fork
+ * under it, so straight down for an even split; a multiplexer's on the upper half, toward the funnels joining over it;
+ * a dial on its arc.
+ */
+export function angleOf(kind: LeverKind, v: number): number {
+  if (kind === 'dial') return -DIAL_STOP + 2 * DIAL_STOP * v;
+  if (kind === 'split') return (1.5 - v) * Math.PI;
+  if (kind === 'join') return (v - 0.5) * Math.PI;
+  return ((1 - v) * Math.PI) / 2;
+}
+
+/**
+ * A valve's angle, given the one it was last drawn and turned at (if any) and what it's set to now: that one, if it
+ * still says what it's set to, or else, if it's been set some other way (loaded, undone, a preset), where that's drawn
+ * (see angleOf). This is the one place an angle is worked out from a setting.
+ */
+export function settleAngle(kind: LeverKind, a: number | undefined, v: number): number {
+  return a !== undefined && Math.abs(valveAt(kind, a) - v) < 1e-9 ? a : angleOf(kind, v);
+}
+
+/** A valve at angle `a` turned by `d` (clockwise): as far as that, all the way round, but a dial only to its stops. */
+export function sweep(kind: LeverKind, a: number, d: number): number {
+  return kind === 'dial' ? Math.max(-DIAL_STOP, Math.min(DIAL_STOP, a + d)) : a + d;
+}
+
+/**
+ * The angle round a valve's middle of a point (dx, dy) from it on its face (x right, y down), clockwise from straight
+ * up; null within VALVE_DEADZONE of the middle, where it's too jumpy to mean anything.
+ */
+export function aimAngle(dx: number, dy: number): number | null {
+  return Math.hypot(dx, dy) < VALVE_DEADZONE ? null : Math.atan2(dx, -dy);
+}
+
+/**
+ * How far round a valve's middle the aim swept between two angles of it (see aimAngle), clockwise, the short way: what
+ * turns it. Nothing if either is in the dead zone.
+ */
+export function swept(from: number | null, to: number | null): number {
+  return from === null || to === null ? 0 : wrapAngle(to - from);
+}
+
+/** How valve k of tool t turns (see valveAt). */
 export function leverKind(t: Tool, k: number): LeverKind {
-  return k === t.shape.dial ? 'dial' : t.kind === 'splitter' || t.kind === 'multiplexer' ? 'split' : 'valve';
+  return k === t.shape.dial ? 'dial' : t.kind === 'splitter' ? 'split' : t.kind === 'multiplexer' ? 'join' : 'valve';
 }
 
-/** Point valve k's lever at (x, y) in the tool's flat frame as it stands (y down); see leverAt. */
-export function aimValve(t: Tool, k: number, x: number, y: number): void {
-  const vc = valveLocal(t, k);
-  const v = leverAt(leverKind(t, k), x - vc.x, y - vc.y);
-  if (v !== null) t.valves[k] = v;
+/** Valve k's angle as it's drawn and turned (see settleAngle), kept with the tool (Tool.angles). */
+export function valveAngle(t: Tool, k: number): number {
+  return (t.angles[k] = settleAngle(leverKind(t, k), t.angles[k], t.valves[k]));
+}
+
+/** Turn valve k by `d` (radians clockwise, see sweep), and set it to what it comes to. */
+export function turnValve(t: Tool, k: number, d: number): void {
+  const kind = leverKind(t, k);
+  const a = sweep(kind, valveAngle(t, k), d);
+  t.angles[k] = a;
+  t.valves[k] = valveAt(kind, a);
 }
