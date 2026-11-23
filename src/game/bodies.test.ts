@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FLASK_R, MAGNET, NOZZLE_REACH, SCALE_SLOTS, magnetShift, STAND_BASE, aimAngle, angleOf, settleAngle, swept, turnValve, valveAt, valveAngle, leverKind, VALVE_DEADZONE, VALVE_WHEEL, DIAL_STOP, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
-  docked, nozzleBox, nozzleMounts, nozzleStand, onScale, scaleBox, scaleSpot, snapReach, spoutAt, standBase, tankMouth, toolBox, toolStands,
+  FLASK_R, MAGNET, NOZZLE_REACH, SCALE_SLOTS, magnetShift, STAND_BASE, aimAngle, angleOf, settleAngle, swept, turnValve, valveAt, valveAngle, leverKind, VALVE_DEADZONE, DIAL_STOP, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
+  docked, nozzleBox, nozzleMounts, nozzleStand, onScale, scaleBox, scaleSpot, snapReach, spoutAt, standBase, tankMouth, toolBounds, toolBox, toolStands,
   plumbZ,
 } from './bodies';
 import { SOLVENT_SPECIES, singleOf } from '../chem/species';
@@ -14,7 +14,7 @@ import { LAMP_POSE } from './presets';
 import { SCALE_SHAPE, Scale } from './scale';
 import { CELL, COUNTERS, LAMP_AREA, LAMP_FLOOR, LAMP_Z, LIFT, ROOM, counterUnder, fromFrac, groundAt, toFrac, toWorld, wrapAngle } from './space';
 import { SCALE_ANCHOR, onCell, toCell, toolAnchor } from './testLayout';
-import { BULB_Y, COLUMN, TANK_H, Hose, INLINE_DOCK, LAMP, SCREEN, SHAPES, STRIP, STRIP_FOOT, THERMOMETER_ROD, Tool, dipUnder, footY, mouthBelow, type ToolKind } from './tools';
+import { BULB_Y, COLUMN, SPOUT_STUB, TANK_H, Hose, INLINE_DOCK, LAMP, SCREEN, SHAPES, STRIP, STRIP_FOOT, THERMOMETER_ROD, Tool, dipUnder, footY, mouthBelow, type ToolKind } from './tools';
 
 const at = (x: number, y: number, z: number, yaw = 0) => ({ x, y, z, yaw });
 
@@ -108,10 +108,12 @@ describe('the shadow lamp', () => {
    * Whether a tool of a kind can stand in the channel, in its cell `i`, turned by `yaw`, its foot `up` above the
    * channel's floor: clear of the trough, with its stands' bases on that floor and clear of the rest of it too.
    */
-  const stands = (kind: ToolKind, i: number, yaw: number, up = 10): boolean => {
+  const stands = (kind: ToolKind, i: number, yaw: number, up = 10, bare = true): boolean => {
     const t = new Tool(kind, 1);
+    // (bare: a stopcock's handwheel stands a little proud of the front of what it's on, see below)
+    if (bare) t.cocks.fill(null);
     const c = cell(i);
-    t.pose = onCell(at(c.x, LAMP_FLOOR.y + up + t.shape.box.y1, c.z, yaw), toolAnchor(t));
+    t.pose = onCell(at(c.x, LAMP_FLOOR.y + up + toolBounds(t).y1, c.z, yaw), toolAnchor(t));
     const on = toolStands(t);
     return !boxesOverlap(toolBox(t), b) && on.every((st) => counterUnder(standBase(st, 0)) === LAMP_FLOOR.y && !boxesOverlap(standBase(st, LAMP_FLOOR.y), b));
   };
@@ -213,6 +215,9 @@ describe('the shadow lamp', () => {
     expect(stands('dispenser', cells - 1, TO_SCREEN)).toBe(true);
     expect(stands('dispenser', 1, TO_LAMP)).toBe(true);
     expect(stands('dispenser', 1, TO_SCREEN)).toBe(true);
+    // with its stopcock, as it comes, facing the lamp in the cell by it, the stopcock's handwheel is in the enclosure
+    expect(stands('dispenser', 0, TO_LAMP, 10, false)).toBe(false);
+    expect(stands('dispenser', 1, TO_LAMP, 10, false)).toBe(true);
     // the other way round its stand would be in the enclosure, or the end wall
     expect(stands('dispenser', 0, TO_SCREEN)).toBe(false);
     expect(stands('dispenser', cells - 1, TO_LAMP)).toBe(false);
@@ -307,7 +312,8 @@ describe('valves', () => {
     expect(settleAngle('valve', 3 * Q, 0)).toBe(3 * Q);
     expect(settleAngle('valve', 3 * Q, 1)).toBe(0);
     expect(settleAngle('valve', undefined, 0.5)).toBeCloseTo(Q / 2, 12);
-    const t = new Tool('dispenser', 0, undefined, [1]);
+    // (the heater's tap's valve is a plain one)
+    const t = new Tool('heater', 0, undefined, [1]);
     turnValve(t, 0, 2 * Q);
     expect(t.valves[0]).toBeCloseTo(1, 12);
     expect(valveAngle(t, 0)).toBeCloseTo(2 * Q, 12);
@@ -317,7 +323,7 @@ describe('valves', () => {
   });
 
   it('shut a plain valve swept a quarter turn from open, and open it again a quarter turn on', () => {
-    const t = new Tool('dispenser', 0, undefined, [1]);
+    const t = new Tool('heater', 0, undefined, [1]);
     turnValve(t, 0, Q);
     expect(t.valves[0]).toBeCloseTo(0, 12);
     turnValve(t, 0, Q);
@@ -357,23 +363,25 @@ describe('valves', () => {
     expect(ht.valves[k]).toBeCloseTo(0.5, 12);
   });
 
-  it('stand on a straight drop of pipe, their handwheels clear of the tank above and any spout below', () => {
-    const clear = VALVE_WHEEL.r + 2;
-    for (const kind of Object.keys(SHAPES) as ToolKind[]) {
+  it('are built in only where they share out or set something, not to let a spout out slower', () => {
+    const builtIn = (Object.keys(SHAPES) as ToolKind[]).filter((k) => SHAPES[k].valves);
+    expect(builtIn.sort()).toEqual(['dilatometer', 'heater', 'multiplexer', 'receptacle', 'splitter']);
+    for (const kind of Object.keys(SHAPES) as ToolKind[]) expect(new Tool(kind, 0).valves.length, kind).toBe(SHAPES[kind].valves?.length ?? 0);
+  });
+
+  it('leave a plain spout a short stub under what it drains, for a stopcock to go on', () => {
+    for (const kind of ['dispenser', 'tank', 'pipette'] as ToolKind[]) {
       const sh = SHAPES[kind];
-      if (sh.noValve || sh.valves) continue;
-      // what's above: the tank's floor, its sump's or hopper's tip, or a column's tube's foot
-      const above = kind === 'column' ? COLUMN.tube.y1 + 1.5 : (sh.tankH ?? TANK_H) + (sh.funnel || sh.cup ? 0 : (sh.sump?.h ?? 0));
-      expect(sh.valveY - clear, kind).toBeGreaterThanOrEqual(above);
-      // a spout straight under it has its tip (6 tall) below the handwheel
-      if (sh.spouts.includes(0)) expect(sh.valveY + clear, kind).toBeLessThanOrEqual(sh.spoutY - 6);
+      const above = (sh.tankH ?? TANK_H) + (sh.funnel || sh.cup ? 0 : (sh.sump?.h ?? 0));
+      expect(sh.spoutY - above, kind).toBe(SPOUT_STUB);
     }
+    expect(SHAPES.column.spoutY - COLUMN.tube.y1).toBe(SPOUT_STUB);
   });
 
   it("tell a splitter's and a multiplexer's pointers from the plain valves", () => {
     expect(leverKind(new Tool('splitter', 0), 0)).toBe('split');
     expect(leverKind(new Tool('multiplexer', 0), 0)).toBe('join');
-    expect(leverKind(new Tool('dispenser', 0), 0)).toBe('valve');
+    expect(leverKind(new Tool('heater', 0), 0)).toBe('valve');
   });
 });
 

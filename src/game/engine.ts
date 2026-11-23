@@ -4,9 +4,9 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
-  FLASK_CENTER, FLASK_LIP, NEAR, NEAR_STEP, NOZZLE_H, NOZZLE_REACH, SCALE_SLOTS, STAND_MAX, aimAngle, settleAngle, swept, sweep, turnValve, valveAt, valveFaceZ, valveLocal, VALVE_WHEEL, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
+  COCK_EXTENT, COCK_WHEEL_Z, FLASK_CENTER, FLASK_LIP, NEAR, NEAR_STEP, NOZZLE_H, NOZZLE_REACH, SCALE_SLOTS, STAND_MAX, STOPCOCK, aimAngle, cockBox, settleAngle, swept, sweep, turnValve, valveAt, valveFaceZ, valveLocal, VALVE_WHEEL, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
   FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, magnetShift, nozzleMounts, nozzleStand, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, standBase,
-  tankMouth, tankNoteY, toolBox, toolCenter, toolStands, type Magnets, type NozzleMount, type Stand,
+  spoutTip, tankMouth, tankNoteY, toolBox, toolCenter, toolStands, type Magnets, type NozzleMount, type Stand,
 } from './bodies';
 import { CABINET, endless, isStocked, putIn, stockWith, takeFrom, takeSlot, type Stock, type Stocked } from './cabinet';
 import { changeover, type ChangeoverSound } from './changeover';
@@ -33,8 +33,8 @@ import {
   type Pose, type Vec3,
 } from './space';
 import {
-  changeoverAt, BOND_KEYS, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, INLINE_TOOLS, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
-  TANK_H, TOOL_NAMES, isBlotter, isDipper, isThermometer, Blotter, Tool, UNIQUE_TOOLS, cupFillHeight, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
+  changeoverAt, BOND_KEYS, HEATER, HEATER_CELLS, HEATER_TUBE, DIVERTER_HOLD, Hose, MAX_FLOW, SHAPES, STATION, STRIP_FOOT, SUMP_TIP,
+  TANK_H, TOOL_NAMES, isBlotter, isDipper, isThermometer, Blotter, Tool, UNIQUE_TOOLS, cupFillHeight, type Cock, type HoseMount, drip, mouthBelow, sameMount, sumpFillHeight, levelIn, spaceOf, tankPieces, tankX,
   type Mouth, type ToolKind,
 } from './tools';
 import { typingIn } from './typing';
@@ -171,7 +171,21 @@ interface Rest {
   hose?: NozzleMount;
   /** Where each hose following what's held would come to rest with it, in Held.follow's order (see followRests). */
   follow?: Rest[];
+  /** For a stopcock, what it goes on (see CockSpot). */
+  cock?: CockSpot;
 }
+
+/** Where a stopcock is, or goes (see Cock): on a spout or a faucet, at its tip, or on the end of its hose (`nozzle`). */
+interface CockSpot {
+  m: HoseMount;
+  nozzle: boolean;
+}
+
+/**
+ * How near the line the crosshair is on the end of an outlet must be for a stopcock in hand to go on it, if the
+ * crosshair isn't on it (see GameEngine.cockAim).
+ */
+const COCK_SNAP = 30;
 
 /**
  * A hose whose nozzle pours into something being carried, and so goes along with it (see gather): the vessel it pours
@@ -193,6 +207,8 @@ type Held = (
   | { kind: 'scale'; sc: Scale }
   /** A hose by its nozzle, with how far behind it its stand is wanted, as the clamp's arm is slid (see snapReach). */
   | { kind: 'hose'; h: Hose; reach: number }
+  /** A stopcock, hanging from `pose` (see STOPCOCK): it has no pose of its own but on what it's fitted on. */
+  | { kind: 'cock'; c: Cock; pose: Pose }
 ) & {
   /**
    * How far it's turned from facing the player, and how far from their eyes it's held, along `dir`: which way it is
@@ -275,6 +291,14 @@ const REACH = 460;
  * stays on it; one on either of the other two taps' is rolled up, and what hung from them is gone.
  */
 const OLD_HEATER = { spouts: 4, kept: [1, 3] };
+/**
+ * The tools that had flow valves of their own, before there were stopcocks (see Cock): for each spout, which of its
+ * saved valves let it out. A save from then fits a stopcock on each of those spouts, set as that valve was, so that it
+ * runs on as it did (see GameEngine.loadCocks).
+ */
+const OLD_FLOW: Partial<Record<ToolKind, number[]>> = {
+  dispenser: [0], pipette: [0], tank: [0], column: [0], exchanger: [0, 1], separator: [0, 0], dilatometer: [0, 1],
+};
 /** The nearest and furthest something can be held, from the eyes to its middle, beyond its own size. */
 const HOLD_NEAR = 40;
 /** How much further off than other things a flask is held to start with (see holdDist). */
@@ -349,8 +373,11 @@ function faucetFlow(valve = 0): Omit<LabFaucet, keyof FaucetSpot | 'start'> & { 
   return { valve, drop: new Vessel(Infinity), packet: new Vessel(Infinity), out: null, flow: 0, streaming: false };
 }
 
-/** A valve the player can turn: valve k of tool t, or faucet `faucet`'s (see FAUCET_VALVE). */
-type ValveRef = { t: Tool; k: number } | { faucet: number };
+/**
+ * A valve the player can turn: built-in valve k of tool t, faucet `faucet`'s (see FAUCET_VALVE), or the stopcock on
+ * the spout or faucet `cock` (see Cock).
+ */
+type ValveRef = { t: Tool; k: number } | { faucet: number } | { cock: HoseMount };
 /** How long a note stays up, in ms. */
 const NOTE_MS = 1600;
 /**
@@ -694,6 +721,8 @@ export class GameEngine {
     this.tools = (preset.tools ?? []).map((spec, i) => {
       const t = new Tool(spec.kind, i, spotPose(spec), spec.valves);
       spec.tanks?.forEach((fill, k) => t.tanks[k] && applyFill(t.tanks[k], fill));
+      // its stopcocks as the preset sets them, or else as it comes (see ToolShape.fitted)
+      spec.cocks?.forEach((c, j) => j < t.cocks.length && (t.cocks[j] = c === null ? null : { valve: c, nozzle: false }));
       return t;
     });
     this.uniqueTools();
@@ -740,7 +769,7 @@ export class GameEngine {
     this.flasks = this.flasks.filter((f) => !flasks.has(f));
     this.tools = this.tools.filter((t) => !tools.has(t));
     for (const sc of this.scales) for (const { f } of [...sc.load]) if (flasks.has(f)) sc.remove(f);
-    this.hoses = this.hoses.filter((h) => !('tool' in h.on && tools.has(h.on.tool)) && !inIt(nozzleBox(h)));
+    this.hoses = this.hoses.filter((h) => !('tool' in h.on && tools.has(h.on.tool)) && !inIt(this.nozzleBox(h)));
     // what can't be put away (a unique tool) goes somewhere near instead
     for (const t of this.tools) if (!t.shape.wall && inIt(toolBox(t))) t.pose = this.roomy(t);
     return back;
@@ -836,6 +865,8 @@ export class GameEngine {
     const stock = Object.fromEntries(Object.entries(this.stock).map(([k, v]) => [k, [...v]])) as Stock;
     const fresh = h && !this.inLab(h) ? (h.kind === 'tool' ? h.t.kind : h.kind) : null;
     if (fresh && isStocked(fresh)) putIn(stock, fresh);
+    // and a stopcock in hand is saved as back where it was taken from, or in the cabinet
+    if (h?.kind === 'cock' && !h.from) putIn(stock, 'stopcock');
     return {
       v: 1,
       preset: this.preset.id,
@@ -844,6 +875,10 @@ export class GameEngine {
       })),
       tools: this.tools.map((t) => ({
         kind: t.kind, id: t.id, ...this.frac(t.pose), ...depth(t.pose), valves: [...t.valves], tanks: t.tanks.map(saveVessel),
+        cocks: t.cocks.map((_, j) => {
+          const c = this.cockSaved({ tool: t, spout: j });
+          return c && { valve: c.valve, ...(c.nozzle ? { nozzle: true } : {}) };
+        }),
         drops: t.drops.map(saveVessel),
         ...(t.tube.length ? { tube: t.tube.map(saveVessel) } : {}),
         ...(t.note ? { note: t.note } : {}),
@@ -875,6 +910,17 @@ export class GameEngine {
     };
   }
 
+  /**
+   * The stopcock a save keeps on a spout or faucet: the one there, or the one in hand, if it was taken off it (it's
+   * saved as put back, as anything in hand is).
+   */
+  private cockSaved(m: HoseMount): Cock | null {
+    const h = this.held;
+    const from = h?.kind === 'cock' ? h.from?.cock : undefined;
+    if (h?.kind === 'cock' && from && sameMount(from.m, m)) return { ...h.c, nozzle: from.nozzle };
+    return this.cockOn(m);
+  }
+
   private frac(p: Vec3): { fx: number; fy: number } {
     const f = toFrac(p);
     return { fx: f.x, fy: f.y };
@@ -900,10 +946,13 @@ export class GameEngine {
       .map((st) => {
         // (an older save's heater had three taps, each with a spout, before its end's: see OLD_HEATER)
         const long = (a: unknown[] | undefined) => st.kind === 'heater' && a?.length === OLD_HEATER.spouts;
-        const valves = long(st.valves) ? OLD_HEATER.kept.map((j) => st.valves![j]) : st.valves;
+        const saved = (long(st.valves) ? OLD_HEATER.kept.map((j) => st.valves![j]) : st.valves) ?? [];
         const drops = long(st.drops) ? OLD_HEATER.kept.map((j) => st.drops![j]) : st.drops;
         if (long(st.valves) || long(st.drops)) longHeaters.add(st.id);
-        const t = new Tool(st.kind, st.id, pose(fromFrac({ x: st.fx, y: st.fy }), st), valves ?? []);
+        // (an older save's swell bulbs had a valve under each bulb before their dial, which is all they have now)
+        const valves = st.kind === 'dilatometer' && saved.length === 3 ? [saved[2]] : SHAPES[st.kind].valves ? saved : [];
+        const t = new Tool(st.kind, st.id, pose(fromFrac({ x: st.fx, y: st.fy }), st), valves);
+        this.loadCocks(t, st, saved);
         t.tanks.forEach((v, k) => st.tanks?.[k] && loadVessel(v, st.tanks[k]));
         t.drops.forEach((v, k) => drops?.[k] && loadVessel(v, drops[k]));
         t.tube.forEach((v, k) => st.tube?.[k] && loadVessel(v, st.tube[k]));
@@ -984,6 +1033,24 @@ export class GameEngine {
       }
     } else this.stock = stockWith(this.outOfCabinet());
     this.afterLoad();
+  }
+
+  /**
+   * Fit the stopcocks a save says tool t has (see Cock), on the spouts it says: each with its setting, at its tip or on
+   * the end of its hose. A save from before there were stopcocks says nothing, and its tool gets one, at the spout's
+   * tip, on each spout an old valve of its let out of (see OLD_FLOW), set as that was (`valves`, as saved).
+   */
+  private loadCocks(t: Tool, st: SaveState['tools'][number], valves: readonly number[]): void {
+    const unit = (x: unknown) => (Number.isFinite(x) ? Math.max(0, Math.min(1, x as number)) : 0);
+    if (Array.isArray(st.cocks)) {
+      t.cocks.forEach((_, j) => {
+        const c = st.cocks![j];
+        t.cocks[j] = c && typeof c === 'object' ? { valve: unit(c.valve), nozzle: !!c.nozzle } : null;
+      });
+      return;
+    }
+    const old = OLD_FLOW[t.kind];
+    if (old) t.cocks.forEach((_, j) => (t.cocks[j] = { valve: unit(valves[old[j]]), nozzle: false }));
   }
 
   /** A pose kept inside the room. */
@@ -1219,6 +1286,8 @@ export class GameEngine {
       return { kind: 'flask', f, relYaw: 0, dist: 0 };
     }
     if (kind === 'scale') return { kind: 'scale', sc: new Scale(), relYaw: 0, dist: 0 };
+    // a stopcock comes out shut
+    if (kind === 'stopcock') return { kind: 'cock', c: { valve: 0, nozzle: false }, pose: { ...CABINET.slots.stopcock[slot] }, relYaw: 0, dist: 0 };
     // (held with its middle on the crosshair, like anything made in hand, a sheet lying flat included: looked down on,
     // as a sheet is when it's laid on a counter, its face is seen)
     return { kind: 'tool', t: new Tool(kind, this.nextToolId++, undefined), relYaw: 0, dist: 0 };
@@ -1262,7 +1331,9 @@ export class GameEngine {
       this.hoses = this.hoses.filter((hose) => !('tool' in hose.on && hose.on.tool === h.t));
     }
     if (h.kind === 'scale') this.scales = this.scales.filter((sc) => sc !== h.sc);
-    const kind = h.kind === 'tool' ? h.t.kind : h.kind;
+    // (a stopcock goes back in its compartment, if there's a place for it there; if not, it's just gone, as anything
+    // more of a kind than the cabinet holds is)
+    const kind = h.kind === 'tool' ? h.t.kind : h.kind === 'cock' ? 'stopcock' : h.kind;
     if (isStocked(kind)) putIn(this.stock, kind);
     if (h.kind === 'hose') this.hoses.splice(this.hoses.indexOf(h.h), 1);
     this.held = null;
@@ -1284,6 +1355,10 @@ export class GameEngine {
     if (h.kind === 'flask') return FLASK_CENTER;
     if (h.kind === 'tool') return toolCenter(h.t);
     if (h.kind === 'scale') return scaleCenter(h.sc);
+    if (h.kind === 'cock') {
+      const { y0, y1, z0, z1 } = COCK_EXTENT;
+      return { x: 0, y: -(y0 + y1) / 2, z: (z0 + z1) / 2 };
+    }
     return { x: 0, y: NOZZLE_H / 2, z: 0 };
   }
 
@@ -1306,6 +1381,7 @@ export class GameEngine {
     if (h.kind === 'flask') return h.f.pose;
     if (h.kind === 'tool') return h.t.pose;
     if (h.kind === 'scale') return h.sc.pose;
+    if (h.kind === 'cock') return h.pose;
     return { ...h.h.outlet, yaw: 0 };
   }
 
@@ -1325,7 +1401,8 @@ export class GameEngine {
     else if (h.kind === 'scale') {
       h.sc.pose = p;
       this.settle();
-    } else h.h.outlet = { x: p.x, y: p.y, z: p.z };
+    } else if (h.kind === 'cock') h.pose = p;
+    else h.h.outlet = { x: p.x, y: p.y, z: p.z };
   }
 
   /**
@@ -1350,7 +1427,13 @@ export class GameEngine {
     if (h.kind === 'flask') return flaskBox(h.f);
     if (h.kind === 'tool') return toolBox(h.t);
     if (h.kind === 'scale') return scaleBox(h.sc, true);
-    return nozzleBox(h.h);
+    if (h.kind === 'cock') return cockBox(h.pose, h.pose.yaw);
+    return this.nozzleBox(h.h);
+  }
+
+  /** A hose's nozzle's box, with the stopcock on its end, if there is one (see nozzleBox in bodies.ts). */
+  private nozzleBox(hose: Hose): Box {
+    return nozzleBox(hose, !!this.cockOn(hose.on)?.nozzle);
   }
 
   /** Where the box of what's held would be with it at pose p. */
@@ -1386,7 +1469,7 @@ export class GameEngine {
     const following = new Set(h?.follow?.map((f) => f.hose));
     for (const hose of this.hoses)
       if (!(h?.kind === 'hose' && h.h === hose) && !following.has(hose) && !skip.has(hose)) {
-        if (!(h?.kind === 'tool' && 'tool' in hose.on && hose.on.tool === h.t)) out.push(nozzleBox(hose));
+        if (!(h?.kind === 'tool' && 'tool' in hose.on && hose.on.tool === h.t)) out.push(this.nozzleBox(hose));
         if (bases) out.push(standBase(nozzleStand(hose.outlet, hose.turn, hose.reach)));
       }
     if (bases) for (const t of this.tools) if (!gone(t)) for (const st of toolStands(t)) out.push(standBase(st));
@@ -1685,22 +1768,31 @@ export class GameEngine {
     const { o, d } = this.view.ray((aim.x / this.viewW) * 2 - 1, 1 - (aim.y / this.viewH) * 2);
     const t = 't' in tr ? tr.t : null;
     const fa = 'faucet' in tr ? this.faucets[tr.faucet] : null;
-    const pose = t ? t.pose : faucetValvePose(fa!);
+    const cock = 'cock' in tr ? this.cockOn(tr.cock) : null;
+    if ('cock' in tr && !cock) return;
+    const pose = t ? t.pose : cock ? this.cockFrame({ m: (tr as { cock: HoseMount }).cock, nozzle: cock.nozzle }) : faucetValvePose(fa!);
     const n = { x: Math.sin(pose.yaw), y: 0, z: Math.cos(pose.yaw) };
-    const p0 = t && 't' in tr ? onTool(t, 0, 0, valveFaceZ(t, tr.k)) : toWorld(pose, { x: 0, y: 0, z: FAUCET_VALVE.pipe + VALVE_WHEEL.gap + VALVE_WHEEL.thick });
+    const p0 =
+      t && 't' in tr ? onTool(t, 0, 0, valveFaceZ(t, tr.k))
+      : cock ? toWorld(pose, { x: 0, y: 0, z: COCK_WHEEL_Z + VALVE_WHEEL.thick / 2 })
+      : toWorld(pose, { x: 0, y: 0, z: FAUCET_VALVE.pipe + VALVE_WHEEL.gap + VALVE_WHEEL.thick });
     const dn = d.x * n.x + d.z * n.z;
     if (Math.abs(dn) < 1e-3) return;
     const s = ((p0.x - o.x) * n.x + (p0.z - o.z) * n.z) / dn;
     if (s <= 0) return;
     const l = toLocal(pose, { x: o.x + d.x * s, y: o.y + d.y * s, z: o.z + d.z * s });
     // the pointer's angle round the valve's middle, x right and y down on its face
-    const c = 't' in tr ? valveLocal(tr.t, tr.k) : { x: 0, y: 0 };
+    const c = 't' in tr ? valveLocal(tr.t, tr.k) : cock ? { x: 0, y: STOPCOCK.wheelY } : { x: 0, y: 0 };
     const a = aimAngle(l.x - c.x, -l.y - c.y);
     const by = swept(tr.last, a);
     tr.last = a;
     if (!by) return;
     if ('t' in tr) turnValve(tr.t, tr.k, by);
-    else if (fa) {
+    else if (cock) {
+      // a stopcock turns as a plain valve does
+      cock.angle = sweep('valve', settleAngle('valve', cock.angle, cock.valve), by);
+      cock.valve = valveAt('valve', cock.angle);
+    } else if (fa) {
       // a faucet's valve turns as a tool's plain valve does
       fa.angle = sweep('valve', settleAngle('valve', fa.angle, fa.valve), by);
       fa.valve = valveAt('valve', fa.angle);
@@ -2014,9 +2106,44 @@ export class GameEngine {
     this.holdHose(hose, from);
   }
 
-  /** Where the spout or faucet a hose runs from is. */
+  /**
+   * Where a hose pulled out of a spout or faucet runs from: its tip, or the foot of the stopcock fitted there, if
+   * there is one at its tip (see spoutAt).
+   */
   private mountAt(m: HoseMount): Vec3 {
     return 'tool' in m ? spoutAt(m.tool, m.spout) : this.faucets[m.faucet].spout;
+  }
+
+  /** The stopcock on a spout or faucet, wherever on it it is (see Cock), if there is one. */
+  private cockOn(m: HoseMount): Cock | null {
+    return 'tool' in m ? (m.tool.cocks[m.spout] ?? null) : null;
+  }
+
+  /** Fit stopcock c on a spout or faucet, or with null, take off the one there. */
+  private setCock(m: HoseMount, c: Cock | null): void {
+    if ('tool' in m) m.tool.cocks[m.spout] = c;
+  }
+
+  /** Whether a spout or faucet can have a stopcock fitted on it: a tool's spout, but not the station's. */
+  private takesCock(m: HoseMount): boolean {
+    return 'tool' in m && !m.tool.shape.wall;
+  }
+
+  /**
+   * Where a stopcock on a spout or faucet hangs from and which way it faces (see STOPCOCK): at the spout's tip, facing
+   * the tool's front; or on the end of its hose, under the nozzle, facing the way the nozzle does.
+   */
+  private cockFrame(spot: CockSpot): Pose {
+    const { m } = spot;
+    const hose = spot.nozzle ? this.hoseOn(m) : undefined;
+    if (hose) return { ...hose.outlet, yaw: hose.turn };
+    return 'tool' in m ? { ...spoutTip(m.tool, m.spout), yaw: m.tool.pose.yaw } : { ...this.faucets[m.faucet].spout, yaw: 0 };
+  }
+
+  /** Where what a hose lets out leaves it: its nozzle's tip, or the foot of the stopcock on its end. */
+  private nozzleOut(hose: Hose): Vec3 {
+    const o = hose.outlet;
+    return this.cockOn(hose.on)?.nozzle ? { ...o, y: o.y - STOPCOCK.drop } : o;
   }
 
   /** The hose pulled out of a spout or faucet, if there is one. */
@@ -2024,14 +2151,19 @@ export class GameEngine {
     return this.hoses.find((h) => sameMount(h.on, m));
   }
 
-  /** Where what leaves a tool's spout comes out: the spout, or the nozzle of its hose if one's pulled out. */
+  /**
+   * Where what leaves a tool's spout comes out: the spout (or the foot of the stopcock at its tip, see spoutAt), or
+   * the nozzle of its hose if one's pulled out (or the foot of the stopcock on its end, see nozzleOut).
+   */
   private outletAt(t: Tool, j: number): Vec3 {
-    return this.hoseOn({ tool: t, spout: j })?.outlet ?? spoutAt(t, j);
+    const hose = this.hoseOn({ tool: t, spout: j });
+    return hose ? this.nozzleOut(hose) : spoutAt(t, j);
   }
 
   /** Where what a faucet pours comes out, the same way. */
   private faucetOutlet(i: number): Vec3 {
-    return this.hoseOn({ faucet: i })?.outlet ?? this.faucets[i].spout;
+    const hose = this.hoseOn({ faucet: i });
+    return hose ? this.nozzleOut(hose) : this.mountAt({ faucet: i });
   }
 
   /**
@@ -2087,6 +2219,10 @@ export class GameEngine {
       }
     }
     if (h.kind === 'hose' && rest.hose) ({ turn: h.h.turn, reach: h.h.reach } = rest.hose);
+    if (h.kind === 'cock' && rest.cock) {
+      h.c.nozzle = rest.cock.nozzle;
+      this.setCock(rest.cock.m, h.c);
+    }
     h.follow?.forEach((f, i) => {
       const fr = rest.follow?.[i];
       if (!fr) return;
@@ -2106,6 +2242,12 @@ export class GameEngine {
       return;
     }
     if (inPod(this.wake)) return;
+    // with empty hands, a stopcock looked at is taken off
+    const cock = this.held ? null : this.cockAimed();
+    if (cock) {
+      this.takeCock(cock);
+      return;
+    }
     // with empty hands, a spout or faucet's hose is pulled out, or its nozzle taken hold of if it's out, and so is a
     // nozzle looked at
     const m = this.held ? null : this.mountAimed();
@@ -2419,8 +2561,75 @@ export class GameEngine {
     const p = this.target;
     // a faucet's valve is its handwheel
     if (p?.kind === 'faucet') return p.valve ? { faucet: p.i } : null;
-    if (p?.kind !== 'tool' || p.t.shape.noValve || p.t.swap !== null) return null;
+    if (p?.kind !== 'tool' || p.t.swap !== null) return null;
+    // a stopcock's is its handwheel, and the hub it's on
+    if (p.part === 'cock') return p.turns ? { cock: { tool: p.t, spout: p.k } } : null;
     return p.part === 'valve' ? { t: p.t, k: p.k } : null;
+  }
+
+  /** The stopcock the crosshair is on, to take off (see takeCock): the spout or faucet it's on, wherever on it it is. */
+  private cockAimed(): HoseMount | null {
+    const p = this.target;
+    if (p?.kind === 'tool' && p.part === 'cock' && p.t.swap === null) return { tool: p.t, spout: p.k };
+    return null;
+  }
+
+  /**
+   * Take a stopcock off what it's on into the hand, just where it was, so that what it was on is fully open. Q puts it
+   * back.
+   */
+  private takeCock(m: HoseMount): void {
+    const c = this.cockOn(m);
+    if (!c) return;
+    this.mark();
+    const spot = { m, nozzle: c.nozzle };
+    const pose = this.cockFrame(spot);
+    this.setCock(m, null);
+    const h: Held = { kind: 'cock', c, pose, relYaw: wrapAngle(pose.yaw - this.player.yaw), dist: 0, from: { pose, cock: spot } };
+    this.holdInPlace(h);
+    this.held = h;
+  }
+
+  /**
+   * Where a held stopcock would go on, if it were let go of now: the end of an outlet with none on it (see takesCock),
+   * the one the crosshair is on (a spout, or a hose's nozzle), or else the one nearest the line it's on, within
+   * COCK_SNAP of it and REACH of the eyes; and why it can't, if it would be in something there (see cockRoom). Null if there's nowhere near.
+   */
+  private cockAim(): { spot: CockSpot; pose: Pose; why: string | null } | null {
+    const free = (m: HoseMount) => this.takesCock(m) && !this.cockOn(m);
+    const p = this.target;
+    let spot: CockSpot | null = null;
+    if (p?.kind === 'tool' && p.part === 'spout' && p.t.swap === null && free({ tool: p.t, spout: p.k })) spot = { m: { tool: p.t, spout: p.k }, nozzle: false };
+    if (!spot) {
+      // the one nearest the line the crosshair is on, within reach
+      const eye = this.eye();
+      const look = this.lookDir();
+      let best = COCK_SNAP;
+      const near = (s: CockSpot) => {
+        const q = this.cockFrame(s);
+        const v = { x: q.x - eye.x, y: q.y - eye.y, z: q.z - eye.z };
+        const along = v.x * look.x + v.y * look.y + v.z * look.z;
+        if (along <= 0 || along > REACH) return;
+        const d = Math.hypot(v.x - along * look.x, v.y - along * look.y, v.z - along * look.z);
+        if (d <= best) [best, spot] = [d, s];
+      };
+      for (const t of this.tools) if (t.swap === null) t.shape.spouts.forEach((_, j) => free({ tool: t, spout: j }) && near({ m: { tool: t, spout: j }, nozzle: false }));
+    }
+    if (!spot) return null;
+    const pose = this.cockFrame(spot);
+    return { spot, pose, why: this.cockRoom(spot, pose) ? null : 'No room for a stopcock there' };
+  }
+
+  /**
+   * Whether there's room for a stopcock on `spot`, hanging from `pose`: it mustn't be in anything but what it's
+   * fitted on (the tool whose spout it is, or the hose's nozzle).
+   */
+  private cockRoom(spot: CockSpot, pose: Pose): boolean {
+    const m = spot.m;
+    const own = 'tool' in m && !spot.nozzle ? m.tool : null;
+    const hose = this.hoseOn(m);
+    const box = cockBox(pose, pose.yaw);
+    return !this.obstacles(null, false, own, new Set(hose ? [hose] : [])).some((o) => boxesOverlap(box, o));
   }
 
   /** For checks in a browser: stand somewhere, look somewhere, and act as if the mouse were captured. */
@@ -2742,7 +2951,7 @@ export class GameEngine {
     const h = this.held;
     const p = this.target;
     if (!h || h.kind === 'hose' || (p?.kind !== 'cabinet' && p?.kind !== 'stock')) return false;
-    return isStocked(h.kind === 'tool' ? h.t.kind : h.kind);
+    return isStocked(h.kind === 'tool' ? h.t.kind : h.kind === 'cock' ? 'stopcock' : h.kind);
   }
 
   private heldObject(): object | null {
@@ -2752,6 +2961,7 @@ export class GameEngine {
     if (h.kind === 'flask') return h.f;
     if (h.kind === 'tool') return h.t;
     if (h.kind === 'scale') return h.sc;
+    if (h.kind === 'cock') return h.c;
     return h.h;
   }
 
@@ -3025,7 +3235,7 @@ export class GameEngine {
       // (and where a flask would go on it, for a guide to show it lined up under a spout before a flask's there)
       mine.add(SCALE_PLACE);
     }
-    else outlets.push({ at: h.h.outlet, lip: false });
+    else if (h.kind === 'hose') outlets.push({ at: this.nozzleOut(h.h), lip: false });
     const out: Aim[] = [];
     const aim = (from: Vec3, held: Aim['held']) => {
       const m = mouthBelow(mouths, from);
@@ -3037,7 +3247,7 @@ export class GameEngine {
       for (const t of this.tools)
         t.shape.spouts.forEach((_, j) => {
           const hose = this.hoseOn({ tool: t, spout: j });
-          if (hose || !(h.kind === 'tool' && h.t === t)) aim(hose?.outlet ?? spoutAt(t, j), 'mouth');
+          if (hose || !(h.kind === 'tool' && h.t === t)) aim(this.outletAt(t, j), 'mouth');
         });
       this.faucets.forEach((_, i) => aim(this.faucetOutlet(i), 'mouth'));
     }
@@ -3095,7 +3305,7 @@ export class GameEngine {
     } else if (h.kind === 'scale') {
       for (const { f } of h.sc.load) vs.add(f);
       mouths.push(...this.emptyPlaces(h.sc));
-    } else outlets.push({ ...h.h.outlet });
+    } else if (h.kind === 'hose') outlets.push({ ...this.nozzleOut(h.h) });
     const all = this.mouthsWith(h);
     mouths.push(...all.filter((m) => vs.has(m.v)));
     const theirs: Vec3[] = [];
@@ -3144,6 +3354,12 @@ export class GameEngine {
    * where it's held.
    */
   private placement(h: Held): { rest: Rest } | { why: string } {
+    // a stopcock goes on an outlet near it, or nowhere
+    if (h.kind === 'cock') {
+      const a = this.cockAim();
+      if (!a) return { why: 'Put it on a spout' };
+      return a.why ? { why: a.why } : { rest: { pose: a.pose, cock: a.spot } };
+    }
     // a strip or a thermometer aimed at an open top is set down standing in it
     const aim = h.kind === 'tool' && isDipper(h.t.kind) ? this.dipAim(h) : null;
     if (aim) return aim.rest;
@@ -3334,7 +3550,8 @@ export class GameEngine {
    */
   private footprints(pl: ReturnType<GameEngine['placement']> | null): Frame['footprints'] {
     const h = this.held;
-    if (!h || !pl || this.sniffing) return [];
+    // (a stopcock is outlined where it would go on instead: see looseFrame)
+    if (!h || !pl || this.sniffing || h.kind === 'cock') return [];
     const ok = 'rest' in pl;
     const p = ok ? pl.rest.pose : this.heldPose(h);
     const base = (st: Stand) => {
@@ -3404,7 +3621,19 @@ export class GameEngine {
       energies: BOND_KEYS.map((k) => this.chem.params.bonds[k].E), alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
       airlock: this.airlockLook(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(), ghost: this.ghostFrame(pl),
+      loose: this.looseFrame(),
     });
+  }
+
+  /**
+   * The stopcock in hand, for the view (see Frame.loose): where it would go on, if there's somewhere (see cockAim), or
+   * else in hand.
+   */
+  private looseFrame(): Frame['loose'] {
+    const h = this.held;
+    if (h?.kind !== 'cock') return null;
+    const a = this.sniffing ? null : this.cockAim();
+    return a ? { cock: h.c, pose: a.pose, ok: !a.why } : { cock: h.c, pose: h.pose, ok: null };
   }
 
   /**
@@ -3490,6 +3719,7 @@ export class GameEngine {
     if (h) {
       const ok = !!this.placed && 'rest' in this.placed;
       const how = h.kind === 'hose' ? 'set the hose’s end down'
+        : h.kind === 'cock' ? 'put the stopcock on'
         : h.kind === 'tool' && isDipper(h.t.kind) && this.mouthAimed() ? 'stand it in it'
         // (what's moved by a ghost hasn't left where it was)
         : h.ghost && h.from ? 'move it here'
@@ -3509,14 +3739,14 @@ export class GameEngine {
       if (h.kind === 'hose') {
         add(['R'], 'swing its stand round');
         add(['Shift', '↑↓'], 'slide its stand out or in');
-      } else if (h.kind !== 'flask') add(['R'], 'turn it');
+      } else if (h.kind !== 'flask' && h.kind !== 'cock') add(['R'], 'turn it');
       add(['Wheel'], 'hold it nearer or further');
-      if (!TOUCH) add(['Alt'], 'hold to set it down just as it’s held');
+      if (!TOUCH && h.kind !== 'cock') add(['Alt'], 'hold to set it down just as it’s held');
       if (h.kind === 'hose') add(['Backspace'], 'roll the hose back up');
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it back in the cabinet');
       add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it back in the cabinet') : h.ghost ? 'leave it where it is' : 'put it back');
     } else {
-      if (this.rightWouldDo()) add(['RMB'], 'hold and sweep round it to turn the valve');
+      if (this.rightWouldDo()) add(['RMB'], `hold and sweep round it to turn the ${this.valveAimed() && 'cock' in this.valveAimed()! ? 'stopcock' : 'valve'}`);
       add([WHEEL_KEYS.join(', ')], 'hold to grab equipment');
     }
     if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
@@ -3524,7 +3754,8 @@ export class GameEngine {
     else if (p?.kind === 'tool' && p.part === 'button') add(['LMB'], p.t.lit ? 'put the lamp out' : 'light the lamp');
     else if (this.pressable()) add(['LMB'], 'press it');
     const m = h ? null : this.mountAimed();
-    if (m) add(['LMB'], this.hoseOn(m) ? 'take hold of its hose' : 'pull out its hose');
+    if (!h && this.cockAimed()) add(['LMB'], 'take the stopcock off');
+    else if (m) add(['LMB'], this.hoseOn(m) ? 'take hold of its hose' : 'pull out its hose');
     else if (!h && p?.kind === 'hose') add(['LMB'], 'take hold of it');
     else if (!h && p && this.grabbable(p) && !this.onButton()) {
       add(['LMB'], 'pick it up');
@@ -3557,7 +3788,7 @@ export class GameEngine {
     if (this.onButton()) return this.pressable();
     if (this.held) return this.intoCabinet() || (!!this.placed && 'rest' in this.placed);
     const p = this.target;
-    return !!this.mountAimed() || (!!p && this.grabbable(p));
+    return !!this.cockAimed() || !!this.mountAimed() || (!!p && this.grabbable(p));
   }
 
   /** Whether the crosshair is on a key or button, which takes the left button's click even with something in hand. */
@@ -3890,8 +4121,9 @@ export class GameEngine {
     if (h?.kind === 'flask') return h.f.N > TRACE;
     // a strip or a thermometer dips into the open top looked at
     if (h?.kind === 'tool' && isDipper(h.t.kind)) return !!this.mouthAimed();
-    // nothing else held in hand (a sheet of blotting paper) has a use for it, and what's moved by a ghost runs anyway
-    if (h?.kind === 'tool' || h?.kind === 'scale') return false;
+    // nothing else held in hand (a sheet of blotting paper, a stopcock) has a use for it, and what's moved by a ghost
+    // runs anyway
+    if (h?.kind === 'tool' || h?.kind === 'scale' || h?.kind === 'cock') return false;
     // a faucet runs if its valve's open
     if (h?.kind === 'hose') return 'tool' in h.h.on ? this.wouldFlow(h.h.on.tool) : this.faucets[h.h.on.faucet].valve > 0;
     return !!this.valveAimed();
@@ -3929,7 +4161,7 @@ export class GameEngine {
     // the station's reservoir through its faucet, or its funnel through the diverter, unless its block is away
     if (t.kind === 'receptacle') return !t.away && t.tanks.some((v, k) => v.N > TRACE && drains(t, k));
     // a column's dry bed drinks what's in its funnel, and lets nothing out
-    if (t.kind === 'column') return t.soaked >= 1 && t.valves[0] > 0 && t.tanks[0].N > TRACE;
+    if (t.kind === 'column') return t.soaked >= 1 && t.open(0) > 0 && t.tanks[0].N > TRACE;
     // a heater's tube runs whatever its valves say
     return (t.shape.spouts.length > 0 && t.tanks.some((v, k) => v.N > TRACE && drains(t, k))) || t.tube.some((v) => v.N > TRACE);
   }
@@ -3995,16 +4227,20 @@ export class GameEngine {
 }
 
 /**
- * Whether tank k of a tool lets fluid out on its own: a funnel or an instrument's tube always (the station's funnel
- * through its diverter), a multiplexer's funnel unless its valve takes only from the other, a tank with a valve as
- * long as it's open.
+ * Whether tank k of a tool lets fluid out on its own: as long as a spout it feeds isn't shut (see Tool.open); the
+ * station's funnel always, through its diverter, and its reservoir while its faucet's open; a multiplexer's funnel
+ * unless its selector takes only from the other.
  */
 function drains(t: Tool, k: number): boolean {
-  if (t.kind === 'receptacle') return k === 0 || t.valves[0] > 0;
-  if (t.kind === 'multiplexer') return k ? t.valves[0] > 0 : t.valves[0] < 1;
-  // a dry column's bed drinks from its funnel, its tap open or not
-  if (t.kind === 'column') return t.soaked < 1 || t.valves[0] > 0;
-  return t.kind === 'splitter' || t.kind === 'sorter' || t.kind === 'heater' || INLINE_TOOLS.includes(t.kind) || t.valves[k] > 0;
+  if (t.kind === 'receptacle') return k === 0 || (t.valves[0] > 0 && t.open(1) > 0);
+  if (t.kind === 'multiplexer') return t.open(0) > 0 && (k ? t.valves[0] > 0 : t.valves[0] < 1);
+  // a dry column's bed drinks from its funnel, open or not
+  if (t.kind === 'column') return t.soaked < 1 || t.open(0) > 0;
+  // (a heater's tube runs on whatever its spouts say)
+  if (t.kind === 'heater') return true;
+  // a tank lets out of its own spout, or one tank out of all of them, as far as any is open
+  const S = t.shape.spouts.length;
+  return t.tanks.length === S ? t.open(k) > 0 : t.shape.spouts.some((_, j) => t.open(j) > 0);
 }
 
 export type { ToolKind };

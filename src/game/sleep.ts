@@ -20,7 +20,7 @@ import type { Tool } from './tools';
  * times, giving K increments per component, from which come its rate (their mean) and that rate's standard error
  * (drops and random rounding make the increments noisy).
  *
- * A vessel that something drains (a tank with its valve open, a funnel, the heater's tube) feeds what's downstream,
+ * A vessel that something drains (a tank with a spout open, a funnel, the heater's tube) feeds what's downstream,
  * so its rates are applied whole or not at all, which keeps atoms where the plain lab would put them: whole, if any of
  * its element totals (atoms of each color) or its heat is drifting, judged in this window (and confirmed by the one
  * before) or over the last few windows pooled, at its species' rates in this window (not pooled: a vessel draining
@@ -28,7 +28,7 @@ import type { Tool } from './tools';
  * species by species, where a species' drift shows clearly in this window and the one before (internal chemistry
  * with every element in balance); and the rest is left as it is, steady.
  *
- * A vessel that nothing drains (a flask, the reservoir, a tank with its valve shut) feeds nothing back, so each of its
+ * A vessel that nothing drains (a flask, the reservoir, a tank with its spouts shut) feeds nothing back, so each of its
  * components with a clear drift, confirmed, is applied on its own, at its rate pooled over every window since it last
  * changed course: its rate is what's extrapolated furthest (the reservoir's, all the way to the goal), so it has to be
  * known to within `precision` before a long jump.

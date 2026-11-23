@@ -1,4 +1,4 @@
-import { FLASK_CENTER, FLASK_R, scaleBox, toolBox } from './bodies';
+import { COCK_EXTENT, FLASK_CENTER, FLASK_R, scaleBox, toolBox } from './bodies';
 import { FLASK_H } from './flaskShape';
 import { Scale } from './scale';
 import { CABINET_AREA, type Pose, type Vec3 } from './space';
@@ -11,8 +11,11 @@ import { Tool, type ToolKind } from './tools';
  * putting one away puts it back. The consumables (ENDLESS) are stacked deep, and never run out.
  */
 
-/** What the cabinet stocks: every kind of thing the equipment wheels make. */
-export type Stocked = 'flask' | 'scale' | Exclude<ToolKind, 'receptacle' | 'spectroscope' | 'shadowlamp'>;
+/**
+ * What the cabinet stocks: every kind of thing the equipment wheels make, a stopcock (see Cock in tools.ts) among
+ * them.
+ */
+export type Stocked = 'flask' | 'scale' | 'stopcock' | Exclude<ToolKind, 'receptacle' | 'spectroscope' | 'shadowlamp'>;
 
 /** The consumables: stacked deep in the cabinet, more than anyone could use, so taking one never empties it. */
 export const ENDLESS: readonly Stocked[] = ['thermometer', 'thermometerWide', 'strip', 'testpaper', 'bondpaper'];
@@ -20,9 +23,13 @@ export const ENDLESS: readonly Stocked[] = ['thermometer', 'thermometerWide', 's
 /** Whether the cabinet's supply of a kind never runs out. */
 export const endless = (k: Stocked) => ENDLESS.includes(k);
 
-/** How many of each kind the cabinet holds, full: thirty flasks, and eight of everything else (see ENDLESS). */
+/**
+ * How many of each kind the cabinet holds, full: thirty flasks, sixteen stopcocks, and eight of everything else (see
+ * ENDLESS). The stopcocks fitted on what comes out of it fitted (see ToolShape.fitted) aren't these: they come with it,
+ * and go back with it.
+ */
 export const STOCK: Record<Stocked, number> = {
-  flask: 30, scale: 8, dispenser: 8, pipette: 8, exchanger: 8, separator: 8, splitter: 8, multiplexer: 8, sorter: 8,
+  flask: 30, scale: 8, stopcock: 16, dispenser: 8, pipette: 8, exchanger: 8, separator: 8, splitter: 8, multiplexer: 8, sorter: 8,
   heater: 8, tank: 8, meter: 8, dilatometer: 8, column: 8,
   // drawn as this many, but endless
   thermometer: 16, thermometerWide: 16, strip: 16, testpaper: 16, bondpaper: 16,
@@ -66,7 +73,7 @@ const BAYS: readonly (readonly (readonly Compartment[])[])[] = [
     // (the sheets of test paper in one stack, lying flat on the shelf, and the sheets of bond paper in another)
     [
       { kind: 'strip', cols: 8, high: 1, deep: 2 }, { kind: 'testpaper', cols: 1, high: 16, deep: 1 },
-      { kind: 'bondpaper', cols: 1, high: 16, deep: 1 },
+      { kind: 'bondpaper', cols: 1, high: 16, deep: 1 }, { kind: 'stopcock', cols: 4, high: 1, deep: 4 },
     ],
     [{ kind: 'thermometer', cols: 8, high: 1, deep: 2 }, { kind: 'thermometerWide', cols: 8, high: 1, deep: 2 }],
   ],
@@ -83,6 +90,11 @@ export const CABINET_BUILD = { base: 120, side: 8, board: 4, clear: 10, back: 4,
 /** A kind's size, as its box is drawn (w across, h tall, d deep), and where that box's middle is from its pose. */
 function sizeOf(k: Stocked): { w: number; h: number; d: number; c: Vec3 } {
   if (k === 'flask') return { w: 2 * FLASK_R, h: FLASK_H, d: 2 * FLASK_R, c: FLASK_CENTER };
+  if (k === 'stopcock') {
+    // hanging from where it's held (see STOPCOCK), as it would from a spout
+    const { hx, y0, y1, z0, z1 } = COCK_EXTENT;
+    return { w: 2 * hx, h: y1 - y0, d: z1 - z0, c: { x: 0, y: -(y0 + y1) / 2, z: (z0 + z1) / 2 } };
+  }
   const b = k === 'scale' ? scaleBox(new Scale()) : toolBox(new Tool(k, 0));
   return { w: 2 * b.hx, h: 2 * b.hy, d: 2 * b.hz, c: { x: b.x, y: b.y, z: b.z } };
 }

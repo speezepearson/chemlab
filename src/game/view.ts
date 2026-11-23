@@ -10,7 +10,7 @@ import type { Fluid } from '../chem/reactions';
 import { OUTLINE } from './outline';
 import { glowFalloff } from './appearance';
 import {
-  NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onScale, onTool, openingOf, plumbZ, tankNoteY, tankRect, valveLocal, valveZ, dialZ, settleAngle, valveAngle, VALVE_WHEEL, type Stand,
+  NOZZLE_H, STAND_BASE, STAND_ROD, STOPCOCK, TOOL_DEPTH, onScale, onTool, openingOf, plumbZ, tankNoteY, tankRect, valveLocal, valveZ, dialZ, settleAngle, valveAngle, VALVE_WHEEL, type Stand,
 } from './bodies';
 import { SPECIES } from '../chem/species';
 import { CAP, DELIVERY, GOAL_PURITY, TRACE } from './config';
@@ -30,15 +30,18 @@ import { WHEEL } from './wheel';
 import {
   clockText, LAMP, SCREEN, TANK_SECTION, ringShare, atomSector, BOND_ENDS, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS,
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, TEST_PAPER, paperTriangles, sectorInset, BOND_PAPER, bondDots, isBlotter, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
-  type Hose, type Piece, Tool,
+  type Cock, type Hose, type Piece, Tool,
 } from './tools';
 import { CABINET, CABINET_BUILD, STOCK, type Stock, type Stocked } from './cabinet';
 
 /** What the crosshair is on. */
 export type Pick =
   | { kind: 'flask'; f: Flask }
-  /** A tool: its body, or one of its tanks, valves or spouts; or the shadow lamp's button. */
-  | { kind: 'tool'; t: Tool; part: 'body' | 'tank' | 'valve' | 'spout' | 'button'; k: number }
+  /**
+   * A tool: its body, or one of its tanks, built-in valves or spouts; or the stopcock on spout k (see Cock), its
+   * handwheel and the hub it's on if `turns`, but for its foot, which is the spout's; or the shadow lamp's button.
+   */
+  | { kind: 'tool'; t: Tool; part: 'body' | 'tank' | 'valve' | 'spout' | 'button' | 'cock'; k: number; turns?: boolean }
   | { kind: 'scale'; sc: Scale; part: 'body' | 'tare' }
   /** A hose's nozzle. */
   | { kind: 'hose'; h: Hose }
@@ -114,9 +117,14 @@ export interface Frame {
   /**
    * What's being moved by a ghost (see Held.ghost in engine.ts), drawn as one where it would come to rest if let go,
    * with its stands, their bases `y` high; or, `ok` false, where it's held, red, since it can't be set down. The tool
-   * or scale itself is only for what it is (its kind, its valves, how many flasks ride on it): the ghost is a copy.
+   * or scale itself is only for what it is (its kind, its valves and stopcocks, how many flasks ride on it): the ghost is a copy.
    */
   ghost: { tool?: Tool; scale?: Scale; pose: Pose; ok: boolean; stands: readonly { s: Stand; y: number }[] } | null;
+  /**
+   * A stopcock in hand (see Cock), hanging from `pose`: where it would go on if let go of, outlined there, or in red
+   * if there's no room for it (`ok` false); or with nowhere to go, just in hand (`ok` null), not outlined.
+   */
+  loose: { cock: Cock; pose: Pose; ok: boolean | null } | null;
   drops: readonly { at: Vec3; v: Vessel; hanging: boolean }[];
   /** The scale whose tare key is held down. */
   tarePress: Scale | null;
@@ -199,11 +207,11 @@ const DROP_R_ATOMS = 1.5e6;
 /** A CRT's phosphor green. */
 const PHOSPHOR = '64, 255, 110';
 /**
- * The separator's manifold, below its valve, in local units (y down): two arms sloping down from a peak under its
+ * The separator's manifold, below its tank, in local units (y down): two arms sloping down from a peak under its
  * tank, midway between its spouts, each `slope` (radians) below level, `thick` through and `deep` front to back,
- * reaching `over` past its spout; `top` is how far down the peak's top is, just under its valve.
+ * reaching `over` past its spout; `top` is how far down the peak's top is, a short drop under its hopper's tip.
  */
-const SEP_ARMS = { top: TANK_SECTION.h + 35, slope: Math.PI / 12, thick: 12, deep: 20, over: 10 };
+const SEP_ARMS = { top: TANK_SECTION.h + 18, slope: Math.PI / 12, thick: 12, deep: 20, over: 10 };
 /** Height of each line of a label, in world units. */
 const LABEL_H = 10;
 /** How far above a flask's mouth or a scale's platform its note sits, to the note's middle. */
@@ -764,6 +772,82 @@ function handwheel(rim: THREE.Material, face: THREE.Material, bar: THREE.Materia
     g.add(m);
   }
   return g;
+}
+
+/** A stopcock's parts' shapes (see STOPCOCK), in its own frame, y up from the tip it hangs from, shared by them all. */
+const COCK_GEOMS = (() => {
+  const { collar: c, barrel, foot, tip, drop } = STOPCOCK;
+  const bot = drop - foot;
+  return {
+    collar: new RoundedBoxGeometry(2 * c.r, c.top + c.bottom, 2 * c.r, 2, 1).translate(0, (c.top - c.bottom) / 2, 0),
+    barrel: new THREE.CylinderGeometry(barrel, barrel, bot - c.bottom + 1, 12).translate(0, -(c.bottom + bot) / 2, 0),
+    foot: new THREE.BoxGeometry(2 * tip, foot, 2 * tip).translate(0, -(bot + foot / 2), 0),
+    hub: new THREE.CylinderGeometry(2.2, 2.2, barrel + VALVE_WHEEL.gap + 0.2, 12)
+      .rotateX(Math.PI / 2)
+      .translate(0, -STOPCOCK.wheelY, (barrel + VALVE_WHEEL.gap + 0.2) / 2),
+  };
+})();
+
+/**
+ * A stopcock (see STOPCOCK and Cock), built in a group hanging from its origin, the tip of what it's fitted on, facing
+ * +z: a dark collar sleeving that tip, a barrel of pipe down to a foot like a spout's tip, and on the barrel's front a
+ * plain valve's handwheel on a short hub. Its parts, to be hit: the collar and barrel (`body`), the hub and the
+ * handwheel (`wheel`, which turns about z), and the foot.
+ */
+function buildCock(): { group: THREE.Group; body: THREE.Mesh[]; turns: THREE.Mesh[]; foot: THREE.Mesh; wheel: THREE.Group } {
+  const group = new THREE.Group();
+  const mesh = (g: THREE.BufferGeometry, mat: THREE.Material) => {
+    const m = new THREE.Mesh(g, mat);
+    m.castShadow = true;
+    group.add(m);
+    return m;
+  };
+  const body = [mesh(COCK_GEOMS.collar, darkMat), mesh(COCK_GEOMS.barrel, pipeMat)];
+  const foot = mesh(COCK_GEOMS.foot, pipeMat);
+  const hub = mesh(COCK_GEOMS.hub, darkMat);
+  const wheel = handwheel(leverMat, wheelFaceMat, leverMat);
+  wheel.position.set(0, -STOPCOCK.wheelY, STOPCOCK.barrel + VALVE_WHEEL.gap);
+  group.add(wheel);
+  const turns = [hub, ...wheel.children.filter((m): m is THREE.Mesh => m instanceof THREE.Mesh)];
+  return { group, body, turns, foot, wheel };
+}
+
+/**
+ * A stopcock as drawn, kept turned to how it's set (see settleAngle), with its meshes registered as `cock`, `turns`
+ * and `foot` say, in `pickables` if it's given (see buildCock).
+ */
+class CockView {
+  readonly group: THREE.Group;
+  private wheel: THREE.Group;
+  private meshes: THREE.Mesh[];
+
+  constructor(
+    parent: THREE.Object3D,
+    private pickables: Map<THREE.Object3D, Pick> | null,
+    picks: { cock: Pick; turns: Pick; foot: Pick } | null,
+  ) {
+    const b = buildCock();
+    this.group = b.group;
+    this.wheel = b.wheel;
+    this.meshes = [...b.body, ...b.turns, b.foot];
+    parent.add(this.group);
+    if (pickables && picks) {
+      for (const m of b.body) pickables.set(m, picks.cock);
+      for (const m of b.turns) pickables.set(m, picks.turns);
+      pickables.set(b.foot, picks.foot);
+    }
+  }
+
+  /** Turn its handwheel to how c is set, at the angle it was turned to (see settleAngle), and keep that angle with it. */
+  set(c: Cock): void {
+    c.angle = settleAngle('valve', c.angle, c.valve);
+    this.wheel.rotation.z = -c.angle;
+  }
+
+  dispose(): void {
+    this.group.removeFromParent();
+    if (this.pickables) for (const m of this.meshes) this.pickables.delete(m);
+  }
 }
 
 /* ---------------- text and screens ---------------- */
@@ -1625,6 +1709,8 @@ class ToolView {
    */
   private fluids: { fm: FluidMesh; level: (v: Vessel) => number; fit?: (v: Vessel) => void }[] = [];
   private levers = new Map<number, THREE.Group>();
+  /** The stopcock drawn at each spout's tip, if one's fitted there (see Tool.cocks), and the one it was drawn for. */
+  private cocks: ({ v: CockView; c: Cock } | null)[] = [];
   /** Each tank's glass's flash overlays (see flashOver). */
   private flashes: THREE.Mesh[][] = [];
   private dial?: THREE.Group;
@@ -1673,7 +1759,7 @@ class ToolView {
   constructor(
     readonly t: Tool,
     scene: THREE.Object3D,
-    pickables: Map<THREE.Object3D, Pick>,
+    private pickables: Map<THREE.Object3D, Pick>,
   ) {
     const sh = t.shape;
     const { art } = this;
@@ -1714,13 +1800,13 @@ class ToolView {
         outlet(k, [[x, mid + Math.abs(x - peak) * Math.tan(slope)], [x, sh.spoutY - 4]]);
       });
     } else if (t.kind === 'splitter') {
-      // far enough under the valve to clear its handwheel
-      const fork = sh.valveY + VALVE_WHEEL.r + 4;
+      // far enough under its selector to clear its handwheel
+      const fork = sh.valves![0].y + VALVE_WHEEL.r + 4;
       pipes(art, [[0, TH], [0, fork]]);
       sh.spouts.forEach((x, k) => outlet(k, [[0, fork], [x, fork + 16], [x, sh.spoutY - 4]]));
     } else if (t.kind === 'multiplexer') {
-      // the splitter's fork upside down: each funnel's stem in to where they join, over the valve
-      const join = sh.valveY - VALVE_WHEEL.r - 4;
+      // the splitter's fork upside down: each funnel's stem in to where they join, over its selector
+      const join = sh.valves![0].y - VALVE_WHEEL.r - 4;
       for (const tk of sh.tanks) pipes(art, [[tankX(tk), TH], [tankX(tk), join - 16], [0, join]]);
       outlet(0, [[0, join], [0, sh.spoutY - 4]]);
     } else if (t.kind === 'sorter') {
@@ -1862,24 +1948,23 @@ class ToolView {
     if (t.kind === 'heater') this.buildHeater();
     if (t.kind === 'dilatometer') this.buildBulbs();
 
-    // valves: a handwheel on the pipe, facing the front, on a short hub out from the pipe; or a dial
-    if (!sh.noValve)
-      t.valves.forEach((_, k) => {
+    // its built-in valves: a handwheel on the pipe, facing the front, on a short hub out from the pipe; or a dial
+    t.valves.forEach((_, k) => {
         const vc = valveLocal(t, k);
-        if (k === sh.dial) {
-          this.dial = this.buildDial(vc, dialZ(t));
-          art.traverse((m) => m.parent === this.dial && pick(m, 'valve', k));
-          return;
-        }
-        const back = valveZ(t) - VALVE_WHEEL.thick / 2;
-        const hub = rod(art, darkMat, v3(vc.x, vc.y, pz), v3(vc.x, vc.y, back + 0.2), 2.2);
-        pick(hub, 'valve', k);
-        const pivot = handwheel(leverMat, wheelFaceMat, leverMat, t.kind === 'splitter' || t.kind === 'multiplexer');
-        pivot.position.copy(v3(vc.x, vc.y, back));
-        art.add(pivot);
-        pivot.traverse((m) => m instanceof THREE.Mesh && pick(m, 'valve', k));
-        this.levers.set(k, pivot);
-      });
+      if (k === sh.dial) {
+        this.dial = this.buildDial(vc, dialZ(t));
+        art.traverse((m) => m.parent === this.dial && pick(m, 'valve', k));
+        return;
+      }
+      const back = valveZ(t) - VALVE_WHEEL.thick / 2;
+      const hub = rod(art, darkMat, v3(vc.x, vc.y, pz), v3(vc.x, vc.y, back + 0.2), 2.2);
+      pick(hub, 'valve', k);
+      const pivot = handwheel(leverMat, wheelFaceMat, leverMat, t.kind === 'splitter' || t.kind === 'multiplexer');
+      pivot.position.copy(v3(vc.x, vc.y, back));
+      art.add(pivot);
+      pivot.traverse((m) => m instanceof THREE.Mesh && pick(m, 'valve', k));
+      this.levers.set(k, pivot);
+    });
 
     // everything else that's drawn is the tool's body, to grab it by
     this.body.traverse((m) => {
@@ -2497,7 +2582,7 @@ class ToolView {
     const valve = new THREE.Mesh(unitCylinder, panelMat);
     valve.rotation.x = Math.PI / 2;
     valve.scale.set(4.5, 8, 4.5);
-    valve.position.copy(v3(sh.spouts[0], sh.valveY, 0));
+    valve.position.copy(v3(sh.spouts[0], STATION.paneH + 24, 0));
     art.add(valve);
     pick(valve, 'spout', 0);
     // the readout of the litres in the reservoir, under its label, and beside it, how long it's been delivering steadily
@@ -2601,6 +2686,7 @@ class ToolView {
     // each handwheel and dial at the angle it's been turned to (see valveAngle), clockwise from upright
     for (const [k, pv] of this.levers) pv.rotation.z = -valveAngle(t, k);
     if (this.dial) this.dial.children[1].rotation.z = -valveAngle(t, t.shape.dial!);
+    this.updateCocks();
     if (this.helix)
       for (const { geom, colors, k } of this.helix) {
         const out = t.out[k];
@@ -2706,6 +2792,35 @@ class ToolView {
       }
     }
     if (t.kind === 'receptacle') this.updateStation(clock);
+  }
+
+  /**
+   * Draw a stopcock at the tip of each spout that has one fitted there (see Tool.cocks), and none at the others: its
+   * foot is the spout's, for the crosshair, since it hides most of the spout's own tip, and the rest of it a part of
+   * its own.
+   */
+  private updateCocks(): void {
+    const { t } = this;
+    const sh = t.shape;
+    t.cocks.forEach((c, j) => {
+      const want = c && !c.nozzle ? c : null;
+      const was = this.cocks[j];
+      if (was && was.c !== want) {
+        was.v.dispose();
+        this.cocks[j] = null;
+      }
+      if (want && !this.cocks[j]) {
+        const picks = {
+          cock: { kind: 'tool', t, part: 'cock', k: j } as const,
+          turns: { kind: 'tool', t, part: 'cock', k: j, turns: true } as const,
+          foot: { kind: 'tool', t, part: 'spout', k: j } as const,
+        };
+        const v = new CockView(this.art, this.pickables, picks);
+        v.group.position.copy(v3(sh.spouts[j], sh.spoutY, plumbZ(t)));
+        this.cocks[j] = { v, c: want };
+      }
+      if (want) this.cocks[j]!.v.set(want);
+    });
   }
 
   private updateStation(clock: number): void {
@@ -2998,6 +3113,13 @@ class GhostView {
       const { t, v } = this.tool;
       t.pose = g.pose;
       t.valves.splice(0, t.valves.length, ...g.tool!.valves);
+      // with the stopcocks it has at its spouts' tips (and so none it doesn't), as they're set
+      g.tool!.cocks.forEach((c, j) => {
+        const mine = t.cocks[j];
+        if (!c || c.nozzle) t.cocks[j] = null;
+        else if (mine) Object.assign(mine, { valve: c.valve, angle: c.angle });
+        else t.cocks[j] = { valve: c.valve, angle: c.angle, nozzle: false };
+      });
       v.update(clock, energies, none);
     }
     if (this.scale) {
@@ -4087,6 +4209,7 @@ function partOf(p: Pick): unknown {
       if (t.kind === 'shadowlamp') return null;
       if (p.part === 'tank') return `tool ${t.id} tank ${p.k}`;
       if (p.part === 'spout') return `tool ${t.id} spout ${p.k}`;
+      if (p.part === 'cock') return `tool ${t.id} cock ${p.k}`;
       // (the station's one valve is its faucet's, so it goes with that spout)
       if (p.part === 'valve') return t.shape.fixed ? `tool ${t.id} spout ${t.shape.spouts.indexOf(valveLocal(t, p.k).x)}` : `tool ${t.id} valve ${p.k}`;
       return t.shape.fixed ? null : t;
@@ -4152,6 +4275,11 @@ function specimen(k: Stocked, scene: THREE.Object3D): THREE.Object3D {
     const v = new ScaleView(new Scale(), scene, none);
     v.update(false, null);
     root = v.root;
+  } else if (k === 'stopcock') {
+    // shut, as it's put away
+    const v = new CockView(scene, null, null);
+    v.set({ valve: 0, nozzle: false });
+    root = v.group;
   } else {
     const v = new ToolView(new Tool(k, -1), scene, none);
     v.update(0, [], new Set());
@@ -4973,6 +5101,8 @@ export class View {
   private hoses = new Map<Hose, HoseView>();
   private stands: StandView[] = [];
   private ghost: GhostView;
+  /** The stopcock in hand, if there is one (see Frame.loose), and the one it was drawn for. */
+  private loose: { v: CockView; c: Cock } | null = null;
   private faucetMats: THREE.MeshStandardMaterial[] = [];
   /** Each faucet's valve's bar, black or white to show on its handwheel's color (see BAR_DARK_ABOVE). */
   private faucetBars: THREE.MeshStandardMaterial[] = [];
@@ -5159,6 +5289,7 @@ export class View {
 
     this.updateStands(fr);
     this.ghost.update(fr.ghost, fr.clock, fr.energies);
+    this.updateLoose(fr);
     this.updateStreams(fr);
     this.updateGuides(fr);
 
@@ -5191,7 +5322,25 @@ export class View {
     // what's moved by a ghost is outlined there, always, red if it can't go, its destination crisp against anything
     const ghost = this.ghost.outline();
     if (ghost.meshes.length) this.outliner.render(this.renderer, scene, this.camera, ghost.meshes, 1, ghost.red ? GHOST_RED : OUTLINE.color);
+    // and so is a stopcock in hand where it would go on, red if there's no room for it there
+    const loose = fr.loose && this.loose && fr.loose.ok !== null ? this.loose.v.group.children : [];
+    if (loose.length) this.outliner.render(this.renderer, scene, this.camera, loose, 1, fr.loose!.ok ? OUTLINE.color : GHOST_RED);
     this.shine();
+  }
+
+  /** The stopcock in hand (see Frame.loose), where it's held or would go on; nothing to aim at. */
+  private updateLoose(fr: Frame): void {
+    const l = fr.loose;
+    if (this.loose && this.loose.c !== l?.cock) {
+      this.loose.v.dispose();
+      this.loose = null;
+    }
+    if (!l) return;
+    this.loose ??= { v: new CockView(this.scene, null, null), c: l.cock };
+    const g = this.loose.v.group;
+    g.position.set(l.pose.x, l.pose.y, l.pose.z);
+    g.rotation.y = l.pose.yaw;
+    this.loose.v.set(l.cock);
   }
 
   /**

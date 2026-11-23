@@ -36,7 +36,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   takes real time during which the sim runs on.
 - Pass `ignoreHTTPSErrors: true` to `browser.newContext`, or the Google font (Schibsted Grotesk) fails to load through
   the sandbox's proxy and pages render in a fallback font, hiding font-specific bugs.
-- Tools drain fast at 16×. Use slow valves, or screenshot early, to catch something mid-flow.
+- Tools drain fast at 16×. Use slow stopcocks, or screenshot early, to catch something mid-flow.
 - The dev server reloads the lab when a source file changes, so don't edit `src/` while a script is driving a page.
 - The shadow lamp's bench is in the front left corner (`LAMP_AREA`), its trough along the bench's edge toward the room,
   its screen at the left wall's end, facing the lamp (stand at about x = −60, z = 2790, past the enclosure's end, and
@@ -79,7 +79,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     a mouth hovers and dips (`dipPoses`), and how valves turn: a valve has an angle (`Tool.angles`, never saved),
     turned by how far the aim sweeps round it (`turnValve`), which says its setting (`valveAt`); `valves` is still all
     the sim reads and all a save keeps, and whenever it's set any other way the angle is worked out afresh from it in
-    one place (`settleAngle`, through `valveAngle`).
+    one place (`settleAngle`, through `valveAngle`; a stopcock's angle lives on its `Cock`). It also has a stopcock's
+    shape (`STOPCOCK`, `COCK_EXTENT`, `cockBox`, `cockParts`) and where a spout's tip is (`spoutTip`) as against where
+    fluid leaves it (`spoutAt`, the foot of a stopcock at its tip).
   - `physics.ts` is the collisions: yawed boxes, the player's cylinder and `walk`. What's held collides with nothing; only
     where it would be set down is checked (the engine's `placement` and `rest`). What stands on stands and a scale
     are moved by a ghost (`Held.ghost`, set for whatever `ghostly` says, as it's taken; flasks, dippers, blotters
@@ -110,7 +112,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     wheel's key (1 or 2) is held, and which sector that picks. The engine holds the open one's state (`wheel`,
     `openWheel`, `closeWheel`) and `Wheel` in `Hud.tsx` draws it.
   - `outline.ts` is the player's settings for the two outlines round what the crosshair is on: the part it's on
-    (`partOf` in `view.ts`: a valve, a tank, a spout with its hose), and faintly the whole thing that's part of
+    (`partOf` in `view.ts`: a valve, a stopcock, a tank, a spout with its hose), and faintly the whole thing that's part of
     (`thingOf`). The view's `Outliner` draws each over the finished frame, from a mask of the meshes whose picks have
     that key.
   - `finish.ts` is the player's setting for the metal's shine, 0 matte to 1 mirror-smooth, 0.5 as built (`AS_BUILT`), starting at 0.4 (`FINISH`),
@@ -166,7 +168,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   exception. Waking in the airlock (the pod's message flickering out, its front opening, the doors closing) is sim
   time too.
   - Anything drawn per outlet must use totals over the whole frame. A single substep's output can be empty, for
-    example when a wide-open valve drains its tank in the first substep.
+    example when a wide-open spout drains its tank in the first substep.
 - **Landing fluid goes through `land()`, and into a vessel through `fill()`.** Anything that falls into a mouth
   (streams, faucets, pours, spills) must use `engine.land()`, which `fill()`s the mouth's vessel, never `addFrom`.
   `fill()` mixes everything in, then `overflow()` spills the excess of the mixture over the vessel's `Mouth.rim`
@@ -214,6 +216,15 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Hoses** aren't a tool: every spout and faucet has one, pulled out with the left button (`Hose.on` says which). A
   spout's fluid leaves at its hose's nozzle if it's out, so wherever fluid leaves a spout or faucet, use the engine's
   `outletAt` and `faucetOutlet`, not `spoutAt` or `fa.spout`.
+- **Stopcocks** aren't a tool either, nor have a pose: tools have no flow valves of their own, and what throttles a
+  spout is the stopcock on it, `Tool.cocks[j]` (a `Cock`: its setting, its angle, never saved, and whether it's on the
+  hose's end), null for none, which is fully open (`Tool.open`). It lives with its outlet, so it moves, is saved and is
+  undone with it; in hand it's the engine's `Held` of kind `'cock'`, and it's stocked in the cabinet as `'stopcock'`.
+  Whatever asks where fluid leaves must go through the engine's `outletAt`/`faucetOutlet`/`mountAt`/`nozzleOut` (or
+  `spoutAt` in `bodies.ts`), which count it; `spoutTip` is the bare tip. A tool comes with a shut one on each spout if
+  its shape is `fitted` (the dispenser and the big tank). A tool feeding several spouts from one tank throttles them by
+  `throttle` in `tools.ts`. Built-in valves (`ToolShape.valves`) are only controls that share out or set something:
+  the splitter's and multiplexer's selectors, the heater's tap, dials, the station's faucet.
 - **What's drawn is what's hit.** Every mesh a `ToolView` builds is registered as part of the tool for the crosshair's
   raycast, so empty space around it isn't. Register a mesh yourself only to make it a specific part (a tank, valve,
   spout or button: a spout's is its tip and the pipe that runs to it alone); sprites (labels) aren't hit. There are
@@ -248,16 +259,16 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - Tests and the README.
   - A tool needn't have tanks at all: the thermometers and the wicking strip (the `DIPPERS`),
     a sheet of test paper or bond paper and the shadow lamp have none, nor spouts nor
-    valves. Then Enter writes its own `note`, and its collision is whatever
+    built-in valves. Then Enter writes its own `note`, and its collision is whatever
     `toolParts` gives it (a thermometer's, only the top of its rod; a strip's, its clip), so code that reaches for
     `tanks[0]` must allow for there being none.
   - A tank needn't be under its opening: one with a `neck` (the swell bulbs') has its bulb and neck where the flag
     says, and its own `x0` and `x1` are its inlet's, since it's the openings and spouts that line up (see the magnet).
   - A tank needn't drain under its middle: one with `front` (the box tanks and the big tank) has a shallow hopper
-    under its whole floor leaning forward to its tip at the front, and all its plumbing (pipes, valves, spouts) is
+    under its whole floor leaning forward to its tip at the front, and all its plumbing (pipes, spouts, their stopcocks) is
     `plumbZ` (`bodies.ts`) in front of the tool's middle. Build anything under its tanks at that depth, and get a
-    spout's place from `spoutAt`, never by assuming z = 0.
-  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `front`, `neck`, `noValve`, `valves`, `dial`, `round`, `fixed`, `wall`, `flat`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`.
+    spout's place from `spoutAt` (or `spoutTip`), never by assuming z = 0.
+  - `ToolShape` flags cover most variations: `tankH`, `tankCap`, `funnel`, `cup`, `sump`, `front`, `neck`, `valves` (built-in controls only), `dial`, `fitted` (comes with stopcocks), `round`, `fixed`, `wall`, `flat`, `sealed`, `maxFlow`, `label`; and per tank, `cap`, `sealed` and `label`. A plain spout is a short stub (`SPOUT_STUB`) for a stopcock to go on.
 - **Unique tools** (`UNIQUE_TOOLS`: the spectroscope, the receptacle and the shadow lamp) aren't on
   an equipment wheel and can't be put away. `uniqueTools()` keeps at most one of each and always adds one of each. The `receptacle` kind is the
   whole supply station (`STATION` in `tools.ts`): its tanks are the funnel and the ship's reservoir, in that

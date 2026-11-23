@@ -28,6 +28,11 @@ export const TANK_H = 84;
 export const TANK_SECTION = { w: 52, h: 92 };
 /** How deep the shallow hopper under the floor of a tank of that section is, down to its tip at the front (see ToolShape.front). */
 export const TANK_SUMP_H = 8;
+/**
+ * How far below the bottom of what it drains a plain spout's tip is, on a tool with nothing else on the pipe to it: a
+ * short stub, for a stopcock to be fitted on (see Tool.cocks).
+ */
+export const SPOUT_STUB = 12;
 
 /**
  * How much room fluid takes up as it's drawn, in world units cubed per atom a vessel holds: a flask's inside over
@@ -85,7 +90,7 @@ export function levelIn(ps: readonly Piece[], share: number): number {
   return y;
 }
 
-/** How wide a sump narrows to at its tip, where its valve is, in local units (see ToolShape.sump). */
+/** How wide a sump narrows to at its tip, where it drains, in local units (see ToolShape.sump). */
 export const SUMP_TIP = 4;
 /** How wide a funnel-shaped tank narrows to at the bottom of its stem, across and front to back. */
 export const FUNNEL_TIP = 6;
@@ -200,7 +205,7 @@ export const FUNNEL_CAP = CAP / 4;
 /**
  * How fast a splitter's or size sorter's funnel drains when full, in atoms per sim second, whatever a splitter's
  * valve is set to; it drains in proportion to how high its fluid stands (see Tool.level). A multiplexer's two funnels
- * drain at this rate between them, shared out by its valve. An inline instrument's tube drains at this rate however
+ * drain at this rate between them, shared out by its selector. An inline instrument's tube drains at this rate however
  * full it is.
  */
 export const FUNNEL_RATE = 2 * MAX_FLOW;
@@ -1044,8 +1049,7 @@ export const UNIQUE_TOOLS: readonly ToolKind[] = ['spectroscope', 'receptacle', 
  * A tool's geometry in local units: multiply by the stage scale and offset by
  * the tool's position, which is the top center of its bounding box.
  * Every tank is open at y = 0 and has its floor at y = tankH (TANK_H unless
- * set), and drains through its own valve, straight below its center (in front of it, if it drains at its front: see
- * front).
+ * set), and drains straight below its center (in front of it, if it drains at its front: see front).
  */
 export interface ToolShape {
   /**
@@ -1066,7 +1070,7 @@ export interface ToolShape {
   cup?: { w: number; h: number };
   /**
    * A narrow point under the middle of each tank's flat floor, `w` wide at the floor and `h` deep, narrowing to
-   * SUMP_TIP, which its valve drains from; or with `front`, a shallow hopper under all of it, narrowing to its front. A valve pours by how high the fluid stands above the tip (see Tool.level), so with a sump the
+   * SUMP_TIP, which it drains from; or with `front`, a shallow hopper under all of it, narrowing to its front. A tank pours by how high the fluid stands above the tip (see Tool.level), so with a sump the
    * last of it, down in the narrow point, still drains quickly, rather than a thin layer across the whole floor
    * trickling out ever more slowly.
    */
@@ -1074,8 +1078,8 @@ export interface ToolShape {
   /**
    * Whether each tank's sump is a shallow hopper under its whole floor (`sump.w` its full width, and its full depth),
    * narrowing to its tip at the middle of the floor's front edge, so its front wall runs straight down to the tip and
-   * its floor slopes down to it from the back and both sides: it drains at its front, and all its plumbing (pipes,
-   * valves and spouts) is there, just inside its front wall (see plumbZ in bodies.ts), not under its middle.
+   * its floor slopes down to it from the back and both sides: it drains at its front, and all its plumbing (pipes
+   * and spouts) is there, just inside its front wall (see plumbZ in bodies.ts), not under its middle.
    */
   front?: boolean;
   /**
@@ -1087,12 +1091,16 @@ export interface ToolShape {
    * spills from.
    */
   neck?: { w: number; h: number; body: number; bodies: number[]; necks: number[]; inlet: { h: number; y: number } };
-  /** Whether the tool has no valves to turn. */
-  noValve?: boolean;
-  /** Where the valves are, if not one under each tank's center at valveY: then there's one valve per entry. */
+  /**
+   * Where its built-in controls are, one valve per entry: a splitter's or multiplexer's selector, the heater's tap's
+   * valve, the station's faucet's; or a dial (see dial). A tool has no flow valves of its own: what lets a spout out
+   * slower is a stopcock fitted on it (see Tool.cocks), and a spout with none is fully open.
+   */
   valves?: Point[];
   /** Which valve, if any, is a dial instead: it turns clockwise from down-left (0) to down-right (1). */
   dial?: number;
+  /** Whether it comes out of the cabinet with a stopcock fitted on each spout, shut (see Tool.cocks). */
+  fitted?: boolean;
   /** Whether its tanks are upright cylinders, as wide front to back as across, rather than boxes; a sump too. */
   round?: boolean;
   /** Whether it stays where it is: it can't be picked up and carried, and has no clamp stand. */
@@ -1109,8 +1117,7 @@ export interface ToolShape {
   label?: string[];
   /** Where fluid leaves the tool, in the order Tool.step returns it. */
   spouts: number[];
-  /** Height of the valves, and of the tips of the spouts. */
-  valveY: number;
+  /** Height of the tips of the spouts. */
   spoutY: number;
   box: { x0: number; x1: number; y0: number; y1: number };
 }
@@ -1118,9 +1125,7 @@ export interface ToolShape {
 /** A thermometer's shape: no tanks, spouts or valves, just its rod's box (see THERMOMETER_ROD). */
 const THERMOMETER_SHAPE: ToolShape = {
   tanks: [],
-  noValve: true,
   spouts: [],
-  valveY: 0,
   spoutY: THERMOMETER_ROD.h,
   box: { x0: -THERMOMETER_ROD.r - 0.5, x1: THERMOMETER_ROD.r + 0.5, y0: -0.5, y1: THERMOMETER_ROD.h + 0.5 },
 };
@@ -1128,10 +1133,8 @@ const THERMOMETER_SHAPE: ToolShape = {
 /** A sheet of blotting paper lying flat (see TEST_PAPER and BLOTTERS), its top face up, with no tanks, spouts or valves. */
 const BLOTTER_SHAPE: ToolShape = {
   tanks: [],
-  noValve: true,
   flat: true,
   spouts: [],
-  valveY: 0,
   spoutY: TEST_PAPER.thick,
   box: { x0: -TEST_PAPER.w / 2, x1: TEST_PAPER.w / 2, y0: 0, y1: TEST_PAPER.thick },
 };
@@ -1143,12 +1146,11 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tankH: TANK_SECTION.h,
     sump: { w: TANK_SECTION.w, h: TANK_SUMP_H },
     front: true,
+    // a short stub down from the hopper's tip, with a stopcock fitted on it (see STOPCOCK in bodies.ts)
+    fitted: true,
     spouts: [0],
-    // its valve's handwheel (see VALVE_WHEEL in bodies.ts) on a straight drop from the hopper's tip, clear of the
-    // tank above it and the spout below
-    valveY: TANK_SECTION.h + TANK_SUMP_H + 12,
-    spoutY: TANK_SECTION.h + TANK_SUMP_H + 30,
-    box: { x0: -TANK_SECTION.w / 2 - 3, x1: TANK_SECTION.w / 2 + 3, y0: -6, y1: TANK_SECTION.h + TANK_SUMP_H + 32 },
+    spoutY: TANK_SECTION.h + TANK_SUMP_H + SPOUT_STUB,
+    box: { x0: -TANK_SECTION.w / 2 - 3, x1: TANK_SECTION.w / 2 + 3, y0: -6, y1: TANK_SECTION.h + TANK_SUMP_H + SPOUT_STUB + 2 },
   },
   pipette: {
     // a narrow dispenser, filled through a little funnel on top
@@ -1157,9 +1159,8 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     cup: { w: 10, h: 8 },
     maxFlow: PIPETTE_FLOW,
     spouts: [0],
-    valveY: 98,
-    spoutY: 116,
-    box: { x0: -18, x1: 18, y0: -20, y1: 118 },
+    spoutY: TANK_H + SPOUT_STUB,
+    box: { x0: -18, x1: 18, y0: -20, y1: TANK_H + SPOUT_STUB + 2 },
   },
   exchanger: {
     // two tanks of the standard section (see TANK_SECTION), half a cell either side of its middle
@@ -1172,10 +1173,8 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     front: true,
     // the streams cross over in the exchanger, so each leaves on the other side, a cell apart (see CELL)
     spouts: [CELL / 2, -CELL / 2],
-    // each valve's handwheel on the drop from its tank to the coil (see HELIX), clear of both
-    valveY: TANK_SECTION.h + TANK_SUMP_H + 12,
-    spoutY: TANK_SECTION.h + 67,
-    box: { x0: -CELL / 2 - TANK_SECTION.w / 2 - 3, x1: CELL / 2 + TANK_SECTION.w / 2 + 3, y0: -6, y1: TANK_SECTION.h + 69 },
+    spoutY: TANK_SECTION.h + 52,
+    box: { x0: -CELL / 2 - TANK_SECTION.w / 2 - 3, x1: CELL / 2 + TANK_SECTION.w / 2 + 3, y0: -6, y1: TANK_SECTION.h + 54 },
   },
   separator: {
     // the dispenser's tank (see TANK_SECTION)
@@ -1186,12 +1185,10 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spouts: [-CELL, CELL],
     sump: { w: TANK_SECTION.w, h: TANK_SUMP_H },
     front: true,
-    // its valve's handwheel on the drop from the hopper's tip to the manifold, clear of both
-    valveY: TANK_SECTION.h + TANK_SUMP_H + 12,
     // under the manifold's arms, which slope down to them (see the view's SEP_ARMS): its peak's middle
-    // TANK_SECTION.h + 41 down, a cell's run at 15° lower again, and a short pipe down from each arm's end
-    spoutY: TANK_SECTION.h + 74,
-    box: { x0: -CELL - 16, x1: CELL + 16, y0: -6, y1: TANK_SECTION.h + 76 },
+    // TANK_SECTION.h + 24 down, a cell's run at 15° lower again, and a short pipe down from each arm's end
+    spoutY: TANK_SECTION.h + 57,
+    box: { x0: -CELL - 16, x1: CELL + 16, y0: -6, y1: TANK_SECTION.h + 59 },
   },
   splitter: {
     tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
@@ -1200,7 +1197,8 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     funnel: true,
     // a cell either side of its funnel, like the separator's of its tank
     spouts: [-CELL, CELL],
-    valveY: 42,
+    // its selector, a handwheel on the pipe over the fork
+    valves: [{ x: 0, y: 42 }],
     spoutY: 84,
     box: { x0: -CELL - 16, x1: CELL + 16, y0: -6, y1: 86 },
   },
@@ -1216,7 +1214,6 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     funnel: true,
     valves: [{ x: 0, y: 64 }],
     spouts: [0],
-    valveY: 64,
     spoutY: 88,
     box: { x0: -CELL - 26, x1: CELL + 26, y0: -6, y1: 90 },
   },
@@ -1226,10 +1223,8 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tankH: 30,
     tankCap: FUNNEL_CAP,
     funnel: true,
-    noValve: true,
     // a cell apart, like the separator's, the first a cell on from the funnel
     spouts: [0, CELL, 2 * CELL, 3 * CELL],
-    valveY: 30,
     spoutY: 104,
     box: { x0: -CELL - 26, x1: 3 * CELL + 6, y0: -6, y1: 106 },
   },
@@ -1245,7 +1240,6 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     dial: HEATER_TAPS.length,
     // a cell apart, under the tap's stretch (see heaterCellX) and then the last
     spouts: [-CELL, 0],
-    valveY: 72,
     spoutY: 92,
     box: { x0: -2 * CELL - 28, x1: 16, y0: -6, y1: 94 },
   },
@@ -1257,10 +1251,11 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     round: true,
     sump: BIG_TANK_SUMP,
     front: true,
+    // a short stub down from the hopper's tip, with a stopcock fitted on it, as the dispenser has
+    fitted: true,
     spouts: [0],
-    valveY: BIG_TANK_H + BIG_TANK_SUMP.h + 12,
-    spoutY: BIG_TANK_H + BIG_TANK_SUMP.h + 29,
-    box: { x0: -BIG_TANK_W / 2 - 4, x1: BIG_TANK_W / 2 + 4, y0: -6, y1: BIG_TANK_H + BIG_TANK_SUMP.h + 31 },
+    spoutY: BIG_TANK_H + BIG_TANK_SUMP.h + SPOUT_STUB,
+    box: { x0: -BIG_TANK_W / 2 - 4, x1: BIG_TANK_W / 2 + 4, y0: -6, y1: BIG_TANK_H + BIG_TANK_SUMP.h + SPOUT_STUB + 2 },
   },
   receptacle: {
     // the station: a funnel, and the reservoir's column in the wall, behind a pane (see STATION); a waste
@@ -1280,7 +1275,6 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     fixed: true,
     wall: true,
     spouts: [CELL, 2 * CELL],
-    valveY: STATION.paneH + 24,
     spoutY: STATION.paneH + 44,
     box: { x0: STATION.block.x0 - 6, x1: STATION.block.x1 + 6, y0: STATION.block.y0 - 6, y1: STATION.block.y1 + 6 },
   },
@@ -1290,17 +1284,14 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tankH: TUBE_H,
     tankCap: TUBE_CAP,
     round: true,
-    noValve: true,
     spouts: [0],
-    valveY: TUBE_H,
     spoutY: TUBE_H + 32,
     box: { x0: -15, x1: 15, y0: -6, y1: TUBE_H + 34 },
   },
   dilatometer: {
     // two swell bulbs (see BULB) pressed together like "db", necks side by side in the middle; each filled through a
-    // funnel at the top of its neck, where the necks lean apart, a cell from the other, and draining slowly
-    // through its own valve to a spout under that; one wire wound round both, from a box under them whose dial sets
-    // its heat
+    // funnel at the top of its neck, where the necks lean apart, a cell from the other, and draining slowly to a
+    // spout under that; one wire wound round both, from a box under them whose dial sets its heat
     tanks: [
       { name: 'A', x0: -CELL / 2 - BULB.inlet.w, x1: -CELL / 2 + BULB.inlet.w },
       { name: 'B', x0: CELL / 2 - BULB.inlet.w, x1: CELL / 2 + BULB.inlet.w },
@@ -1316,42 +1307,36 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
       necks: [-(BULB.gap + BULB.neck.w) / 2, (BULB.gap + BULB.neck.w) / 2],
       inlet: { h: BULB.inlet.h, y: -(BULB.neck.h + BULB.inlet.rise + BULB.inlet.h) },
     },
-    valves: [{ x: -CELL / 2, y: 42 }, { x: CELL / 2, y: 42 }, { x: 0, y: 46 }],
-    dial: 2,
+    valves: [{ x: 0, y: 46 }],
+    dial: 0,
     maxFlow: PIPETTE_FLOW,
     spouts: [-CELL / 2, CELL / 2],
-    valveY: 42,
-    spoutY: 60,
+    spoutY: 58,
     box: { x0: -CELL / 2 - 14, x1: CELL / 2 + 14, y0: -(BULB.neck.h + BULB.inlet.rise + BULB.inlet.h) - 6, y1: 62 },
   },
   strip: {
     // bare paper hanging from a clip (see STRIP.paper), its foot cut to a point, with no tanks, spouts or valves
     tanks: [],
-    noValve: true,
     spouts: [],
-    valveY: 0,
     spoutY: STRIP_FOOT,
     box: { x0: -STRIP.paper.w - 0.5, x1: STRIP.paper.w + 0.5, y0: -0.5, y1: STRIP_FOOT + 0.5 },
   },
   column: {
-    // a small glass funnel over a tall glass tube, packed (see COLUMN), over a tap and a spout, all on one line
+    // a small glass funnel over a tall glass tube, packed (see COLUMN), over a short stub of a spout, all on one line
     tanks: [{ name: 'funnel', x0: -COLUMN.funnel.w, x1: COLUMN.funnel.w }],
     tankH: COLUMN.funnel.h,
     tankCap: COLUMN.funnel.cap,
     funnel: true,
     spouts: [0],
-    valveY: COLUMN.tube.y1 + 13,
-    spoutY: COLUMN.tube.y1 + 30,
-    box: { x0: -COLUMN.funnel.w - 2, x1: COLUMN.funnel.w + 2, y0: -6, y1: COLUMN.tube.y1 + 32 },
+    spoutY: COLUMN.tube.y1 + SPOUT_STUB,
+    box: { x0: -COLUMN.funnel.w - 2, x1: COLUMN.funnel.w + 2, y0: -6, y1: COLUMN.tube.y1 + SPOUT_STUB + 2 },
   },
   shadowlamp: {
     // a trough: the lamp's enclosure, a floored channel between two walls, and an end wall with its screen (see
     // LAMP), with no tanks, spouts or valves
     tanks: [],
-    noValve: true,
     fixed: true,
     spouts: [],
-    valveY: 0,
     spoutY: LAMP.h,
     box: { x0: LAMP.box.x0, x1: LAMP.channel.x1 + LAMP.wall, y0: 0, y1: LAMP.h },
   },
@@ -1367,9 +1352,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tankH: TUBE_H,
     tankCap: TUBE_CAP,
     round: true,
-    noValve: true,
     spouts: [0],
-    valveY: TUBE_H,
     spoutY: 116,
     box: { x0: -10, x1: INSTRUMENT.body.x1 + 4, y0: -6, y1: 118 },
   },
@@ -1505,7 +1488,7 @@ export const METER_BODY = {
   display: { x0: -12, x1: 12, y0: TUBE_H + 7, y1: TUBE_H + 17 },
 };
 
-/** Horizontal center of a tank, which is also where its valve is. */
+/** Horizontal center of a tank. */
 export const tankX = (tk: { x0: number; x1: number }) => (tk.x0 + tk.x1) / 2;
 
 /**
@@ -1514,7 +1497,7 @@ export const tankX = (tk: { x0: number; x1: number }) => (tk.x0 + tk.x1) / 2;
  * one end to the bottom of the other, so a stream comes down from its tank,
  * winds across, and drops out the far side.
  */
-export const HELIX = { x0: -CELL / 2, x1: CELL / 2, y: TANK_SECTION.h + 41, r: 6, halfTwists: 9 };
+export const HELIX = { x0: -CELL / 2, x1: CELL / 2, y: TANK_SECTION.h + 26, r: 6, halfTwists: 9 };
 
 /** The inside of a tank with a neck, by kind of tool (see Tool.level): every tank of a kind is alike. */
 const necked = new Map<ToolKind, Piece[]>();
@@ -1631,29 +1614,41 @@ export class Blotter extends Vessel {
 }
 
 /**
- * Something with tanks on top, each draining through its own valve, and
- * spouts on the bottom.
+ * A stopcock: a short inline fitting with a handwheel on it (see STOPCOCK in bodies.ts), fitted on a spout or a
+ * faucet's, at its tip, or on the end of the hose pulled out of it, under its nozzle (`nozzle`). What leaves the spout
+ * leaves it at the stopcock's foot, as far as it's open: `valve`, 0 (shut) to 1 (fully open), set as a plain valve's
+ * handwheel is turned (see valveAt in bodies.ts), at `angle` as it's drawn and turned (never saved: see settleAngle).
+ * There's at most one on each spout or faucet.
+ */
+export interface Cock {
+  valve: number;
+  angle?: number;
+  nozzle: boolean;
+}
+
+/**
+ * Something with tanks on top, each draining out of spouts on the bottom.
  *
- * - A **dispenser** has one tank and one spout. A **pipette** is a narrow one, a tenth of a flask, filled
- *   through a little funnel on top, that lets out PIPETTE_FLOW full and fully open.
+ * - A **dispenser** has one tank and one spout, with a stopcock on it, shut, as it comes. A **pipette** is a narrow
+ *   one, a tenth of a flask, filled through a little funnel on top, that lets out PIPETTE_FLOW full and fully open.
  * - A **heat exchanger** has two tanks, whose streams pass each other in
  *   counterflow on the way to their spouts, trading heat but never mixing.
  * - A **separator** has one tank and two spouts, and sorts what drains
  *   between them by whether it has a black atom in it (see separate).
  * - A **splitter** has a small funnel that drains straight through (at
- *   FUNNEL_RATE) to two spouts. Its valve doesn't open or close: it sets the
+ *   FUNNEL_RATE) to two spouts. Its selector, a built-in valve, doesn't open or close: it sets the
  *   share that goes right, from 0 (all left) to 1 (all right).
  * - A **multiplexer** is a splitter the other way up: two funnels, each draining (at FUNNEL_RATE times how high
- *   its fluid stands) into one spout between them. Its valve picks which: the share of FUNNEL_RATE the right funnel
+ *   its fluid stands) into one spout between them. Its selector picks which: the share of FUNNEL_RATE the right funnel
  *   gets, from 0 (only the left drains) to 1 (only the right), the left getting the rest.
  * - A **size sorter** has a funnel like the splitter's, with no valve, draining down a chute through three
  *   screens and off its end, each with a spout under it (see sieve).
  * - A **resistive heater** has a funnel draining (at HEATER.feed) into one end of a tube, which carries
  *   it to the other end in HEATER.transit and out a spout there, heating it all the way (see heatBy) with a
- *   wire whose temperature its dial sets (see wireTemperature). A tap halfway along the tube, a valve over
+ *   wire whose temperature its dial sets (see wireTemperature). A tap halfway along the tube, a built-in valve over
  *   a spout, lets fluid out sooner, less heated.
  * - A **tank** is a dispenser holding a hundred flasks, drawn as big as a hundred flasks, with ten faint
- *   graduations across it.
+ *   graduations across it; it comes with a stopcock fitted too.
  * - A **receptacle** is the station, built into the wall (see STATION): a funnel and the ship's
  *   reservoir of whatever it's fitted for (see Supply). The funnel drains straight through (at FUNNEL_RATE) into a
  *   diverter, which sends what's more than
@@ -1668,9 +1663,9 @@ export class Blotter extends Vessel {
  * - A **wicking strip** is bare paper, with no tanks. Its foot touched to a fluid takes a spot of it (see touch), and
  *   stood in a fluid, it drinks it up (see bath), carrying each species of the spot along at its own pace (see wick
  *   and STRIP_RUN), to leave it as a band once the paper's dry. It's used once.
- * - A **column** is a small funnel over a tall tube packed with the strips' paper, its bed, over a tap and a spout. A
- *   dry bed drinks from the funnel until it's wet through; then what's poured in runs through it as far as the tap's
- *   open, carrying each species down it at its own pace, as on a strip, and out the spout (see elute).
+ * - A **column** is a small funnel over a tall tube packed with the strips' paper, its bed, over a spout. A
+ *   dry bed drinks from the funnel until it's wet through; then what's poured in runs through it as far as the spout's
+ *   open (see open), carrying each species down it at its own pace, as on a strip, and out the spout (see elute).
  * - A **thermometer** (fine or wide, see THERMOMETERS) has no tanks at all: it's a glass rod whose bulb takes the
  *   temperature of whatever fluid it's dipped in, or the room's (see warm and bath), and which shatters, for good, if
  *   that's too hot for it.
@@ -1693,11 +1688,16 @@ export class Tool {
   /** A heater's tube, stretch by stretch from the funnel's end (see HEATER_CELLS); empty for any other tool. */
   readonly tube: Vessel[];
   /**
-   * Per valve (one per tank unless the shape places them): 0 (closed) to 1 (MAX_FLOW). Closed by default, so a tool doesn't drip on everything it's carried
-   * over. A splitter's one valve is instead the share going right, and a multiplexer's the share taken from the right,
-   * half by default.
+   * Per built-in control (see ToolShape.valves): a splitter's selector, the share going right, and a multiplexer's,
+   * the share taken from the right, half by default; the heater's tap's valve, 0 (shut) to 1, and a dial, 0 to 1; the
+   * station's faucet's valve. Shut, or at 0, by default. A tool with none has none.
    */
   readonly valves: number[];
+  /**
+   * Per spout, the stopcock fitted on it, if there is one (see Cock), which says how open the spout is (see open); a
+   * spout with none is fully open. A tool that comes fitted (see ToolShape.fitted) starts with a shut one on each.
+   */
+  readonly cocks: (Cock | null)[];
   /**
    * Per valve, the angle it's drawn and turned at (see valveAngle in bodies.ts), which says no more than `valves` does
    * about how it's set: never saved, and worked out afresh from `valves` whenever that's been set some other way.
@@ -1847,8 +1847,9 @@ export class Tool {
     this.bed = Array.from({ length: kind === 'column' ? COLUMN.cells : 0 }, () => new Vessel(Infinity));
     this.packing = kind === 'strip' ? new Bed(this.paper) : kind === 'column' ? new Bed(this.bed) : null;
     this.glow = new Float32Array(kind === 'shadowlamp' ? SCREEN.cells ** 2 : 0);
-    const nValves = SHAPES[kind].valves?.length ?? this.tanks.length;
+    const nValves = SHAPES[kind].valves?.length ?? 0;
     this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' ? 0.5 : 0));
+    this.cocks = this.shape.spouts.map(() => (SHAPES[kind].fitted ? { valve: 0, nozzle: false } : null));
     this.out = this.shape.spouts.map(() => null);
     this.flow = this.shape.spouts.map(() => 0);
     this.drops = this.shape.spouts.map(() => new Vessel(Infinity));
@@ -2306,24 +2307,11 @@ export class Tool {
 
   /**
    * How open spout j is, from 0 (shut) to 1 (fully open): it lets out that share of what it would fully open (see
-   * step). For now that's the valve that feeds it, if it has one of its own: a tank's (each of an exchanger's or swell
-   * bulbs' its own spout's, a separator's both of its spouts'), or a column's tap. Any other spout is fully open.
+   * step). That's how its stopcock is set, wherever on the spout or its hose that is (see cocks); with none, it's
+   * fully open.
    */
   open(j: number): number {
-    const v = this.valves;
-    switch (this.kind) {
-      case 'exchanger':
-      case 'dilatometer':
-        return v[j];
-      case 'dispenser':
-      case 'pipette':
-      case 'tank':
-      case 'column':
-      case 'separator':
-        return v[0];
-      default:
-        return 1;
-    }
+    return this.cocks[j]?.valve ?? 1;
   }
 
   /**

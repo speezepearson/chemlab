@@ -3,7 +3,7 @@ import { BOND_KEYS } from '../chem/atoms';
 import { ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
-import { FLASK_R, MAGNET, NEAR, NEAR_STEP, NOZZLE_REACH, SCALE_SLOTS, flaskLip, flaskMouth, onScale, plumbZ, spoutAt, valveLocal, VALVE_WHEEL, tankMouth, scaleBox, standBase, toolBox, toolStands, type Stand } from './bodies';
+import { FLASK_R, MAGNET, NEAR, NEAR_STEP, NOZZLE_REACH, SCALE_SLOTS, flaskLip, flaskMouth, onScale, plumbZ, spoutAt, spoutTip, valveLocal, STOPCOCK, VALVE_WHEEL, tankMouth, scaleBox, standBase, toolBounds, toolBox, toolStands, type Stand } from './bodies';
 import { boxesOverlap } from './physics';
 import { STOCK } from './cabinet';
 import { WHEELS } from './wheel';
@@ -20,7 +20,7 @@ import { CELL, LAMP_FLOOR, LIFT, counterUnder, toWorld } from './space';
 import { toCell } from './testLayout';
 import {
   DRIP, DRIP_FLOW, Hose, INLINE_TOOLS, MAX_FLOW, PAPER_TAU, SCREEN, SHAPES, TEST_PAPER, UNIQUE_TOOLS, bondReading, bondShares, paperReading,
-  type Blotter, type Mouth, Tool,
+  type Blotter, type Cock, type Mouth, Tool,
 } from './tools';
 
 /*
@@ -80,6 +80,9 @@ interface Inside {
   stands(): Stand[];
   keys: Set<string>;
 }
+
+/** Fit a stopcock at the tip of t's first spout, set to v (see Tool.cocks), or set the one there to v. */
+const cock = (t: Tool, v: number) => (t.cocks[0] = { valve: v, nozzle: false });
 
 /** Whether the lab has t's stands up, as t stands (see toolStands). */
 const standing = (l: { in: Inside }, t: Tool) =>
@@ -264,7 +267,7 @@ describe('test paper', () => {
     const paper = paperOf(sheet);
     // (a pipette holds a little over three times what a sheet soaks up)
     pip.tanks[0].setMolecules(R, 3 * TEST_PAPER.cap);
-    pip.valves[0] = 1;
+    cock(pip, 1);
     run(l, 0.1);
     // what's landed so far is to show already, as faintly as the sheet is wet: all of it is R
     expect(volume(paper)).toBeGreaterThan(0);
@@ -293,7 +296,7 @@ describe('test paper', () => {
     const pip = pipetteOver(l);
     const paper = paperOf(sheet);
     pip.tanks[0].setMolecules(RG, TEST_PAPER.cap);
-    pip.valves[0] = 0.02;
+    cock(pip, 0.02);
     // until the first drop has fallen and landed
     for (let i = 0; i < 2000 && paper.N === 0; i++) l.in.simulate(0.02);
     expect(paper.N).toBeGreaterThan(0);
@@ -460,7 +463,7 @@ describe('bond paper', () => {
     // three parts R–G to one of R
     pip.tanks[0].setMolecules(RG, 2.25 * TEST_PAPER.cap);
     pip.tanks[0].setMolecules(R, 0.75 * TEST_PAPER.cap);
-    pip.valves[0] = 1;
+    cock(pip, 1);
     run(l, 0.1);
     // what's landed so far is to show already, as faintly as the sheet is wet: three quarters of it has the bond
     expect(volume(paper)).toBeGreaterThan(0);
@@ -584,7 +587,7 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
     pip.tanks[0].setMolecules(R, 0.75 * cap);
     const before = [R, RG].map((s) => count(l, s, pip, sheet, f));
     expect(before).toEqual([0.75 * cap, 2.25 * cap]);
-    pip.valves[0] = 1;
+    cock(pip, 1);
     run(l, 0.1);
     // at once it's wet with what's running, and showing it; nothing has got past it yet
     expect(volume(paper)).toBeGreaterThan(0);
@@ -622,7 +625,7 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
       const { pip, f } = line(l);
       const sheet = wave(l, up, dx);
       pip.tanks[0].setMolecules(R, 3 * cap);
-      pip.valves[0] = 1;
+      cock(pip, 1);
       run(l, 5);
       expect(paperOf(sheet).N).toBe(0);
       expect(volume(f)).toBeGreaterThan(cap);
@@ -633,7 +636,7 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
     const { pip } = line(l);
     const sheet = wave(l, 150, TEST_PAPER.w / 2 - 2);
     pip.tanks[0].setMolecules(R, 3 * cap);
-    pip.valves[0] = 1;
+    cock(pip, 1);
     run(l, 6);
     expect(volume(paperOf(sheet)) / cap).toBeCloseTo(1, 4);
   });
@@ -643,7 +646,7 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
     const { pip, f } = line(l);
     const sheet = wave(l, 150);
     pip.tanks[0].setMolecules(R, 3 * cap);
-    pip.valves[0] = 1;
+    cock(pip, 1);
     l.e.speed = 0;
     run(l, 5);
     expect(paperOf(sheet).N).toBe(0);
@@ -666,7 +669,7 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
     paper.addFrom(wet, cap - room, true);
     expect((paper as Blotter).soaked).toBe(false);
     pip.tanks[0].setMolecules(R, 2 * cap);
-    pip.valves[0] = 0.02;
+    cock(pip, 0.02);
     // until the first drop has struck the sheet and what was left of it has landed in the flask
     for (let i = 0; i < 4000 && f.N === 0; i++) l.in.simulate(0.02);
     expect(paper.n[R]).toBeGreaterThan(0);
@@ -707,9 +710,9 @@ describe.each(['testpaper', 'bondpaper'] as const)('a sheet of %s held in a stre
     const sheet = wave(l, 150);
     const paper = paperOf(sheet);
     pip.tanks[0].setMolecules(RG, 3 * cap);
-    pip.valves[0] = 1;
+    cock(pip, 1);
     run(l, 5);
-    pip.valves[0] = 0;
+    cock(pip, 0);
     expect(volume(paper) / cap).toBeCloseTo(1, 4);
     const held = [...paper.n];
     // let go of over the flask's cell, it's laid there, under the flask
@@ -763,7 +766,7 @@ describe.each(['testpaper', 'bondpaper'] as const)('what a sheet of %s shows, in
     const sheet = lay(l, SPOT.x, SPOT.z, kind);
     const pip = pipetteOver(l);
     pip.tanks[0].setMolecules(pairOf('R', 'G'), 3 * cap);
-    pip.valves[0] = 1;
+    cock(pip, 1);
     run(l, 0.25);
     // it's already holding some, and showing less than that calls for
     expect(volume(paperOf(sheet))).toBeGreaterThan(0);
@@ -867,7 +870,7 @@ describe.each(['testpaper', 'bondpaper'] as const)('what stands on a sheet of %s
 
   it("is a tool's stand too, base and all: nothing about a sheet under it is in its way", () => {
     // every kind of tool that stands on a stand, with a sheet in each cell its base touches
-    const kinds = (Object.keys(STOCK) as (keyof typeof STOCK)[]).filter((k) => k !== 'flask' && k !== 'scale' && !SHAPES[k as Tool['kind']].flat);
+    const kinds = (Object.keys(STOCK) as (keyof typeof STOCK)[]).filter((k) => k !== 'flask' && k !== 'scale' && k !== 'stopcock' && !SHAPES[k as Tool['kind']].flat);
     let onSheets = 0;
     for (const k of kinds) {
       const l = lab();
@@ -923,7 +926,7 @@ describe.each(['testpaper', 'bondpaper'] as const)('what stands on a sheet of %s
     expect(cell(f.pose)).toEqual(cell(sheet.pose));
     const pip = pipetteOver(l, SPOT.x, SPOT.z, 200);
     pip.tanks[0].setMolecules(R, 2 * cap);
-    pip.valves[0] = 1;
+    cock(pip, 1);
     run(l, 3);
     // the flask has it all, and the sheet under it is dry
     expect(volume(f)).toBeGreaterThan(0.5 * cap);
@@ -1329,7 +1332,7 @@ describe('setting things down', () => {
     expect(f.pose.x).toBeCloseTo(sp.x, 9);
     expect(f.pose.z).toBeCloseTo(sp.z, 9);
     d.tanks[0].setMolecules(singleOf('R'), CAP);
-    d.valves[0] = 1;
+    cock(d, 1);
     run(l, 2);
     expect(f.N).toBeGreaterThan(0);
     // and a save keeps it turned so
@@ -1448,7 +1451,7 @@ describe('ghost moves', () => {
   it('leaves what is picked up where it is, still pouring, until it is set down, and then moves it at once, as one step', () => {
     const { l, d, f } = rig();
     const was = { ...d.pose };
-    d.valves[0] = 1;
+    cock(d, 1);
     pick(l, d);
     expect(g(l).held!.ghost).toBeDefined();
     const to = { ...P, x: P.x + 3 * CELL };
@@ -1712,6 +1715,8 @@ describe('the shadow lamp', () => {
     // stand's base on the floor behind it
     expect(l.e.spawn('dispenser')).toBe(true);
     const d = l.in.held!.t!;
+    // (bare: the handwheel of the stopcock it comes with stands a little proud of its front, into the end wall)
+    d.cocks.fill(null);
     // (whoever holds it is looking across the channel, the screen's end on their right)
     l.in.held!.relYaw = Math.PI / 2;
     l.in.held!.dist = Math.hypot(160, LIFT + 40 - 620);
@@ -1720,7 +1725,7 @@ describe('the shadow lamp', () => {
     expect(l.in.held).toBeNull();
     expect(d.pose.x).toBeCloseTo(mid.x - 2 * CELL);
     expect(d.pose.z).toBeCloseTo(mid.z);
-    expect(d.pose.y - d.shape.box.y1).toBeCloseTo(LAMP_FLOOR.y);
+    expect(d.pose.y - toolBounds(d).y1).toBeCloseTo(LAMP_FLOOR.y);
     const [st] = toolStands(d);
     expect(counterUnder(standBase(st, 0))).toBe(LAMP_FLOOR.y);
     expect(st.x).toBeGreaterThan(d.pose.x);
@@ -2004,7 +2009,8 @@ describe('faucets’ valves', () => {
 
   it("turns a tool's valve only by its handwheel, and by how far it's swept round, not where it's pointed", () => {
     const l = lab();
-    const t = new Tool('dispenser', 99, { x: SPOT.x, y: LIFT + 400, z: SPOT.z, yaw: 0 }, [1]);
+    // (the heater's tap's valve, a plain one, built in)
+    const t = new Tool('heater', 99, { x: SPOT.x, y: LIFT + 400, z: SPOT.z, yaw: 0 }, [1]);
     (taps(l) as unknown as { tools: Tool[] }).tools.push(t);
     l.e.debug({ x: SPOT.x, z: SPOT.z + 300, yaw: 0, pitch: 0, locked: true });
     // the pipe beside it, or anything else of the tool, isn't its valve
@@ -2037,4 +2043,206 @@ describe('faucets’ valves', () => {
     expect(t.valves[0]).toBeCloseTo(1, 9);
     l.e.hand(false);
   });
+
+  it('turns a stopcock by its handwheel just as a plain valve, from press to let go one step to undo', () => {
+    const l = lab();
+    const t = new Tool('dispenser', 99, { x: SPOT.x, y: LIFT + 400, z: SPOT.z, yaw: 0 });
+    (taps(l) as unknown as { tools: Tool[] }).tools.push(t);
+    l.e.debug({ x: SPOT.x, z: SPOT.z + 300, yaw: 0, pitch: 0, locked: true });
+    const c = t.cocks[0]!;
+    // only its handwheel (and the hub it's on) turns it; its collar and barrel are for taking it off
+    l.in.target = { kind: 'tool', t, part: 'cock', k: 0, point: spoutAt(t, 0) } as never;
+    expect(l.in.valveAimed()).toBeNull();
+    l.in.target = { kind: 'tool', t, part: 'cock', k: 0, turns: true, point: spoutAt(t, 0) } as never;
+    expect(l.in.valveAimed()).toEqual({ cock: { tool: t, spout: 0 } });
+    const tip = spoutTip(t, 0);
+    const face = (dx: number, dy: number) => ({ x: tip.x + dx, y: tip.y - STOPCOCK.wheelY - dy, z: tip.z + 400 });
+    let at = face(20, 0);
+    taps(l).view.ray = () => ({ o: at, d: { x: 0, y: 0, z: -1 } });
+    l.e.hand(true);
+    // shut, as it comes: a quarter turn round, anticlockwise, opens it
+    expect(c.valve).toBe(0);
+    at = face(14, -14);
+    taps(l).look(1, 0, false);
+    at = face(0, -20);
+    taps(l).look(1, 0, false);
+    expect(c.valve).toBeCloseTo(1, 9);
+    at = face(-14, -14);
+    taps(l).look(1, 0, false);
+    expect(c.valve).toBeCloseTo(0.5, 9);
+    l.e.hand(false);
+    expect(t.cocks[0]).toBe(c);
+    l.e.undo();
+    expect(t.cocks[0]!.valve).toBe(0);
+    l.e.undo(true);
+    expect(t.cocks[0]!.valve).toBeCloseTo(0.5, 9);
+  });
+});
+
+describe('stopcocks', () => {
+  /** More of the engine's own things, which these tests reach into. */
+  interface Cocks {
+    held: { kind: string; c?: Cock; from?: unknown } | null;
+    flasks: Flask[];
+    hoses: Hose[];
+    target: unknown;
+  }
+  const cocks = (l: Lab) => l.in as unknown as Cocks;
+  /** A pipette (which comes bare) set down with its spout's tip over the middle of SPOT, `up` above the counter. */
+  const bare = (l: Lab, up = 200) => pipetteOver(l, SPOT.x, SPOT.z, up);
+  /** Aim at spout j of t, its tip. */
+  const atSpout = (l: Lab, t: Tool, j = 0) => (l.in.target = { kind: 'tool', t, part: 'spout', k: j, point: spoutTip(t, j) });
+  /** Aim at the stopcock on spout j of t. */
+  const atCock = (l: Lab, t: Tool, j = 0) => (l.in.target = { kind: 'tool', t, part: 'cock', k: j, point: spoutTip(t, j) });
+
+  it('come fitted, shut, on only the dispenser and the big tank; every other spout comes bare, and fully open', () => {
+    for (const kind of Object.keys(SHAPES) as Tool['kind'][]) {
+      const t = new Tool(kind, 0);
+      const fitted = kind === 'dispenser' || kind === 'tank';
+      expect(t.cocks.length, kind).toBe(t.shape.spouts.length);
+      for (const c of t.cocks) expect(c, kind).toEqual(fitted ? { valve: 0, nozzle: false } : null);
+      t.shape.spouts.forEach((_, j) => expect(t.open(j), kind).toBe(fitted ? 0 : 1));
+    }
+  });
+
+  it('go on a bare spout from the wheel, out of their own compartment, and come off again into the hand', () => {
+    const l = lab();
+    const pip = bare(l);
+    const tip = spoutTip(pip, 0);
+    expect(spoutAt(pip, 0)).toEqual(tip);
+    const n = l.in.stock.stopcock.filter(Boolean).length;
+    expect(WHEELS[1]).toContain('stopcock');
+    expect(l.e.spawn('stopcock')).toBe(true);
+    expect(l.in.stock.stopcock.filter(Boolean)).toHaveLength(n - 1);
+    // away from any spout it goes nowhere, and says so
+    l.in.target = null;
+    l.e.debug({ x: SPOT.x, z: SPOT.z + 400, yaw: Math.PI, pitch: 0 });
+    l.in.release();
+    expect(l.in.flash?.text).toBe('Put it on a spout');
+    expect(cocks(l).held?.kind).toBe('cock');
+    // aimed at the spout, it goes on, shut, and what leaves the spout leaves its foot, STOPCOCK.drop lower
+    atSpout(l, pip);
+    l.in.leftDown(false);
+    expect(cocks(l).held).toBeNull();
+    expect(pip.cocks[0]).toEqual({ valve: 0, nozzle: false });
+    expect(spoutAt(pip, 0)).toEqual({ ...tip, y: tip.y - STOPCOCK.drop });
+    pip.tanks[0].setMolecules(singleOf('R'), CAP / 20);
+    run(l, 1);
+    expect(pip.tanks[0].N).toBe(CAP / 20);
+    // taken off, the spout's open again, and Q puts it back as it was
+    atCock(l, pip);
+    l.in.leftDown(false);
+    expect(cocks(l).held?.c).toEqual({ valve: 0, nozzle: false });
+    expect(pip.cocks[0]).toBeNull();
+    l.in.putBack();
+    expect(pip.cocks[0]).toEqual({ valve: 0, nozzle: false });
+    // taken off and put away, it's back in its compartment
+    atCock(l, pip);
+    l.in.leftDown(false);
+    l.in.putAway();
+    expect(pip.cocks[0]).toBeNull();
+    expect(l.in.stock.stopcock.filter(Boolean)).toHaveLength(n);
+    // each was one step to undo
+    l.e.undo();
+    expect(pip.cocks[0]).toEqual({ valve: 0, nozzle: false });
+    expect(l.in.stock.stopcock.filter(Boolean)).toHaveLength(n - 1);
+  });
+
+  it('go on only where there is room for one, and only one to a spout', () => {
+    const l = lab();
+    // a flask's mouth right under the spout's tip
+    const pip = bare(l, FLASK_H + 15);
+    const f = setAtFlask(l, spoutTip(pip, 0));
+    expect(f.pose.y).toBeCloseTo(LIFT + FLASK_H, 6);
+    expect(l.e.spawn('stopcock')).toBe(true);
+    atSpout(l, pip);
+    expect(l.in.placement(l.in.held)).toEqual({ why: 'No room for a stopcock there' });
+    l.in.leftDown(false);
+    expect(l.in.flash?.text).toBe('No room for a stopcock there');
+    expect(pip.cocks[0]).toBeNull();
+    l.in.putAway();
+    // one with one on it already takes no other
+    const d = new Tool('dispenser', 98, { x: SPOT.x + 3 * CELL, y: LIFT + 400, z: SPOT.z, yaw: 0 });
+    l.in.tools.push(d);
+    expect(l.e.spawn('stopcock')).toBe(true);
+    atSpout(l, d);
+    expect('why' in l.in.placement(l.in.held)).toBe(true);
+  });
+
+  it('are part of what they are on, in its way and it in theirs', () => {
+    const d = new Tool('dispenser', 0, { x: 500, y: LIFT + 400, z: 500, yaw: 0 });
+    const tip = spoutTip(d, 0);
+    const b = toolBox(d);
+    expect(b.y - b.hy).toBeCloseTo(tip.y - STOPCOCK.drop, 6);
+    // a flask's mouth a little under the spout's own tip, but above its stopcock's foot
+    const f = { ...flaskMouth({ pose: { x: tip.x, y: tip.y - STOPCOCK.drop + 5, z: tip.z, yaw: 0 } } as Flask) };
+    const box = { x: f.x, y: f.y - FLASK_H / 2, z: f.z, yaw: 0, hx: FLASK_R, hy: FLASK_H / 2, hz: FLASK_R, round: true };
+    expect(boxesOverlap(box, b)).toBe(true);
+    d.cocks[0] = null;
+    expect(boxesOverlap(box, toolBox(d))).toBe(false);
+  });
+
+  it('come and go with what they are fitted on, not out of their own compartment', () => {
+    const l = lab();
+    const n = l.in.stock.stopcock.filter(Boolean).length;
+    expect(l.e.spawn('dispenser')).toBe(true);
+    const d = l.in.held!.t!;
+    expect(d.cocks).toEqual([{ valve: 0, nozzle: false }]);
+    l.in.putAway();
+    expect(l.in.stock.stopcock.filter(Boolean)).toHaveLength(n);
+    // a loose one put away with its compartment full is just gone
+    expect(l.e.spawn('stopcock')).toBe(true);
+    l.in.stock.stopcock.fill(true);
+    l.in.putAway();
+    expect(cocks(l).held).toBeNull();
+    expect(l.in.stock.stopcock.every(Boolean)).toBe(true);
+  });
+
+  it('are kept by a save, and one in hand as put back; a save from before them fits them as its valves were', () => {
+    const l = lab();
+    const pip = bare(l);
+    pip.cocks[0] = { valve: 0.3, nozzle: false };
+    atCock(l, pip);
+    l.in.leftDown(false);
+    expect(pip.cocks[0]).toBeNull();
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    const saved = s.tools.find((t) => t.id === pip.id)!;
+    expect(saved.cocks).toEqual([{ valve: 0.3 }]);
+    l.e.restore(s, DEFAULT_PRESET);
+    expect(l.in.tools.find((t) => t.id === pip.id)!.cocks).toEqual([{ valve: 0.3, nozzle: false }]);
+    // none saved on it: none
+    saved.cocks = [null];
+    l.e.restore(s, DEFAULT_PRESET);
+    expect(l.in.tools.find((t) => t.id === pip.id)!.cocks).toEqual([null]);
+    // from before stopcocks: a separator's one valve on both its spouts, swell bulbs' each on its own, their dial kept
+    const old = (kind: Tool['kind'], id: number, valves: number[]) =>
+      ({ kind, id, fx: 0.5, fy: 0.3, z: 750, valves, tanks: [], drops: [] }) as SaveState['tools'][number];
+    s.tools.push(old('separator', 950, [0.3]), old('dilatometer', 951, [0.2, 0.7, 0.4]), old('splitter', 952, [0.8]), old('meter', 953, []));
+    for (const t of s.tools) if (t.id === pip.id) Object.assign(t, { valves: [0.3], cocks: undefined });
+    l.e.restore(s, DEFAULT_PRESET);
+    const by = (id: number) => l.in.tools.find((t) => t.id === id)!;
+    expect(by(950).cocks).toEqual([{ valve: 0.3, nozzle: false }, { valve: 0.3, nozzle: false }]);
+    expect(by(950).valves).toEqual([]);
+    expect(by(951).cocks).toEqual([{ valve: 0.2, nozzle: false }, { valve: 0.7, nozzle: false }]);
+    expect(by(951).valves).toEqual([0.4]);
+    expect(by(952).cocks).toEqual([null, null]);
+    expect(by(952).valves).toEqual([0.8]);
+    expect(by(953).cocks).toEqual([null]);
+    expect(by(pip.id).cocks).toEqual([{ valve: 0.3, nozzle: false }]);
+  });
+
+  it('are fitted by the demos where their valves used to be set', () => {
+    const l = lab();
+    l.e.load(PRESETS.find((p) => p.id === 'exchanger')!);
+    const ts = l.in.tools.filter((t) => t.kind === 'dispenser' || t.kind === 'exchanger');
+    expect(ts.flatMap((t) => t.cocks.map((c) => c?.valve))).toEqual([0.25, 0.25, 0.25, 0.25]);
+  });
+
+  /** A flask set down with its mouth just under p. */
+  function setAtFlask(l: Lab, p: { x: number; y: number; z: number }): Flask {
+    holdAt(l, 'flask', { x: p.x, y: LIFT + 150, z: p.z, yaw: 0 });
+    const f = cocks(l).held!.kind === 'flask' ? (l.in.held!.f as Flask) : null;
+    l.in.release();
+    return f!;
+  }
 });

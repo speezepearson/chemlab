@@ -24,12 +24,12 @@ describe('arrangement', () => {
     const a = arrangement(l, sw);
     f.pose = { x: 950, y: 490, z: 150, yaw: 1 };
     f.label = 'acid';
-    t.valves[0] = 0.7;
+    t.cocks[0]!.valve = 0.7;
     f.N = 5;
     arrange(l, a);
     expect(f.pose).toEqual({ x: 50, y: 490, z: 150, yaw: 0 });
     expect(f.label).toBe('');
-    expect(t.valves[0]).toBe(0);
+    expect(t.cocks[0]!.valve).toBe(0);
     expect(f.N).toBe(5);
   });
 
@@ -96,9 +96,17 @@ describe('arrangement', () => {
     // what's in the vessels doesn't count
     l.flasks[0].N = 9;
     expect(sameArrangement(a, arrangement(l, sw))).toBe(true);
-    l.tools[0].valves[0] = 0.5;
+    l.tools[0].cocks[0]!.valve = 0.5;
     expect(sameArrangement(a, arrangement(l, sw))).toBe(false);
-    l.tools[0].valves[0] = 0;
+    l.tools[0].cocks[0]!.valve = 0;
+    expect(sameArrangement(a, arrangement(l, sw))).toBe(true);
+    // nor does a stopcock taken off, or put on the end of the hose
+    const c = l.tools[0].cocks[0];
+    l.tools[0].cocks[0] = null;
+    expect(sameArrangement(a, arrangement(l, sw))).toBe(false);
+    l.tools[0].cocks[0] = { ...c!, nozzle: true };
+    expect(sameArrangement(a, arrangement(l, sw))).toBe(false);
+    l.tools[0].cocks[0] = c;
     expect(sameArrangement(a, arrangement(l, { ...sw, blindsShut: true }))).toBe(false);
     l.flasks.push(new Flask(100));
     expect(sameArrangement(a, arrangement(l, sw))).toBe(false);

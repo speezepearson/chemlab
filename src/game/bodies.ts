@@ -100,7 +100,7 @@ export function onTool(t: Tool, x: number, y: number, z = 0): Vec3 {
 }
 
 /**
- * How far in front of a tool's middle its plumbing is: the pipes under its tanks, its valves' stems and its spouts. For
+ * How far in front of a tool's middle its plumbing is: the pipes under its tanks, its spouts and their stopcocks. For
  * a tool whose tanks drain at their front (see ToolShape.front), the tip of their hoppers, the pipe just inside their
  * front walls; for every other, its middle.
  */
@@ -109,14 +109,23 @@ export function plumbZ(t: Tool | ToolKind): number {
   return SHAPES[kind].front ? TOOL_DEPTH[kind].tank / 2 - SUMP_TIP / 2 : 0;
 }
 
-/** The tip of spout j, where fluid leaves the tool. */
-export function spoutAt(t: Tool, j: number): Vec3 {
+/** The tip of spout j itself, in the room: where a stopcock fitted on it hangs from (see STOPCOCK). */
+export function spoutTip(t: Tool, j: number): Vec3 {
   return onTool(t, t.shape.spouts[j], t.shape.spoutY, plumbZ(t));
 }
 
-/** A valve's center, in the tool's flat frame: as its shape places it, or under tank k. */
+/**
+ * Where fluid leaves spout j, in the room: its tip, or the foot of the stopcock fitted there, if there is one (see
+ * Tool.cocks); one on the end of its hose doesn't change where the hose runs from.
+ */
+export function spoutAt(t: Tool, j: number): Vec3 {
+  const tip = spoutTip(t, j);
+  return t.cocks[j] && !t.cocks[j]!.nozzle ? { ...tip, y: tip.y - STOPCOCK.drop } : tip;
+}
+
+/** A built-in valve's center, in the tool's flat frame (see ToolShape.valves). */
 export function valveLocal(t: Tool, k: number): { x: number; y: number } {
-  const v = t.shape.valves?.[k] ?? { x: tankX(t.shape.tanks[k]), y: t.shape.valveY };
+  const v = t.shape.valves![k];
   return { x: v.x, y: v.y };
 }
 
@@ -179,7 +188,27 @@ export function tankNoteY(t: Tool, k: number): number {
  * lamp's are its enclosure, its channel's two side walls, its end wall and the channel's floor (see LAMP): the
  * channel between them is clear, for things to stand in its light on its floor, and so is the bench round the trough.
  */
-export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean }[] {
+export function toolParts(t: Tool): ToolPart[] {
+  return [...shapeParts(t), ...cockParts(t)];
+}
+
+/** One of a tool's solid parts, in its flat frame (see toolParts). */
+export type ToolPart = { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean };
+
+/** Each stopcock fitted at the tip of a tool's spouts (see Tool.cocks), as a solid part of it, in its flat frame. */
+export function cockParts(t: Tool): ToolPart[] {
+  const out: ToolPart[] = [];
+  t.cocks.forEach((c, j) => {
+    if (!c || c.nozzle) return;
+    const x = t.shape.spouts[j];
+    const { y0, y1, hx, z0, z1 } = COCK_EXTENT;
+    out.push({ x0: x - hx, x1: x + hx, y0: t.shape.spoutY + y0, y1: t.shape.spoutY + y1, hz: (z1 - z0) / 2, z: plumbZ(t) + (z0 + z1) / 2 });
+  });
+  return out;
+}
+
+/** A tool's own parts, as its shape has them, without its stopcocks (see toolParts). */
+function shapeParts(t: Tool): ToolPart[] {
   const sh = t.shape;
   const b = sh.box;
   if (sh.wall) {
@@ -240,7 +269,7 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
   // tanks with necks: each bulb on its own, round, where it is; the necks together above them; and each one's inlet,
   // above its neck (the thin tubes leaning in from them are too slight to bump into)
   const neck = sh.neck;
-  const upper: { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean }[] = neck
+  const upper: ToolPart[] = neck
     ? [
         ...neck.bodies.map((x) => ({ x0: x - neck.body / 2 - 2, x1: x + neck.body / 2 + 2, y0: -2, y1: bottom, hz: neck.body / 2 + 2, round: true })),
         { x0: Math.min(...neck.necks) - neck.w / 2 - 1, x1: Math.max(...neck.necks) + neck.w / 2 + 1, y0: -neck.h - 2, y1: -2, hz: neck.w / 2 + 1 },
@@ -248,7 +277,7 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
       ]
     : [tanks];
   if (bottom >= b.y1) return upper;
-  const valves = sh.noValve ? [] : (sh.valves ?? sh.tanks.map((k) => ({ x: tankX(k), y: sh.valveY })));
+  const valves = sh.valves ?? [];
   const xs = [...sh.spouts, ...valves.map((v) => v.x), ...sh.tanks.map(tankX)];
   if (t.kind === 'exchanger') xs.push(HELIX.x0, HELIX.x1);
   const below = {
@@ -258,9 +287,24 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
   return [...upper, below];
 }
 
-/** A tool's box in the room, for collisions: its bounding box, solid only in its parts (see toolParts). */
+/**
+ * A tool's bounding box in its flat frame: its shape's (see ToolShape.box), and as far as the stopcocks fitted at its
+ * spouts' tips reach, if they reach further (see cockParts).
+ */
+export function toolBounds(t: Tool): { x0: number; x1: number; y0: number; y1: number } {
+  const b = { ...t.shape.box };
+  for (const p of cockParts(t)) {
+    b.x0 = Math.min(b.x0, p.x0);
+    b.x1 = Math.max(b.x1, p.x1);
+    b.y0 = Math.min(b.y0, p.y0);
+    b.y1 = Math.max(b.y1, p.y1);
+  }
+  return b;
+}
+
+/** A tool's box in the room, for collisions: its bounding box (see toolBounds), solid only in its parts (see toolParts). */
 export function toolBox(t: Tool): Box {
-  const b = t.shape.box;
+  const b = toolBounds(t);
   const c = { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 };
   const parts: Part[] = toolParts(t).map((p) => ({
     x: (p.x0 + p.x1) / 2 - c.x, y: -((p.y0 + p.y1) / 2 - c.y), z: p.z ?? 0,
@@ -272,7 +316,7 @@ export function toolBox(t: Tool): Box {
 
 /** The middle of a tool's bounding box, in its own frame (y up), as it stands: where it's held from. */
 export function toolCenter(t: Tool): Vec3 {
-  const b = t.shape.box;
+  const b = toolBounds(t);
   return { x: (b.x0 + b.x1) / 2, y: -(b.y0 + b.y1) / 2, z: 0 };
 }
 
@@ -516,9 +560,14 @@ export function docked(p: Pose, tools: readonly Tool[]): Pose {
 export const NOZZLE_H = 10;
 export const NOZZLE_R = 5;
 
-/** A hose's nozzle's box: a little upright cylinder up from its tip. */
-export function nozzleBox(h: Hose): Box {
-  const box = placeBox({ ...h.outlet, yaw: 0 }, { x: 0, y: NOZZLE_H / 2, z: 0 }, { x: NOZZLE_R, y: NOZZLE_H / 2, z: NOZZLE_R });
+/**
+ * A hose's nozzle's box: a little upright cylinder up from its tip; or with a stopcock on it (`cocked`, see Cock), a
+ * cylinder as wide as the stopcock's handwheel, from the stopcock's foot up to the nozzle's top.
+ */
+export function nozzleBox(h: Hose, cocked = false): Box {
+  const down = cocked ? STOPCOCK.drop : 0;
+  const r = cocked ? VALVE_WHEEL.r : NOZZLE_R;
+  const box = placeBox({ ...h.outlet, yaw: 0 }, { x: 0, y: (NOZZLE_H - down) / 2, z: 0 }, { x: r, y: (NOZZLE_H + down) / 2, z: r });
   return { ...box, round: true };
 }
 
@@ -628,7 +677,35 @@ export function standBase(s: Stand, y = groundAt(s.x, s.z)): Box {
 export const VALVE_WHEEL = { r: 9, thick: 3, gap: 1.5, lobes: 10, notch: 0.9, bar: 1.8 };
 
 /**
- * How far in front of the tool's middle its valves' handwheels are, at their middles: just proud of the pipe they're
+ * A stopcock (see Cock in tools.ts), in its own frame: y down from the tip of the spout or nozzle it hangs from, x
+ * across, and z toward its front. A square collar sleeves that tip, from `collar.top` above it to `collar.bottom`
+ * below, `collar.r` either side of its axis; under it, a barrel of pipe `barrel` in radius down to its foot, a tip
+ * block like a tool's spout's, `foot` tall and `tip` either side of its axis, whose bottom, `drop` below the tip it
+ * hangs from, is where what it lets out leaves it. On the barrel's front is a plain valve's handwheel (see
+ * VALVE_WHEEL), on a short hub, its middle `wheelY` down, halfway along the barrel, which is as long as the handwheel
+ * is across, at least.
+ */
+export const STOPCOCK = { drop: 26, collar: { top: 6.5, bottom: 1.5, r: 5.5 }, barrel: 2, foot: 6, tip: 4, wheelY: 10.75 };
+
+/** How far in front of a stopcock's axis its handwheel's middle is: just proud of its barrel, as a tool's is of its pipe. */
+export const COCK_WHEEL_Z = STOPCOCK.barrel + VALVE_WHEEL.gap + VALVE_WHEEL.thick / 2;
+
+/**
+ * How far a stopcock reaches, in its own frame (see STOPCOCK), for bumping into things: across as far as its
+ * handwheel, from its collar's top down to its foot, and from its collar's back to its handwheel's face.
+ */
+export const COCK_EXTENT = {
+  hx: VALVE_WHEEL.r, y0: -STOPCOCK.collar.top, y1: STOPCOCK.drop, z0: -STOPCOCK.collar.r, z1: COCK_WHEEL_Z + VALVE_WHEEL.thick / 2,
+};
+
+/** A stopcock's box in the room, hanging from the tip `at`, facing `yaw` (see STOPCOCK). */
+export function cockBox(at: Vec3, yaw: number): Box {
+  const { hx, y0, y1, z0, z1 } = COCK_EXTENT;
+  return placeBox({ ...at, yaw }, { x: 0, y: -(y0 + y1) / 2, z: (z0 + z1) / 2 }, { x: hx, y: (y1 - y0) / 2, z: (z1 - z0) / 2 });
+}
+
+/**
+ * How far in front of the tool's middle its built-in valves' handwheels are, at their middles: just proud of the pipe they're
  * on (see VALVE_WHEEL), which is in front of the middle if it drains at its front (see plumbZ). The supply station's
  * pipes are a little thicker.
  */

@@ -67,7 +67,16 @@ export interface SavedTool extends SavedDepth {
   id: number;
   fx: number;
   fy: number;
+  /**
+   * Its built-in valves' settings (see ToolShape.valves). From before there were stopcocks, a tool's flow valves were
+   * here too, a tank's each: a save with no `cocks` fits stopcocks set as those were (see GameEngine.loadCocks).
+   */
   valves: number[];
+  /**
+   * Per spout, the stopcock fitted on it (see Cock), or null for none: its setting, and whether it's on the end of the
+   * spout's hose rather than at its tip. A save from before there were stopcocks has none.
+   */
+  cocks?: ({ valve: number; nozzle?: boolean } | null)[];
   tanks: SavedVessel[];
   /** Per spout, the drop hanging there, if any. */
   drops?: SavedVessel[];

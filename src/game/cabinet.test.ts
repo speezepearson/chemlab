@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { flaskBox, scaleBox, toolBox } from './bodies';
+import { cockBox, flaskBox, scaleBox, toolBox } from './bodies';
 import { CABINET, CABINET_BUILD, ENDLESS, STOCK, endless, putIn, stockWith, takeFrom, takeSlot, type Stocked } from './cabinet';
 import { Flask } from './flask';
 import { boxesOverlap, solids, type Box } from './physics';
@@ -16,6 +16,7 @@ function boxAt(k: Stocked, pose: Pose): Box {
     f.pose = pose;
     return flaskBox(f);
   }
+  if (k === 'stopcock') return cockBox(pose, pose.yaw);
   return k === 'scale' ? scaleBox(new Scale(pose)) : toolBox(new Tool(k, 0, pose));
 }
 
