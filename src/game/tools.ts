@@ -1158,6 +1158,8 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     tankCap: PIPETTE_CAP,
     cup: { w: 10, h: 8 },
     maxFlow: PIPETTE_FLOW,
+    // it comes with a stopcock fitted, as the dispenser does
+    fitted: true,
     spouts: [0],
     spoutY: TANK_H + SPOUT_STUB,
     box: { x0: -18, x1: 18, y0: -20, y1: TANK_H + SPOUT_STUB + 2 },
@@ -1310,6 +1312,8 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     valves: [{ x: 0, y: 46 }],
     dial: 0,
     maxFlow: PIPETTE_FLOW,
+    // each comes with a stopcock fitted, so the bulbs hold what's poured in until they're opened
+    fitted: true,
     spouts: [-CELL / 2, CELL / 2],
     spoutY: 58,
     box: { x0: -CELL / 2 - 14, x1: CELL / 2 + 14, y0: -(BULB.neck.h + BULB.inlet.rise + BULB.inlet.h) - 6, y1: 62 },
@@ -1630,7 +1634,8 @@ export interface Cock {
  * Something with tanks on top, each draining out of spouts on the bottom.
  *
  * - A **dispenser** has one tank and one spout, with a stopcock on it, shut, as it comes. A **pipette** is a narrow
- *   one, a tenth of a flask, filled through a little funnel on top, that lets out PIPETTE_FLOW full and fully open.
+ *   one, a tenth of a flask, filled through a little funnel on top, that lets out PIPETTE_FLOW full and fully open;
+ *   it comes with a stopcock fitted too.
  * - A **heat exchanger** has two tanks, whose streams pass each other in
  *   counterflow on the way to their spouts, trading heat but never mixing.
  * - A **separator** has one tank and two spouts, and sorts what drains

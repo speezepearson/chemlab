@@ -222,7 +222,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   undone with it; in hand it's the engine's `Held` of kind `'cock'`, and it's stocked in the cabinet as `'stopcock'`.
   Whatever asks where fluid leaves must go through the engine's `outletAt`/`faucetOutlet`/`mountAt`/`nozzleOut` (or
   `spoutAt` in `bodies.ts`), which count it; `spoutTip` is the bare tip. A tool comes with a shut one on each spout if
-  its shape is `fitted` (the dispenser and the big tank). A tool feeding several spouts from one tank throttles them by
+  its shape is `fitted` (the dispenser, the pipette, the big tank and the swell bulbs). A tool feeding several spouts from one tank throttles them by
   `throttle` in `tools.ts`. Built-in valves (`ToolShape.valves`) are only controls that share out or set something:
   the splitter's and multiplexer's selectors, the heater's tap, dials, the station's faucet.
 - **What's drawn is what's hit.** Every mesh a `ToolView` builds is registered as part of the tool for the crosshair's

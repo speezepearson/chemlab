@@ -2150,17 +2150,21 @@ describe('stopcocks', () => {
     target: unknown;
   }
   const cocks = (l: Lab) => l.in as unknown as Cocks;
-  /** A pipette (which comes bare) set down with its spout's tip over the middle of SPOT, `up` above the counter. */
-  const bare = (l: Lab, up = 200) => pipetteOver(l, SPOT.x, SPOT.z, up);
+  /** A pipette set down with its spout's tip over the middle of SPOT, `up` above the counter, its stopcock taken off. */
+  const bare = (l: Lab, up = 200) => {
+    const pip = pipetteOver(l, SPOT.x, SPOT.z, up);
+    pip.cocks[0] = null;
+    return pip;
+  };
   /** Aim at spout j of t, its tip. */
   const atSpout = (l: Lab, t: Tool, j = 0) => (l.in.target = { kind: 'tool', t, part: 'spout', k: j, point: spoutTip(t, j) });
   /** Aim at the stopcock on spout j of t. */
   const atCock = (l: Lab, t: Tool, j = 0) => (l.in.target = { kind: 'tool', t, part: 'cock', k: j, point: spoutTip(t, j) });
 
-  it('come fitted, shut, on only the dispenser and the big tank; every other spout comes bare, and fully open', () => {
+  it('come fitted, shut, on the dispenser, the pipette, the big tank and the swell bulbs; every other spout comes bare, and fully open', () => {
     for (const kind of Object.keys(SHAPES) as Tool['kind'][]) {
       const t = new Tool(kind, 0);
-      const fitted = kind === 'dispenser' || kind === 'tank';
+      const fitted = ['dispenser', 'pipette', 'tank', 'dilatometer'].includes(kind);
       expect(t.cocks.length, kind).toBe(t.shape.spouts.length);
       for (const c of t.cocks) expect(c, kind).toEqual(fitted ? { valve: 0, nozzle: false } : null);
       t.shape.spouts.forEach((_, j) => expect(t.open(j), kind).toBe(fitted ? 0 : 1));
