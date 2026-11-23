@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultFinish, parseFinish, roughnessAt } from './finish';
+import { AS_BUILT, defaultFinish, parseFinish, roughnessAt } from './finish';
 
 describe('finish', () => {
   it('reads what was stored, and defaults whatever is missing or junk', () => {
@@ -12,8 +12,14 @@ describe('finish', () => {
     for (const shine of [-0.1, 1.5, '0.5', null]) expect(parseFinish(JSON.stringify({ shine }))).toEqual(defaultFinish());
   });
 
-  it('leaves a metal as built at the default shine, and takes every metal to the same ends', () => {
-    const mid = defaultFinish().shine;
+  it('starts somewhere on the slider', () => {
+    const { shine } = defaultFinish();
+    expect(parseFinish(JSON.stringify({ shine }))).toEqual(defaultFinish());
+    expect(shine >= 0 && shine <= 1).toBe(true);
+  });
+
+  it('leaves a metal as built at AS_BUILT, and takes every metal to the same ends', () => {
+    const mid = AS_BUILT;
     for (const base of [0.08, 0.28, 0.45, 0.8]) {
       expect(roughnessAt(base, mid)).toBeCloseTo(base, 12);
       expect(roughnessAt(base, 0)).toBe(1);
@@ -25,7 +31,7 @@ describe('finish', () => {
   });
 
   it('lets a dressed surface go more matte than its map, and as shiny as any other metal', () => {
-    const mid = defaultFinish().shine;
+    const mid = AS_BUILT;
     expect(roughnessAt(1, mid, true)).toBeCloseTo(1, 12);
     expect(roughnessAt(1, 0, true)).toBe(2);
     expect(roughnessAt(1, 0.25, true)).toBeCloseTo(1.5, 12);

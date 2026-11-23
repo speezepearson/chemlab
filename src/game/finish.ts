@@ -1,13 +1,17 @@
 /**
- * The player's setting for how the lab's metal is finished: its shine, from 0 (fully matte) through 0.5 (as it was
- * built) to 1 (mirror-smooth). It sets the roughness of every metal material (see `metal` in textures.ts). Kept in
+ * The player's setting for how the lab's metal is finished: its shine, from 0 (fully matte) through AS_BUILT (as it
+ * was built) to 1 (mirror-smooth), starting at DEFAULT_FINISH, a little more matte than as built. It sets the roughness of every metal material (see `metal` in textures.ts). Kept in
  * local storage, not in saves: it's a preference, like the outline.
  */
 export interface Finish {
   shine: number;
 }
 
-export const DEFAULT_FINISH: Readonly<Finish> = { shine: 0.5 };
+/** The shine at which every metal is just as it was authored (see roughnessAt). */
+export const AS_BUILT = 0.5;
+
+/** Where the slider starts: a little more matte than as built, which the user found the better finish. */
+export const DEFAULT_FINISH: Readonly<Finish> = { shine: 0.4 };
 
 export function defaultFinish(): Finish {
   return { ...DEFAULT_FINISH };
@@ -30,14 +34,14 @@ export function parseFinish(json: string | null): Finish {
 
 /**
  * A metal's roughness at shine `s`, given the roughness `base` it was authored with: straight from 1 at shine 0 to
- * `base` at 0.5, and on to 0 at 1, so the default leaves it as built and the ends are the same for every metal.
+ * `base` at AS_BUILT, and on to 0 at 1, so AS_BUILT leaves it as built and the ends are the same for every metal.
  * A `dressed` metal's roughness is only a multiplier on its roughness map's (see dress in textures.ts), so on its
  * matte half it goes up to 2 at shine 0 instead, which the shader clamps where the product passes 1: 1 couldn't
  * make it any more matte than its map.
  */
 export function roughnessAt(base: number, s: number, dressed = false): number {
   const top = dressed ? 2 : 1;
-  return s <= 0.5 ? top + (base - top) * 2 * s : base * 2 * (1 - s);
+  return s <= AS_BUILT ? top + ((base - top) * s) / AS_BUILT : (base * (1 - s)) / (1 - AS_BUILT);
 }
 
 const KEY = 'slurry-lab.finish';

@@ -110,7 +110,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     (`partOf` in `view.ts`: a valve, a tank, a spout with its hose), and faintly the whole thing that's part of
     (`thingOf`). The view's `Outliner` draws each over the finished frame, from a mask of the meshes whose picks have
     that key.
-  - `finish.ts` is the player's setting for the metal's shine, 0 matte to 1 mirror-smooth, 0.5 as built (`FINISH`),
+  - `finish.ts` is the player's setting for the metal's shine, 0 matte to 1 mirror-smooth, 0.5 as built (`AS_BUILT`), starting at 0.4 (`FINISH`),
     and the roughness it gives a metal. `metal()` in `textures.ts` registers a material for it; the view applies it.
   - `smell.ts` is what a sniff (F) makes of a fluid, pure and DOM-free: the ten odorants and Nadia's similes for them
     (`ODORANTS`), how strong each is for a composition and temperature, masking, and what she says of it all
