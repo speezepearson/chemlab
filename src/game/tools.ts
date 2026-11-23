@@ -1894,17 +1894,21 @@ export class Tool {
       const wireT = wireTemperature(this.valves[this.shape.dial!]);
       for (const v of this.tanks) heatBy(v, wireT, h);
     }
+    const open = this.shape.spouts.map((_, j) => this.open(j));
+    // a tank with a spout of its own lets out as far as that's open; one tank feeding several spouts draws on itself
+    // as far as the most open of them is (see throttle)
+    const feeds = (k: number) => (T === open.length ? open[k] : Math.max(0, ...open));
     let packets = this.tanks.map((tank, k) => {
       const p = this.packet(k);
-      // a valve, or a funnel without one, lets out in proportion to how high the fluid stands; an instrument's tube
-      // drains at a fixed rate, so what it reads is just what's arriving; a multiplexer's valve shares its rate out
-      // between its funnels
+      // a tank, or a funnel, lets out in proportion to how high the fluid stands; an instrument's tube drains at a
+      // fixed rate, so what it reads is just what's arriving; a multiplexer's valve shares its rate out between its
+      // funnels
       const rate =
         INLINE_TOOLS.includes(this.kind) ? FUNNEL_RATE
         : this.kind === 'splitter' || this.kind === 'sorter' ? FUNNEL_RATE * this.level(k)
         : this.kind === 'multiplexer' ? FUNNEL_RATE * this.level(k) * (k ? this.valves[0] : 1 - this.valves[0])
-        : this.valves[k] * (this.shape.maxFlow ?? MAX_FLOW) * this.level(k);
-      transfer(tank, p, rate * h);
+        : (this.shape.maxFlow ?? MAX_FLOW) * this.level(k);
+      transfer(tank, p, feeds(k) * rate * h);
       return p;
     });
     if (this.kind === 'exchanger') counterflow(packets[0], packets[1], EXCHANGE_RATE * h);
@@ -1915,6 +1919,7 @@ export class Tool {
       packets = [packets[0]];
     }
     if (this.kind === 'sorter') packets = sieve(packets[0], parts(SORTER_OUTLETS));
+    if (T === 1 && packets.length > 1) throttle(packets, open, this.tanks[0]);
     this.out = packets.map((p) => (p.N > 0 ? p : null));
     this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
     if (this.kind === 'meter') {
@@ -2017,7 +2022,7 @@ export class Tool {
   private elute(h: number): (Vessel | null)[] {
     const funnel = this.tanks[0];
     const soaking = this.soaked < 1;
-    const rate = soaking ? COLUMN.soak : this.valves[0] * COLUMN.flow;
+    const rate = soaking ? COLUMN.soak : this.open(0) * COLUMN.flow;
     if (funnel.N <= 0 || rate <= 0) return this.none();
     const C = COLUMN.cells;
     const amount = Math.min(rate * h, volume(funnel), soaking ? (1 - this.soaked) * COLUMN.cap : Infinity);
@@ -2283,17 +2288,42 @@ export class Tool {
     const { tube, valves } = this;
     if (this.tanks[0].N <= 0 && tube.every((v) => v.N <= 0)) return this.none();
     const packets = this.shape.spouts.map((_, j) => this.packet(j));
-    const on = Math.min(1, (h * HEATER_CELLS) / Math.max(1e-9, HEATER.transit));
+    // the end's spout as far open as it is slows the whole tube, feed and all, so what goes through it is heated
+    // that much longer; and the tap's lets out that much of what its valve sends it
+    const end = this.open(HEATER_TAPS.length);
+    const on = Math.min(1, (h * HEATER_CELLS) / Math.max(1e-9, HEATER.transit)) * end;
     const last = tube.length - 1;
     transfer(tube[last], packets[HEATER_TAPS.length], volume(tube[last]) * on);
     for (let c = last - 1; c >= 0; c--) transfer(tube[c], tube[c + 1], volume(tube[c]) * on);
-    transfer(this.tanks[0], tube[0], HEATER.feed * this.level(0) * h);
-    HEATER_TAPS.forEach((c, j) => transfer(tube[c], packets[j], valves[j] * MAX_FLOW * h));
+    transfer(this.tanks[0], tube[0], end * HEATER.feed * this.level(0) * h);
+    HEATER_TAPS.forEach((c, j) => transfer(tube[c], packets[j], this.open(j) * valves[j] * MAX_FLOW * h));
     const wireT = wireTemperature(valves[this.shape.dial!]);
     for (const v of tube) heatBy(v, wireT, h);
     this.out = packets.map((p) => (p.N > 0 ? p : null));
     this.flow = packets.map((p) => volume(p) / (MAX_FLOW * h));
     return this.out;
+  }
+
+  /**
+   * How open spout j is, from 0 (shut) to 1 (fully open): it lets out that share of what it would fully open (see
+   * step). For now that's the valve that feeds it, if it has one of its own: a tank's (each of an exchanger's or swell
+   * bulbs' its own spout's, a separator's both of its spouts'), or a column's tap. Any other spout is fully open.
+   */
+  open(j: number): number {
+    const v = this.valves;
+    switch (this.kind) {
+      case 'exchanger':
+      case 'dilatometer':
+        return v[j];
+      case 'dispenser':
+      case 'pipette':
+      case 'tank':
+      case 'column':
+      case 'separator':
+        return v[0];
+      default:
+        return 1;
+    }
   }
 
   /**
@@ -2355,7 +2385,7 @@ export class Tool {
     const { species } = this.supply;
     const out: (Vessel | null)[] = [null, null];
     const tap = this.packet(0);
-    transfer(ref, tap, this.valves[0] * REFERENCE_FLOW * h);
+    transfer(ref, tap, this.open(1) * this.valves[0] * REFERENCE_FLOW * h);
     if (tap.N > 0) out[1] = tap;
     const p = this.packet(1);
     transfer(funnel, p, FUNNEL_RATE * h);
@@ -2498,6 +2528,23 @@ export function divide(
   out[0].Q = f.N > 0 ? Math.min(f.Q, roundRandom((f.Q * out[0].N) / f.N)) : 0;
   out[1].Q = f.Q - out[0].Q;
   return [out[0], out[1]];
+}
+
+/**
+ * One tank's draw, already split among the spouts it feeds (`parts`, one per spout), throttled spout by spout: spout j
+ * passes only `open[j]` of what it would fully open, and the rest goes back into `tank`. The draw was made as far as
+ * the most open spout is (see Tool.step), so each spout passes `open[j] / most` of its part, and the rest, `1 −
+ * open[j] / most` of it, by volume, is put back, in whole molecules (see transfer). So with every spout as open as
+ * the others, nothing goes back, and the tool lets out just what one valve over all of them would; with one shut,
+ * what would have gone out of it stays in the tank, and the tank comes to hold more and more of it.
+ */
+export function throttle(parts: readonly Vessel[], open: readonly number[], tank: Vessel): void {
+  const most = Math.max(0, ...open);
+  if (most <= 0) return;
+  parts.forEach((p, j) => {
+    const back = 1 - Math.max(0, open[j]) / most;
+    if (back > 0 && p.N > 0) transfer(p, tank, volume(p) * back);
+  });
 }
 
 /**

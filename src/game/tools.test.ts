@@ -15,7 +15,7 @@ import { loadVessel, saveVessel } from './save';
 import { TILES } from './surfaces';
 import {
   DRIP_FLOW, SUMP_TIP, EXCHANGE_RATE, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TAPS, INLINE_TOOLS, UNIQUE_TOOLS, METER_DIGITS, heatBy, heaterCellX, meterText, wireTemperature, FUNNEL_CAP, FUNNEL_RATE, Hose, MAX_FLOW, PIPETTE_FLOW, BOND_KEYS, SPECTROSCOPE, bondShares, bondCounts, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, INSTRUMENT_TAU, TUBE_CAP,
-  clockText, needleAt, STRIP, STRIP_FOOT, STRIP_RUN, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, sameMount, separate, composition, ringShare, LAMP, SCREEN, lampLight, type Mouth,
+  clockText, needleAt, STRIP, STRIP_FOOT, STRIP_RUN, footY, isDipper, stripInk, COLUMN, columnInk, wetness, leadOf, scorchAt, tankX, sieve, THERMOMETER, THERMOMETERS, isThermometer, type ThermometerKind, thermometerAt, BULB, BULB_BODY_CAP, BULB_NECK_CAP, neckShare, heightOf, INTAKE_CAP, REFERENCE_FLOW, CHANGEOVER, CHANGEOVER_S, CHANGEOVER_ALARM, changeoverAt, RESERVOIR_FILTER, SEPARATOR, STATION, gaugeSegments, SEPARATOR_PERFECT, SORTER, STATION_FUNNEL, SPACE_PER_ATOM, SEPARATOR_OUTLET, SEPARATOR_OUTLETS, SORTER_OUTLETS, SECTOR_ATOMS, TANK_CAP, Tool, counterflow, cupFillHeight, levelIn, spaceOf, tankDepth, tankPieces, SHAPES, type ToolKind, drip, dropRate, mouthBelow, throttle, sameMount, separate, composition, ringShare, LAMP, SCREEN, lampLight, type Mouth,
 } from './tools';
 
 const R = singleOf('R');
@@ -2114,6 +2114,143 @@ describe('separator', () => {
     expect(out).toHaveLength(SEPARATOR_OUTLETS);
     expect(out.reduce((t, v) => t + (v?.N ?? 0), 0) / (0.5 * MAX_FLOW * level * 0.1)).toBeCloseTo(1, 6);
     expect(x.flow.reduce((a, b) => a + b, 0)).toBeCloseTo(0.5 * level);
+  });
+});
+
+describe('each spout as open as it is', () => {
+  const K = singleOf('K');
+  /** A tool whose spouts are open as `open` says, whatever feeds it (see Tool.open). */
+  const opened = (t: Tool, open: number[]) => Object.assign(t, { open: (j: number) => open[j] });
+  const sharp = (fn: () => void) => {
+    const before = SEPARATOR.sharpness;
+    SEPARATOR.sharpness = SEPARATOR_PERFECT;
+    try {
+      fn();
+    } finally {
+      SEPARATOR.sharpness = before;
+    }
+  };
+  /** Parts of a draw, as a tool's step splits it: some R, some K. */
+  const parts = () => {
+    const a = filled(new Vessel(Infinity), R, 3e6, 2);
+    const b = filled(new Vessel(Infinity), K, 2e6, 2);
+    return [a, b];
+  };
+
+  it('puts nothing back when every spout is as open as the others', () => {
+    for (const c of [1, 0.5, 0.01]) {
+      const tank = new Vessel(CAP);
+      const ps = parts();
+      const before = ps.map((p) => p.N);
+      throttle(ps, [c, c], tank);
+      expect(ps.map((p) => p.N)).toEqual(before);
+      expect(tank.N).toBe(0);
+    }
+  });
+
+  it('puts back all of a shut spout’s part, and of one partly open, the share it’s less open than the most, in whole molecules', () => {
+    const tank = new Vessel(CAP);
+    const ps = parts();
+    const [n0, n1] = ps.map((p) => p.N);
+    const q = ps[0].Q + ps[1].Q;
+    throttle(ps, [0.2, 0], tank);
+    expect(ps[1].N).toBe(0);
+    expect(ps[0].N).toBe(n0);
+    expect(tank.n[K]).toBe(n1);
+    const back = new Vessel(CAP);
+    const more = parts();
+    throttle(more, [1, 0.25], back);
+    expect(more[0].N).toBe(n0);
+    expect(back.n[K] / n1).toBeCloseTo(0.75, 2);
+    expect(Number.isInteger(back.n[K]) && Number.isInteger(more[1].n[K])).toBe(true);
+    // nothing made or lost, heat included
+    expect(back.n[K] + more[1].n[K]).toBe(n1);
+    expect(tank.Q + ps[0].Q + ps[1].Q).toBe(q);
+  });
+
+  it('draws nothing at all with every spout shut', () => {
+    const x = opened(new Tool('separator', 0), [0, 0]);
+    filled(x.tanks[0], R, CAP, 1);
+    const was = x.tanks[0].N;
+    expect(x.step(0.1).every((o) => o === null)).toBe(true);
+    expect(x.tanks[0].N).toBe(was);
+  });
+
+  it('lets out of a separator just what one valve over both would, its spouts open alike', () => {
+    sharp(() => {
+      for (const c of [1, 0.4]) {
+        const x = opened(new Tool('separator', 0), [c, c]);
+        filled(x.tanks[0], R, 2 * CAP, 1);
+        x.tanks[0].setMolecules(K, 2 * CAP);
+        const level = x.level(0);
+        const out = x.step(0.1);
+        expect(out.reduce((t, v) => t + (v?.N ?? 0), 0) / (c * MAX_FLOW * level * 0.1)).toBeCloseTo(1, 4);
+        expect(out[0]!.n[K]).toBe(0);
+        expect(out[1]!.n[R]).toBe(0);
+      }
+    });
+  });
+
+  it('keeps in a separator what its shut spout would let out, so the open one’s stream thins as the tank fills with it', () => {
+    sharp(() => {
+      const x = opened(new Tool('separator', 0), [1, 0]);
+      filled(x.tanks[0], R, 2 * CAP, 1);
+      x.tanks[0].setMolecules(K, 2 * CAP);
+      const k0 = x.tanks[0].n[K];
+      const second = () => {
+        let left = 0;
+        for (let i = 0; i < 50; i++) {
+          const [a, b] = x.step(0.02);
+          expect(b).toBeNull();
+          left += a?.N ?? 0;
+        }
+        return left;
+      };
+      const first = second();
+      const share = x.tanks[0].n[K] / (x.tanks[0].n[K] + x.tanks[0].n[R]);
+      const next = second();
+      // all the black stays, and the red runs out: so the tank's ever more black, and less red comes out each second
+      expect(x.tanks[0].n[K]).toBe(k0);
+      expect(share).toBeGreaterThan(0.5);
+      expect(x.tanks[0].n[K] / (x.tanks[0].n[K] + x.tanks[0].n[R])).toBeGreaterThan(share);
+      expect(next).toBeLessThan(first);
+    });
+  });
+
+  it('keeps in a splitter’s funnel the share its selector sends to a shut spout', () => {
+    const sp = opened(new Tool('splitter', 0, undefined, [0.5]), [0, 1]);
+    filled(sp.tanks[0], R, FUNNEL_CAP, 1);
+    const level = sp.level(0);
+    const was = sp.tanks[0].N;
+    const [a, b] = sp.step(0.01);
+    expect(a).toBeNull();
+    expect(b!.N / (0.5 * FUNNEL_RATE * level * 0.01)).toBeCloseTo(1, 2);
+    expect(was - sp.tanks[0].N).toBe(b!.N);
+  });
+
+  it('lets a spout of its own out as far as it’s open', () => {
+    for (const c of [1, 0.3, 0]) {
+      const m = opened(new Tool('meter', 0), [c]);
+      filled(m.tanks[0], R, TUBE_CAP, 1);
+      const out = m.step(0.01)[0];
+      expect((out?.N ?? 0) / (FUNNEL_RATE * 0.01)).toBeCloseTo(c, 2);
+    }
+  });
+
+  it('slows a heater’s whole tube, feed and all, with its end’s spout partly open, and stops it with it shut', () => {
+    const through = (c: number) => {
+      const ht = opened(new Tool('heater', 0, undefined, [0, 0]), [1, c]);
+      filled(ht.tanks[0], R, FUNNEL_CAP, 1);
+      let out = 0;
+      for (let i = 0; i < 50; i++) out += ht.step(0.02)[1]?.N ?? 0;
+      return { out, fed: FUNNEL_CAP - ht.tanks[0].N };
+    };
+    const full = through(1);
+    const half = through(0.5);
+    const shut = through(0);
+    expect(half.fed).toBeLessThan(full.fed);
+    expect(half.fed).toBeGreaterThan(0);
+    expect(shut).toEqual({ out: 0, fed: 0 });
   });
 });
 
