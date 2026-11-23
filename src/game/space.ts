@@ -50,8 +50,8 @@ export const LIFT = 420;
 /** How far the back wall's counter comes out from it: three cells. */
 export const COUNTER_D = 3 * CELL;
 /**
- * How far the right wall's counter, under the faucets, comes out from it: two cells, so they're in easy reach, over
- * its outer row, the inner row free bench.
+ * How far the right wall's counter, under the faucets, comes out from it: two cells, so they're in easy reach, with
+ * room in front of them for free bench.
  */
 export const SINK_D = 2 * CELL;
 /**

@@ -281,13 +281,13 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
  * column in the wall seen through a narrow glass pane, with a faucet under it; and beside it, low down, a glass funnel
  * over a diverter, which sends what drains from the funnel up into the reservoir if it's pure enough, or else down
  * and out a waste spigot under it, with a little LCD between the funnel and the spigot showing which way it's going.
- * In its own flat frame, x runs along the wall and y down from the column's top; z = 0 is over the middle of the
- * counter's outer row of cells, where the funnel and spouts are, and the wall is `out` behind it.
+ * In its own flat frame, x runs along the wall and y down from the column's top; z = 0 is where the funnel and
+ * spouts are, out over the counter, and the wall is `out` behind it.
  * - along: how far along the wall from its back end (z, in the room) its frame's origin is, over the middle of a cell
  *   (see STATION_POSE in presets.ts); the funnel is a cell on from it, and the reservoir a cell on from that.
  * - paneW, paneH: the reservoir's pane, across and tall; the column behind it is as tall.
- * - out: how far the funnel and spouts stand out from the wall: over the middle of the counter's outer row of cells,
- *   in line with the faucets (a flask under them in the row nearest the wall would be up against the block's seam).
+ * - out: how far the funnel and spouts stand out from the wall, in line with the faucets: far enough that a flask
+ *   under them clears the block's seam, and no further, so they don't stand out from the wall on long pipes.
  * - top: how high the column's top is, in the room.
  * - plate: how deep the plate the pane is set in goes into the wall, its face flush with the wall.
  * - block: the plate's edges, in the flat frame: a swappable block of the wall, two of the wall's panels across and one
@@ -309,7 +309,7 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
 const STATION_TOP = LIFT + 400;
 const STATION_ALONG = 20.5 * CELL;
 const STATION_BLOCK_X0 = 5 * WALL_PANEL.w - STATION_ALONG;
-const STATION_OUT = 1.5 * CELL;
+const STATION_OUT = 50;
 const STATION_MOUTH = { y: 180, w: 30, h: 30 };
 export const STATION = {
   along: STATION_ALONG,

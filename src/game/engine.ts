@@ -318,16 +318,15 @@ const MOD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator
 /** Whether the screen is mainly touched, rather than pointed at with a mouse: then the on-screen sticks walk and look. */
 export const TOUCH = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 /**
- * Where the faucets are: along the right wall over its counter, a cell apart, each spout over the middle of a
- * cell of the counter's outer row (see CELL, SINK_D), where the station's are too (see STATION.out), clear of the
- * manifold, and the row by the wall is free bench. Their spouts are a little under eye level, high enough over the
+ * Where the faucets are: along the right wall over its counter (see SINK_D), a cell apart, each spout FAUCET_OUT
+ * out from the wall, in line with the station's (see STATION.out), so a flask under one clears the manifold. Their spouts are a little under eye level, high enough over the
  * counter for a flask on a scale (whose mouth is 112 up) to go under one, at the foot of a neck FAUCET_NECK long.
  */
 const FAUCET_Y = LIFT + 160;
 const FAUCET_NECK = 30;
 const FAUCET_Z0 = 5.5 * CELL;
 const FAUCET_GAP = CELL;
-const FAUCET_OUT = 1.5 * CELL;
+const FAUCET_OUT = 50;
 /**
  * An island's faucet rises from the island's middle, a corner of four cells, and reaches out over the middle of one
  * of them, this far along x and along z (see CELL).

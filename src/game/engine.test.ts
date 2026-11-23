@@ -1212,7 +1212,8 @@ describe('setting things down', () => {
   it('pulls a flask under a faucet when it is held within MAGNET of it, and not when it is further', () => {
     const l = lab();
     const sp = more(l).faucets[0].spout;
-    const off = (d: number) => ({ x: sp.x + d * 0.8, y: LIFT + 150, z: sp.z - d * 0.6, yaw: 0 });
+    // (off toward the room, away from the wall)
+    const off = (d: number) => ({ x: sp.x - d * 0.8, y: LIFT + 150, z: sp.z - d * 0.6, yaw: 0 });
     holdAt(l, 'flask', off(MAGNET - 1));
     expect([rests(l)!.pose.x, rests(l)!.pose.z]).toEqual([sp.x, sp.z]);
     l.in.putAway();

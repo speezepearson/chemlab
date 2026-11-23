@@ -2347,7 +2347,7 @@ class ToolView {
       this.lids.push(lid);
     };
 
-    // the funnel, over the second cell out from the wall, with its fluid settling into it as drawn (see STATION_FUNNEL)
+    // the funnel, out over the counter, with its fluid settling into it as drawn (see STATION_FUNNEL)
     const built = art.children.length;
     glassFrom(art, frustum(fx, f.y, f.y + f.h, 2 * f.w, 2 * f.w, FUNNEL_TIP, FUNNEL_TIP, true));
     const fm = new FluidMesh([frustum(fx, f.y + 0.5, f.y + f.h - 0.5, 2 * f.w - 1.5, 2 * f.w - 1.5, FUNNEL_TIP - 1, FUNNEL_TIP - 1, false)], art);

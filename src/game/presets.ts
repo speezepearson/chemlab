@@ -34,7 +34,7 @@ export const SPECTROSCOPE_AT: Spot = { at: [1.47, 0.5] };
 
 /**
  * Where the station is (see STATION in tools.ts): built into the right wall, past the faucets, facing
- * into the room, its funnel and spouts over the middles of the cells of the counter's outer row, and its
+ * into the room, its funnel and spouts out over the counter in line with the faucets, and its
  * spouts high enough for a flask under them. Every lab has it, always here.
  */
 export const STATION_POSE: Pose = { x: ROOM.x1 - STATION.out, y: STATION.top, z: STATION.along, yaw: -Math.PI / 2 };
