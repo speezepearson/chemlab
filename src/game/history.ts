@@ -2,11 +2,11 @@ import { copyStock, type Stock, type Stocked } from './cabinet';
 import type { Flask } from './flask';
 import type { Scale } from './scale';
 import type { Pose, Vec3 } from './space';
-import type { Hose, Tool } from './tools';
+import type { Cock, Hose, Tool } from './tools';
 
 /**
  * Undo and redo, of the lab's arrangement only: what's in it, where everything is and which way it faces, tools'
- * valves and the stopcocks fitted on their spouts, and how they're set, faucets' valves, hoses, scales' tares, the player's notes, the room's switches and whether the shadow lamp is lit (see
+ * valves and the stopcocks fitted on their spouts, and how they're set, faucets' valves and stopcocks, hoses, scales' tares, the player's notes, the room's switches and whether the shadow lamp is lit (see
  * Tool.lit). Never what's in the vessels:
  * the lab reacts and flows on between the player's actions, so an undo puts things back where they were, holding
  * whatever they hold now. Things are kept by reference, so one taken away and brought back by an undo or a redo is
@@ -19,7 +19,7 @@ export interface Things {
   tools: Tool[];
   scales: Scale[];
   hoses: Hose[];
-  faucets: { note: string; valve: number }[];
+  faucets: { note: string; valve: number; cock: Cock | null }[];
   /** What's in the equipment cabinet, changed in place. */
   stock: Stock;
 }
@@ -30,7 +30,7 @@ export interface Arrangement {
   tools: { t: Tool; pose: Pose; valves: number[]; cocks: ({ valve: number; nozzle: boolean } | null)[]; note: string; labels: string[]; lit: boolean }[];
   scales: { sc: Scale; pose: Pose; load: { f: Flask; dx: number }[]; tare: number; note: string }[];
   hoses: { h: Hose; outlet: Vec3; turn: number; reach: number }[];
-  faucets: { note: string; valve: number }[];
+  faucets: { note: string; valve: number; cock: { valve: number; nozzle: boolean } | null }[];
   stock: Stock;
   alarmsOff: boolean;
   blindsShut: boolean;
@@ -49,7 +49,7 @@ export function arrangement(l: Things, sw: Switches): Arrangement {
     })),
     scales: l.scales.map((sc) => ({ sc, pose: { ...sc.pose }, load: sc.load.map((x) => ({ ...x })), tare: sc.tare, note: sc.note })),
     hoses: l.hoses.map((h) => ({ h, outlet: { ...h.outlet }, turn: h.turn, reach: h.reach })),
-    faucets: l.faucets.map(({ note, valve }) => ({ note, valve })),
+    faucets: l.faucets.map(({ note, valve, cock }) => ({ note, valve, cock: cock && { valve: cock.valve, nozzle: cock.nozzle } })),
     stock: copyStock(l.stock),
     alarmsOff: sw.alarmsOff,
     blindsShut: sw.blindsShut,
@@ -81,7 +81,10 @@ export function arrange(l: Things, a: Arrangement): void {
     }),
   );
   l.hoses.splice(0, Infinity, ...a.hoses.map(({ h, outlet, turn, reach }) => Object.assign(h, { outlet: { ...outlet }, turn, reach })));
-  l.faucets.forEach((fa, i) => Object.assign(fa, a.faucets[i] ?? { note: '', valve: fa.valve }));
+  l.faucets.forEach((fa, i) => {
+    const { note, valve, cock } = a.faucets[i] ?? { note: '', valve: fa.valve, cock: null };
+    Object.assign(fa, { note, valve, cock: cock && Object.assign(fa.cock ?? { valve: 0, nozzle: false }, cock) });
+  });
   for (const k of Object.keys(a.stock) as Stocked[]) l.stock[k].splice(0, Infinity, ...a.stock[k]);
 }
 

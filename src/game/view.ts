@@ -49,10 +49,11 @@ export type Pick =
    */
   | { kind: 'hose'; h: Hose; cock?: boolean; turns?: boolean }
   /**
-   * A faucet: its spout, or the pipe down to it, if `spout`; its valve's handwheel, or the hub it's on, if `valve`
-   * (see FAUCET_VALVE); else the pipe from the wall, and the elbow.
+   * A faucet: its spout, or the pipe down to it, if `spout` (or the foot of a stopcock at its tip); its valve's
+   * handwheel, or the hub it's on, if `valve` (see FAUCET_VALVE); the stopcock at its tip, if `cock` (its handwheel and
+   * hub if `turns`); else the pipe from the wall, and the elbow.
    */
-  | { kind: 'faucet'; i: number; spout?: boolean; valve?: boolean }
+  | { kind: 'faucet'; i: number; spout?: boolean; valve?: boolean; cock?: boolean; turns?: boolean }
   /** The button under the beacon that silences the alarms. */
   | { kind: 'alarm' }
   /** The button by the porthole that shuts its blinds, or opens them. */
@@ -82,6 +83,8 @@ export interface FaucetSpot {
   valve: number;
   /** The angle its valve is drawn and turned at, as a tool's (see settleAngle in bodies.ts): never saved. */
   angle?: number;
+  /** The stopcock fitted on it, at its tip or on the end of its hose, if there is one (see Cock). */
+  cock: Cock | null;
 }
 
 /** Everything the view needs to draw one frame. */
@@ -4243,7 +4246,7 @@ function partOf(p: Pick): unknown {
       if (p.cock) return 'tool' in m ? `tool ${m.tool.id} cock ${m.spout}` : `faucet ${m.faucet} cock`;
       return 'tool' in m ? `tool ${m.tool.id} spout ${m.spout}` : `faucet ${m.faucet} spout`;
     }
-    case 'faucet': return p.spout ? `faucet ${p.i} spout` : p.valve ? `faucet ${p.i} valve` : `faucet ${p.i}`;
+    case 'faucet': return p.spout ? `faucet ${p.i} spout` : p.valve ? `faucet ${p.i} valve` : p.cock ? `faucet ${p.i} cock` : `faucet ${p.i}`;
     default: return p.kind;
   }
 }
@@ -5133,6 +5136,8 @@ export class View {
   private faucetNotes: Label[] = [];
   /** Each faucet's valve's handwheel, turned to its setting (see buildFaucets). */
   private faucetWheels: THREE.Group[] = [];
+  /** The stopcock drawn at each faucet's tip, if one's fitted there, and the one it was drawn for. */
+  private faucetCocks: ({ v: CockView; c: Cock } | null)[] = [];
   private streams: THREE.Mesh[] = [];
   private guides: THREE.Mesh[] = [];
   private rims: { g: THREE.Group; mat: THREE.MeshBasicMaterial; sides: THREE.Mesh[]; ring: THREE.Mesh }[] = [];
@@ -5309,6 +5314,24 @@ export class View {
       // at the angle it's been turned to (see settleAngle), upright open, as a tool's plain valve
       const wheel = this.faucetWheels[i];
       if (wheel) wheel.rotation.z = -settleAngle('valve', fa.angle, fa.valve);
+      // a stopcock at its tip hangs from it, facing as its valve does; its foot is the faucet's spout
+      const want = fa.cock && !fa.cock.nozzle ? fa.cock : null;
+      const was = this.faucetCocks[i];
+      if (was && was.c !== want) {
+        was.v.dispose();
+        this.faucetCocks[i] = null;
+      }
+      if (want && !this.faucetCocks[i]) {
+        const picks = {
+          cock: { kind: 'faucet', i, cock: true } as const, turns: { kind: 'faucet', i, cock: true, turns: true } as const,
+          foot: { kind: 'faucet', i, spout: true } as const,
+        };
+        const v = new CockView(scene, pickables, picks);
+        v.group.position.set(fa.spout.x, fa.spout.y, fa.spout.z);
+        v.group.rotation.y = faucetValvePose(fa).yaw;
+        this.faucetCocks[i] = { v, c: want };
+      }
+      if (want) this.faucetCocks[i]!.v.set(want);
     });
 
     this.updateStands(fr);

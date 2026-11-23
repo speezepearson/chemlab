@@ -19,7 +19,7 @@ import type { SaveState } from './save';
 import { CELL, LAMP_FLOOR, LIFT, counterUnder, toWorld } from './space';
 import { toCell } from './testLayout';
 import {
-  DRIP, DRIP_FLOW, Hose, INLINE_TOOLS, MAX_FLOW, PAPER_TAU, SCREEN, SHAPES, TEST_PAPER, UNIQUE_TOOLS, bondReading, bondShares, paperReading,
+  DRIP, DRIP_FLOW, Hose, INLINE_TOOLS, MAX_FLOW, PAPER_TAU, REFERENCE_FLOW, SCREEN, SHAPES, TEST_PAPER, UNIQUE_TOOLS, bondReading, bondShares, paperReading,
   type Blotter, type Cock, type Mouth, Tool,
 } from './tools';
 
@@ -1963,6 +1963,68 @@ describe('faucets’ valves', () => {
     expect(taps(l).faucets.every((fa) => fa.valve === 1)).toBe(true);
     l.e.restore(bare(), DEFAULT_PRESET);
     expect(taps(l).faucets.every((fa) => fa.valve === 1)).toBe(true);
+  });
+
+  it('take a stopcock on the spout, and then let out as far as both are open, at its foot', () => {
+    const l = lab();
+    const fa = taps(l).faucets[0] as Taps['faucets'][number] & { cock: Cock | null };
+    const f = under(l);
+    fa.valve = 1;
+    expect(l.e.spawn('stopcock')).toBe(true);
+    l.in.target = { kind: 'faucet', i: 0, spout: true, point: fa.spout };
+    l.in.leftDown(false);
+    expect(l.in.held).toBeNull();
+    expect(fa.cock).toEqual({ valve: 0, nozzle: false });
+    const I = l.in as unknown as { faucetOutlet(i: number): { y: number } };
+    expect(I.faucetOutlet(0).y).toBe(fa.spout.y - STOPCOCK.drop);
+    run(l, 1);
+    expect(f.N).toBe(0);
+    fa.cock!.valve = 0.5;
+    run(l, 1);
+    expect(volume(f) / faucetRate(0.5)).toBeCloseTo(1, 3);
+    fa.valve = 0.5;
+    const had = volume(f);
+    run(l, 1);
+    expect((volume(f) - had) / faucetRate(0.25)).toBeCloseTo(1, 3);
+    // its handwheel turns it, the rest of it takes it off, and its foot is the faucet's spout
+    l.in.target = { kind: 'faucet', i: 0, cock: true, turns: true };
+    expect(l.in.valveAimed()).toEqual({ cock: { faucet: 0 } });
+    // a save keeps it, and a save from before there were stopcocks has none
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    expect(s.faucets![0].cock).toEqual({ valve: 0.5 });
+    l.e.restore(s, DEFAULT_PRESET);
+    expect((taps(l).faucets[0] as unknown as { cock: Cock | null }).cock).toEqual({ valve: 0.5, nozzle: false });
+    delete s.faucets![0].cock;
+    l.e.restore(s, DEFAULT_PRESET);
+    expect((taps(l).faucets[0] as unknown as { cock: Cock | null }).cock).toBeNull();
+    l.e.restore(JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState, DEFAULT_PRESET);
+    l.in.target = { kind: 'faucet', i: 0, cock: true };
+    const fb = taps(l).faucets[0] as unknown as { cock: Cock | null };
+    fb.cock = { valve: 0.5, nozzle: false };
+    l.in.leftDown(false);
+    expect(fb.cock).toBeNull();
+    expect(l.in.held?.kind).toBe('cock');
+    l.in.putBack();
+    expect(fb.cock).toEqual({ valve: 0.5, nozzle: false });
+  });
+
+  it('take none on the station’s waste spigot, but one on its reservoir’s faucet, which it throttles', () => {
+    const l = lab();
+    const st = l.in.tools.find((t) => t.kind === 'receptacle')!;
+    expect(l.e.spawn('stopcock')).toBe(true);
+    l.in.target = { kind: 'tool', t: st, part: 'spout', k: 0, point: spoutTip(st, 0) };
+    expect(l.in.placement(l.in.held)).not.toHaveProperty('rest', expect.objectContaining({ cock: expect.objectContaining({ m: { tool: st, spout: 0 } }) }));
+    l.in.target = { kind: 'tool', t: st, part: 'spout', k: 1, point: spoutTip(st, 1) };
+    l.in.leftDown(false);
+    expect(st.cocks).toEqual([null, { valve: 0, nozzle: false }]);
+    st.valves[0] = 1;
+    const ref = st.tanks[1];
+    const was = ref.N;
+    st.step(0.1);
+    expect(ref.N).toBe(was);
+    st.cocks[1]!.valve = 0.5;
+    const out = st.step(0.1)[1];
+    expect(volume(out!) / (0.5 * REFERENCE_FLOW * 0.1)).toBeCloseTo(1, 4);
   });
 
   it('turns by its handwheel as a tool’s valve does, from press to let go one step to undo', () => {

@@ -368,9 +368,9 @@ type LabFaucet = FaucetSpot & {
   streaming: boolean;
 };
 
-/** A faucet's valve set to `valve`, with nothing hanging from it or let out yet. */
-function faucetFlow(valve = 0): Omit<LabFaucet, keyof FaucetSpot | 'start'> & { valve: number } {
-  return { valve, drop: new Vessel(Infinity), packet: new Vessel(Infinity), out: null, flow: 0, streaming: false };
+/** A faucet's valve set to `valve`, with no stopcock on it, nothing hanging from it, and nothing let out yet. */
+function faucetFlow(valve = 0): Omit<LabFaucet, keyof FaucetSpot | 'start'> & { valve: number; cock: Cock | null } {
+  return { valve, cock: null, drop: new Vessel(Infinity), packet: new Vessel(Infinity), out: null, flow: 0, streaming: false };
 }
 
 /**
@@ -900,6 +900,7 @@ export class GameEngine {
       // where they started on the old flat bench, so the save still loads there, with their notes
       faucets: this.faucets.map((fa, i, all) => ({
         x: (i + 0.5) / all.length, y: 30 / HOME_H, valve: fa.valve, ...(fa.note ? { note: fa.note } : {}),
+        ...((c) => (c ? { cock: { valve: c.valve, ...(c.nozzle ? { nozzle: true } : {}) } } : {}))(this.cockSaved({ faucet: i })),
       })),
       cabinet: Object.fromEntries(
         (Object.keys(stock) as Stocked[]).filter((k) => !endless(k)).map((k) => [k, stock[k].flatMap((on, i) => (on ? [i] : []))]),
@@ -1013,6 +1014,8 @@ export class GameEngine {
       if (j === null) return;
       if (typeof f?.note === 'string') this.faucets[j].note = f.note;
       if (Number.isFinite(f?.valve)) this.faucets[j].valve = Math.max(0, Math.min(1, f.valve!));
+      const c = f?.cock;
+      if (c && typeof c === 'object') this.faucets[j].cock = { valve: Number.isFinite(c.valve) ? Math.max(0, Math.min(1, c.valve)) : 0, nozzle: !!c.nozzle };
     });
     this.setAlarmsOff(!!s.alarmsOff);
     this.blindsShut = !!s.blindsShut;
@@ -2118,12 +2121,14 @@ export class GameEngine {
    * there is one at its tip (see spoutAt).
    */
   private mountAt(m: HoseMount): Vec3 {
-    return 'tool' in m ? spoutAt(m.tool, m.spout) : this.faucets[m.faucet].spout;
+    if ('tool' in m) return spoutAt(m.tool, m.spout);
+    const fa = this.faucets[m.faucet];
+    return fa.cock && !fa.cock.nozzle ? { ...fa.spout, y: fa.spout.y - STOPCOCK.drop } : fa.spout;
   }
 
   /** The stopcock on a spout or faucet, wherever on it it is (see Cock), if there is one. */
   private cockOn(m: HoseMount): Cock | null {
-    return 'tool' in m ? (m.tool.cocks[m.spout] ?? null) : null;
+    return 'tool' in m ? (m.tool.cocks[m.spout] ?? null) : this.faucets[m.faucet].cock;
   }
 
   /** Bring the stopcock on the end of a spout's or faucet's hose, if there is one, up to its tip (see Cock). */
@@ -2138,16 +2143,26 @@ export class GameEngine {
    */
   private tidyCocks(): void {
     for (const t of this.tools) t.cocks.forEach((c, j) => c?.nozzle && !this.hoseOn({ tool: t, spout: j }) && (c.nozzle = false));
+    this.faucets.forEach((fa, i) => fa.cock?.nozzle && !this.hoseOn({ faucet: i }) && (fa.cock.nozzle = false));
   }
 
   /** Fit stopcock c on a spout or faucet, or with null, take off the one there. */
   private setCock(m: HoseMount, c: Cock | null): void {
     if ('tool' in m) m.tool.cocks[m.spout] = c;
+    else this.faucets[m.faucet].cock = c;
   }
 
-  /** Whether a spout or faucet can have a stopcock fitted on it: a tool's spout, but not the station's. */
+  /**
+   * Whether a spout or faucet can have a stopcock fitted on it: any but the station's waste spigot, which only its
+   * diverter works.
+   */
   private takesCock(m: HoseMount): boolean {
-    return 'tool' in m && !m.tool.shape.wall;
+    return !('tool' in m && m.tool.shape.wall && m.spout === 0);
+  }
+
+  /** Whether a spout is the station's while its changeover's under way, when nothing on it can be worked. */
+  private awayOn(m: HoseMount): boolean {
+    return 'tool' in m && m.tool.swap !== null;
   }
 
   /** Whether a hose's nozzle at p is docked on an inline instrument's tube (see docked). */
@@ -2164,7 +2179,10 @@ export class GameEngine {
     const { m } = spot;
     const hose = spot.nozzle ? this.hoseOn(m) : undefined;
     if (hose) return { ...hose.outlet, yaw: hose.turn };
-    return 'tool' in m ? { ...spoutTip(m.tool, m.spout), yaw: m.tool.pose.yaw } : { ...this.faucets[m.faucet].spout, yaw: 0 };
+    if ('tool' in m) return { ...spoutTip(m.tool, m.spout), yaw: m.tool.pose.yaw };
+    // a faucet's faces as its valve does
+    const fa = this.faucets[m.faucet];
+    return { ...fa.spout, yaw: faucetValvePose(fa).yaw };
   }
 
   /** Where what a hose lets out leaves it: its nozzle's tip, or the foot of the stopcock on its end. */
@@ -2590,9 +2608,9 @@ export class GameEngine {
    */
   private valveAimed(): ValveRef | null {
     const p = this.target;
-    // a faucet's valve is its handwheel
-    if (p?.kind === 'faucet') return p.valve ? { faucet: p.i } : null;
-    if (p?.kind === 'hose') return p.cock && p.turns ? { cock: p.h.on } : null;
+    // a faucet's valve is its handwheel, and so is a stopcock's on it
+    if (p?.kind === 'faucet') return p.valve ? { faucet: p.i } : p.cock && p.turns ? { cock: { faucet: p.i } } : null;
+    if (p?.kind === 'hose') return p.cock && p.turns && !this.awayOn(p.h.on) ? { cock: p.h.on } : null;
     if (p?.kind !== 'tool' || p.t.swap !== null) return null;
     // a stopcock's is its handwheel, and the hub it's on
     if (p.part === 'cock') return p.turns ? { cock: { tool: p.t, spout: p.k } } : null;
@@ -2603,7 +2621,8 @@ export class GameEngine {
   private cockAimed(): HoseMount | null {
     const p = this.target;
     if (p?.kind === 'tool' && p.part === 'cock' && p.t.swap === null) return { tool: p.t, spout: p.k };
-    if (p?.kind === 'hose' && p.cock) return p.h.on;
+    if (p?.kind === 'hose' && p.cock && !this.awayOn(p.h.on)) return p.h.on;
+    if (p?.kind === 'faucet' && p.cock) return { faucet: p.i };
     return null;
   }
 
@@ -2629,12 +2648,13 @@ export class GameEngine {
    * COCK_SNAP of it and REACH of the eyes; and why it can't, if it would be in something there (see cockRoom). Null if there's nowhere near.
    */
   private cockAim(): { spot: CockSpot; pose: Pose; why: string | null } | null {
-    const free = (m: HoseMount) => this.takesCock(m) && !this.cockOn(m);
+    const free = (m: HoseMount) => this.takesCock(m) && !this.cockOn(m) && !this.awayOn(m);
     const p = this.target;
     let spot: CockSpot | null = null;
     if (p?.kind === 'tool' && p.part === 'spout' && p.t.swap === null && free({ tool: p.t, spout: p.k })) spot = { m: { tool: p.t, spout: p.k }, nozzle: false };
-    // a hose's nozzle, for one on its end
+    // a hose's nozzle, for one on its end; or a faucet's spout
     if (p?.kind === 'hose' && !p.cock && free(p.h.on)) spot = { m: p.h.on, nozzle: true };
+    if (p?.kind === 'faucet' && p.spout && free({ faucet: p.i })) spot = { m: { faucet: p.i }, nozzle: false };
     if (!spot) {
       // the one nearest the line the crosshair is on, within reach
       const eye = this.eye();
@@ -2649,7 +2669,8 @@ export class GameEngine {
         if (d <= best) [best, spot] = [d, s];
       };
       for (const t of this.tools) if (t.swap === null) t.shape.spouts.forEach((_, j) => free({ tool: t, spout: j }) && near({ m: { tool: t, spout: j }, nozzle: false }));
-      for (const hose of this.hoses) if (free(hose.on)) near({ m: hose.on, nozzle: true });
+      this.faucets.forEach((_, i) => free({ faucet: i }) && near({ m: { faucet: i }, nozzle: false }));
+      for (const hose of this.hoses) if (free(hose.on) && !this.awayOn(hose.on)) near({ m: hose.on, nozzle: true });
     }
     if (!spot) return null;
     const pose = this.cockFrame(spot);
@@ -2977,7 +2998,8 @@ export class GameEngine {
     if (p.N) p.n.fill(0);
     p.N = 0;
     p.Q = 0;
-    p.addFrom(fa.output, faucetRate(fa.valve) * h, true);
+    // as far as its valve is open, and a stopcock on it, if there is one
+    p.addFrom(fa.output, faucetRate(fa.valve) * (fa.cock?.valve ?? 1) * h, true);
     return p.N > 0 ? p : null;
   }
 
@@ -3084,7 +3106,7 @@ export class GameEngine {
         // each faucet runs as far as its valve is open, as a tool's spout does, dripping if that's slow enough
         this.faucets.forEach((fa, i) => {
           if (i === stillFaucet) return;
-          const out = fa.valve > 0 ? this.faucetLets(fa, step) : null;
+          const out = fa.valve > 0 && (fa.cock?.valve ?? 1) > 0 ? this.faucetLets(fa, step) : null;
           if (!out && fa.drop.N <= 0) return;
           if (quiet) {
             pour(fa.drop, out, taps[i], tapTargets[i]);
@@ -3240,8 +3262,11 @@ export class GameEngine {
     if (st.swap === null) return;
     const its = (h: Hose) => 'tool' in h.on && h.on.tool === st;
     if (this.turning && 't' in this.turning && this.turning.t === st) this.endTurn();
+    if (this.turning && 'cock' in this.turning && 'tool' in this.turning.cock && this.turning.cock.tool === st) this.endTurn();
     const held = this.held?.kind === 'hose' && its(this.held.h);
     this.hoses = this.hoses.filter((h) => !its(h));
+    // (a stopcock on the end of one of them goes up to its spout's tip)
+    this.tidyCocks();
     if (held) {
       this.held = null;
       this.pinned = null;
@@ -4172,7 +4197,7 @@ export class GameEngine {
     // runs anyway
     if (h?.kind === 'tool' || h?.kind === 'scale' || h?.kind === 'cock') return false;
     // a faucet runs if its valve's open
-    if (h?.kind === 'hose') return 'tool' in h.h.on ? this.wouldFlow(h.h.on.tool) : this.faucets[h.h.on.faucet].valve > 0;
+    if (h?.kind === 'hose') return 'tool' in h.h.on ? this.wouldFlow(h.h.on.tool) : this.faucets[h.h.on.faucet].valve > 0 && (this.cockOn(h.h.on)?.valve ?? 1) > 0;
     return !!this.valveAimed();
   }
 
