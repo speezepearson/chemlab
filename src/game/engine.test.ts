@@ -120,6 +120,15 @@ interface Hands {
   placeHeld(h: unknown, p: Tool['pose']): void;
 }
 const hands = (l: Lab) => l.in as unknown as Hands;
+/** How far, in radians, the middle of what's held is from straight ahead of the eyes, where the crosshair is. */
+function offRay(l: Lab): number {
+  const I = l.in as unknown as { eye(): { x: number; y: number; z: number }; lookDir(): { x: number; y: number; z: number } };
+  const c = toolBox(l.in.held!.t!);
+  const e = I.eye();
+  const d = I.lookDir();
+  const v = { x: c.x - e.x, y: c.y - e.y, z: c.z - e.z };
+  return Math.acos(Math.min(1, (v.x * d.x + v.y * d.y + v.z * d.z) / Math.hypot(v.x, v.y, v.z)));
+}
 /** A sheet of blotting paper, of either kind. */
 type Sheet = 'testpaper' | 'bondpaper';
 /** The middle of a cell in the front row of the first island. */
@@ -132,7 +141,7 @@ const flat = (x: number, z: number, yaw = 0) => [x, LIFT + TEST_PAPER.thick, z, 
 
 /** Take a sheet out of the cabinet, by the wheel, and lay it down with its middle at (x, z). */
 function lay(l: Lab, x = SPOT.x, z = SPOT.z, kind: Sheet = 'testpaper'): Tool {
-  // looking a little down, the sheet is held low in front, about there; and then just there
+  // looking a little down, the sheet is held in front, about there; and then just there
   const there = () => {
     l.e.debug({ x, z: z + 96, yaw: 0, pitch: (-20 * Math.PI) / 180 });
     l.in.move(0);
@@ -174,12 +183,15 @@ describe('test paper', () => {
   const G = singleOf('G');
   const RG = pairOf('R', 'G');
 
-  it('comes out of the cabinet as often as wanted, held low so that its face shows, and is thrown away when put away', () => {
+  it('comes out of the cabinet as often as wanted, held with its middle on the crosshair, and is thrown away when put away', () => {
     const l = lab();
     for (let i = 0; i < STOCK.testpaper + 3; i++) {
+      // looking down at a counter or level, its face's middle is straight ahead
+      l.e.debug({ x: SPOT.x, z: SPOT.z + 300, yaw: 0, pitch: [-0.8, -0.4, 0][i % 3] });
       expect(l.e.spawn('testpaper')).toBe(true);
+      l.in.move(0);
       expect(l.in.held?.t?.kind).toBe('testpaper');
-      expect(hands(l).held!.dir!.y).toBeLessThan(0);
+      expect(offRay(l)).toBeLessThan(1e-9);
       l.in.putAway();
       expect(l.in.held).toBeNull();
     }
@@ -391,12 +403,15 @@ describe('bond paper', () => {
   const RK = pairOf('R', 'K');
   const bond = (k: string) => BOND_KEYS.indexOf(k);
 
-  it('comes out of the cabinet as often as wanted, held low so that its face shows, and is thrown away when put away', () => {
+  it('comes out of the cabinet as often as wanted, held with its middle on the crosshair, and is thrown away when put away', () => {
     const l = lab();
     for (let i = 0; i < STOCK.bondpaper + 3; i++) {
+      // looking down at a counter or level, its face's middle is straight ahead
+      l.e.debug({ x: SPOT.x, z: SPOT.z + 300, yaw: 0, pitch: [-0.8, -0.4, 0][i % 3] });
       expect(l.e.spawn('bondpaper')).toBe(true);
+      l.in.move(0);
       expect(l.in.held?.t?.kind).toBe('bondpaper');
-      expect(hands(l).held!.dir!.y).toBeLessThan(0);
+      expect(offRay(l)).toBeLessThan(1e-9);
       l.in.putAway();
       expect(l.in.held).toBeNull();
     }
@@ -1701,7 +1716,7 @@ describe('the shadow lamp', () => {
     expect(l.e.spawn('testpaper')).toBe(true);
     const p = l.in.held!.t!;
     hold(LAMP_FLOOR.y + 20);
-    // (it's held low in front, a little nearer: just over the middle, then)
+    // (it's held in front, short of the middle: just over the middle, then)
     hands(l).placeHeld(l.in.held, { ...p.pose, x: mid.x, z: mid.z });
     l.in.release();
     expect(l.in.held).toBeNull();

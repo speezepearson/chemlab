@@ -233,13 +233,6 @@ const WHEEL_CODES = ['Digit1', 'Digit2'];
 /** Those keys, as they're named for the player. */
 const WHEEL_KEYS = ['1', '2'];
 
-/**
- * Which way from the eyes (see Held.dir) something that lies flat, a sheet of test paper or bond paper, is held when it's made in
- * hand: 25° below straight ahead, so that it's looked down on and its face is seen. Straight ahead, with the eyes
- * level, it would be edge on: a line.
- */
-const FLAT_HOLD: Vec3 = { x: 0, y: -Math.sin((25 * Math.PI) / 180), z: Math.cos((25 * Math.PI) / 180) };
-
 /** How tipped a flask held to pour is: past the horizontal, mouth down. */
 const POUR_ANG = Math.PI * 0.61;
 /** How long a flask takes to tip to pour, or stand back up, in real seconds. */
@@ -1199,9 +1192,9 @@ export class GameEngine {
       return { kind: 'flask', f, relYaw: 0, dist: 0 };
     }
     if (kind === 'scale') return { kind: 'scale', sc: new Scale(), relYaw: 0, dist: 0 };
-    const t = new Tool(kind, this.nextToolId++, undefined);
-    // what lies flat is held low, so its face is seen, not its edge
-    return { kind: 'tool', t, relYaw: 0, dist: 0, ...(t.shape.flat ? { dir: { ...FLAT_HOLD } } : {}) };
+    // (held with its middle on the crosshair, like anything made in hand, a sheet lying flat included: looked down on,
+    // as a sheet is when it's laid on a counter, its face is seen)
+    return { kind: 'tool', t: new Tool(kind, this.nextToolId++, undefined), relYaw: 0, dist: 0 };
   }
 
   /**
