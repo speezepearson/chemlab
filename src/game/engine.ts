@@ -3019,14 +3019,14 @@ export class GameEngine {
     return { turn: toCardinal(this.player.yaw + h.relYaw), reach: snapReach(h.reach) };
   }
 
-  /** Every stand in the lab, with what it holds up; but none for a dipper (see DIPPERS) or a sheet of shadow paper while it's in hand. */
-  private stands(): { s: Stand; of: Pick }[] {
-    const out: { s: Stand; of: Pick }[] = [];
+  /** Every stand in the lab; but none for a dipper (see DIPPERS) or a sheet of shadow paper while it's in hand. */
+  private stands(): Stand[] {
+    const out: Stand[] = [];
     const held = this.held;
     for (const t of this.tools) {
       // a strip, a thermometer or a sheet of shadow paper in hand is just itself: its stand is there once it's set down
       if (held?.kind === 'tool' && held.t === t && (isDipper(t.kind) || t.kind === 'sheet')) continue;
-      for (const s of toolStands(t)) out.push({ s, of: { kind: 'tool', t, part: 'body', k: 0 } });
+      out.push(...toolStands(t));
     }
     const pl = this.placed;
     const follow = held?.follow ?? [];
@@ -3040,7 +3040,7 @@ export class GameEngine {
         if (r) s = nozzleStand(r.pose, r.hose!.turn, r.hose!.reach);
       } else if (held?.kind === 'hose' && held.h === h) s = this.standsAt(held, this.heldPose(held), pl && 'rest' in pl ? pl.rest : undefined)[0];
       else s = nozzleStand(h.outlet, h.turn, h.reach);
-      if (s) out.push({ s, of: { kind: 'hose', h } });
+      if (s) out.push(s);
     }
     return out;
   }

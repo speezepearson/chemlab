@@ -3,7 +3,7 @@ import { BOND_KEYS } from '../chem/atoms';
 import { ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
-import { SHEET_SLOT, flaskLip, inSlot, scaleBox, sheetIn, slotPose, standBase, toolBox, toolStands } from './bodies';
+import { SHEET_SLOT, flaskLip, inSlot, scaleBox, sheetIn, slotPose, standBase, toolBox, toolStands, type Stand } from './bodies';
 import { boxesOverlap } from './physics';
 import { STOCK } from './cabinet';
 import { WHEELS } from './wheel';
@@ -70,8 +70,12 @@ interface Inside {
   simulate(dt: number, quiet?: boolean): void;
   sleeper(): { skip(dt: number): void };
   placement(h: unknown): { rest: { pose: Tool['pose'] } } | { why: string };
-  stands(): { of: { t?: Tool } }[];
+  stands(): Stand[];
 }
+
+/** Whether the lab has t's stands up, as t stands (see toolStands). */
+const standing = (l: { in: Inside }, t: Tool) =>
+  l.in.stands().some((s) => toolStands(t).some((u) => u.x === s.x && u.z === s.z && u.clampY === s.clampY));
 
 let Engine: typeof GameEngine;
 const engines: GameEngine[] = [];
@@ -187,7 +191,7 @@ describe('test paper', () => {
     const sheet = lay(l);
     expect(where(sheet.pose)).toEqual(flat(SPOT.x, SPOT.z));
     expect(toolStands(sheet)).toEqual([]);
-    expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(false);
+    expect(standing(l, sheet)).toBe(false);
     // off a counter there's nowhere for it to lie
     holdAt(l, 'testpaper', { x: 150, y: 500, z: 1200, yaw: 0 });
     expect('why' in l.in.placement(l.in.held)).toBe(true);
@@ -402,7 +406,7 @@ describe('bond paper', () => {
     expect(sheet.kind).toBe('bondpaper');
     expect(where(sheet.pose)).toEqual(flat(SPOT.x, SPOT.z));
     expect(toolStands(sheet)).toEqual([]);
-    expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(false);
+    expect(standing(l, sheet)).toBe(false);
     // nothing else can be set down on its cell, not even a sheet of the other kind
     holdAt(l, 'testpaper', { x: SPOT.x - 10, y: LIFT + 150, z: SPOT.z, yaw: 0 });
     const sh = l.in.placement(l.in.held);
@@ -1375,7 +1379,7 @@ describe('shadow paper', () => {
     const l = emptied();
     const sheet = sheetAtSlot(l);
     // in hand it has no stand, and where it would go is the slot
-    expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(false);
+    expect(standing(l, sheet)).toBe(false);
     const pl = l.in.placement(l.in.held);
     expect('rest' in pl && pl.rest.pose).toEqual(SHEET_SLOT);
     l.in.release();
@@ -1383,7 +1387,7 @@ describe('shadow paper', () => {
     expect(sheet.pose).toEqual(SHEET_SLOT);
     expect(sheetIn(l.in.tools)).toBe(sheet);
     expect(toolStands(sheet)).toEqual([]);
-    expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(false);
+    expect(standing(l, sheet)).toBe(false);
     // a second sheet held there has to go somewhere else: on a stand, over the bench
     const second = sheetAtSlot(l);
     const pl2 = l.in.placement(l.in.held);
@@ -1399,7 +1403,7 @@ describe('shadow paper', () => {
     expect(l.in.held).toBeNull();
     expect(sheetIn(l.in.tools)).toBeNull();
     expect(toolStands(sheet)).toHaveLength(1);
-    expect(l.in.stands().some((s) => s.of.t === sheet)).toBe(true);
+    expect(standing(l, sheet)).toBe(true);
     // undo puts it back in the slot, and Q puts back one picked up from there
     l.e.undo();
     expect(sheet.pose).toEqual(SHEET_SLOT);

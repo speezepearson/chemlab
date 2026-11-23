@@ -191,10 +191,16 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   `outletAt` and `faucetOutlet`, not `spoutAt` or `fa.spout`.
 - **What's drawn is what's hit.** Every mesh a `ToolView` builds is registered as part of the tool for the crosshair's
   raycast, so empty space around it isn't. Register a mesh yourself only to make it a specific part (a tank, valve,
-  spout or button: a spout's is its tip and the pipe that runs to it alone); sprites (labels) aren't hit. The one exception is each `FluidMesh`'s bent copy of what's behind a clear
-  fluid (`bentMat` in `view.ts`), on a layer of its own (`REFRACT_LAYER`) drawn only in the frame's main render. It's
-  the only thing using three.js's `transmission`, whose extra pass runs whenever anything transmissive is in view, so
-  don't give other materials `transmission` lightly.
+  spout or button: a spout's is its tip and the pipe that runs to it alone); sprites (labels) aren't hit. There are
+  two exceptions. Clamp stands (`StandView`) aren't hit at all: the crosshair goes through them to what's behind, and
+  what they hold is picked up by itself (only a sniff's `clearance` counts them). And each `FluidMesh`'s bent copy of
+  what's behind a clear fluid (`bentMat` in `view.ts`), on a layer of its own (`REFRACT_LAYER`) drawn only in the
+  frame's main render. It's the only thing using three.js's `transmission`, whose extra pass runs whenever anything
+  transmissive is in view, so don't give other materials `transmission` lightly.
+- **An outline always takes in what the crosshair is on.** This is the user's rule: the mesh hit is always one of the
+  meshes outlined at full strength (`partOf` in `view.ts`). So a mesh's registered part must be what's outlined for
+  it, and what the buttons act on, never a neighbour chosen by nearness to where it's hit. Clamp stands are never
+  outlined, which is why they aren't hit.
 - **What's drawn is what casts a shadow.** The shadow lamp's light (`Exposer` in `view.ts`) goes by the meshes in the
   scene in its channel, between its pane and its sheet: opaque ones stop it, see-through ones (`transparent` materials) don't, and
   fluid dims it by its rings. So whatever draws fluid, in any material, must mark that material with `shade()` each

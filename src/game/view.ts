@@ -100,8 +100,8 @@ export interface Frame {
    * flask's), unless it's `square` (a sheet of test paper's, as is its face as a guide's mouth).
    */
   footprints: readonly (Vec3 & { hx: number; hz: number; yaw: number; ok: boolean; square?: boolean })[];
-  /** Every clamp stand, each with what it holds up, to grab that by it. */
-  stands: readonly { s: Stand; of: Pick }[];
+  /** Every clamp stand. */
+  stands: readonly Stand[];
   drops: readonly { at: Vec3; v: Vessel; hanging: boolean }[];
   /** The scale whose tare key is held down. */
   tarePress: Scale | null;
@@ -2820,7 +2820,10 @@ class HoseView {
 
 /* ---------------- stands ---------------- */
 
-/** A clamp stand (see Stand): a base plate, a steel rod up from it, and a clamp out to what it holds. */
+/**
+ * A clamp stand (see Stand): a base plate, a steel rod up from it, and a clamp out to what it holds. It isn't hit (see
+ * View.pick), so the crosshair goes through it to what's behind, but it's in the way of a sniff (see View.clearance).
+ */
 class StandView {
   readonly group = new THREE.Group();
   readonly parts: THREE.Mesh[];
@@ -5037,8 +5040,8 @@ export class View {
   /**
    * The outlines round what the crosshair is on (see Outliner): at full strength round the part of it (see partOf),
    * and first, faintly, round the whole thing it's part of (see thingOf) with that part, so no faint line cuts across
-   * a hose that's out. A part whose key is a whole thing (a tool's body) takes all of it in. Clamp stands are never
-   * outlined, though looking at one is looking at what it holds: they're only what holds it up.
+   * a hose that's out. A part whose key is a whole thing (a tool's body) takes all of it in. Clamp stands, which aren't
+   * hit, are never outlined.
    */
   private renderOutline(hot: Pick | null): void {
     if (!hot) return;
@@ -5051,11 +5054,9 @@ export class View {
     const whole = wholeOf(hot);
     // (a hose's tube isn't hit, so it isn't among the pickables, but it's drawn as part of its hose)
     const members: [THREE.Object3D, Pick][] = [...this.pickables, ...[...this.hoses.values()].map((v): [THREE.Object3D, Pick] => [v.tube, { kind: 'hose', h: v.h }])];
-    const stands = new Set<THREE.Object3D>(this.stands.flatMap((v) => v.parts));
     const part: THREE.Object3D[] = [];
     const all: THREE.Object3D[] = [];
     for (const [o, p] of members) {
-      if (stands.has(o)) continue;
       const thing = thingOf(p);
       const inPart = partOf(p) === focus || thing === focus;
       if (inPart) part.push(o);
@@ -5069,13 +5070,9 @@ export class View {
   private updateStands(fr: Frame): void {
     while (this.stands.length < fr.stands.length) this.stands.push(new StandView(this.scene));
     this.stands.forEach((v, i) => {
-      const st = fr.stands[i];
-      v.group.visible = !!st;
-      for (const m of v.parts) {
-        if (st) this.pickables.set(m, st.of);
-        else this.pickables.delete(m);
-      }
-      if (st) v.update(st.s, groundAt(st.s.x, st.s.z));
+      const s = fr.stands[i];
+      v.group.visible = !!s;
+      if (s) v.update(s, groundAt(s.x, s.z));
     });
   }
 
@@ -5230,12 +5227,13 @@ export class View {
 
   /**
    * How far from `from`, along the unit vector `dir`, the first thing drawn that the crosshair could be on is (see
-   * pick); Infinity if there's nothing within `reach`.
+   * pick), or a clamp stand; Infinity if there's nothing within `reach`.
    */
   clearance(from: Vec3, dir: Vec3, reach: number): number {
     this.raycaster.set(new THREE.Vector3(from.x, from.y, from.z), new THREE.Vector3(dir.x, dir.y, dir.z));
     this.raycaster.far = reach;
-    const hit = this.raycaster.intersectObjects([...this.pickables.keys()], false).find((h) => this.pickables.get(h.object));
+    const stands = this.stands.filter((v) => v.group.visible).flatMap((v) => v.parts);
+    const hit = this.raycaster.intersectObjects([...this.pickables.keys(), ...stands], false)[0];
     return hit ? hit.distance : Infinity;
   }
 
