@@ -16,7 +16,7 @@ import { ambience } from './game/ambience';
 import { GameEngine, type Hud as HudState, type Inspection } from './game/engine';
 import { DEFAULT_PRESET, PRESETS } from './game/presets';
 import { typingIn } from './game/typing';
-import { decodeSave, encodeSave, storeGhostMoves, storeGod, storeSave, storedGhostMoves, storedGod, storedSave, type SaveState } from './game/save';
+import { decodeSave, encodeSave, storeGod, storeSave, storedGod, storedSave, type SaveState } from './game/save';
 
 const INTRO_KEY = 'slurry-lab.introSeen';
 const introSeen = () => {
@@ -59,7 +59,6 @@ export function App() {
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [speed, setSpeed] = useState(1);
   const [god, setGod] = useState(storedGod);
-  const [ghost, setGhost] = useState(storedGhostMoves);
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [hud, setHud] = useState<HudState | null>(null);
   const [saved] = useState(storedSave);
@@ -139,11 +138,6 @@ export function App() {
     storeGod(god);
   }, [engine, god]);
 
-  useEffect(() => {
-    if (engine) engine.ghostMoves = ghost;
-    storeGhostMoves(ghost);
-  }, [engine, ghost]);
-
   const reset = () => {
     engine?.reset();
   };
@@ -198,9 +192,6 @@ export function App() {
           <SpeedControl value={speed} onChange={setSpeed} />
           <label className="tog">
             <input type="checkbox" checked={god} onChange={(e) => setGod(e.target.checked)} /> god mode
-          </label>
-          <label className="tog" title="Move things by a ghost of them, leaving them where they are until set down">
-            <input type="checkbox" checked={ghost} onChange={(e) => setGhost(e.target.checked)} /> ghost moves
           </label>
           {/* switching scenarios is for god mode; Reset still restarts the current one */}
           {god && (

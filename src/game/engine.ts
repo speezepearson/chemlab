@@ -212,16 +212,16 @@ type Held = (
   /** The hoses pouring into what's carried, which go along with it (see gather). */
   follow?: Follower[];
   /**
-   * Moved by a ghost (see GameEngine.ghostMoves): where it's held, while the thing itself stays where it was, in the
-   * lab and running, until it's set down; or, one just made, out of the lab until then.
+   * Moved by a ghost (see ghostly): where it's held, while the thing itself stays where it was, in the lab and running,
+   * until it's set down; or, one just made, out of the lab until then. Set for just what ghostly says, as it's taken.
    */
   ghost?: { pose: Pose };
 };
 
 /**
- * Whether what's held is moved by a ghost when ghost moves are on (see GameEngine.ghostMoves): what stands on the
- * bench on stands, and a scale; not what's used while it's held (a flask, a dipper, a sheet of blotting paper, a
- * hose's nozzle).
+ * Whether what's held is moved by a ghost of it (see Held.ghost): what stands on the bench on stands, and a scale,
+ * stay where they are, running, until they're set down; what's used while it's held (a flask, a dipper, a sheet of
+ * blotting paper, a hose's nozzle) is carried in hand.
  */
 const ghostly = (h: Held) => h.kind === 'scale' || (h.kind === 'tool' && !isDipper(h.t.kind) && !isBlotter(h.t.kind));
 
@@ -391,13 +391,6 @@ interface Gaze {
 export class GameEngine {
   speed = 1;
   god = true;
-  /**
-   * Whether what stands on the bench on stands, or a scale, is moved by a ghost of it: picked
-   * up, it stays where it is, running, and what's carried is a ghost drawn where it would come to rest, until it's set
-   * down there, when it moves at once (see Held.ghost). Taken up at the next pick-up. Flasks, dippers, sheets of
-   * blotting paper and hoses' nozzles are carried in hand either way, since they're used while held.
-   */
-  ghostMoves = false;
 
   private view: View;
   private flasks: Flask[] = [];
@@ -413,7 +406,7 @@ export class GameEngine {
   /** Where the on-screen sticks are pushed (see stick). */
   private sticks = { move: { x: 0, y: 0 }, look: { x: 0, y: 0 } };
   private held: Held | null = null;
-  /** Whether the right button is held: a held flask tips and pours, and a held tool or hose lets fluid out, only while it is. */
+  /** Whether the right button is held: a held flask tips and pours, a held hose lets fluid out, and a held dipper dips, only while it is. */
   private rightHeld = false;
   /** A valve being turned with the right button (a tool's or a faucet's), and where on screen the pointer aiming its lever is. */
   private turning: (ValveRef & { aim: { x: number; y: number } }) | null = null;
@@ -1226,12 +1219,9 @@ export class GameEngine {
     return { kind: 'tool', t: new Tool(kind, this.nextToolId++, undefined), relYaw: 0, dist: 0 };
   }
 
-  /**
-   * Make what's just been taken hold of move by a ghost (see Held.ghost), if ghost moves are on and it's moved that
-   * way (see ghostly), starting where it is.
-   */
+  /** Make what's just been taken hold of move by a ghost (see Held.ghost), if it's moved that way (see ghostly), starting where it is. */
   private ghostIf(h: Held): void {
-    if (this.ghostMoves && ghostly(h)) h.ghost = { pose: { ...this.objPose(h) } };
+    if (ghostly(h)) h.ghost = { pose: { ...this.objPose(h) } };
   }
 
   /** Whether what's held is in the lab: all of it is, but a ghost of something just made (see Held.ghost). */
@@ -2725,14 +2715,6 @@ export class GameEngine {
   }
 
   /**
-   * Whether spout j of tool t is a held tool's with no hose out: what leaves it goes straight down the drain, so
-   * nothing it's carried over catches it.
-   */
-  private loose(t: Tool, j: number): boolean {
-    return this.held?.kind === 'tool' && this.held.t === t && !this.held.ghost && !this.hoseOn({ tool: t, spout: j });
-  }
-
-  /**
    * What faucet fa lets out in a substep of h sim seconds, with its valve as it is (see faucetRate), in its own packet,
    * good only until its next: what it pours, in whole molecules.
    */
@@ -2815,18 +2797,17 @@ export class GameEngine {
       const step = simDt / sub;
       // where each spout's fluid comes out: the spout, or its hose's nozzle
       const spouts = this.tools.map((t) => t.shape.spouts.map((_, j) => this.outletAt(t, j)));
-      // a held tool keeps running, but what leaves a spout of it with no hose out goes down the drain, not into
-      // whatever it's swung over (see loose)
-      const targets = this.tools.map((t, i) => spouts[i].map((sp, j) => (this.loose(t, j) ? null : mouthBelow(mouths, sp))));
+      // and what each pours into, if anything
+      const targets = spouts.map((sps) => sps.map((sp) => mouthBelow(mouths, sp)));
       // and each faucet's, and what it runs into, if anything: with nothing under it, it runs away down the sink
       const taps = this.faucets.map((_, i) => this.faucetOutlet(i));
       const tapTargets = taps.map((sp) => faucetTarget(mouths, sp));
       // a fast flow streams straight into what's below (overflowing it if it's full); a slow one gathers
       // in a drop, which falls on its own time
-      const pour = (drop: Vessel, out: Vessel | null, sp: Vec3, target: Mouth | null, loose: boolean): boolean => {
+      const pour = (drop: Vessel, out: Vessel | null, sp: Vec3, target: Mouth | null): boolean => {
         const down = drip(drop, out, step);
         if (down && down === out) this.land(target, sp, out);
-        else if (down && !loose) this.falling.push({ v: down, x: sp.x, y: sp.y, z: sp.z, vy: 0 });
+        else if (down) this.falling.push({ v: down, x: sp.x, y: sp.y, z: sp.z, vy: 0 });
         return !!down && down === out;
       };
       // what leaves each outlet over the whole frame, for drawing: a single substep's can be nothing, as when a
@@ -2851,21 +2832,21 @@ export class GameEngine {
           const out = fa.valve > 0 ? this.faucetLets(fa, step) : null;
           if (!out && fa.drop.N <= 0) return;
           if (quiet) {
-            pour(fa.drop, out, taps[i], tapTargets[i], false);
+            pour(fa.drop, out, taps[i], tapTargets[i]);
             return;
           }
           tally(tapTotals[i], out, false);
-          tally(tapTotals[i], null, pour(fa.drop, out, taps[i], tapTargets[i], false));
+          tally(tapTotals[i], null, pour(fa.drop, out, taps[i], tapTargets[i]));
         });
         this.tools.forEach((t, j) => {
           if (t === stillTool) return;
           t.step(step).forEach((out, k) => {
             if (quiet) {
-              pour(t.drops[k], out, spouts[j][k], targets[j][k], this.loose(t, k));
+              pour(t.drops[k], out, spouts[j][k], targets[j][k]);
               return;
             }
             tally(toolTotals[j][k], out, false); // before pouring, which can gather it into a drop
-            tally(toolTotals[j][k], null, pour(t.drops[k], out, spouts[j][k], targets[j][k], this.loose(t, k)));
+            tally(toolTotals[j][k], null, pour(t.drops[k], out, spouts[j][k], targets[j][k]));
           });
         });
         // falling drops land in the first open top they pass, or go down the sink; what's left of one that struck a
@@ -3289,7 +3270,7 @@ export class GameEngine {
     const held = this.held;
     for (const t of this.tools) {
       // a strip or a thermometer in hand is just itself: its stand is there once it's set down
-      if (held?.kind === 'tool' && held.t === t && !held.ghost && isDipper(t.kind)) continue;
+      if (held?.kind === 'tool' && held.t === t && isDipper(t.kind)) continue;
       for (const s of toolStands(t)) out.push({ s, of: { kind: 'tool', t, part: 'body', k: 0 } });
     }
     const pl = this.placed;
@@ -3385,7 +3366,7 @@ export class GameEngine {
       t.out.forEach((out, k) => {
         if (!out || !t.streaming[k]) return;
         const sp = this.outletAt(t, k);
-        streams.push({ from: sp, toY: this.loose(t, k) ? groundAt(sp.x, sp.z) : this.landsAt(sp, mouths), fluid: out, flow: t.flow[k] });
+        streams.push({ from: sp, toY: this.landsAt(sp, mouths), fluid: out, flow: t.flow[k] });
       });
     for (const { at, v } of this.spills.values())
       if (v.N > TRACE) streams.push({ from: at, toY: this.landsAt(at, mouths), fluid: v, flow: volume(v) / (MAX_FLOW * this.spillTime) });
@@ -3902,8 +3883,8 @@ export class GameEngine {
     if (h?.kind === 'flask') return h.f.N > TRACE;
     // a strip or a thermometer dips into the open top looked at
     if (h?.kind === 'tool' && isDipper(h.t.kind)) return !!this.mouthAimed();
-    // a held tool runs anyway
-    if (h?.kind === 'tool') return false;
+    // nothing else held in hand (a sheet of blotting paper) has a use for it, and what's moved by a ghost runs anyway
+    if (h?.kind === 'tool' || h?.kind === 'scale') return false;
     // a faucet runs if its valve's open
     if (h?.kind === 'hose') return 'tool' in h.h.on ? this.wouldFlow(h.h.on.tool) : this.faucets[h.h.on.faucet].valve > 0;
     return !!this.valveAimed();

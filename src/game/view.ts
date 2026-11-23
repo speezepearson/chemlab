@@ -109,7 +109,7 @@ export interface Frame {
   /** Every clamp stand, each with what it holds up, to grab that by it. */
   stands: readonly { s: Stand; of: Pick }[];
   /**
-   * What's being moved by a ghost (see GameEngine.ghostMoves), drawn as one where it would come to rest if let go,
+   * What's being moved by a ghost (see Held.ghost in engine.ts), drawn as one where it would come to rest if let go,
    * with its stands, their bases `y` high; or, `ok` false, where it's held, red, since it can't be set down. The tool
    * or scale itself is only for what it is (its kind, its valves, how many flasks ride on it): the ghost is a copy.
    */

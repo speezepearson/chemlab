@@ -78,9 +78,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     frame (`Tool.bath`, or for a strip `Tool.dipIn`, which also says whether it may drink), where a dipper aimed at
     a mouth hovers and dips (`dipPoses`).
   - `physics.ts` is the collisions: yawed boxes, the player's cylinder and `walk`. What's held collides with nothing; only
-    where it would be set down is checked (the engine's `placement` and `rest`). With ghost moves on
-    (`GameEngine.ghostMoves`, the top bar's checkbox), what stands on stands and a scale are moved by a
-    ghost (`Held.ghost`): the thing itself stays in the lab where it was, running and solid to the player, though
+    where it would be set down is checked (the engine's `placement` and `rest`). What stands on stands and a scale
+    are moved by a ghost (`Held.ghost`, set for whatever `ghostly` says, as it's taken; flasks, dippers, blotters
+    and hoses' nozzles are carried in hand): the thing itself stays in the lab where it was, running and solid to the player, though
     not aimed at (`heldObject`) nor in the way of its own move, while `heldPose`/`placeHeld` work on the ghost's pose. Code that
     puts what's held somewhere for a moment, to see what would be (guides, magnets, followers), uses `objPose`/`putAt`,
     which move the thing itself; and one just made is out of the lab (`inLab`) until set down, so its own mouths come

@@ -244,25 +244,3 @@ export function storeGod(on: boolean): void {
     // storage blocked: god mode just starts off next time
   }
 }
-
-const GHOST_KEY = 'slurry-lab.ghostMoves';
-
-/**
- * Whether moving things leaves them where they are until they're set down (see GameEngine.ghostMoves), as the player
- * last left it, kept beside the save but not in it, like god mode: off if it's never been set, or storage is blocked.
- */
-export function storedGhostMoves(): boolean {
-  try {
-    return localStorage.getItem(GHOST_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-export function storeGhostMoves(on: boolean): void {
-  try {
-    localStorage.setItem(GHOST_KEY, on ? '1' : '0');
-  } catch {
-    // storage blocked: it just starts off next time
-  }
-}

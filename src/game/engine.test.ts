@@ -178,6 +178,12 @@ function pipetteOver(l: Lab, x = SPOT.x, z = SPOT.z, up = 60): Tool {
   return t;
 }
 
+/** Where what's held is held: its ghost's pose, if it's moved by one, or else its own. */
+function heldPose(l: Lab): Tool['pose'] {
+  const h = l.in.held as unknown as { ghost?: { pose: Tool['pose'] }; t?: Tool; f?: Flask; sc?: Scale };
+  return h.ghost?.pose ?? (h.t ?? h.f ?? h.sc)!.pose;
+}
+
 /** Run the lab for `s` sim seconds. */
 const run = (l: Lab, s: number) => {
   for (let i = 0; i < Math.round(s / 0.05); i++) l.in.simulate(0.05);
@@ -833,7 +839,9 @@ describe.each(['testpaper', 'bondpaper'] as const)('what stands on a sheet of %s
       expect(l.e.spawn(what)).toBe(true);
       const h = l.in.held as unknown as { kind: string; t?: Tool; sc?: { pose: Tool['pose'] } };
       hands(l).placeHeld(l.in.held, { x, y: LIFT + 200, z: SPOT.z, yaw: 0 });
-      const was = h.kind === 'scale' ? scaleBox(h.sc as never) : toolBox(h.t!);
+      // (a scale is moved by a ghost, held there while the scale itself is still in the cabinet)
+      const pose = () => (h.kind === 'scale' ? h.sc!.pose : h.t!.pose);
+      expect(h.kind === 'scale' ? !!(l.in.held as unknown as { ghost?: object }).ghost : true).toBe(true);
       const to = rests(l)!;
       expect(to).not.toBeNull();
       // it comes straight down where it's held
@@ -845,7 +853,7 @@ describe.each(['testpaper', 'bondpaper'] as const)('what stands on a sheet of %s
       // over the sheet, which is where it was
       expect(Math.abs(now.x - x)).toBeLessThan(now.hx + TEST_PAPER.w / 2);
       expect(Math.abs(now.z - SPOT.z)).toBeLessThan(now.hz + TEST_PAPER.d / 2);
-      expect(now.y).toBeLessThanOrEqual(was.y);
+      expect(pose().y).toBeLessThanOrEqual(LIFT + 200);
       expect(where(under.pose)).toEqual(flat(x, SPOT.z));
       // (a scale stands on the counter, not on the paper)
       if (what === 'scale') expect(now.y - now.hy).toBeCloseTo(LIFT, 6);
@@ -1259,6 +1267,8 @@ describe('setting things down', () => {
       // held facing the other way, high over them, a little off
       holdAt(l, 'separator' as 'pipette', { x: SPOT.x + 5, y: LIFT + 480, z: SPOT.z + 3, yaw: Math.PI });
       const t = l.in.held!.t!;
+      // (it's moved by a ghost, and isn't in the lab yet: see it where its ghost is)
+      t.pose = heldPose(l);
       const mouths = ds.map((d) => tankMouth(d, 0));
       const apart = (j: number, m: { x: number; z: number }) => Math.hypot(spoutAt(t, j).x - m.x, spoutAt(t, j).z - m.z);
       // the nearest any spout is to any tank's middle, as it's held
@@ -1288,13 +1298,13 @@ describe('setting things down', () => {
     const d = l.in.held!.t!;
     l.in.held!.relYaw = Math.PI / 6;
     l.in.move(0);
-    // without Alt it faces the nearest of the four ways; with it, as it's held
-    expect(d.pose.yaw).toBeCloseTo(0, 9);
+    // without Alt it faces the nearest of the four ways; with it, as it's held (by its ghost)
+    expect(rests(l)!.pose.yaw).toBeCloseTo(0, 9);
     l.in.keys.add('AltLeft');
     l.in.move(0);
-    expect(d.pose.yaw).toBeCloseTo(p.yaw + Math.PI / 6, 9);
+    expect(heldPose(l).yaw).toBeCloseTo(p.yaw + Math.PI / 6, 9);
     const pl0 = l.in.placement(l.in.held);
-    expect(pl0, JSON.stringify(d.pose)).toHaveProperty("rest");
+    expect(pl0, JSON.stringify(heldPose(l))).toHaveProperty("rest");
     const want = rests(l)!.pose;
     l.in.release();
     expect(l.in.held, l.in.flash?.text).toBeNull();
@@ -1389,7 +1399,6 @@ describe('setting things down', () => {
 
 describe('ghost moves', () => {
   interface Ghosting {
-    ghostMoves: boolean;
     held: { kind: string; t?: Tool; sc?: Scale; f?: Flask; ghost?: { pose: Tool['pose'] } } | null;
     hoses: { on: object; outlet: { x: number; y: number; z: number } }[];
     scales: Scale[];
@@ -1398,6 +1407,7 @@ describe('ghost moves', () => {
     history: { canUndo: boolean };
     target: unknown;
     grabOrRelease(linked: boolean): void;
+    obstacles(h: unknown): { x: number; z: number }[];
   }
   const g = (l: Lab) => l.in as unknown as Ghosting;
   /** Where what's held would come to rest. */
@@ -1407,7 +1417,7 @@ describe('ghost moves', () => {
     return 'rest' in p ? p.rest.pose : P;
   };
   const P = { x: SPOT.x + 0.3 * CELL, y: LIFT + 260, z: SPOT.z - 0.2 * CELL, yaw: 0 };
-  /** A lab with ghost moves on, a dispenser set down at P with a flask under its spout, and R in its tank. */
+  /** A lab with a dispenser set down at P with a flask under its spout, and R in its tank. */
   function rig(): { l: Lab; d: Tool; f: Flask } {
     const l = lab();
     holdAt(l, 'dispenser' as 'pipette', P);
@@ -1419,7 +1429,6 @@ describe('ghost moves', () => {
     l.in.release();
     expect(l.in.held).toBeNull();
     d.tanks[0].setMolecules(singleOf('R'), CAP / 2);
-    g(l).ghostMoves = true;
     return { l, d, f };
   }
   /** Pick up a tool with the crosshair on it, standing back from it. */
@@ -1442,6 +1451,9 @@ describe('ghost moves', () => {
     run(l, 1);
     expect(d.pose).toEqual(was);
     expect(f.N).toBeGreaterThan(0);
+    // and still solid where it stands: the player walks into it as into anything
+    const box = toolBox(d);
+    expect(g(l).obstacles(null).some((b) => b.x === box.x && b.z === box.z)).toBe(true);
     // what's held stays where it was, so it's still poured from, and nothing of it goes down the drain
     const caught = f.N;
     run(l, 1);
@@ -1463,16 +1475,6 @@ describe('ghost moves', () => {
     expect(I.heldObject()).toBe(d);
   });
 
-  it('with the toggle off, carries what is picked up off in hand, as ever', () => {
-    const { l, d } = rig();
-    g(l).ghostMoves = false;
-    pick(l, d);
-    expect(g(l).held!.ghost).toBeUndefined();
-    const to = { ...P, x: P.x + 3 * CELL };
-    hands(l).placeHeld(l.in.held, to);
-    expect(where(d.pose)).toEqual(where(to));
-  });
-
   it('can be nudged into space it partly takes up itself, its stand too', () => {
     const { l, d } = rig();
     pick(l, d);
@@ -1483,7 +1485,6 @@ describe('ghost moves', () => {
 
   it('carries hoses following it along only when it is set down', () => {
     const l = lab();
-    g(l).ghostMoves = true;
     const fa = g(l).faucets[0];
     fa.valve = 1;
     // a scale with a flask on it under a faucet, open, which pours into it
@@ -1547,7 +1548,6 @@ describe('ghost moves', () => {
 
   it('makes something new only a ghost until it is set down, and puts it back in the cabinet if it is not', () => {
     const l = lab();
-    g(l).ghostMoves = true;
     const left = l.in.stock.dispenser.filter(Boolean).length;
     l.e.debug({ x: SPOT.x, z: SPOT.z + 200, yaw: 0, pitch: -0.3 });
     l.in.move(0);
@@ -1571,9 +1571,8 @@ describe('ghost moves', () => {
     expect(where(u.pose)).toEqual(where(P));
   });
 
-  it('still puts a flask, a dipper or a sheet of test paper in hand', () => {
+  it('puts a flask, a dipper, a sheet of test paper or a hose’s nozzle in hand, not a ghost', () => {
     const l = lab();
-    g(l).ghostMoves = true;
     for (const kind of ['flask', 'thermometer', 'testpaper'] as const) {
       l.e.debug({ x: SPOT.x, z: SPOT.z + 200, yaw: 0, pitch: -0.3 });
       l.in.move(0);
@@ -1581,8 +1580,17 @@ describe('ghost moves', () => {
       expect(g(l).held!.ghost, kind).toBeUndefined();
       const thing = g(l).held!.f ?? g(l).held!.t!;
       expect([...g(l).flasks, ...l.in.tools]).toContain(thing);
+      // held where it's held: it's moved itself
+      expect(heldPose(l)).toBe(thing.pose);
       l.in.putAway();
     }
+    // a hose's nozzle, taken hold of
+    const h = new Hose({ faucet: 0 }, { x: SPOT.x, y: LIFT + 150, z: SPOT.z }, NOZZLE_REACH.min);
+    (g(l).hoses as unknown as Hose[]).push(h);
+    l.in.target = { kind: 'hose', h };
+    g(l).grabOrRelease(false);
+    expect(g(l).held!.kind).toBe('hose');
+    expect(g(l).held!.ghost).toBeUndefined();
   });
 });
 
