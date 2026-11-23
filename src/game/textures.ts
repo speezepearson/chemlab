@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FINISH, roughnessAt } from './finish';
 import { TILES, type Baked, type SurfaceName } from './surfaces';
 
 /**
@@ -57,6 +58,11 @@ function dress(m: THREE.MeshStandardMaterial, name: SurfaceName): void {
   if (m.userData.tint === undefined) m.color.set(0xffffff);
   else m.color.set(m.userData.tint as number);
   m.roughness = 1;
+  // its roughness is now a multiplier on its map's, so as metal it's as built at 1
+  if (metals.has(m)) {
+    m.userData.metal = { base: 1, dressed: true } satisfies Authored;
+    shine(m, FINISH.shine);
+  }
   if (m.userData.glowMap) m.emissiveMap = maps.map;
   m.needsUpdate = true;
 }
@@ -70,6 +76,7 @@ export function surfaceMat(name: SurfaceName, opts: THREE.MeshStandardMaterialPa
   const m = new THREE.MeshStandardMaterial({ color: tint ?? PLAIN[name], roughness: 0.6, ...rest });
   m.userData.tint = tint;
   m.userData.glowMap = glowMap;
+  if ((rest.metalness ?? 0) >= METAL) metal(m);
   if (arrived.has(name)) dress(m, name);
   else {
     const was = waiting.get(name);
@@ -80,6 +87,44 @@ export function surfaceMat(name: SurfaceName, opts: THREE.MeshStandardMaterialPa
     }
   }
   return m;
+}
+
+/** How metallic a material must be for the shine setting to reach it (see finish.ts): painted panels are less. */
+export const METAL = 0.3;
+
+/** The roughness a metal was authored with, and whether it's a multiplier on a surface's roughness map. */
+interface Authored {
+  base: number;
+  dressed: boolean;
+}
+
+/** Every metal material there is, which the shine setting reaches (see applyShine). */
+const metals = new Set<THREE.MeshStandardMaterial>();
+
+function shine(m: THREE.MeshStandardMaterial, s: number): void {
+  const { base, dressed } = m.userData.metal as Authored;
+  m.roughness = roughnessAt(base, s, dressed);
+}
+
+/**
+ * Make `m` metal: the shine setting sets its roughness from now on, from the roughness it has now (or, for a clone
+ * of another metal, the one that was authored with). Every metal material must be made through this (surfaceMat
+ * does it itself, for the metallic surfaces), or the slider won't reach it. It's let go of when it's disposed.
+ */
+export function metal<M extends THREE.MeshStandardMaterial>(m: M): M {
+  // a clone carries its original's userData, and with it what that was authored with
+  m.userData.metal ??= { base: m.roughness, dressed: false } satisfies Authored;
+  if (!metals.has(m)) {
+    metals.add(m);
+    m.addEventListener('dispose', () => metals.delete(m));
+  }
+  shine(m, FINISH.shine);
+  return m;
+}
+
+/** Give every metal the roughness it has at shine `s`. */
+export function applyShine(s: number): void {
+  for (const m of metals) shine(m, s);
 }
 
 function paint(name: SurfaceName): void {

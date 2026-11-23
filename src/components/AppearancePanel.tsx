@@ -1,5 +1,6 @@
 import { Fragment, useReducer, useState } from 'react';
 import { LOOK, resetLook, type ColorModel, type Look } from '../game/appearance';
+import { DEFAULT_FINISH, FINISH, setFinish } from '../game/finish';
 import { DEFAULT_OUTLINE, MAX_OUTLINE_WIDTH, OUTLINE, setOutline } from '../game/outline';
 import { DragNumber } from './DragNumber';
 
@@ -29,7 +30,7 @@ const GROUPS: Group[] = [
 
 /**
  * Debug panel: live-tune the temperature appearance curves and how composition looks (see game/appearance.ts), and
- * the outline round what the crosshair is on (see game/outline.ts).
+ * the outline round what the crosshair is on (see game/outline.ts), and how shiny the lab's metal is (see game/finish.ts).
  */
 export function AppearancePanel() {
   const [, rerender] = useReducer((x: number) => x + 1, 0);
@@ -178,6 +179,31 @@ export function AppearancePanel() {
                 </label>
               </td>
             </tr>
+            <tr className="group">
+              <td colSpan={2}>
+                <b>Finish</b> <span>how the lab's metal is finished: 0 matte, 1 mirror-smooth, 0.5 as built</span>
+              </td>
+            </tr>
+            <tr>
+              <td>metal</td>
+              <td>
+                <label className="slider">
+                  <input
+                    type="range"
+                    aria-label="metal shine"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={FINISH.shine}
+                    onChange={(e) => {
+                      setFinish({ shine: +e.target.value });
+                      rerender();
+                    }}
+                  />
+                  <output>{FINISH.shine}</output>
+                </label>
+              </td>
+            </tr>
           </tbody>
         </table>
         <p>
@@ -188,6 +214,7 @@ export function AppearancePanel() {
             onClick={() => {
               resetLook();
               setOutline({ ...DEFAULT_OUTLINE });
+              setFinish({ ...DEFAULT_FINISH });
               rerender();
             }}
           >

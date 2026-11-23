@@ -24,7 +24,8 @@ import { AIRLOCK, POD } from './airlock';
 import { arrival, notice, type Block } from '../intro/notice';
 import { STATION_POSE } from './presets';
 import { litresOf, type Supply } from './supply';
-import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
+import { FINISH } from './finish';
+import { applyShine, boxUV, metal, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
   clockText, LAMP, SCREEN, TANK_SECTION, ringShare, atomSector, BOND_ENDS, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS,
@@ -262,8 +263,8 @@ function floorFirst(g: THREE.BufferGeometry, y: number, near: number): THREE.Buf
 const edgeMat = new THREE.LineBasicMaterial({ color: 0xbfd4da, transparent: true, opacity: 0.3 });
 // stainless pipework, dark anodized fittings, light powder-coated cabinets and black plastic levers, all of them
 // reflecting the room (see View's environment)
-const pipeMat = new THREE.MeshStandardMaterial({ color: 0xa4adac, metalness: 0.9, roughness: 0.28 });
-const darkMat = new THREE.MeshStandardMaterial({ color: 0x30373a, metalness: 0.6, roughness: 0.42 });
+const pipeMat = metal(new THREE.MeshStandardMaterial({ color: 0xa4adac, metalness: 0.9, roughness: 0.28 }));
+const darkMat = metal(new THREE.MeshStandardMaterial({ color: 0x30373a, metalness: 0.6, roughness: 0.42 }));
 /**
  * Graduations printed on glass (the pipette's and the swell bulbs' necks'): ink with no thickness, lying MARK_LIFT
  * off the glass's surface and following it, seen from both sides, as through the glass from behind.
@@ -298,19 +299,19 @@ const PAPER = '#e6dfc8';
 const WET = { rgb: '96, 92, 78', alpha: 0.28 };
 const hidden = new THREE.MeshBasicMaterial({ visible: false });
 const faintMat = new THREE.MeshBasicMaterial({ color: 0xd6ecf2, transparent: true, opacity: 0.3, depthWrite: false });
-const rodMat = new THREE.MeshStandardMaterial({ color: 0xc8cfcd, metalness: 1, roughness: 0.18 });
+const rodMat = metal(new THREE.MeshStandardMaterial({ color: 0xc8cfcd, metalness: 1, roughness: 0.18 }));
 /** How see-through a faucet's knob is at the most, for a clear fluid's (the solvent's). */
 const KNOB_ALPHA = 0.6;
 /** Polished chrome, for the faucets. */
-const chromeMat = new THREE.MeshStandardMaterial({ color: 0xe2e7e8, metalness: 1, roughness: 0.08 });
+const chromeMat = metal(new THREE.MeshStandardMaterial({ color: 0xe2e7e8, metalness: 1, roughness: 0.08 }));
 /** The steel plate the supply station's panes are set in, and the lines marked on it. */
-const plateMat = new THREE.MeshStandardMaterial({ color: 0x6f7975, metalness: 0.5, roughness: 0.45 });
+const plateMat = metal(new THREE.MeshStandardMaterial({ color: 0x6f7975, metalness: 0.5, roughness: 0.45 }));
 /** The rubber seam round the supply station's block of the wall. */
 const rubberMat = new THREE.MeshStandardMaterial({ color: 0x1a1d1c, roughness: 0.95, metalness: 0 });
 /** The inside of the recess the station's block slides back into, behind its hole in the wall: dark, dull metal. */
-const recessMat = new THREE.MeshStandardMaterial({ color: 0x15181a, metalness: 0.3, roughness: 0.8, side: THREE.BackSide });
+const recessMat = metal(new THREE.MeshStandardMaterial({ color: 0x15181a, metalness: 0.3, roughness: 0.8, side: THREE.BackSide }));
 /** The door that shuts over the station's hole through a changeover: pale brushed steel, lighter than the block's plate. */
-const shutterMat = new THREE.MeshStandardMaterial({ color: 0xb4bcb9, metalness: 0.4, roughness: 0.5 });
+const shutterMat = metal(new THREE.MeshStandardMaterial({ color: 0xb4bcb9, metalness: 0.4, roughness: 0.5 }));
 /**
  * How wide the hazard tape round the station's block is, and how far apart its stripes repeat, in world units; and how
  * far its inner edge is from the block's edge, across and up, at each corner (bottom left, bottom right, top right, top
@@ -1977,7 +1978,7 @@ class ToolView {
       pts.push(v3(x, y + 2.6 * Math.sin(ph), 2.6 * Math.cos(ph)));
     }
     pts.push(v3(lead, y - 4), v3(lead, B.y1));
-    this.wire = new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.6 });
+    this.wire = metal(new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.6 }));
     this.art.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), pts.length, 0.65, 5), this.wire));
   }
 
@@ -2185,7 +2186,7 @@ class ToolView {
     const neck = sh.neck!;
     const dial = valveLocal(t, sh.dial!);
     block(this.art, panelMat, dial.x - 14, dial.x + 14, dial.y - 14, dial.y + 14, -10, valveZ(t) - 3, 2.5);
-    this.wire = new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.6 });
+    this.wire = metal(new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.6 }));
     // round both: along the front, round the right bulb's far side, along the back, round the left bulb's, and on
     const R = neck.body / 2 + 1.3;
     const a = Math.max(...neck.bodies);
@@ -2684,6 +2685,8 @@ class ToolView {
     this.lamp?.cap.material.dispose();
     this.lamp?.tex.dispose();
     this.lamp?.screen.dispose();
+    // its own, and metal (see metal in textures.ts), which lets it go
+    this.wire?.dispose();
   }
 }
 
@@ -2973,6 +2976,8 @@ class GhostView {
   private ghostly(): void {
     const copy = (m: THREE.Material, red: boolean): THREE.Material => {
       const c = m.clone();
+      // a metal's ghost keeps up with the shine setting too (see metal in textures.ts), till it's disposed
+      if (m.userData.metal) metal(c as THREE.MeshStandardMaterial);
       c.transparent = true;
       c.opacity = Math.max(GHOST.least, m.opacity * GHOST.opacity);
       c.depthWrite = false;
@@ -3215,7 +3220,7 @@ function buildPort(frac: number): THREE.Group {
     g.add(m);
   };
   band(-6, 10, 6, -3, darkMat, true);
-  band(0, 4, PORT_DEPTH, -PORT_DEPTH - 1, new THREE.MeshStandardMaterial({ color: 0x2a302e, metalness: 0.5, roughness: 0.6 }), false);
+  band(0, 4, PORT_DEPTH, -PORT_DEPTH - 1, metal(new THREE.MeshStandardMaterial({ color: 0x2a302e, metalness: 0.5, roughness: 0.6 })), false);
   return g;
 }
 
@@ -3300,7 +3305,7 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
   right.rotation.y = -Math.PI / 2;
   scene.add(right);
   // ceiling light fixtures: a dark frame round a glowing diffuser behind louvers
-  const frameMat = new THREE.MeshStandardMaterial({ color: 0x2c3231, metalness: 0.6, roughness: 0.45 });
+  const frameMat = metal(new THREE.MeshStandardMaterial({ color: 0x2c3231, metalness: 0.6, roughness: 0.45 }));
   const diffuser = new THREE.MeshBasicMaterial({ map: diffuserTexture(), toneMapped: false });
   for (let x = ROOM.x0 + 300; x < ROOM.x1; x += 500)
     for (let z = 350; z < ROOM.z1; z += 600) {
@@ -3560,17 +3565,17 @@ class AirlockView {
     const { x, w, d, h, wall, door } = AIRLOCK;
     const z1 = ROOM.z1;
     const g = new THREE.Group();
-    const metal = new THREE.MeshStandardMaterial({ color: 0x737a78, roughness: 0.42, metalness: 0.6 });
+    const plain = metal(new THREE.MeshStandardMaterial({ color: 0x737a78, roughness: 0.42, metalness: 0.6 }));
     const hidden = new THREE.MeshBasicMaterial({ visible: false });
     // the chamber, seen from inside: plain gray metal, on the lab's deck; its front is the wall with the doorway, below
-    const [walls, floor] = [metal.clone(), surfaceMat('deck', { metalness: 0.55, side: THREE.BackSide })];
+    const [walls, floor] = [metal(plain.clone()), surfaceMat('deck', { metalness: 0.55, side: THREE.BackSide })];
     walls.side = THREE.BackSide;
     const room = new THREE.Mesh(boxUV(new THREE.BoxGeometry(w, h, d), 'walls', { z: 440 }), [walls, walls, walls, floor, walls, hidden]);
     room.position.set(x, h / 2, z1 + wall + d / 2);
     g.add(room);
     const shape = rectPath(0, h / 2, w, h, new THREE.Shape());
     shape.holes.push(rectPath(0, door.h / 2 + 0.25, door.w, door.h - 0.5));
-    const inside = new THREE.Mesh(new THREE.ShapeGeometry(shape), metal);
+    const inside = new THREE.Mesh(new THREE.ShapeGeometry(shape), plain);
     inside.position.set(x, 0, z1 + wall);
     g.add(inside);
     // red lights in its ceiling: lenses and their glow (not lights, which would cost every surface in the lab)
@@ -3588,7 +3593,7 @@ class AirlockView {
       g.add(glow);
     }
     // the doorway's sides and top, through the wall's thickness: planes only, with nothing lying in either wall's face
-    const jambMat = darkMat.clone();
+    const jambMat = metal(darkMat.clone());
     jambMat.side = THREE.DoubleSide;
     for (const side of [-1, 1]) {
       const m = new THREE.Mesh(new THREE.PlaneGeometry(wall, door.h).rotateY(Math.PI / 2), jambMat);
@@ -3607,7 +3612,7 @@ class AirlockView {
     g.add(sill);
     // the doors, each half the doorway, sliding apart into the wall, with a dark gasket down the edge where they meet;
     // and another pair, just like them, across the chamber's far end, always shut, to the outside
-    const doorMat = new THREE.MeshPhysicalMaterial({ color: 0xa3ada9, roughness: 0.45, metalness: 0.35, clearcoat: 0.3 });
+    const doorMat = metal(new THREE.MeshPhysicalMaterial({ color: 0xa3ada9, roughness: 0.45, metalness: 0.35, clearcoat: 0.3 }));
     const stripeMat = new THREE.MeshStandardMaterial({ color: 0xc9a227, roughness: 0.6 });
     const gasketMat = new THREE.MeshStandardMaterial({ color: 0x141817, roughness: 0.85 });
     const half = (side: number) => {
@@ -3647,7 +3652,7 @@ class AirlockView {
     g.add(this.lampGlow);
     // the pod: a plinth, a metal shell, its body round all but its door, under a whole dome, and its door: POD.arc of
     // the body's round, facing the lab, hinged on its edge toward +x, swinging out
-    const shell = new THREE.MeshStandardMaterial({ color: 0x8c9692, roughness: 0.45, metalness: 0.35, side: THREE.DoubleSide });
+    const shell = metal(new THREE.MeshStandardMaterial({ color: 0x8c9692, roughness: 0.45, metalness: 0.35, side: THREE.DoubleSide }));
     const pod = new THREE.Group();
     pod.position.set(POD.x, 0, POD.z);
     const plinth = new THREE.Mesh(new THREE.CylinderGeometry(POD.r + 10, POD.r + 14, POD.base, 48), darkMat);
@@ -3871,7 +3876,7 @@ class BlindsButton {
     const plate = new THREE.Mesh(new THREE.BoxGeometry(42, 56, 4).translate(0, 0, 2), [darkMat, darkMat, darkMat, darkMat, face, darkMat]);
     this.button = new THREE.Mesh(
       new THREE.CylinderGeometry(8, 8.5, 6, 24).rotateX(Math.PI / 2),
-      new THREE.MeshStandardMaterial({ color: 0x8a948f, roughness: 0.5, metalness: 0.3 }),
+      metal(new THREE.MeshStandardMaterial({ color: 0x8a948f, roughness: 0.5, metalness: 0.3 })),
     );
     this.button.position.y = 6;
     for (const m of [plate, this.button]) {
@@ -4062,8 +4067,8 @@ void main() {
 /* ---------------- the equipment cabinet ---------------- */
 
 /** The cabinet's painted steel, outside and in, and its darker back panel. */
-const cabinetMat = new THREE.MeshStandardMaterial({ color: 0xb4bdb9, metalness: 0.35, roughness: 0.55 });
-const cabinetBackMat = new THREE.MeshStandardMaterial({ color: 0x4d5653, metalness: 0.3, roughness: 0.7 });
+const cabinetMat = metal(new THREE.MeshStandardMaterial({ color: 0xb4bdb9, metalness: 0.35, roughness: 0.55 }));
+const cabinetBackMat = metal(new THREE.MeshStandardMaterial({ color: 0x4d5653, metalness: 0.3, roughness: 0.7 }));
 
 /**
  * A view of a new one of a kind, empty and shut, in `scene`, where a new one starts: what the cabinet's stock and the
@@ -4883,6 +4888,9 @@ class Exposer {
   }
 }
 
+/** How long the shine setting must be still before what reflects the metal is drawn again (see View.refinish), in real ms. */
+const REFINISH_MS = 400;
+
 /** Draws the lab with Three.js, from the player's eyes, and says what's under the crosshair. */
 export class View {
   /** The field of view is 90°, top to bottom, until the player zooms in (see look). */
@@ -4920,6 +4928,11 @@ export class View {
   private studio = new IconStudio(Math.min(2, window.devicePixelRatio || 1));
   /** The equipment wheels' icons (see IconStudio): drawn again, on new canvases, whenever what they reflect is. */
   private drawnIcons: Icons = {};
+  /** Draws again what metal and glass reflect, and the icons with it (see the constructor). */
+  private reflect: () => void;
+  /** The metal's shine last applied (see FINISH), and when it last changed, in real ms, while the reflections wait. */
+  private shone = FINISH.shine;
+  private shineAt: number | null = null;
   private clock = 0;
   private stars = starField();
 
@@ -4961,20 +4974,38 @@ export class View {
     this.ghost = new GhostView(this.scene);
     // what metal and glass reflect: the room itself, seen from its middle at eye height, before anything's in it, and
     // again once its surfaces have their textures (see textures.ts)
-    const reflect = () => {
+    const reflect = (this.reflect = () => {
       const pmrem = new THREE.PMREMGenerator(this.renderer);
       const was = this.scene.environment;
       this.scene.environment = pmrem.fromScene(this.scene, 0.02, 10, 8000, { size: 256, position: new THREE.Vector3(cx, eye, cz) }).texture;
       was?.dispose();
       pmrem.dispose();
       this.drawnIcons = this.studio.render(this.renderer, this.scene.environment);
-    };
+    });
+    // every metal already has the stored shine, from when it was made (see metal in textures.ts)
     reflect();
     whenSurfaced(reflect);
     const fs = buildFaucets(this.scene, faucets, this.pickables);
     this.faucetMats = fs.mats;
     this.faucetNotes = fs.notes;
     this.faucetLevers = fs.levers;
+  }
+
+  /**
+   * Bring the metal to the shine setting if it's changed (see FINISH): its roughness at once, and what reflects it, the
+   * room's reflections and the icons, once the setting's been still for REFINISH_MS of real time, not on every step of
+   * a slider being dragged, since drawing them again is slow. It's a preview of a setting, not part of the world.
+   */
+  private refinish(): void {
+    const now = performance.now();
+    if (FINISH.shine !== this.shone) {
+      this.shone = FINISH.shine;
+      applyShine(this.shone);
+      this.shineAt = now;
+    } else if (this.shineAt !== null && now - this.shineAt >= REFINISH_MS) {
+      this.shineAt = null;
+      this.reflect();
+    }
   }
 
   /** A little picture of each kind of thing the equipment wheels make (see IconStudio). */
@@ -5020,6 +5051,7 @@ export class View {
   render(fr: Frame): void {
     this.clock += fr.dt;
     const { scene, pickables } = this;
+    this.refinish();
     this.look(fr.eye, fr.yaw, fr.pitch);
     this.stars.rotation.x = fr.spin;
 

@@ -110,6 +110,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     (`partOf` in `view.ts`: a valve, a tank, a spout with its hose), and faintly the whole thing that's part of
     (`thingOf`). The view's `Outliner` draws each over the finished frame, from a mask of the meshes whose picks have
     that key.
+  - `finish.ts` is the player's setting for the metal's shine, 0 matte to 1 mirror-smooth, 0.5 as built (`FINISH`),
+    and the roughness it gives a metal. `metal()` in `textures.ts` registers a material for it; the view applies it.
   - `smell.ts` is what a sniff (F) makes of a fluid, pure and DOM-free: the ten odorants and Nadia's similes for them
     (`ODORANTS`), how strong each is for a composition and temperature, masking, and what she says of it all
     (`script`): pieces of text, each with the real seconds it waits before coming up, and whether it starts a new line,
@@ -217,6 +219,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   what's behind a clear fluid (`bentMat` in `view.ts`), on a layer of its own (`REFRACT_LAYER`) drawn only in the
   frame's main render. It's the only thing using three.js's `transmission`, whose extra pass runs whenever anything
   transmissive is in view, so don't give other materials `transmission` lightly.
+- **Metal goes through `metal()`.** Any material at least `METAL` (0.3) metallic must be made through `metal()` in
+  `textures.ts` (a clone too: `metal(m.clone())`), or the Appearance panel's shine slider won't reach it; `surfaceMat`
+  does it itself. A per-instance one must be disposed with its view, which lets it go.
 - **An outline always takes in what the crosshair is on.** This is the user's rule: the mesh hit is always one of the
   meshes outlined at full strength (`partOf` in `view.ts`). So a mesh's registered part must be what's outlined for
   it, and what the buttons act on, never a neighbour chosen by nearness to where it's hit. Clamp stands are never
