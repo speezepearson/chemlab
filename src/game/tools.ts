@@ -7,7 +7,7 @@ import { CAP, DELIVERY, TRACE } from './config';
 import { COOLING } from './cooling';
 import { Vessel, roomFor, sustenance, transfer, volume, type Point } from './flask';
 import { FLASK_VOLUME } from './flaskShape';
-import { CELL, LAMP_FLOOR, LAMP_SLOT, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
+import { CELL, LAMP_FLOOR, LIFT, ORIGIN, WALL_PANEL, type Pose, type Vec3 } from './space';
 import { CRYOSTABILIZER, SUPPLIES, nextSupply, type Supply } from './supply';
 
 /** Capacity of each tank on a tool, in atoms. */
@@ -506,14 +506,14 @@ export const INSTRUMENT = {
 
 /** How many stretches the heater's tube is cut into, each holding what passes through it as one mixed packet. */
 export const HEATER_CELLS = 24;
-/** The stretches of the heater's tube that its three taps draw from: the ends of its first three quarters. */
-export const HEATER_TAPS = [5, 11, 17] as const;
+/** The stretch of the heater's tube that its tap draws from: the end of its first half. */
+export const HEATER_TAPS = [11] as const;
 /**
  * How the resistive heater behaves, editable from the Chemistry panel:
  * - feed: how fast its funnel drains into its tube, in atoms per sim second (one flask a second);
  * - transit: how long fluid takes to run the length of the tube, in sim seconds, however much is in it;
  * - rate: how fast fluid in the tube heats toward the wire's temperature, per sim second: it closes
- *   1 − e^(−rate·t) of the gap in t seconds, so by default 31% by the first tap, 53%, 68%, and 78% by the end;
+ *   1 − e^(−rate·t) of the gap in t seconds, so by default 53% by the tap, and 78% by the end;
  * - maxT: the wire's temperature with the dial turned all the way up.
  */
 export const HEATER = { feed: MAX_FLOW, transit: 6, rate: 0.25, maxT: 100 };
@@ -525,15 +525,15 @@ export function restoreDefaultHeater(): void {
 
 /**
  * The heater's tube, in local units: from x0 to x1 (cut into HEATER_CELLS equal stretches), centered at y, of radius r.
- * Its taps' stretches, and its last, are a cell apart (see CELL), so each tap's spout and the end's can be over one.
+ * Its tap's stretch and its last are a cell apart (see CELL), the tap's a cell on from the funnel.
  */
-export const HEATER_TUBE = { x0: -11.5 * (CELL / 6), x1: 12.5 * (CELL / 6), y: 48, r: 7 };
+export const HEATER_TUBE = { x0: -CELL - 11.5 * (CELL / 12), x1: 0.5 * (CELL / 12), y: 48, r: 7 };
 /** The middle of stretch c of the heater's tube, in local units. */
 export function heaterCellX(c: number): number {
   return HEATER_TUBE.x0 + ((c + 0.5) * (HEATER_TUBE.x1 - HEATER_TUBE.x0)) / HEATER_CELLS;
 }
 /** The heater's control box, above the right end of its tube, with the dial (see SHAPES.heater.valves) on it. */
-export const HEATER_BOX = { x0: 2 * CELL - 50, x1: 2 * CELL - 10, y0: 2, y1: 36 };
+export const HEATER_BOX = { x0: -50, x1: -10, y0: 2, y1: 36 };
 
 /**
  * The heater's wire temperature for a dial setting from 0 to 1: off at 0 (it heats nothing), then rising
@@ -814,86 +814,57 @@ export function scorchAt(T: number): number {
 }
 
 /**
- * A sheet of shadow paper (see SHAPES.sheet), which the shadow lamp's light darkens, for good, where it falls on it:
- * - side: the paper, a square, this far across and tall, so it stands across the lamp's channel from wall to wall (see
- *   LAMP_FLOOR in space.ts, which is as wide); hanging from a stand, it's wider than a cell, like a dispenser;
- *   top: how far down from the sheet's top its square starts, under the bar;
- * - clip: the bar clipped along its top edge, `h` tall and `d` front to back, which a stand's clamp holds, a little
- *   wider than the paper;
- * - margin: how far in from each edge of the paper the lamp's light stops: it falls on the square in the middle (see
- *   sheetLit), and the margin round that stays as new however long the lamp shines;
- * - cells: how many cells a side the light that square has had is kept in (see Tool.dose), a whole number of them to
- *   the margin's width;
- * - tau: how many sim seconds of the lamp's light, unshadowed, darken it all but 1/e of the way (see darkness): so
- *   it's most of the way dark in a second, and all but dark in two;
- * - full: the most light a cell takes, in sim seconds of it unshadowed: as dark as it gets, to within what a save
- *   keeps of it (see Tool.image).
+ * The shadow lamp's screen (see LAMP): a square set in the inner face of its end wall, facing the lamp, which
+ * fluoresces where the lamp's light falls on it and is dark where it doesn't:
+ * - side: how far across and tall it is, in world units: exactly the square the lamp's beam lights, a little narrower
+ *   than the channel, and wide enough for a flask's shadow to fall on it whole;
+ * - cells: how many cells a side how brightly it's fluorescing is kept in (see Tool.glow);
+ * - tau: how many sim seconds a cell takes to close all but 1/e of the gap between how brightly it's fluorescing and
+ *   the light now falling on it (see Tool.fluoresce), brightening or fading alike: so it's most of the way there in
+ *   a second, and all but there in two;
+ * - still: how near to the light falling on it a cell's glow comes before it's just that;
+ * - most: the most sim seconds of catching up it's ever owed at once (see Tool.owed): by then it's all the way there.
  */
-export const SHEET = { side: 100, top: 14, clip: { h: 14, d: 5 }, margin: 10, cells: 64, tau: 0.5, full: 3.2 };
-
-/** How far across and tall the square in the middle of a sheet of shadow paper that the lamp's light falls on is (see SHEET.margin). */
-export const sheetLit = (): number => SHEET.side - 2 * SHEET.margin;
+export const SCREEN = { side: 80, cells: 64, tau: 0.7, still: 1e-3, most: 7 };
 
 /**
  * The shadow lamp (see SHAPES.shadowlamp): one long, low trough on a bench of its own. At one end is a closed box, the
  * lamp's enclosure; from its face an open channel runs between two side walls, over a floor of its own; and across the
- * channel's far end is an end wall, against whose inner face a sheet of shadow paper stands, facing the lamp (see the slot, in bodies.ts). In
- * its own frame (x along it, from the lamp toward the sheet; y down from its top; z toward its front, which is the
+ * channel's far end is an end wall, with the lamp's screen set in its inner face, facing the lamp (see SCREEN). In
+ * its own frame (x along it, from the lamp toward the screen; y down from its top; z toward its front, which is the
  * room; from the middle of the channel), in world units:
- * - h: how tall it is, enclosure and walls alike: as tall as a sheet's paper, so the bar along a sheet's top stands
- *   clear above the end wall, to take it out by;
+ * - h: how tall it is, enclosure and walls alike: as tall as its channel is wide;
  * - wall: how thick its side walls and its end wall are;
  * - floor: how thick the plate that floors the channel is (see LAMP_FLOOR in space.ts, which is where it is in the
- *   room): as thick as a sheet's margin is wide, so the light's lower edge is level with its top, and the shadow of
- *   whatever stands on it stands on the bottom edge of the square the light falls on, none of it lost below;
- * - slot: how far short of the end wall the floor stops (see LAMP_SLOT in space.ts): the slot a sheet stands in, its foot on the bench below, a
- *   little wider than the bar along a sheet's top is thick;
+ *   room): as thick as the margin under the beam is high, so the light's lower edge is level with its top, and the
+ *   shadow of whatever stands on it stands on the bottom edge of the screen, none of it lost below;
  * - box: the enclosure, from `x0` to `x1` along it, two cells, and as wide as the trough is over its walls;
- * - channel: the channel, from the enclosure's face at `x0` to the end wall's at `x1`, five cells and the slot
- *   past them, and reaching
- *   `z` either side of its middle line, which is over the middle of a row of cells: a sheet's side from wall to wall,
- *   wide enough for a flask's shadow to fall whole on the sheet. What's set down in it stands on its floor, along
- *   its middle line (either side of that are its walls);
+ * - channel: the channel, from the enclosure's face at `x0` to the end wall's at `x1`, five cells, and reaching
+ *   `z` either side of its middle line, which is over the middle of a row of cells: wide enough for a flask's shadow
+ *   to fall whole on the screen, a little more than a cell from wall to wall. What's set down in it stands on its
+ *   floor, along its middle line (either side of that are its walls);
  * - window: the square pane in the enclosure's face that its light leaves by, reaching `r` either side of the
- *   channel's middle line and of a height `y` down from the top: exactly the square of the sheet it lights (see
- *   sheetLit), so the sheet's margin, the channel's walls and whatever's outside the trough are never in its light;
+ *   channel's middle line and of a height `y` down from the top: exactly the screen's square, straight across from
+ *   it, so the channel's walls and whatever's outside the trough are never in its light;
  * - spread: how far its light strays from straight along the channel, as a slope. The enclosure sends its light out
- *   as a beam with the window's cross-section all the way to the sheet, not spreading from a point, so a shadow is the
+ *   as a beam with the window's cross-section all the way to the screen, not spreading from a point, so a shadow is the
  *   size of what casts it wherever along the channel that stands; but the lamp inside isn't a point, so the beam's
- *   rays stray this far either side of straight, and a shadow's edge is soft, twice this times how far from the sheet
+ *   rays stray this far either side of straight, and a shadow's edge is soft, twice this times how far from the screen
  *   what casts it is;
- * - dial and button: the middles of the dial that sets how long it shines and of the button that sets it off, on the
- *   enclosure's front, and the button's radius;
- * - shot: how long it shines for a press of the button (see lampShot), in sim seconds, with the dial at either end:
- *   from a flash that barely tints the sheet (a tenth of the way dark), to as long as darkens it all the way (see
- *   SHEET.full), past which there'd be nothing more to see; a factor of 64, so each of the six steps between the
- *   dial's seven ticks doubles it;
+ * - button: the middle of the button that lights it and puts it out, on the enclosure's front, and its radius;
  * - dim: how much fluid dims its light, per world unit of the light's way through fluid all of whose molecules have a
  *   ring in them (see lampLight): so that a flask with a few rings in a hundred molecules, about 50 across inside,
- *   takes a quarter of it, a faint shadow but one that shows on the sheet (see darkness: the sheet's darkening levels
- *   off, so much less than that never shows at all), one with ten in a hundred takes most of it through its middle
- *   and visibly less toward its edges, and a full flask of nothing but rings lets through e^−10 of it, none.
+ *   takes a quarter of it, a faint shadow but one that shows on the screen, one with ten in a hundred takes most of
+ *   it through its middle and visibly less toward its edges, and a full flask of nothing but rings lets through
+ *   e^−10 of it, none.
  */
 export const LAMP = {
-  h: SHEET.side, wall: 6, floor: LAMP_FLOOR.y - LIFT, slot: LAMP_SLOT, dim: 0.2, spread: 0.016,
+  h: 100, wall: 6, floor: LAMP_FLOOR.y - LIFT, dim: 0.2, spread: 0.016,
   box: { x0: -4.5 * CELL, x1: -2.5 * CELL },
-  channel: { x0: -2.5 * CELL, x1: 2.5 * CELL + LAMP_SLOT, z: SHEET.side / 2 },
-  window: { r: sheetLit() / 2, y: SHEET.side / 2 },
-  dial: { x: -3.5 * CELL - 22, y: 36 },
-  button: { x: -3.5 * CELL + 20, y: 36, r: 7 },
-  shot: { min: SHEET.full / 64, max: SHEET.full },
+  channel: { x0: -2.5 * CELL, x1: 2.5 * CELL, z: 50 },
+  window: { r: SCREEN.side / 2, y: 50 },
+  button: { x: -3.5 * CELL, y: 36, r: 7 },
 };
-
-/**
- * How many sim seconds the shadow lamp shines for a press of its button, with its dial at a setting from 0 to 1:
- * LAMP.shot.min at 0, rising by the same factor for each step along the dial to LAMP.shot.max at 1, so the short
- * exposures that show a faint shadow best (about SHEET.tau: longer, and the paper round the shadow has little left to
- * darken) can be set as finely as the long ones that tell one deep shadow from another.
- */
-export function lampShot(dial: number): number {
-  const { min, max } = LAMP.shot;
-  return min * (max / min) ** Math.max(0, Math.min(1, dial));
-}
 
 /**
  * How much of the shadow lamp's light gets through `length` world units of a fluid, `ring` of whose molecules have a
@@ -904,17 +875,6 @@ export function lampShot(dial: number): number {
 export function lampLight(ring: number, length: number): number {
   return Math.exp(-LAMP.dim * Math.max(0, ring) * Math.max(0, length));
 }
-
-/**
- * How dark shadow paper is, from 0 (as new) to 1, where it's had `dose` sim seconds of the lamp's unshadowed light:
- * 1 − e^(−dose / SHEET.tau). It only ever darkens, quickly at first and ever more slowly.
- */
-export function darkness(dose: number): number {
-  return 1 - Math.exp(-Math.max(0, dose) / SHEET.tau);
-}
-
-/** How many of each byte value in a row a sheet's saved image counts at most (see Tool.image). */
-const RUN = 255;
 
 /** How many digits the meter's display has. */
 export const METER_DIGITS = 4;
@@ -1046,7 +1006,7 @@ export function bondDots(): { x: number; y: number }[] {
 export type ToolKind =
   | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater'
   | 'spectroscope' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'column' | 'tank'
-  | 'receptacle' | 'shadowlamp' | 'sheet' | 'testpaper' | 'bondpaper';
+  | 'receptacle' | 'shadowlamp' | 'testpaper' | 'bondpaper';
 
 /**
  * How quickly what a sheet of blotting paper shows comes up, in sim seconds: each thing it shows (how wet it looks, and
@@ -1201,20 +1161,22 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     // the dispenser's tank (see TANK_SECTION)
     tanks: [{ name: 'tank', x0: -TANK_SECTION.w / 2, x1: TANK_SECTION.w / 2 }],
     tankH: TANK_SECTION.h,
-    // one outlet per share of black (see SEPARATOR_OUTLET), a cell apart (see CELL), so a flask fits under each
-    spouts: [-2 * CELL, -CELL, 0, CELL, 2 * CELL],
+    // two outlets (see SEPARATOR_OUTLET), a cell (see CELL) either side of its tank, so a flask or a tool's tank fits
+    // under each
+    spouts: [-CELL, CELL],
     sump: { w: 14, h: 7 },
     valveY: TANK_SECTION.h + 12,
-    spoutY: TANK_SECTION.h + 42,
-    // the manifold under it (see the view's SEP_BODY), with a handle on its left end
-    box: { x0: -2 * CELL - 20, x1: 2 * CELL + 14, y0: -6, y1: TANK_SECTION.h + 44 },
+    // under the manifold's arms, which slope down to them (see the view's SEP_ARMS): its peak's middle
+    // TANK_SECTION.h + 24 down, a cell's run at 15° lower again, and a short pipe down from each arm's end
+    spoutY: TANK_SECTION.h + 57,
+    box: { x0: -CELL - 16, x1: CELL + 16, y0: -6, y1: TANK_SECTION.h + 59 },
   },
   splitter: {
     tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
     tankH: 30,
     tankCap: FUNNEL_CAP,
     funnel: true,
-    // a cell either side of its funnel, like the separator's
+    // a cell either side of its funnel, like the separator's of its tank
     spouts: [-CELL, CELL],
     valveY: 42,
     spoutY: 84,
@@ -1250,7 +1212,7 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -CELL - 26, x1: 3 * CELL + 6, y0: -6, y1: 106 },
   },
   heater: {
-    // a funnel over the left end of a long tube (see HEATER_TUBE) with a wire down its middle; three taps
+    // a funnel over the left end of a tube (see HEATER_TUBE) with a wire down its middle; a tap halfway
     // along it and its far end turning down are the spouts, and the dial on a box above its right end sets
     // the wire's heat
     tanks: [{ name: 'funnel', x0: -2 * CELL - 22, x1: -2 * CELL + 22 }],
@@ -1259,11 +1221,11 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     funnel: true,
     valves: [...HEATER_TAPS.map((_, j) => ({ x: (j - 1) * CELL, y: 72 })), { x: (HEATER_BOX.x0 + HEATER_BOX.x1) / 2, y: 20 }],
     dial: HEATER_TAPS.length,
-    // a cell apart, like the separator's, under the taps' stretches (see heaterCellX) and then the last
-    spouts: [-CELL, 0, CELL, 2 * CELL],
+    // a cell apart, under the tap's stretch (see heaterCellX) and then the last
+    spouts: [-CELL, 0],
     valveY: 72,
     spoutY: 92,
-    box: { x0: -2 * CELL - 28, x1: 2 * CELL + 16, y0: -6, y1: 94 },
+    box: { x0: -2 * CELL - 28, x1: 16, y0: -6, y1: 94 },
   },
   tank: {
     // a hundred flasks' worth, drawn as big as a hundred flasks, with ten faint graduations across it
@@ -1360,25 +1322,15 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     box: { x0: -COLUMN.funnel.w - 2, x1: COLUMN.funnel.w + 2, y0: -6, y1: COLUMN.tube.y1 + 30 },
   },
   shadowlamp: {
-    // a trough: the lamp's enclosure, a floored channel between two walls, and an end wall (see LAMP), with no tanks
-    // or spouts; its one valve is the dial on its enclosure's front, which sets how long it shines (see lampShot)
+    // a trough: the lamp's enclosure, a floored channel between two walls, and an end wall with its screen (see
+    // LAMP), with no tanks, spouts or valves
     tanks: [],
-    valves: [{ x: LAMP.dial.x, y: LAMP.dial.y }],
-    dial: 0,
+    noValve: true,
     fixed: true,
     spouts: [],
     valveY: 0,
     spoutY: LAMP.h,
     box: { x0: LAMP.box.x0, x1: LAMP.channel.x1 + LAMP.wall, y0: 0, y1: LAMP.h },
-  },
-  sheet: {
-    // a square of paper hanging from a bar clipped along its top edge (see SHEET), with no tanks, spouts or valves
-    tanks: [],
-    noValve: true,
-    spouts: [],
-    valveY: 0,
-    spoutY: SHEET.top + SHEET.side,
-    box: { x0: -SHEET.side / 2 - 1, x1: SHEET.side / 2 + 1, y0: 0, y1: SHEET.top + SHEET.side },
   },
   // the sheets of blotting paper (see BLOTTERS): the same sheet, printed differently
   testpaper: BLOTTER_SHAPE,
@@ -1563,16 +1515,15 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   receptacle: 'Cryostabilizer',
   spectroscope: 'Spectroscope',
   shadowlamp: 'Shadow lamp',
-  sheet: 'Shadow paper',
   testpaper: 'Test paper',
   bondpaper: 'Bond paper',
 };
 
 /**
- * How sharply the separator sorts, editable from the Chemistry panel: each molecule goes to outlet j in proportion
- * to e^(−sharpness·(j − its own outlet)²) (see SEPARATOR_OUTLET). At 0 everything splits evenly five ways; at 3 a
- * molecule goes 91% to its own outlet if it's one of the middle three, 95% if it's at an end, and the rest mostly to
- * the next outlet over; and from SEPARATOR_PERFECT up, which is the default, every molecule goes out its own.
+ * How sharply the separator sorts, editable from the Chemistry panel: each molecule goes to its own outlet (see
+ * SEPARATOR_OUTLET) and to the other in the proportion 1 to e^(−sharpness). At 0 everything splits evenly two ways;
+ * at 3 a molecule goes 95% to its own outlet and the rest out the other; and from SEPARATOR_PERFECT up, which is the
+ * default, every molecule goes out its own.
  */
 export const SEPARATOR = { sharpness: 10 };
 const DEFAULT_SEPARATOR = { ...SEPARATOR };
@@ -1584,17 +1535,14 @@ export function restoreDefaultSeparator(): void {
 /** The sharpness from which the separator sorts perfectly: the top of its slider. */
 export const SEPARATOR_PERFECT = 10;
 
-/** How many outlets the separator has, one per share of black atoms a molecule can have. */
-export const SEPARATOR_OUTLETS = 5;
+/** How many outlets the separator has: one for molecules with no black atom, and one for those with one. */
+export const SEPARATOR_OUTLETS = 2;
 
 /**
- * Each species' own outlet on the separator, left to right, by the share of its atoms that are black (K): none (0),
- * one in four (1), one in three (2), half (3), all (4).
+ * Each species' own outlet on the separator, left to right, by whether any of its atoms is black (K): none (0), as
+ * the solvent's has, or one (1).
  */
-export const SEPARATOR_OUTLET: Uint8Array = Uint8Array.from(SPECIES, (sp) => {
-  if (!sp.atoms.includes('K')) return 0;
-  return sp.size === 1 ? 4 : 5 - sp.size;
-});
+export const SEPARATOR_OUTLET: Uint8Array = Uint8Array.from(SPECIES, (sp) => +sp.atoms.includes('K'));
 
 let shareCache = { sharpness: NaN, shares: [] as number[][] };
 
@@ -1667,8 +1615,8 @@ export class Blotter extends Vessel {
  *   through a little funnel on top, that lets out PIPETTE_FLOW full and fully open.
  * - A **heat exchanger** has two tanks, whose streams pass each other in
  *   counterflow on the way to their spouts, trading heat but never mixing.
- * - A **separator** has one tank and five spouts, and sorts what drains
- *   among them by the share of its atoms that are black (see separate).
+ * - A **separator** has one tank and two spouts, and sorts what drains
+ *   between them by whether it has a black atom in it (see separate).
  * - A **splitter** has a small funnel that drains straight through (at
  *   FUNNEL_RATE) to two spouts. Its valve doesn't open or close: it sets the
  *   share that goes right, from 0 (all left) to 1 (all right).
@@ -1677,10 +1625,10 @@ export class Blotter extends Vessel {
  *   gets, from 0 (only the left drains) to 1 (only the right), the left getting the rest.
  * - A **size sorter** has a funnel like the splitter's, with no valve, draining down a chute through three
  *   screens and off its end, each with a spout under it (see sieve).
- * - A **resistive heater** has a funnel draining (at HEATER.feed) into one end of a long tube, which carries
+ * - A **resistive heater** has a funnel draining (at HEATER.feed) into one end of a tube, which carries
  *   it to the other end in HEATER.transit and out a spout there, heating it all the way (see heatBy) with a
- *   wire whose temperature its dial sets (see wireTemperature). Three taps along the tube, each a valve over
- *   a spout, let fluid out sooner, less heated.
+ *   wire whose temperature its dial sets (see wireTemperature). A tap halfway along the tube, a valve over
+ *   a spout, lets fluid out sooner, less heated.
  * - A **tank** is a dispenser holding a hundred flasks, drawn as big as a hundred flasks, with ten faint
  *   graduations across it.
  * - A **receptacle** is the station, built into the wall (see STATION): a funnel and the ship's
@@ -1706,10 +1654,8 @@ export class Blotter extends Vessel {
  * - A **spectroscope** is an inline instrument too, which lets everything through, counting the bonds that pass over
  *   the recent past (see INSTRUMENT_TAU and bondCounts) and showing them by energy as a graph (see spectroscopeAt).
  * - A **shadow lamp** has no tanks either: it's a trough with a lamp in a box at one end (see LAMP), fixed on a bench
- *   of its own, with a button that lights it (see press) for as long as its dial says (see lampShot), after which it
- *   goes out by itself. While it's lit, the sheet at its other end is owed its light (see shine).
- * - A sheet of **shadow paper** has none: it's a square of paper (see SHEET) that darkens, for good, where the shadow
- *   lamp's light falls on it (see dose and expose).
+ *   of its own, with a button that lights it and puts it out (see press), and a screen at its other end that
+ *   fluoresces where its light falls on it (see SCREEN, glow and fluoresce).
  * - A sheet of **test paper** has none either: it lies flat on a counter (see TEST_PAPER), soaks up what lands on it
  *   until it's wet through (see paper and Blotter), and shows what it holds as stains (see paperReading). It's used once.
  * - A sheet of **bond paper** is the same sheet printed differently (see BOND_PAPER): it shows what it holds as the
@@ -1726,7 +1672,7 @@ export class Tool {
   /**
    * Per valve (one per tank unless the shape places them): 0 (closed) to 1 (MAX_FLOW). Closed by default, so a tool doesn't drip on everything it's carried
    * over. A splitter's one valve is instead the share going right, and a multiplexer's the share taken from the right,
-   * half by default; and a shadow lamp's is its dial (see lampShot), halfway by default.
+   * half by default.
    */
   readonly valves: number[];
   /** Per spout, what left it on the last step, for drawing the stream; null if nothing did. */
@@ -1796,33 +1742,25 @@ export class Tool {
   bath: Vessel | null = null;
   /** Whether a thermometer has shattered (see warm): for good, reading nothing. */
   broken = false;
-  /** Whether a shadow lamp is shining (see lit). */
-  private shining = false;
+  /** Whether a shadow lamp is lit (see press): it stays as it is until its button's pressed again. */
+  lit = false;
   /**
-   * How many sim seconds of the exposure a shadow lamp is making, or was when it was put out, it has left to shine
-   * (see press and shine); 0 once it's shone them all.
-   */
-  left = 0;
-  /**
-   * The sheet of shadow paper in a shadow lamp's slot, if there is one, which whoever runs it sets before each step
-   * (see shine): what its light falls on.
-   */
-  sheet: Tool | null = null;
-  /**
-   * How many sim seconds of a shadow lamp's light the sheet in its slot has yet to be darkened by (see shine), up
-   * to SHEET.full: the light has fallen, but what shadows lay across the sheet is for whoever draws the lab to say
-   * (see the view's Exposer), which then hands it on (see expose) and sets this back to 0.
+   * How many sim seconds a shadow lamp's screen has yet to catch up by (see shine), up to SCREEN.most: the time has
+   * gone by, but what shadows lie across the screen is for whoever draws the lab to say (see the view's Exposer),
+   * which then hands it on (see fluoresce), setting this back to 0.
    */
   owed = 0;
   /**
-   * How much of the shadow lamp's light each cell of a sheet of shadow paper has had, in sim seconds of it unshadowed,
-   * up to SHEET.full: the cells of the square in its middle that the light falls on (see sheetLit; its margin has
-   * none), SHEET.cells a side, row by row from the square's bottom edge up, each row from its left edge as the sheet
-   * faces (see darkness for how dark that leaves it). It only ever grows (see expose). Empty for any other tool.
+   * How brightly each cell of a shadow lamp's screen is fluorescing, from 0 (dark) to 1 (as bright as it gets, in
+   * the lamp's unshadowed light): SCREEN.cells a side, row by row from the screen's bottom edge up, each row from its
+   * left edge as the lamp faces it. It follows the light falling on it over a couple of sim seconds (see fluoresce).
+   * It's not kept by a save: a lamp that loads lit comes up from dark. Empty for any other tool.
    */
-  readonly dose: Float32Array;
-  /** How many times a sheet's dose has changed (see expose and develop), for whoever draws it to know to draw it again. */
-  dosed = 0;
+  readonly glow: Float32Array;
+  /** How many times a screen's glow has changed (see fluoresce), for whoever draws it to know to draw it again. */
+  glowed = 0;
+  /** Whether any of a shadow lamp's screen is fluorescing at all (see glow). */
+  private aglow = false;
   /** An inline instrument's exponentially weighted average of what it's measured, per sim second (see smooth). */
   private smoothed: number[] | null = null;
   /**
@@ -1880,9 +1818,9 @@ export class Tool {
     this.scorch = new Float32Array(kind === 'strip' ? STRIP.cells : 0);
     this.bed = Array.from({ length: kind === 'column' ? COLUMN.cells : 0 }, () => new Vessel(Infinity));
     this.packing = kind === 'strip' ? new Bed(this.paper) : kind === 'column' ? new Bed(this.bed) : null;
-    this.dose = new Float32Array(kind === 'sheet' ? SHEET.cells ** 2 : 0);
+    this.glow = new Float32Array(kind === 'shadowlamp' ? SCREEN.cells ** 2 : 0);
     const nValves = SHAPES[kind].valves?.length ?? this.tanks.length;
-    this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' || kind === 'shadowlamp' ? 0.5 : 0));
+    this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' ? 0.5 : 0));
     this.out = this.shape.spouts.map(() => null);
     this.flow = this.shape.spouts.map(() => 0);
     this.drops = this.shape.spouts.map(() => new Vessel(Infinity));
@@ -2103,11 +2041,11 @@ export class Tool {
    * was used to be, when strips dried, and how scorched each stretch is (what's on its paper is saved as vessels, see paper); how much a column's bed has drunk (what's on it is
    * saved as vessels, see bed); which supply a receptacle is
    * fitted for (its place in SUPPLIES), and how far into its changeover it is, or −1 if none is under way; 1 if a
-   * shadow lamp is lit, or 0 if not, and how long its exposure has left (its dial's setting is saved as a valve's); and what a sheet of blotting paper shows so far (see showing), while
+   * shadow lamp is lit, or 0 if not; and what a sheet of blotting paper shows so far (see showing), while
    * that's still coming up: none once it shows all it's going to, as none means when it's put back (see remember).
    */
   get memory(): number[] | undefined {
-    if (this.kind === 'shadowlamp') return [+this.lit, this.left];
+    if (this.kind === 'shadowlamp') return [+this.lit];
     if (this.kind === 'strip') return [this.soaked, 0, ...this.scorch];
     if (this.kind === 'column') return [this.soaked];
     if (this.kind === 'receptacle') return [SUPPLIES.indexOf(this.supply), this.swap ?? -1];
@@ -2118,7 +2056,8 @@ export class Tool {
 
   /**
    * Put back what a save kept (see memory), wherever it's the right length and all finite numbers. An older save's
-   * strip kept one number for how scorched it was, all over: that goes for as much of it as it had soaked.
+   * strip kept one number for how scorched it was, all over: that goes for as much of it as it had soaked. An older
+   * save's shadow lamp kept a second number, how long the exposure it was making had left, when it went out by itself.
    */
   remember(m: unknown): void {
     if (isBlotter(this.kind)) {
@@ -2131,18 +2070,15 @@ export class Tool {
       return;
     }
     const want = this.memory?.length;
-    const old = this.kind === 'strip' && Array.isArray(m) && m.length === 3;
+    const old = Array.isArray(m) && ((this.kind === 'strip' && m.length === 3) || (this.kind === 'shadowlamp' && m.length === 2));
     if (!Array.isArray(m) || (m.length !== want && !old) || !m.every((x) => typeof x === 'number' && Number.isFinite(x))) return;
     if (isThermometer(this.kind)) [this.temp, this.broken] = [m[0] as number, (m[1] as number) > 0];
-    if (this.kind === 'shadowlamp') {
-      this.left = Math.max(0, Math.min(LAMP.shot.max, m[1] as number));
-      this.lit = (m[0] as number) > 0;
-    }
+    if (this.kind === 'shadowlamp') this.lit = (m[0] as number) > 0;
     if (this.kind === 'strip') {
       // the second was how dry it was, when strips dried
       const [soaked, , ...scorch] = (m as number[]).map((x) => Math.max(0, Math.min(1, x)));
       this.soaked = soaked;
-      if (old) this.scorch.fill(scorch[0], 0, Math.ceil(soaked * STRIP.cells));
+      if (m.length === 3) this.scorch.fill(scorch[0], 0, Math.ceil(soaked * STRIP.cells));
       else this.scorch.set(scorch);
     }
     if (this.kind === 'column') this.soaked = Math.max(0, Math.min(1, (m as number[])[0]));
@@ -2155,122 +2091,51 @@ export class Tool {
     }
   }
 
-  /**
-   * Whether a shadow lamp is lit: it's making an exposure (see press), with some of it left to shine. Set, it lights
-   * only if it has any left, which is how an undo puts back a lamp that was put out part-way, and leaves out one that
-   * has since shone itself out.
-   */
-  get lit(): boolean {
-    return this.shining;
-  }
-
-  set lit(on: boolean) {
-    this.shining = on && this.left > 0;
-  }
-
-  /**
-   * A shadow lamp's button is pressed: out, it lights, to shine for as long as its dial says just now (see lampShot),
-   * whatever the dial's turned to afterward; lit, it's put out, keeping what it had left only for an undo to put back.
-   */
+  /** A shadow lamp's button is pressed: out, it lights; lit, it's put out. It stays that way until the next press. */
   press(): void {
-    if (this.kind !== 'shadowlamp') return;
-    if (this.lit) {
-      this.lit = false;
-      return;
-    }
-    this.left = lampShot(this.valves[this.shape.dial!]);
-    this.lit = true;
+    if (this.kind === 'shadowlamp') this.lit = !this.lit;
   }
 
   /**
-   * A shadow lamp's light for `h` sim seconds: while it's lit it shines, for no longer than its exposure has left,
-   * and then it goes out by itself; and for as long as it shines with a sheet in its slot (see sheet), that sheet is
-   * owed that much more of its light (see owed), though never more than darkens it all the way. With no sheet there,
-   * nothing's owed: what a sheet taken out had yet to get is lost. It shines on nothing else.
+   * A shadow lamp's `h` sim seconds: while it's lit, or any of its screen is still fluorescing, its screen has that
+   * much more catching up to do (see owed) with the light that falls on it, or with the dark once it's out; though
+   * never more than SCREEN.most, by when it's caught up however long has gone by. Out, with its screen dark, there's
+   * nothing to catch up with.
    */
   shine(h: number): void {
-    if (!this.sheet) this.owed = 0;
-    if (!this.lit) return;
-    const s = Math.min(h, this.left);
-    this.left -= s;
-    if (this.sheet) this.owed = Math.min(SHEET.full, this.owed + s);
-    // (to within what adding up steps loses)
-    if (this.left < 1e-9) {
-      this.left = 0;
-      this.lit = false;
+    if (this.kind !== 'shadowlamp') return;
+    this.owed = this.lit || this.aglow ? Math.min(SCREEN.most, this.owed + h) : 0;
+  }
+
+  /**
+   * A shadow lamp's screen catches up with the light falling on it, by the sim seconds it's owed (see owed), which
+   * that settles: `light[i]` of the lamp's unshadowed light on each cell (see glow), from 0 (in full shadow) to 1, as
+   * things stand between the lamp and the screen just now; or null for none anywhere, as when it's out. Each cell's
+   * glow closes 1 − e^(−owed / SCREEN.tau) of the gap to its light, brightening and fading alike, and is just that
+   * once it's within SCREEN.still of it.
+   */
+  fluoresce(light: ArrayLike<number> | null): void {
+    const { glow } = this;
+    const s = this.owed;
+    this.owed = 0;
+    if (!(s > 0) || (light && light.length !== glow.length)) return;
+    const k = 1 - Math.exp(-s / SCREEN.tau);
+    let any = false;
+    let changed = false;
+    for (let i = 0; i < glow.length; i++) {
+      const to = light ? Math.max(0, Math.min(1, light[i])) : 0;
+      const gap = to - glow[i];
+      if (gap === 0) {
+        any ||= to > 0;
+        continue;
+      }
+      const g = glow[i] + k * gap;
+      glow[i] = Math.abs(to - g) < SCREEN.still ? to : g;
+      any ||= glow[i] > 0;
+      changed = true;
     }
-  }
-
-  /**
-   * Light falls on a sheet of shadow paper for `s` sim seconds: on each cell (see dose), `light[i]` of the shadow
-   * lamp's unshadowed light, from 0 (in full shadow) to 1. Each takes that much more, up to SHEET.full; none ever
-   * takes less, so a sheet lit twice shows both.
-   */
-  expose(light: ArrayLike<number>, s: number): void {
-    const { dose } = this;
-    if (!(s > 0) || light.length !== dose.length) return;
-    for (let i = 0; i < dose.length; i++) dose[i] = Math.min(SHEET.full, dose[i] + s * Math.max(0, Math.min(1, light[i])));
-    this.dosed++;
-  }
-
-  /**
-   * Whether a sheet of shadow paper is as dark as it gets all over the square the light falls on (see SHEET.full), so
-   * that no more light can show on it; never, for any other tool.
-   */
-  get spent(): boolean {
-    // (a cell holds its fill only to a float's precision)
-    return this.dose.length > 0 && this.dose.every((d) => d >= SHEET.full - 1e-4);
-  }
-
-  /**
-   * What a save keeps of a sheet of shadow paper's image, or undefined for one that's had no light (or any other
-   * tool): how dark each cell is (see darkness), as a byte, 0 as new to 255 as dark as it gets, in dose's order,
-   * packed whichever way comes out shorter, as base64: after a byte of 1, each run of the same byte as two, how many
-   * (up to 255) and the byte; or after a byte of 0, the bytes as they are. A sheet is mostly big patches of one
-   * shade, so runs usually come to a small fraction of a byte a cell.
-   */
-  get image(): string | undefined {
-    const { dose } = this;
-    if (!dose.some((d) => d > 0)) return undefined;
-    const bytes = Array.from(dose, (d) => Math.round(255 * darkness(d)));
-    const runs: number[] = [];
-    for (let i = 0; i < bytes.length; ) {
-      let n = 1;
-      while (n < RUN && bytes[i + n] === bytes[i]) n++;
-      runs.push(n, bytes[i]);
-      i += n;
-    }
-    const packed = runs.length < bytes.length ? [1, ...runs] : [0, ...bytes];
-    let bin = '';
-    for (const b of packed) bin += String.fromCharCode(b);
-    return btoa(bin);
-  }
-
-  /**
-   * Put back a sheet's image from what a save kept of it (see image), if that's an image of a sheet this size; if it
-   * isn't, the sheet is left as it is.
-   */
-  develop(saved: unknown): void {
-    const { dose } = this;
-    if (typeof saved !== 'string' || !dose.length) return;
-    let bin: string;
-    try {
-      bin = atob(saved);
-    } catch {
-      return;
-    }
-    const packed = Array.from(bin, (c) => c.charCodeAt(0));
-    let bytes = packed.slice(1);
-    if (packed[0] === 1) {
-      bytes = [];
-      // (no more than the sheet has cells, whatever it says)
-      for (let i = 1; i + 1 < packed.length && bytes.length <= dose.length; i += 2) for (let n = packed[i]; n > 0; n--) bytes.push(packed[i + 1]);
-      if (packed.length % 2 !== 1) return;
-    } else if (packed[0] !== 0) return;
-    if (bytes.length !== dose.length) return;
-    // a cell as dark as a byte can say is as dark as it gets
-    bytes.forEach((b, i) => (dose[i] = b >= 255 ? SHEET.full : b <= 0 ? 0 : Math.min(SHEET.full, -SHEET.tau * Math.log(1 - b / 255))));
-    this.dosed++;
+    this.aglow = any;
+    if (changed) this.glowed++;
   }
 
   /**

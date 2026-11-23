@@ -5,7 +5,7 @@ import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, 
 import { hushAlarms } from './ambience';
 import {
   FLASK_CENTER, FLASK_LIP, NEAR, NEAR_STEP, NOZZLE_H, NOZZLE_REACH, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
-  FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, SHEET_SLOT, inSlot, sheetIn, slotPose, slotted, magnetShift, nozzleMounts, nozzleStand, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
+  FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, magnetShift, nozzleMounts, nozzleStand, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
   tankMouth, tankNoteY, toolBox, toolCenter, toolStands, valveNear, valveZ, type Magnets, type NozzleMount, type Stand,
 } from './bodies';
 import { CABINET, endless, isStocked, putIn, stockWith, takeFrom, takeSlot, type Stock, type Stocked } from './cabinet';
@@ -220,8 +220,8 @@ type Held = (
 
 /**
  * Whether what's held is moved by a ghost when ghost moves are on (see GameEngine.ghostMoves): what stands on the
- * bench on stands, a scale, and a sheet of shadow paper; not what's used while it's held (a flask, a dipper, a sheet
- * of blotting paper, a hose's nozzle).
+ * bench on stands, and a scale; not what's used while it's held (a flask, a dipper, a sheet of blotting paper, a
+ * hose's nozzle).
  */
 const ghostly = (h: Held) => h.kind === 'scale' || (h.kind === 'tool' && !isDipper(h.t.kind) && !isBlotter(h.t.kind));
 
@@ -275,6 +275,13 @@ const IN_POD = { x: POD.x, z: POD.z, yaw: 0, pitch: -0.12 };
 const SLEEP_SLICE_MS = 12;
 /** How far away something can be and still be picked up or pressed. */
 const REACH = 460;
+/**
+ * The heater as older saves have it: with four spouts, three taps' and then its end's, and as many valves, a tap's
+ * each and then its dial. `kept` are the two of each that it still has, in order: its middle tap, which drew from
+ * where its one tap does now, and its last, which is its end's spout or its dial. A hose on either of those spouts
+ * stays on it; one on either of the other two taps' is rolled up, and what hung from them is gone.
+ */
+const OLD_HEATER = { spouts: 4, kept: [1, 3] };
 /** The nearest and furthest something can be held, from the eyes to its middle, beyond its own size. */
 const HOLD_NEAR = 40;
 /** How much further off than other things a flask is held to start with (see holdDist). */
@@ -370,7 +377,7 @@ export class GameEngine {
   speed = 1;
   god = true;
   /**
-   * Whether what stands on the bench on stands, a scale, or a sheet of shadow paper is moved by a ghost of it: picked
+   * Whether what stands on the bench on stands, or a scale, is moved by a ghost of it: picked
    * up, it stays where it is, running, and what's carried is a ghost drawn where it would come to rest, until it's set
    * down there, when it moves at once (see Held.ghost). Taken up at the next pick-up. Flasks, dippers, sheets of
    * blotting paper and hoses' nozzles are carried in hand either way, since they're used while held.
@@ -828,7 +835,6 @@ export class GameEngine {
         ...(t.tube.length ? { tube: t.tube.map(saveVessel) } : {}),
         ...(t.note ? { note: t.note } : {}),
         ...(t.memory ? { memory: t.memory } : {}),
-        ...(t.image ? { image: t.image } : {}),
         ...(t.paper.length ? { paper: t.paper.map(saveVessel) } : {}),
         ...(t.bed.length ? { bed: t.bed.map(saveVessel) } : {}),
       })),
@@ -873,16 +879,21 @@ export class GameEngine {
       loadVessel(f, sf);
       return f;
     });
+    const longHeaters = new Set<number>();
     this.tools = s.tools
       .filter((st) => st.kind in SHAPES)
       .map((st) => {
-        const t = new Tool(st.kind, st.id, pose(fromFrac({ x: st.fx, y: st.fy }), st), st.valves ?? []);
+        // (an older save's heater had three taps, each with a spout, before its end's: see OLD_HEATER)
+        const long = (a: unknown[] | undefined) => st.kind === 'heater' && a?.length === OLD_HEATER.spouts;
+        const valves = long(st.valves) ? OLD_HEATER.kept.map((j) => st.valves![j]) : st.valves;
+        const drops = long(st.drops) ? OLD_HEATER.kept.map((j) => st.drops![j]) : st.drops;
+        if (long(st.valves) || long(st.drops)) longHeaters.add(st.id);
+        const t = new Tool(st.kind, st.id, pose(fromFrac({ x: st.fx, y: st.fy }), st), valves ?? []);
         t.tanks.forEach((v, k) => st.tanks?.[k] && loadVessel(v, st.tanks[k]));
-        t.drops.forEach((v, k) => st.drops?.[k] && loadVessel(v, st.drops[k]));
+        t.drops.forEach((v, k) => drops?.[k] && loadVessel(v, drops[k]));
         t.tube.forEach((v, k) => st.tube?.[k] && loadVessel(v, st.tube[k]));
         if (typeof st.note === 'string') t.note = st.note;
         t.remember(st.memory);
-        t.develop(st.image);
         t.paper.forEach((v, k) => st.paper?.[k] && loadVessel(v, st.paper[k]));
         t.bed.forEach((v, k) => st.bed?.[k] && loadVessel(v, st.bed[k]));
         // an older save's strip stood in a tray, posed at the tray's top, 4 above its paper's foot: it's bare paper now,
@@ -916,8 +927,10 @@ export class GameEngine {
       if (!on || !sh.outlet) continue;
       const fa = Number.isInteger(on.faucet) ? faucetIndex(on.faucet!, fs.length) : null;
       const t = this.tools.find((u) => u.id === on.tool);
+      // (a hose on a spout of an older save's heater is on the spout that's become: its middle tap's, or its end's)
+      const spout = t && longHeaters.has(t.id) && Number.isInteger(on.spout) ? OLD_HEATER.kept.indexOf(on.spout!) : on.spout;
       const mount: HoseMount | null =
-        t && Number.isInteger(on.spout) && on.spout! >= 0 && on.spout! < t.shape.spouts.length ? { tool: t, spout: on.spout! }
+        t && Number.isInteger(spout) && spout! >= 0 && spout! < t.shape.spouts.length ? { tool: t, spout: spout! }
         : fa !== null ? { faucet: fa }
         : null;
       if (!mount || this.hoses.some((h) => sameMount(h.on, mount))) continue;
@@ -970,8 +983,7 @@ export class GameEngine {
    * shadow lamp: if there's none, one is added where it starts, or as near there as it has room (see roomy), the
    * station fitted for the cryostabilizer, its reservoir holding what's left on board (see Tool.stock), as a save from
    * before it was fitted for anything else would have it. The station is built into the wall, and the shadow lamp
-   * stands on its own bench, so they're always where they are. A shadow lamp that's added has a new sheet of shadow
-   * paper in its slot, facing it, unless one's there already: so a new lab's has, and a save's from before there was a lamp.
+   * stands on its own bench, so they're always where they are.
    */
   private uniqueTools(): void {
     for (const kind of UNIQUE_TOOLS) {
@@ -984,8 +996,6 @@ export class GameEngine {
       if (kind === 'receptacle') t.stock(CRYOSTABILIZER);
       else if (!t.shape.fixed) t.pose = this.roomy(t);
       this.tools.push(t);
-      // a new shadow lamp comes with a sheet of shadow paper in its slot, which shows what goes there
-      if (kind === 'shadowlamp' && !sheetIn(this.tools)) this.tools.push(new Tool('sheet', this.nextToolId++, slotPose(SHEET_SLOT.yaw)));
     };
     // the station and the shadow lamp first, since they're always where they are, for the others to keep clear of
     add('receptacle', STATION_POSE);
@@ -1077,18 +1087,14 @@ export class GameEngine {
   /**
    * Mend what presets and older saves can leave amiss, which is otherwise left where and as it is: a tool or a hose's
    * nozzle whose stand is off the counter (as one an older save left near the back wall can be) comes forward up to
-   * three cells (see CELL), as it faces, until its stand is on it; a sheet of shadow paper all but in the shadow lamp's
-   * slot goes into it; and a flask on a scale goes to the nearer of its places, or off it if the other flask there has it.
+   * three cells (see CELL), as it faces, until its stand is on it; and a flask on a scale goes to the nearer of its
+   * places, or off it if the other flask there has it.
    */
   private toCounters(): void {
     const onCounter = (t: Tool) => toolStands(t).every((st) => counterUnder(standBase(st, 0)) !== null);
     for (const t of this.tools) {
-      // (what's fixed is where it is, and so is a sheet in the shadow lamp's slot)
+      // (what's fixed is where it is)
       if (t.shape.fixed) continue;
-      if (t.kind === 'sheet' && inSlot(t.pose)) {
-        t.pose = slotPose(t.pose.yaw);
-        continue;
-      }
       for (let i = 0; i < 3 && !onCounter(t); i++) t.pose = { ...toWorld(t.pose, { x: 0, y: 0, z: CELL }), yaw: t.pose.yaw };
     }
     for (const sc of this.scales) {
@@ -1686,8 +1692,8 @@ export class GameEngine {
       return;
     }
     if (p.kind === 'faucet' || p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake' || p.kind === 'cabinet') return;
-    // (the shadow lamp's button is for pressing, with the left button, and its dial for turning, with the right)
-    if (p.kind === 'tool' && (p.part === 'button' || (p.t.kind === 'shadowlamp' && p.part === 'valve'))) return;
+    // (the shadow lamp's button is for pressing, with the left button)
+    if (p.kind === 'tool' && p.part === 'button') return;
     if (p.kind === 'tool' && p.t.shape.fixed) {
       this.say('That stays where it is');
       return;
@@ -2760,7 +2766,6 @@ export class GameEngine {
     // what each thermometer's bulb and each strip's foot is in (see dipping)
     const whole = this.tools.map((t) => !t.broken);
     this.dipping(quiet ? 0 : dt);
-    this.slotting();
     if (simDt > 0) {
       const sub = Math.ceil(simDt / 0.02);
       const step = simDt / sub;
@@ -3003,11 +3008,9 @@ export class GameEngine {
 
   /**
    * Where what's held would be set down, at pose p: just there, but a hose's nozzle over an inline instrument's tube on
-   * its top (see docked), a sheet of shadow paper at the shadow lamp's slot in it (see slotted), and a flask facing
-   * the nearest of the four ways (it's round: see faceFlask).
+   * its top (see docked), and a flask facing the nearest of the four ways (it's round: see faceFlask).
    */
   private snapped(h: Held, p: Pose): Pose {
-    if (h.kind === 'tool' && h.t.kind === 'sheet') return slotted(h.t, p, this.tools);
     if (h.kind === 'hose') return docked(p, this.tools);
     if (h.kind === 'flask') return { ...p, yaw: toCardinal(p.yaw) };
     return p;
@@ -3142,7 +3145,6 @@ export class GameEngine {
    * down onto the counter, which the whole base must be over (what it holds can reach out past the counter's edge). Either way, it mustn't overlap anything where it comes to rest (what's held passes through everything, so there's no way down to look
    * at), nor its stand's base sit on anything but the counter. (Stands don't bump into each other: their rods can stand side by side.) A hose's
    * nozzle's stand goes where it's wanted (see nozzleWant) if it can, or else the first place it can of nozzleMounts.
-   * A sheet of shadow paper in the shadow lamp's slot (see inSlot) just stands there, if nothing's in its way.
    */
   private rest(h: Held, p: Pose, obstacles: readonly Box[], solid: readonly Box[]): Rest | string {
     const blocked = (b: Box) => obstacles.some((o) => boxesOverlap(b, o));
@@ -3175,8 +3177,6 @@ export class GameEngine {
       }
       return why!;
     }
-    // a sheet in the shadow lamp's slot stands in it, against its end wall, on the bench, with no stand
-    if (h.kind === 'tool' && h.t.kind === 'sheet' && inSlot(p)) return blocked(box) ? 'No room' : { pose: p };
     const stands = this.standsAt(h, p);
     if (stands.length) return onStands(stands);
     if (h.kind === 'flask')
@@ -3216,13 +3216,13 @@ export class GameEngine {
     return { turn: this.facing(h), reach: snapReach(h.reach) };
   }
 
-  /** Every stand in the lab, with what it holds up; but none for a dipper (see DIPPERS) or a sheet of shadow paper while it's in hand. */
+  /** Every stand in the lab, with what it holds up; but none for a dipper (see DIPPERS) while it's in hand. */
   private stands(): { s: Stand; of: Pick }[] {
     const out: { s: Stand; of: Pick }[] = [];
     const held = this.held;
     for (const t of this.tools) {
-      // a strip, a thermometer or a sheet of shadow paper in hand is just itself: its stand is there once it's set down
-      if (held?.kind === 'tool' && held.t === t && !held.ghost && (isDipper(t.kind) || t.kind === 'sheet')) continue;
+      // a strip or a thermometer in hand is just itself: its stand is there once it's set down
+      if (held?.kind === 'tool' && held.t === t && !held.ghost && isDipper(t.kind)) continue;
       for (const s of toolStands(t)) out.push({ s, of: { kind: 'tool', t, part: 'body', k: 0 } });
     }
     const pl = this.placed;
@@ -3431,7 +3431,6 @@ export class GameEngine {
       const ok = !!this.placed && 'rest' in this.placed;
       const how = h.kind === 'hose' ? 'set the hose’s end down'
         : h.kind === 'tool' && isDipper(h.t.kind) && this.mouthAimed() ? 'stand it in it'
-        : ok && h.kind === 'tool' && h.t.kind === 'sheet' && 'rest' in this.placed! && inSlot(this.placed.rest.pose) ? 'slot it into the lamp'
         // (what's moved by a ghost hasn't left where it was)
         : h.ghost && h.from ? 'move it here'
         : 'set it down';
@@ -3658,8 +3657,8 @@ export class GameEngine {
         this.clock += dt;
         this.spin = (this.spin + SPIN * dt) % (2 * Math.PI);
         this.station().steady += dt;
-        // (and the shadow lamp, if it's lit, shines on through it, for as long as its exposure has left; and a sheet
-        // of blotting paper that was still developing goes on developing)
+        // (and the shadow lamp's screen has that much more catching up to do; and a sheet of blotting paper that was
+        // still developing goes on developing)
         for (const t of this.tools) {
           if (t.kind === 'shadowlamp') t.shine(dt);
           if (isBlotter(t.kind)) t.step(dt);
@@ -3863,16 +3862,6 @@ export class GameEngine {
     if (!dipped) this.dipFor = 0;
     // all the way in, its foot has touched: a tap is over, and it rises unless the button's still held
     if (this.dip >= 1) this.tapping = false;
-  }
-
-  /**
-   * Tell the shadow lamp which sheet is in its slot, if any (see Tool.sheet), from where things are now. One in
-   * hand isn't in it, though it's still where it was picked up until it's moved.
-   */
-  private slotting(): void {
-    const h = this.held;
-    const sheet = sheetIn(this.tools, h?.kind === 'tool' && !h.ghost ? h.t : null);
-    for (const t of this.tools) if (t.kind === 'shadowlamp') t.sheet = sheet;
   }
 
   /** Whether fluid would leave a tool's spouts if it ran. */

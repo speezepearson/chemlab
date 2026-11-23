@@ -137,12 +137,12 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
             <NumberRow label="ambient T" min={0} value={COOLING.ambient} onChange={(v) => edit(() => (COOLING.ambient = v))} />
             <tr className="group">
               <td colSpan={4}>
-                <b>Separator</b> <span>a molecule goes to outlet j ∝ e^(−sharpness·(j − its own)²)</span>
+                <b>Separator</b> <span>a molecule goes to its own outlet and the other as 1 to e^(−sharpness)</span>
               </td>
             </tr>
             <tr>
               <td colSpan={4}>
-                <label className="slider" title="0 splits everything evenly five ways; higher sorts more cleanly, and the top is perfect">
+                <label className="slider" title="0 splits everything evenly two ways; higher sorts more cleanly, and the top is perfect">
                   <span>sharpness</span>
                   <input
                     type="range"
@@ -156,7 +156,7 @@ export function ChemistryPanel({ network }: { network: ReactionNetwork }) {
                 </label>
                 <span>
                   {' '}
-                  middle outlets keep {(100 * separatorShares()[2][2]).toFixed(1)}%, ends {(100 * separatorShares()[0][0]).toFixed(1)}%
+                  each outlet keeps {(100 * separatorShares()[0][0]).toFixed(1)}%
                 </span>
               </td>
             </tr>

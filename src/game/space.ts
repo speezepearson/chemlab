@@ -69,8 +69,8 @@ export const CABINET_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 30 * CELL, z0: ROOM.z0,
  * Where the shadow lamp stands (see LAMP in tools.ts): on a bench of its own in the room's front left corner, nine
  * cells along the front wall and five out from it, as high as the counters. Nothing could be set down there
  * before it was, so no save has anything standing in its way. The lamp's trough lies along its edge toward the room,
- * over its second row of cells; the two rows of cells behind it are free bench, long enough for the longest tools (a
- * heater, a sorter, a separator) on their two stands. It stops short of the airlock's doorway.
+ * over its second row of cells; the two rows of cells behind it are free bench, long enough for the longest tools on
+ * their stands. It stops short of the airlock's doorway.
  */
 export const LAMP_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 9 * CELL, z0: ROOM.z1 - 5 * CELL, z1: ROOM.z1 };
 /**
@@ -79,20 +79,14 @@ export const LAMP_AREA = { x0: ROOM.x0, x1: ROOM.x0 + 9 * CELL, z0: ROOM.z1 - 5 
  */
 export const LAMP_Z = LAMP_AREA.z0 + 1.5 * CELL;
 /**
- * How far past the five cells of the shadow lamp's channel its end wall is (see LAMP in tools.ts): the slot a sheet of
- * shadow paper stands in, a little wider than the bar along a sheet's top is thick (see SHEET), so a flask in the
- * channel's last cell stands clear of a sheet in it.
- */
-export const LAMP_SLOT = 6;
-/**
  * The floor of the shadow lamp's channel (see LAMP in tools.ts): a plate lying on its bench, over the five cells
- * along the middle of the channel and the slot past them (see LAMP_SLOT), from the enclosure (two cells in from the
- * bench's end) to the end wall (a little under two cells in from the left wall), as wide as the channel (a sheet of
- * shadow paper's side, 100, see SHEET), and its top `y` high, a little above the bench's (by a sheet's margin, 10).
- * What's set down in the channel stands on it (see counterUnder), and what falls there lands on it (see groundAt).
+ * along the middle of the channel, from the enclosure (two cells in from the bench's end) to the end wall (two cells
+ * in from the left wall), as wide as the channel (100, a little more than a cell), and its top `y` high, a little
+ * above the bench's (10, as far as the lamp's beam is above the floor, see LAMP.window). What's set down in the
+ * channel stands on it (see counterUnder), and what falls there lands on it (see groundAt).
  */
 export const LAMP_FLOOR = {
-  x0: LAMP_AREA.x0 + 2 * CELL - LAMP_SLOT, x1: LAMP_AREA.x1 - 2 * CELL, z0: LAMP_Z - 50, z1: LAMP_Z + 50, y: LIFT + 10,
+  x0: LAMP_AREA.x0 + 2 * CELL, x1: LAMP_AREA.x1 - 2 * CELL, z0: LAMP_Z - 50, z1: LAMP_Z + 50, y: LIFT + 10,
 };
 /**
  * A counter: its x and z extents, and whether it's an island out in the room rather than a sink counter on a wall, or

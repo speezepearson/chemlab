@@ -7,7 +7,7 @@ import type { Hose, Tool } from './tools';
 /**
  * Undo and redo, of the lab's arrangement only: what's in it, where everything is and which way it faces, tools'
  * valves, hoses, scales' tares, the player's notes, the room's switches and whether the shadow lamp is lit (see
- * Tool.lit: put back lit, it shines only for what its exposure had left). Never what's in the vessels:
+ * Tool.lit). Never what's in the vessels:
  * the lab reacts and flows on between the player's actions, so an undo puts things back where they were, holding
  * whatever they hold now. Things are kept by reference, so one taken away and brought back by an undo or a redo is
  * the very same, with whatever it held when it went.
