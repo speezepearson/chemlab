@@ -5,7 +5,7 @@ import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, 
 import { hushAlarms } from './ambience';
 import {
   FLASK_CENTER, FLASK_LIP, NOZZLE_H, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_MAX, aimValve, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
-  FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, SHEET_SLOT, inSlot, sheetIn, slotPose, slotted, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, spoutNear, standBase,
+  FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, SHEET_SLOT, inSlot, sheetIn, slotPose, slotted, nozzleMounts, nozzleStand, onGrid, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, standBase,
   tankMouth, tankNoteY, toolAnchor, toolBox, toolCenter, toolStands, valveNear, valveZ, type NozzleMount, type Stand,
 } from './bodies';
 import { CABINET, endless, isStocked, putIn, stockWith, takeFrom, takeSlot, type Stock, type Stocked } from './cabinet';
@@ -1876,24 +1876,15 @@ export class GameEngine {
 
   /**
    * The spout or faucet the crosshair is on, to pull a hose out of: a faucet's spout or the pipe down to it (not its
-   * knob, which is for its note), a tool's spout's tip, or the tool just above it (see spoutNear). Null if it's on
+   * knob, which is for its note), or a tool's spout, its tip or the pipe that runs to it alone. Null if it's on
    * neither.
    */
   private mountAimed(): HoseMount | null {
     const p = this.target;
     if (p?.kind === 'faucet') return p.spout ? { faucet: p.i } : null;
-    const j = this.spoutAimed();
-    return j === null || p?.kind !== 'tool' ? null : { tool: p.t, spout: j };
-  }
-
-  /** Which of a tool's spouts the crosshair is on, for mountAimed: its tip, or the tool just above it (see spoutNear). */
-  private spoutAimed(): number | null {
-    const p = this.target;
-    // nothing on the station can be worked through its changeover
-    if (p?.kind !== 'tool' || !p.t.shape.spouts.length || p.t.swap !== null) return null;
-    if (p.part === 'spout') return p.k;
-    const l = toLocal(p.t.pose, p.point);
-    return spoutNear(p.t, l.x, -l.y);
+    // (nothing on the station can be worked through its changeover)
+    if (p?.kind !== 'tool' || p.part !== 'spout' || !p.t.shape.spouts.length || p.t.swap !== null) return null;
+    return { tool: p.t, spout: p.k };
   }
 
   /**
@@ -3144,18 +3135,13 @@ export class GameEngine {
 
   /**
    * What's outlined: what the crosshair is on, but the whole equipment cabinet while what's held would go into it,
-   * and nothing for the cabinet itself otherwise; and a tool's spout, with its hose, where the crosshair is on the
-   * tool just above it, since that's where the left button pulls the hose out (see mountAimed).
+   * and nothing for the cabinet itself otherwise.
    */
   private hot(): Pick | null {
     // (nothing while she sniffs: her nose is in it)
     if (this.sniffing) return null;
     const p = this.target;
     if (this.held) return this.intoCabinet() ? { kind: 'cabinet' } : p?.kind === 'cabinet' || p?.kind === 'stock' ? null : p;
-    if (p?.kind === 'tool' && p.part === 'body') {
-      const j = this.spoutAimed();
-      if (j !== null) return { kind: 'tool', t: p.t, part: 'spout', k: j };
-    }
     return p?.kind === 'cabinet' ? null : p;
   }
 

@@ -541,24 +541,6 @@ export function nozzleBox(h: Hose): Box {
   return { ...box, round: true };
 }
 
-/**
- * How near a spout's tip, across and up, in a tool's flat frame, the crosshair can be on the tool and still be on
- * the spout: its tip, and the pipe just above it.
- */
-export const SPOUT_REACH = { x: 12, up: 30, down: 4 };
-
-/** The spout of a tool nearest (x, y) in its flat frame as it stands, if that's within SPOUT_REACH of its tip; null if none is. */
-export function spoutNear(t: Tool, x: number, y: number): number | null {
-  let best: number | null = null;
-  let reach = SPOUT_REACH.x;
-  t.shape.spouts.forEach((sx, j) => {
-    const dx = Math.abs(x - sx);
-    const dy = t.shape.spoutY - y;
-    if (dx <= reach && dy <= SPOUT_REACH.up && dy >= -SPOUT_REACH.down) [best, reach] = [j, dx];
-  });
-  return best;
-}
-
 /* ---------------- stands ---------------- */
 
 /**

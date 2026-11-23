@@ -661,15 +661,18 @@ function rod(parent: THREE.Object3D, mat: THREE.Material, a: THREE.Vector3, b: T
   return m;
 }
 
-/** Pipes through points in a flat frame (y down), at depth z. */
-function pipes(parent: THREE.Object3D, pts: number[][], r = 2, z = 0): void {
-  for (let i = 1; i < pts.length; i++) rod(parent, pipeMat, v3(pts[i - 1][0], pts[i - 1][1], z), v3(pts[i][0], pts[i][1], z), r);
+/** Pipes through points in a flat frame (y down), at depth z: their rods and the joints between them. */
+function pipes(parent: THREE.Object3D, pts: number[][], r = 2, z = 0): THREE.Mesh[] {
+  const meshes: THREE.Mesh[] = [];
+  for (let i = 1; i < pts.length; i++) meshes.push(rod(parent, pipeMat, v3(pts[i - 1][0], pts[i - 1][1], z), v3(pts[i][0], pts[i][1], z), r));
   for (let i = 1; i < pts.length - 1; i++) {
     const j = new THREE.Mesh(unitSphere, pipeMat);
     j.position.copy(v3(pts[i][0], pts[i][1], z));
     j.scale.setScalar(r);
     parent.add(j);
+    meshes.push(j);
   }
+  return meshes;
 }
 
 /* ---------------- text and screens ---------------- */
@@ -1587,19 +1590,21 @@ class ToolView {
     this.body.add(art);
     this.root.add(this.body);
 
-    // drain pipes and spouts, from the bottom of the tanks (and their sumps)
+    // drain pipes and spouts, from the bottom of the tanks (and their sumps); the pipe that runs to a spout alone is
+    // part of that spout, as a faucet's is, so the crosshair on it is on the spout (and pulls its hose out)
+    const outlet = (k: number, pts: number[][]) => pipes(art, pts).forEach((m) => pick(m, 'spout', k));
     const TH = sh.tankH ?? TANK_H;
     const floor = TH + (sh.sump?.h ?? 0);
     if (sh.wall) this.buildStation(pick);
     else if (t.kind === 'exchanger')
       sh.tanks.forEach((tk, k) => {
         pipes(art, [[tankX(tk), floor], [tankX(tk), HELIX.y - HELIX.r]]);
-        pipes(art, [[sh.spouts[k], HELIX.y + HELIX.r], [sh.spouts[k], sh.spoutY - 4]]);
+        outlet(k, [[sh.spouts[k], HELIX.y + HELIX.r], [sh.spouts[k], sh.spoutY - 4]]);
       });
     else if (t.kind === 'separator') {
       // the manifold: one pipe in, five out, with a divider between each two outlets, and a handle on its left end
       pipes(art, [[0, floor], [0, SEP_BODY.y0]]);
-      for (const x of sh.spouts) pipes(art, [[x, SEP_BODY.y1], [x, sh.spoutY - 4]]);
+      sh.spouts.forEach((x, k) => outlet(k, [[x, SEP_BODY.y1], [x, sh.spoutY - 4]]));
       block(art, panelMat, SEP_BODY.x0, SEP_BODY.x1, SEP_BODY.y0, SEP_BODY.y1, -10, 10, 2);
       for (let k = 1; k < sh.spouts.length; k++) {
         const x = (sh.spouts[k - 1] + sh.spouts[k]) / 2;
@@ -1610,30 +1615,30 @@ class ToolView {
     } else if (t.kind === 'splitter') {
       const fork = sh.valveY + 10;
       pipes(art, [[0, TH], [0, fork]]);
-      for (const x of sh.spouts) pipes(art, [[0, fork], [x, fork + 16], [x, sh.spoutY - 4]]);
+      sh.spouts.forEach((x, k) => outlet(k, [[0, fork], [x, fork + 16], [x, sh.spoutY - 4]]));
     } else if (t.kind === 'multiplexer') {
       // the splitter's fork upside down: each funnel's stem in to where they join, over the valve
       const join = sh.valveY - 12;
       for (const tk of sh.tanks) pipes(art, [[tankX(tk), TH], [tankX(tk), join - 16], [0, join]]);
-      pipes(art, [[0, join], [0, sh.spoutY - 4]]);
+      outlet(0, [[0, join], [0, sh.spoutY - 4]]);
     } else if (t.kind === 'sorter') {
       const x = tankX(sh.tanks[0]);
       pipes(art, [[x, TH], [x, chuteY(x)]]);
-      sh.spouts.forEach((x, k) => pipes(art, [[x, k < sh.spouts.length - 1 ? chuteY(x) + 8 : SORTER_CHUTE.y1], [x, sh.spoutY - 4]]));
+      sh.spouts.forEach((x, k) => outlet(k, [[x, k < sh.spouts.length - 1 ? chuteY(x) + 8 : SORTER_CHUTE.y1], [x, sh.spoutY - 4]]));
     } else if (t.kind === 'heater') {
       // the funnel's stem down into the tube, and a pipe from the tube down through each tap, and from its last
       // stretch down into the last spout
       const { y, r } = HEATER_TUBE;
       pipes(art, [[tankX(sh.tanks[0]), TH], [tankX(sh.tanks[0]), y - r + 1]]);
-      for (const x of sh.spouts) pipes(art, [[x, y + r - 1], [x, sh.spoutY - 4]]);
+      sh.spouts.forEach((x, k) => outlet(k, [[x, y + r - 1], [x, sh.spoutY - 4]]));
     } else if (INLINE_TOOLS.includes(t.kind)) {
       // straight down from the tube to its spout, with a branch into the cabinet, if it has one
       const { body: b, inY } = INSTRUMENT;
-      pipes(art, [[0, TH], [0, sh.spoutY - 4]]);
+      outlet(0, [[0, TH], [0, sh.spoutY - 4]]);
       if (t.kind !== 'meter') pipes(art, [[0, inY], [b.x0, inY]], 1.3);
     } else if (sh.neck) {
       // from under each bulb, out to its spout, under its inlet
-      sh.neck.bodies.forEach((bx, k) => pipes(art, [[bx, floor], [bx, floor + 4], [sh.spouts[k], floor + 4], [sh.spouts[k], sh.spoutY - 4]]));
+      sh.neck.bodies.forEach((bx, k) => outlet(k, [[bx, floor], [bx, floor + 4], [sh.spouts[k], floor + 4], [sh.spouts[k], sh.spoutY - 4]]));
     }
     else if (t.kind === 'strip') this.buildStrip();
     else if (t.kind === 'shadowlamp') this.buildLamp(pick);
@@ -1644,9 +1649,9 @@ class ToolView {
       this.buildColumn();
       // the funnel's stem down into the tube, and from the tube's foot down through the tap to the spout
       pipes(art, [[0, TH], [0, COLUMN.tube.y0]]);
-      pipes(art, [[0, COLUMN.tube.y1], [0, sh.spoutY - 4]]);
+      outlet(0, [[0, COLUMN.tube.y1], [0, sh.spoutY - 4]]);
     }
-    else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);
+    else outlet(0, [[0, floor], [0, sh.spoutY - 4]]);
     sh.spouts.forEach((x, k) => pick(block(art, pipeMat, x - 4, x + 4, sh.spoutY - 6, sh.spoutY, -4, 4), 'spout', k));
 
     // tanks, with their fluid (the station's are built in buildStation)

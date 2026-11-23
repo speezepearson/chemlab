@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   FLASK_R, NOZZLE_REACH, SCALE_ANCHOR, SCALE_SLOTS, STAND_BASE, aimValve, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, onGrid, toolAnchor, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
-  docked, nozzleBox, nozzleMounts, nozzleStand, onScale, scaleBox, scaleSpot, snapReach, spoutNear, spoutAt, standBase, tankMouth, toolBox, toolStands, valveLocal,
+  docked, nozzleBox, nozzleMounts, nozzleStand, onScale, scaleBox, scaleSpot, snapReach, spoutAt, standBase, tankMouth, toolBox, toolStands, valveLocal,
   valveNear, SHEET_SLOT, SLOT_REACH, inSlot, sheetIn, slotPose, slotted,
 } from './bodies';
 import { SOLVENT_SPECIES, singleOf } from '../chem/species';
@@ -333,17 +333,6 @@ describe('tools in the room', () => {
     expect(boxesOverlap(toolBox(a), toolBox(new Tool('dispenser', 1, at(60, 500, 0))))).toBe(true);
     expect(boxesOverlap(toolBox(a), toolBox(new Tool('dispenser', 1, at(80, 500, 0))))).toBe(false);
     expect(boxesOverlap(toolBox(a), toolBox(new Tool('dispenser', 1, at(0, 300, 0))))).toBe(false);
-  });
-});
-
-describe('spoutNear', () => {
-  it("finds the spout whose tip, or the pipe just above it, is under the crosshair, as the tool stands", () => {
-    const sep = new Tool('separator', 0);
-    const y = sep.shape.spoutY;
-    expect(spoutNear(sep, sep.shape.spouts[1] + 3, y - 2)).toBe(1);
-    expect(spoutNear(sep, sep.shape.spouts[4], y - 25)).toBe(4);
-    expect(spoutNear(sep, sep.shape.spouts[4], y - 60)).toBeNull();
-    expect(spoutNear(sep, (sep.shape.spouts[1] + sep.shape.spouts[2]) / 2, y)).toBeNull();
   });
 });
 
