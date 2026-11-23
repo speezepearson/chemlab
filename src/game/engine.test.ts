@@ -3,7 +3,7 @@ import { BOND_KEYS } from '../chem/atoms';
 import { ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
-import { FLASK_R, MAGNET, NEAR, NEAR_STEP, NOZZLE_REACH, SCALE_SLOTS, flaskLip, flaskMouth, onScale, plumbZ, spoutAt, valveLocal, tankMouth, scaleBox, standBase, toolBox, toolStands, type Stand } from './bodies';
+import { FLASK_R, MAGNET, NEAR, NEAR_STEP, NOZZLE_REACH, SCALE_SLOTS, flaskLip, flaskMouth, onScale, plumbZ, spoutAt, valveLocal, VALVE_WHEEL, tankMouth, scaleBox, standBase, toolBox, toolStands, type Stand } from './bodies';
 import { boxesOverlap } from './physics';
 import { STOCK } from './cabinet';
 import { WHEELS } from './wheel';
@@ -13,7 +13,7 @@ import { Vessel, volume, type Flask } from './flask';
 import type { Scale } from './scale';
 import { FLASK_H } from './flaskShape';
 import { DEFAULT_PRESET, LAMP_POSE, PRESETS } from './presets';
-import { FAUCETS, faucetRate, faucetTarget } from './faucets';
+import { FAUCETS, faucetRate, faucetTarget, faucetValveAt } from './faucets';
 import { FILL_RATE } from './config';
 import type { SaveState } from './save';
 import { CELL, LAMP_FLOOR, LIFT, counterUnder, toWorld } from './space';
@@ -1960,7 +1960,7 @@ describe('faucets’ valves', () => {
     expect(taps(l).faucets.every((fa) => fa.valve === 1)).toBe(true);
   });
 
-  it('turns by its knob as a tool’s valve does, from press to let go one step to undo', () => {
+  it('turns by its handwheel as a tool’s valve does, from press to let go one step to undo', () => {
     const l = lab();
     const fa = taps(l).faucets[0];
     l.e.debug({ x: fa.spout.x - 300, z: fa.spout.z, yaw: -Math.PI / 2, pitch: 0, locked: true });
@@ -1971,8 +1971,14 @@ describe('faucets’ valves', () => {
     expect(l.in.valveAimed()).toBeNull();
     l.in.target = { kind: 'faucet', i: 0, valve: true };
     expect(taps(l).history.canUndo).toBe(false);
-    // the pointer, on the knob's front, straight above its middle: taking hold of it there turns nothing
-    const knob = { x: fa.spout.x, y: fa.wall.y, z: fa.spout.z };
+    // the pointer, on the handwheel's face, straight above its middle: taking hold of it there turns nothing
+    const knob = faucetValveAt(fa);
+    // (on the drop, clear of the pipe from the wall above, 3.5 in radius, and the spout's tip, 7 tall, below, on every faucet)
+    for (const f of taps(l).faucets) {
+      const v = faucetValveAt(f);
+      expect(f.wall.y - 3.5 - (v.y + VALVE_WHEEL.r)).toBeGreaterThanOrEqual(2);
+      expect(v.y - VALVE_WHEEL.r - (f.spout.y + 7)).toBeGreaterThanOrEqual(2);
+    }
     let at = { x: knob.x, y: knob.y + 20, z: knob.z };
     taps(l).view.ray = () => ({ o: { x: at.x - 300, y: at.y, z: at.z }, d: { x: 1, y: 0, z: 0 } });
     l.e.hand(true);

@@ -4,7 +4,7 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
-  FLASK_CENTER, FLASK_LIP, NEAR, NEAR_STEP, NOZZLE_H, NOZZLE_REACH, SCALE_SLOTS, STAND_MAX, aimAngle, settleAngle, swept, sweep, turnValve, valveAt, valveFaceZ, valveLocal, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
+  FLASK_CENTER, FLASK_LIP, NEAR, NEAR_STEP, NOZZLE_H, NOZZLE_REACH, SCALE_SLOTS, STAND_MAX, aimAngle, settleAngle, swept, sweep, turnValve, valveAt, valveFaceZ, valveLocal, VALVE_WHEEL, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
   FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, magnetShift, nozzleMounts, nozzleStand, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, standBase,
   tankMouth, tankNoteY, toolBox, toolCenter, toolStands, type Magnets, type NozzleMount, type Stand,
 } from './bodies';
@@ -14,7 +14,7 @@ import { chime } from './chime';
 import { diverter, type Diverter } from './diverter';
 import { CAP, DELIVERY, HOME_H, HOME_W, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
-import { FAUCETS, WALL_FAUCETS, faucetIndex, faucetOutput, faucetRate, faucetTarget, knobPose, KNOB } from './faucets';
+import { FAUCETS, WALL_FAUCETS, faucetIndex, faucetOutput, faucetRate, faucetTarget, faucetValvePose, FAUCET_VALVE } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
 import { Flask, Vessel, roomFor, sustenance, transfer, volume, volumeUnit } from './flask';
 import { History, arrange, arrangement, type Arrangement } from './history';
@@ -313,10 +313,11 @@ export const TOUCH = typeof matchMedia === 'function' && matchMedia('(pointer: c
 /**
  * Where the faucets are: along the right wall over its counter (see SINK_D), a cell apart, each spout FAUCET_OUT
  * out from the wall, in line with the station's (see STATION.out), so a flask under one clears the manifold. Their spouts are a little under eye level, high enough over the
- * counter for a flask on a scale (whose mouth is 112 up) to go under one, at the foot of a neck FAUCET_NECK long.
+ * counter for a flask on a scale (whose mouth is 112 up) to go under one, at the foot of a neck FAUCET_NECK long: long
+ * enough for the valve on it (see FAUCET_VALVE), clear of the elbow above and the spout's tip below.
  */
 const FAUCET_Y = LIFT + 160;
-const FAUCET_NECK = 30;
+const FAUCET_NECK = 35;
 const FAUCET_Z0 = 5.5 * CELL;
 const FAUCET_GAP = CELL;
 const FAUCET_OUT = 50;
@@ -348,7 +349,7 @@ function faucetFlow(valve = 0): Omit<LabFaucet, keyof FaucetSpot | 'start'> & { 
   return { valve, drop: new Vessel(Infinity), packet: new Vessel(Infinity), out: null, flow: 0, streaming: false };
 }
 
-/** A valve the player can turn: valve k of tool t, or faucet `faucet`'s (see KNOB). */
+/** A valve the player can turn: valve k of tool t, or faucet `faucet`'s (see FAUCET_VALVE). */
 type ValveRef = { t: Tool; k: number } | { faucet: number };
 /** How long a note stays up, in ms. */
 const NOTE_MS = 1600;
@@ -1392,7 +1393,7 @@ export class GameEngine {
     return out;
   }
 
-  /** The islands' faucets' risers, each a round post from the counter up to its knob. */
+  /** The islands' faucets' risers, each a round post from the counter up to its elbow. */
   private risers(): Box[] {
     return this.faucets.flatMap(({ base, wall }) => {
       if (!base) return [];
@@ -1673,7 +1674,7 @@ export class GameEngine {
 
   /**
    * Turn the valve being turned by as far as the pointer has swept round its middle since it was last taken, on the face
-   * it lies on (a tool's handwheel's or dial's, or the front of a faucet's knob, see knobPose): never to where the
+   * it lies on (a tool's handwheel's or dial's, or a faucet's, see faucetValvePose): never to where the
    * pointer is, only by how far it's gone round, so taking hold of it moves nothing, and nor does the pointer coming out
    * of the dead zone round its middle.
    */
@@ -1684,15 +1685,15 @@ export class GameEngine {
     const { o, d } = this.view.ray((aim.x / this.viewW) * 2 - 1, 1 - (aim.y / this.viewH) * 2);
     const t = 't' in tr ? tr.t : null;
     const fa = 'faucet' in tr ? this.faucets[tr.faucet] : null;
-    const pose = t ? t.pose : knobPose(fa!);
+    const pose = t ? t.pose : faucetValvePose(fa!);
     const n = { x: Math.sin(pose.yaw), y: 0, z: Math.cos(pose.yaw) };
-    const p0 = t && 't' in tr ? onTool(t, 0, 0, valveFaceZ(t, tr.k)) : toWorld(pose, { x: 0, y: 0, z: KNOB.r + KNOB.hubH });
+    const p0 = t && 't' in tr ? onTool(t, 0, 0, valveFaceZ(t, tr.k)) : toWorld(pose, { x: 0, y: 0, z: FAUCET_VALVE.pipe + VALVE_WHEEL.gap + VALVE_WHEEL.thick });
     const dn = d.x * n.x + d.z * n.z;
     if (Math.abs(dn) < 1e-3) return;
     const s = ((p0.x - o.x) * n.x + (p0.z - o.z) * n.z) / dn;
     if (s <= 0) return;
     const l = toLocal(pose, { x: o.x + d.x * s, y: o.y + d.y * s, z: o.z + d.z * s });
-    // the pointer's angle round the valve's middle (a faucet's is its knob's), x right and y down on its face
+    // the pointer's angle round the valve's middle, x right and y down on its face
     const c = 't' in tr ? valveLocal(tr.t, tr.k) : { x: 0, y: 0 };
     const a = aimAngle(l.x - c.x, -l.y - c.y);
     const by = swept(tr.last, a);
@@ -1985,7 +1986,7 @@ export class GameEngine {
 
   /**
    * The spout or faucet the crosshair is on, to pull a hose out of: a faucet's spout or the pipe down to it (not its
-   * knob, which is for its note), or a tool's spout, its tip or the pipe that runs to it alone. Null if it's on
+   * valve), or a tool's spout, its tip or the pipe that runs to it alone. Null if it's on
    * neither.
    */
   private mountAimed(): HoseMount | null {
@@ -2411,12 +2412,12 @@ export class GameEngine {
   }
 
   /**
-   * The valve the crosshair is on, if any: a tool's handwheel or dial, or a faucet's knob, never a part beside one (see
+   * The valve the crosshair is on, if any: a tool's handwheel or dial, or a faucet's, never a part beside one (see
    * the view's partOf).
    */
   private valveAimed(): ValveRef | null {
     const p = this.target;
-    // a faucet's valve is its knob, and the lever on it
+    // a faucet's valve is its handwheel
     if (p?.kind === 'faucet') return p.valve ? { faucet: p.i } : null;
     if (p?.kind !== 'tool' || p.t.shape.noValve || p.t.swap !== null) return null;
     return p.part === 'valve' ? { t: p.t, k: p.k } : null;

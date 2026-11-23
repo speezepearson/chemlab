@@ -18,7 +18,7 @@ import { Flask, Vessel, fluidAlpha, fluidRGB, volume } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, Scale } from './scale';
 import { COUNTERS, LIFT, ROOM, groundAt, toWorld, type Pose, type Vec3 } from './space';
-import { KNOB, knobPose } from './faucets';
+import { FAUCET_VALVE, faucetValvePose } from './faucets';
 import { PORT_FRAC, PORT_WALL, porthole, type Porthole } from './porthole';
 import { AIRLOCK, POD } from './airlock';
 import { arrival, notice, type Block } from '../intro/notice';
@@ -43,8 +43,8 @@ export type Pick =
   /** A hose's nozzle. */
   | { kind: 'hose'; h: Hose }
   /**
-   * A faucet: its spout, or the pipe down to it, if `spout`; its knob, or the hub and lever on it, if `valve` (see
-   * KNOB); else the pipe from the wall.
+   * A faucet: its spout, or the pipe down to it, if `spout`; its valve's handwheel, or the hub it's on, if `valve`
+   * (see FAUCET_VALVE); else the pipe from the wall, and the elbow.
    */
   | { kind: 'faucet'; i: number; spout?: boolean; valve?: boolean }
   /** The button under the beacon that silences the alarms. */
@@ -70,7 +70,7 @@ export interface FaucetSpot {
   wall: Vec3;
   base?: Vec3;
   output: Fluid;
-  /** The player's note, written above its knob; empty for none. */
+  /** The player's note, written above its elbow; empty for none. */
   note: string;
   /** How far its valve is open: 0 (shut) to 1 (fully open, FILL_RATE), as a tool's valve is (see faucetRate). */
   valve: number;
@@ -307,8 +307,15 @@ const WET = { rgb: '96, 92, 78', alpha: 0.28 };
 const hidden = new THREE.MeshBasicMaterial({ visible: false });
 const faintMat = new THREE.MeshBasicMaterial({ color: 0xd6ecf2, transparent: true, opacity: 0.3, depthWrite: false });
 const rodMat = metal(new THREE.MeshStandardMaterial({ color: 0xc8cfcd, metalness: 1, roughness: 0.18 }));
-/** How see-through a faucet's knob is at the most, for a clear fluid's (the solvent's). */
+/** How see-through a faucet's handwheel is at the most, for a clear fluid's (the solvent's). */
 const KNOB_ALPHA = 0.6;
+/**
+ * How light a faucet's handwheel's color must be (its luminance, 0 to 1) for its bar to be black; on a darker one
+ * (black's), the bar is this white, so it shows on every one.
+ */
+const BAR_DARK_ABOVE = 0.3;
+const BAR_LIGHT = 0xe9ecea;
+const BAR_DARK = 0x15191a;
 /** Polished chrome, for the faucets. */
 const chromeMat = metal(new THREE.MeshStandardMaterial({ color: 0xe2e7e8, metalness: 1, roughness: 0.08 }));
 /** The steel plate the supply station's panes are set in, and the lines marked on it. */
@@ -3961,15 +3968,15 @@ class BlindsButton {
 
 /**
  * The faucets: a manifold along a wall, with each of its faucets a pipe out over the counter; and on each island, a
- * chrome riser up from the counter with a pipe out over it. Each has a knob of its color (the solvent's clear, see
- * View.update), and a spout.
+ * chrome riser up from the counter with a pipe out over it. Each turns down at an elbow to its spout, with its valve
+ * on that drop: a handwheel of its color (the solvent's clear, see View.update).
  */
 function buildFaucets(
   scene: THREE.Scene,
   faucets: readonly FaucetSpot[],
   pickables: Map<THREE.Object3D, Pick>,
-): { mats: THREE.MeshPhysicalMaterial[]; notes: Label[]; levers: THREE.Group[] } {
-  if (!faucets.length) return { mats: [], notes: [], levers: [] };
+): { mats: THREE.MeshPhysicalMaterial[]; bars: THREE.MeshPhysicalMaterial[]; notes: Label[]; levers: THREE.Group[] } {
+  if (!faucets.length) return { mats: [], bars: [], notes: [], levers: [] };
   const g = new THREE.Group();
   const at = (p: Vec3) => new THREE.Vector3(p.x, p.y, p.z);
   const onWall = faucets.filter((fa) => !fa.base);
@@ -3998,6 +4005,7 @@ function buildFaucets(
   }
   const notes: Label[] = [];
   const levers: THREE.Group[] = [];
+  const bars: THREE.MeshPhysicalMaterial[] = [];
   const mats = faucets.map(({ wall, spout, base }, i) => {
     const elbow = new THREE.Vector3(spout.x, wall.y, spout.z);
     pickables.set(rod(g, chromeMat, at(wall), elbow, 3.5), { kind: 'faucet', i });
@@ -4028,39 +4036,35 @@ function buildFaucets(
     const tip = new THREE.Mesh(new THREE.CylinderGeometry(5, 4, 7, 16), chromeMat);
     tip.position.set(spout.x, spout.y + 3.5, spout.z);
     g.add(tip);
-    // a glossy knob in its fluid's color, on a chrome stem
-    const mat = new THREE.MeshPhysicalMaterial({ roughness: 0.3, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.08 });
-    const knob = new THREE.Mesh(new THREE.SphereGeometry(10, 24, 16), mat);
-    knob.position.copy(elbow);
-    knob.castShadow = true;
-    g.add(knob);
-    pickables.set(knob, { kind: 'faucet', i, valve: true });
     pickables.set(tip, { kind: 'faucet', i, spout: true });
-    // its valve on the knob's front, as a tool's is on its face: a dark hub, and a black lever on it that points
-    // where it's turned (see View.update), turning about the way the pipe reaches out
+    // the elbow, plain chrome like the rest of the pipe
+    const joint = new THREE.Mesh(unitSphere, chromeMat);
+    joint.position.copy(elbow);
+    joint.scale.setScalar(3.5);
+    g.add(joint);
+    pickables.set(joint, { kind: 'faucet', i });
+    // its valve on the drop, facing the way the pipe reaches out: a handwheel in its fluid's color (see View.update),
+    // its bar contrasting with it, on a short dark hub out from the drop
+    const mat = new THREE.MeshPhysicalMaterial({ roughness: 0.3, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.08 });
+    const bar = new THREE.MeshPhysicalMaterial({ roughness: 0.35, metalness: 0, clearcoat: 0.6, clearcoatRoughness: 0.2 });
     const valve = new THREE.Group();
-    const pose = knobPose({ spout, wall });
+    const pose = faucetValvePose({ spout, wall });
     valve.position.copy(at(pose));
     valve.rotation.y = pose.yaw;
-    const hub = new THREE.Mesh(unitCylinder, leverMat);
-    hub.rotation.x = Math.PI / 2;
-    hub.scale.set(KNOB.hub, KNOB.r + KNOB.hubH, KNOB.hub);
-    hub.position.z = (KNOB.r + KNOB.hubH) / 2;
-    valve.add(hub);
+    const stand = FAUCET_VALVE.pipe + VALVE_WHEEL.gap;
+    const hub = rod(valve, darkMat, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, stand + 0.2), 2.2);
     pickables.set(hub, { kind: 'faucet', i, valve: true });
-    const pivot = new THREE.Group();
-    pivot.position.z = KNOB.r + KNOB.hubH + 1;
-    const lever = new THREE.Mesh(new THREE.BoxGeometry(KNOB.lever + 2, 3, 2).translate(KNOB.lever / 2 - 1, 0, 0), leverMat);
-    lever.castShadow = true;
-    pivot.add(lever);
-    valve.add(pivot);
-    pickables.set(lever, { kind: 'faucet', i, valve: true });
+    const wheel = handwheel(mat, mat, bar);
+    wheel.position.z = stand;
+    valve.add(wheel);
+    wheel.traverse((m) => m instanceof THREE.Mesh && pickables.set(m, { kind: 'faucet', i, valve: true }));
     g.add(valve);
-    levers.push(pivot);
+    levers.push(wheel);
+    bars.push(bar);
     return mat;
   });
   scene.add(g);
-  return { mats, notes, levers };
+  return { mats, bars, notes, levers };
 }
 
 /* ---------------- the view ---------------- */
@@ -4068,7 +4072,7 @@ function buildFaucets(
 /**
  * The part a pick is on, to outline just that: one of a tool's tanks, valves or spouts, the rest of a tool for its
  * body, a flask, a scale. A spout and the hose pulled out of it are one part, nozzle too, and so are a faucet's
- * spout and its hose; its valve (its knob, with the hub and lever on it) is a part too, and the pipe from the wall
+ * spout and its hose; its valve (its handwheel, with the hub it's on) is a part too, and the pipe from the wall
  * stands for the whole faucet. The supply station, built into the
  * wall, is outlined a part at a time as ever: its funnel, its reservoir's window, or one of its two faucets (its
  * spout's pipe, with its valve); its plate, nothing. Of the shadow lamp, which stays where it is too, only its button
@@ -4099,7 +4103,7 @@ function partOf(p: Pick): unknown {
 
 /**
  * The whole thing a pick's mesh is part of, outlined faintly round the part: a tool for any of its parts, a faucet for
- * its knob or spout. Nothing for the station or the shadow lamp, which are part of the room; and nothing for a hose,
+ * its valve or spout. Nothing for the station or the shadow lamp, which are part of the room; and nothing for a hose,
  * which isn't part of its tool's own shape, so outlining the tool doesn't take its hoses in.
  */
 function thingOf(p: Pick): unknown {
@@ -4970,9 +4974,11 @@ export class View {
   private stands: StandView[] = [];
   private ghost: GhostView;
   private faucetMats: THREE.MeshStandardMaterial[] = [];
+  /** Each faucet's valve's bar, black or white to show on its handwheel's color (see BAR_DARK_ABOVE). */
+  private faucetBars: THREE.MeshStandardMaterial[] = [];
   private faucetNotes: Label[] = [];
-  /** Each faucet's valve's lever, turned to its setting (see buildFaucets). */
-  private faucetLevers: THREE.Group[] = [];
+  /** Each faucet's valve's handwheel, turned to its setting (see buildFaucets). */
+  private faucetWheels: THREE.Group[] = [];
   private streams: THREE.Mesh[] = [];
   private guides: THREE.Mesh[] = [];
   private rims: { g: THREE.Group; mat: THREE.MeshBasicMaterial; sides: THREE.Mesh[]; ring: THREE.Mesh }[] = [];
@@ -5050,8 +5056,9 @@ export class View {
     whenSurfaced(reflect);
     const fs = buildFaucets(this.scene, faucets, this.pickables);
     this.faucetMats = fs.mats;
+    this.faucetBars = fs.bars;
     this.faucetNotes = fs.notes;
-    this.faucetLevers = fs.levers;
+    this.faucetWheels = fs.levers;
   }
 
   /**
@@ -5134,17 +5141,20 @@ export class View {
       const mat = this.faucetMats[i];
       if (rgb && mat) {
         setRGB(mat.color, rgb);
-        // a knob for a clear fluid is clear too, like glossy acrylic, but never so clear it's hard to see
+        // a handwheel for a clear fluid is clear too, like glossy acrylic, but never so clear it's hard to see
         mat.opacity = Math.max(KNOB_ALPHA, fluidAlpha(fa.output));
         if (mat.transparent !== mat.opacity < 1) {
           mat.transparent = mat.opacity < 1;
           mat.needsUpdate = true;
         }
+        // its bar black, or white on a dark one, so it shows on every color
+        const lum = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
+        this.faucetBars[i]?.color.setHex(lum > BAR_DARK_ABOVE ? BAR_DARK : BAR_LIGHT);
       }
       this.faucetNotes[i]?.set(fa.note);
-      // shut points right, open straight up, at the angle it's been turned to (see settleAngle)
-      const lever = this.faucetLevers[i];
-      if (lever) lever.rotation.z = Math.PI / 2 - settleAngle('valve', fa.angle, fa.valve);
+      // at the angle it's been turned to (see settleAngle), upright open, as a tool's plain valve
+      const wheel = this.faucetWheels[i];
+      if (wheel) wheel.rotation.z = -settleAngle('valve', fa.angle, fa.valve);
     });
 
     this.updateStands(fr);

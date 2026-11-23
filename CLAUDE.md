@@ -130,7 +130,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `cabinet.ts` is the equipment cabinet: its layout (each kind's slots on its shelves) and its stock, which the
     equipment wheels take from and putting away puts back into. The view draws what's in it as instanced meshes
     (`CabinetView`), so it's cheap however much it holds.
-  - `faucets.ts` is the faucets: what each pours, and its knob, a valve turned just as a tool's is (the engine's
+  - `faucets.ts` is the faucets: what each pours, and its valve (`FAUCET_VALVE`), a handwheel on its neck, drawn and turned just as a tool's is (the engine's
     `turning` and `valveAimed` take either; `valveAt`, `sweep` and `settleAngle` in `bodies.ts` are the law they share), letting out
     `faucetRate` through the same `drip` as a spout.
   - Also here: `presets.ts`, `save.ts` and `scale.ts`.

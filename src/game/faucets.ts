@@ -107,24 +107,23 @@ export function faucetRate(valve: number): number {
 }
 
 /**
- * A faucet's knob: a glossy ball of its fluid's color, `r` in radius, at the elbow where its pipe from the wall (or its
- * riser) turns down to its spout; and on its front, the way that pipe reaches out, its valve: a hub, `hub` in radius
- * and standing `hubH` proud of the ball (far enough that a shut lever, lying along the wall's manifold, stands clearly in
- * front of it seen from the side), and a lever on it, `lever` long from the hub's middle, that points where it's
- * turned to, as a tool's valve's does: straight up open, straight right shut, as seen from in front.
+ * A faucet's valve: a handwheel as a tool's is (see VALVE_WHEEL), in its fluid's color, on the drop from the elbow where
+ * its pipe from the wall (or its riser) turns down to its spout, its middle `down` below the elbow, facing the way that
+ * pipe reaches out, standing VALVE_WHEEL.gap proud of the drop, which is `pipe` in radius. It turns as a tool's plain
+ * valve does: its bar upright open, level shut, as seen from in front.
  */
-export const KNOB = { r: 10, hub: 3.5, hubH: 12, lever: 17 };
+export const FAUCET_VALVE = { down: 15, pipe: 3 };
 
-/** A faucet's knob's middle, where its lever turns: the elbow over its spout, level with the pipe it's on. */
-export function knobAt(fa: { spout: Vec3; wall: Vec3 }): Vec3 {
-  return { x: fa.spout.x, y: fa.wall.y, z: fa.spout.z };
+/** A faucet's valve's middle, on its drop's axis, where it turns: under the elbow over its spout. */
+export function faucetValveAt(fa: { spout: Vec3; wall: Vec3 }): Vec3 {
+  return { x: fa.spout.x, y: fa.wall.y - FAUCET_VALVE.down, z: fa.spout.z };
 }
 
 /**
- * The frame a faucet's valve lies in (see toWorld): at its knob's middle, facing the way its pipe reaches out (out
- * from the wall, or from the top of an island's riser), so its lever lies on the face square to that, x to the right
+ * The frame a faucet's valve lies in (see toWorld): at its middle (see faucetValveAt), facing the way its pipe reaches
+ * out (out from the wall, or from the top of an island's riser), so it turns on the face square to that, x to the right
  * and y up as seen from in front.
  */
-export function knobPose(fa: { spout: Vec3; wall: Vec3 }): Pose {
-  return { ...knobAt(fa), yaw: Math.atan2(fa.spout.x - fa.wall.x, fa.spout.z - fa.wall.z) };
+export function faucetValvePose(fa: { spout: Vec3; wall: Vec3 }): Pose {
+  return { ...faucetValveAt(fa), yaw: Math.atan2(fa.spout.x - fa.wall.x, fa.spout.z - fa.wall.z) };
 }
