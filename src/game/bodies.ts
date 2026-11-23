@@ -2,10 +2,10 @@ import { volume, type Flask, type Vessel } from './flask';
 import { FLASK_H, fillLevel, flaskRadius } from './flaskShape';
 import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
-import { CELL, groundAt, toCardinal, toCell, toLocal, toWorld, type Pose, type Vec3 } from './space';
+import { CELL, groundAt, toLocal, toWorld, wrapAngle, type Pose, type Vec3 } from './space';
 import {
   HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, LAMP, METER_BODY, SHAPES, STATION, STRIP, TANK_H, TEST_PAPER, THERMOMETER_ROD, dipUnder, footY, isThermometer, levelIn,
-  tankDepth, tankPieces, tankX, overMouth, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
+  tankDepth, tankPieces, tankX, mouthBelow, overMouth, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
 } from './tools';
 
 /**
@@ -39,22 +39,60 @@ export const TOOL_DEPTH = Object.fromEntries(
 ) as Record<ToolKind, { body: number; tank: number }>;
 
 /**
- * A pose on the grid (see CELL): turned to the nearest of the four ways along it, and slid the least way that brings
- * `anchor`, a point in its own frame, over the middle of a cell.
+ * How far across what's held is pulled, at most, to line one of its outlets up over a mouth, or one of its mouths up
+ * under an outlet (see magnetShift): within this of lining up, it's set down lined up. It's a flask's radius (see
+ * FLASK_R), so a flask held with a spout over any of its foot is set down with its mouth under it.
  */
-export function onGrid(p: Pose, anchor: Vec3 = { x: 0, y: 0, z: 0 }): Pose {
-  const q = { ...p, yaw: toCardinal(p.yaw) };
-  const a = toWorld(q, anchor);
-  return { ...q, x: q.x + toCell(a.x) - a.x, z: q.z + toCell(a.z) - a.z };
+export const MAGNET = 28;
+
+/**
+ * How far across from where it's held what's let go of can be set down instead, if there's no room for it there (see
+ * GameEngine.placement), and how finely that's looked through: on rings round it, this much further out each time,
+ * with spots on each ring this far apart.
+ */
+export const NEAR = CELL;
+export const NEAR_STEP = 12;
+
+/** How near across an outlet must be to the middle of a mouth for the two to count as lined up (see magnetShift). */
+export const LINED_UP = 1;
+
+/** What can line up, of something or of everything else (see magnetShift): where fluid leaves it, and where it goes in. */
+export interface Magnets {
+  outlets: readonly Vec3[];
+  mouths: readonly Mouth[];
 }
 
 /**
- * The point of a tool that goes over the middle of a grid cell: the middle of its first tank's mouth, or for a tool
- * with no tanks (a thermometer), its middle. Its other mouths and its spouts are a whole number of cells from it along
- * the tool, so once it's on the grid, they are too.
+ * The shift across (x and z) that lines up the most of what's held's outlets over others' mouths, and others' outlets
+ * over its mouths, at once, no further than `reach`; the shortest of those that line up as many. Null if none lines
+ * any up. An outlet lines up with a mouth when it's within LINED_UP of its middle across and that mouth is the first
+ * below it, the one its fluid would land in (see mouthBelow), with what's held shifted: so nothing's lined up with a
+ * mouth hidden under another, nor an outlet of what's held with its own mouth.
  */
-export const toolAnchor = (t: Tool): Vec3 => ({ x: t.shape.tanks.length ? tankX(t.shape.tanks[0]) : 0, y: 0, z: 0 });
-
+export function magnetShift(mine: Magnets, others: Magnets, reach = MAGNET): { x: number; z: number; pairs: number } | null {
+  const shifts: { x: number; z: number }[] = [];
+  const add = (x: number, z: number) => {
+    if (Math.hypot(x, z) <= reach) shifts.push({ x, z });
+  };
+  for (const o of mine.outlets) for (const m of others.mouths) if (m.y < o.y) add(m.x - o.x, m.z - o.z);
+  for (const m of mine.mouths) for (const o of others.outlets) if (o.y > m.y) add(o.x - m.x, o.z - m.z);
+  let best: { x: number; z: number; pairs: number } | null = null;
+  for (const s of shifts) {
+    const moved = mine.mouths.map((m) => ({ ...m, x: m.x + s.x, z: m.z + s.z }));
+    const ours = new Set<Mouth>(moved);
+    const all = [...others.mouths, ...moved];
+    const lined = (o: Vec3, theirs: boolean) => {
+      const m = mouthBelow(all, o);
+      return !!m && ours.has(m) === theirs && Math.hypot(o.x - m.x, o.z - m.z) <= LINED_UP;
+    };
+    let pairs = 0;
+    for (const o of mine.outlets) if (lined({ x: o.x + s.x, y: o.y, z: o.z + s.z }, false)) pairs++;
+    for (const o of others.outlets) if (lined(o, true)) pairs++;
+    if (!pairs) continue;
+    if (!best || pairs > best.pairs || (pairs === best.pairs && Math.hypot(s.x, s.z) < Math.hypot(best.x, best.z))) best = { ...s, pairs };
+  }
+  return best;
+}
 
 /** A point in a tool's flat frame (x right, y down from its top center), `z` toward its front, in the room. */
 export function onTool(t: Tool, x: number, y: number, z = 0): Vec3 {
@@ -306,7 +344,7 @@ export const STRIP_FLOOR = 0.5;
 export const STRIP_STOOD = STRIP.paper.point - 0.5;
 
 /**
- * Where a dipper (see DIPPERS) aimed at mouth m goes, facing `yaw`, upright, over the middle of the mouth, on the grid,
+ * Where a dipper (see DIPPERS) aimed at mouth m goes, facing `yaw`, upright, over the middle of the mouth,
  * given how high the vessel's floor and its fluid's surface are (see flaskFluid and tankFluid):
  * - hovering, its foot DIP_HOVER above the mouth;
  * - dipped in by hand, its foot just under the surface (see dipUnder), so no more of it goes in than touches the
@@ -317,7 +355,7 @@ export const STRIP_STOOD = STRIP.paper.point - 0.5;
  * In an empty vessel, dipped or stood, it goes down to where it would stand on the floor.
  */
 export function dipPoses(t: Tool, m: Vec3, fluid: { floor: number; surface: number }, yaw: number): { hover: Pose; dipped: Pose; stood: Pose } {
-  const at = (foot: number) => onGrid({ x: m.x, y: foot + footY(t.kind), z: m.z, yaw }, toolAnchor(t));
+  const at = (foot: number): Pose => ({ x: m.x, y: foot + footY(t.kind), z: m.z, yaw });
   const { floor, surface } = fluid;
   const strip = t.kind === 'strip';
   const rest = floor + (strip ? STRIP_FLOOR : DIP_FLOOR);
@@ -410,10 +448,8 @@ export function onScale(sc: Scale, dx: number): Pose {
   return { ...toWorld(sc.pose, { x: dx, y: FLASK_H, z: 0 }), yaw: sc.pose.yaw };
 }
 
-/** Where along its platform a scale stands flasks: half a grid cell either side of its middle, a cell apart. */
+/** Where along its platform a scale stands flasks: half a cell (see CELL) either side of its middle, a cell apart. */
 export const SCALE_SLOTS = [-CELL / 2, CELL / 2];
-/** The point of a scale that goes over the middle of a grid cell: one of its places for a flask, so both are. */
-export const SCALE_ANCHOR: Vec3 = { x: SCALE_SLOTS[1], y: 0, z: 0 };
 
 /**
  * A scale's body and platform in the room; with `load`, reaching up over whatever's standing on it too (as it's
@@ -511,13 +547,13 @@ export interface Stand {
 }
 
 /** A stand's base plate: how far it reaches either side of its rod, across and front to back, and how thick it is. */
-export const STAND_BASE = { hx: 30, hz: 16, h: 6 };
+export const STAND_BASE = { hx: 28, hz: 16, h: 6 };
 /** How high a stand's rod reaches above the counter, whatever it holds: its clamp slides up and down it. */
 export const STAND_ROD = 570;
 /** How high a stand's clamp can be above the counter: just short of the top of its rod. */
 export const STAND_MAX = STAND_ROD - 10;
 /** A tool wider than this is held by two stands, one near each end, rather than one in the middle. */
-const TWO_STANDS = 300;
+const TWO_STANDS = 240;
 /**
  * How far behind the middle of what it holds a stand's rod is: far enough that its base clears a flask standing
  * under what it holds (or under the tool's spouts, which are along its middle), by this much.
@@ -544,9 +580,10 @@ export function toolStands(t: Tool, pose = t.pose): Stand[] {
 
 /**
  * How far behind a hose's nozzle its stand's rod can be, its clamp's arm slid in or out: from just far enough for its
- * base to clear a flask under the nozzle, out to three cells, in steps of `step`.
+ * base to clear a flask under the nozzle, out to five cells, in ten even steps of `step`.
  */
-export const NOZZLE_REACH = { min: rodBack(2 * NOZZLE_R), max: 3 * CELL, step: CELL / 4 };
+const NOZZLE_MIN = rodBack(2 * NOZZLE_R);
+export const NOZZLE_REACH = { min: NOZZLE_MIN, max: 5 * CELL, step: (5 * CELL - NOZZLE_MIN) / 10 };
 
 /** A reach for a nozzle's stand (see NOZZLE_REACH): the nearest step to `r`, within its range. */
 export function snapReach(r: number): number {
@@ -580,7 +617,7 @@ export function nozzleMounts(want: NozzleMount): NozzleMount[] {
   const reaches: number[] = [];
   for (let r = min; r <= max + 1e-9; r += step) reaches.push(r);
   reaches.sort((a, b) => Math.abs(a - reach) - Math.abs(b - reach) || b - a);
-  const turns = [0, -1, 1, 2].map((k) => toCardinal(want.turn + (k * Math.PI) / 2));
+  const turns = [0, -1, 1, 2].map((k) => wrapAngle(want.turn + (k * Math.PI) / 2));
   return turns.flatMap((turn) => reaches.map((r) => ({ turn, reach: r })));
 }
 
@@ -610,28 +647,39 @@ export function valveNear(t: Tool, x: number, y: number): number | null {
   return best;
 }
 
+/** How a lever turns (see leverAt): a valve's, a splitter's or a multiplexer's, or a dial. */
+export type LeverKind = 'valve' | 'split' | 'dial';
+
 /**
- * Point valve k's lever at (x, y) in the tool's flat frame as it stands (y down): straight up from the valve is fully
- * open, straight right is closed, and in between is partly open. Below the valve it closes, and left
- * of it (past the down-left diagonal) it opens, so a wild swing lands at the nearer end. A splitter's lever instead
- * sweeps the upper half: straight left sends everything left, straight right everything right, and below the valve
- * it goes to the nearer side; a multiplexer's the same, taking everything from the left or the right. A dial points at (x, y), turning clockwise from down-left (0) to down-right (1), and
- * straight below it goes to the nearer end. Within VALVE_DEADZONE of the valve the angle is too jumpy to mean
- * anything, so the lever stays put.
+ * The setting a lever pointed at (dx, dy) from its valve's center, on the face it lies on (x right, y down), comes to:
+ * a valve's straight up is fully open (1), straight right closed (0), and partly open in between, so its lever stands at
+ * its setting times a quarter turn up from right. Below the valve it closes, and left of it (past the down-left
+ * diagonal) it opens, so a wild swing lands at the nearer end. A splitter's lever instead sweeps the upper half:
+ * straight left sends everything left, straight right everything right, and below the valve it goes to the nearer
+ * side; a multiplexer's the same, taking everything from the left or the right. A dial points at (dx, dy), turning
+ * clockwise from down-left (0) to down-right (1), and straight below it goes to the nearer end. Within VALVE_DEADZONE
+ * of the center the angle is too jumpy to mean anything, so the lever stays put: null.
  */
+export function leverAt(kind: LeverKind, dx: number, dy: number): number | null {
+  if (Math.hypot(dx, dy) < VALVE_DEADZONE) return null;
+  if (kind === 'dial') {
+    const cw = Math.atan2(dx, -dy); // clockwise from straight up
+    return Math.max(0, Math.min(1, (cw + 0.75 * Math.PI) / (1.5 * Math.PI)));
+  }
+  const a = Math.atan2(-dy, dx); // counterclockwise from right
+  if (kind === 'split') return a >= 0 ? 1 - a / Math.PI : a > -Math.PI / 2 ? 1 : 0;
+  const open = a < -0.75 * Math.PI ? 1 : a / (Math.PI / 2);
+  return Math.max(0, Math.min(1, open));
+}
+
+/** How valve k of tool t turns (see leverAt). */
+export function leverKind(t: Tool, k: number): LeverKind {
+  return k === t.shape.dial ? 'dial' : t.kind === 'splitter' || t.kind === 'multiplexer' ? 'split' : 'valve';
+}
+
+/** Point valve k's lever at (x, y) in the tool's flat frame as it stands (y down); see leverAt. */
 export function aimValve(t: Tool, k: number, x: number, y: number): void {
   const vc = valveLocal(t, k);
-  if (Math.hypot(x - vc.x, y - vc.y) < VALVE_DEADZONE) return;
-  if (k === t.shape.dial) {
-    const cw = Math.atan2(x - vc.x, vc.y - y); // clockwise from straight up
-    t.valves[k] = Math.max(0, Math.min(1, (cw + 0.75 * Math.PI) / (1.5 * Math.PI)));
-    return;
-  }
-  const a = Math.atan2(vc.y - y, x - vc.x); // counterclockwise from right
-  if (t.kind === 'splitter' || t.kind === 'multiplexer') {
-    t.valves[k] = a >= 0 ? 1 - a / Math.PI : a > -Math.PI / 2 ? 1 : 0;
-    return;
-  }
-  const open = a < -0.75 * Math.PI ? 1 : a / (Math.PI / 2);
-  t.valves[k] = Math.max(0, Math.min(1, open));
+  const v = leverAt(leverKind(t, k), x - vc.x, y - vc.y);
+  if (v !== null) t.valves[k] = v;
 }

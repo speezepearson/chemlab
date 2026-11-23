@@ -35,16 +35,21 @@ export function flaskGrams(f: Flask): number {
   return f.glass + w * GRAMS_PER_WEIGHT;
 }
 
-/** Scale geometry in local units, origin at the top center of the platform, y down as on the old flat bench. */
+/**
+ * Scale geometry in local units, origin at the top center of the platform, y down as on the old flat bench. It's two
+ * cells long and one deep (see CELL), a little inside them, its places for a flask over the two (see SCALE_SLOTS):
+ * the display just wide enough for six seven-segment cells (a reading below −SCALE_MAX's five digits), and the tare key
+ * beside it.
+ */
 export const SCALE_SHAPE = {
-  platform: { x0: -92, x1: 92 },
+  platform: { x0: -58, x1: 58 },
   /** How far the platform and body reach out front and back. */
-  depth: 36,
-  body: { x0: -84, x1: 84, y1: 40 },
-  display: { x0: -62, x1: 22, y0: 12, y1: 32 },
-  tare: { x0: 32, x1: 70, y0: 14, y1: 30 },
+  depth: 29,
+  body: { x0: -54, x1: 54, y1: 40 },
+  display: { x0: -50, x1: 22, y0: 12, y1: 32 },
+  tare: { x0: 27, x1: 50, y0: 14, y1: 30 },
   /** Bounding box, including flasks standing on it. */
-  box: { x0: -92, x1: 92, y0: -74, y1: 42 },
+  box: { x0: -58, x1: 58, y0: -74, y1: 42 },
 };
 
 /** A bench scale with gram resolution. Flasks stand anywhere along its platform. */

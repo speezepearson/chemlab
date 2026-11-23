@@ -95,14 +95,16 @@ type Engine = Record<string, any>;
 interface Scene {
   about: string;
   preset: Preset;
-  /** Adjust the loaded lab: hoses, flasks under faucets. */
+  /** Adjust the loaded lab: hoses, flasks under faucets, and the faucets they use opened. */
   after?: (e: Engine) => void;
 }
 
 const base = (flasks: (FlaskFill | null)[], id: string): Preset => ({ ...DEFAULT_PRESET, id, name: id, flasks, tools: [] });
 
+/** A hose from a spout or a faucet into a mouth; a faucet's is opened all the way, as faucets start shut. */
 function hose(e: Engine, on: Hose['on'], into: { x: number; y: number; z: number }, up = 24): void {
   e.hoses.push(new Hose(on, { x: into.x, y: into.y + up, z: into.z }, NOZZLE_REACH.min));
+  if ('faucet' in on) e.faucets[on.faucet].valve = 1;
 }
 
 const SCENES: Record<string, Scene> = {

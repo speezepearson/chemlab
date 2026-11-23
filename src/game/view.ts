@@ -10,14 +10,15 @@ import type { Fluid } from '../chem/reactions';
 import { OUTLINE } from './outline';
 import { glowFalloff } from './appearance';
 import {
-  NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
+  NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onScale, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
 } from './bodies';
 import { SPECIES } from '../chem/species';
 import { CAP, DELIVERY, GOAL_PURITY, TRACE } from './config';
 import { Flask, Vessel, fluidAlpha, fluidRGB, volume } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, Scale } from './scale';
-import { COUNTERS, LIFT, ROOM, groundAt, toWorld, type Vec3 } from './space';
+import { COUNTERS, LIFT, ROOM, groundAt, toWorld, type Pose, type Vec3 } from './space';
+import { KNOB, knobPose } from './faucets';
 import { PORT_FRAC, PORT_WALL, porthole, type Porthole } from './porthole';
 import { AIRLOCK, POD } from './airlock';
 import { arrival, notice, type Block } from '../intro/notice';
@@ -26,7 +27,7 @@ import { litresOf, type Supply } from './supply';
 import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
-  clockText, LAMP, SCREEN, ringShare, atomSector, BOND_ENDS, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS, 
+  clockText, LAMP, SCREEN, TANK_SECTION, ringShare, atomSector, BOND_ENDS, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS,
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, TEST_PAPER, paperTriangles, sectorInset, BOND_PAPER, bondDots, isBlotter, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Hose, type Piece, Tool,
 } from './tools';
@@ -40,8 +41,11 @@ export type Pick =
   | { kind: 'scale'; sc: Scale; part: 'body' | 'tare' }
   /** A hose's nozzle. */
   | { kind: 'hose'; h: Hose }
-  /** A faucet: its spout, or the pipe down to it, if `spout`; else its knob or the pipe from the wall. */
-  | { kind: 'faucet'; i: number; spout?: boolean }
+  /**
+   * A faucet: its spout, or the pipe down to it, if `spout`; its knob, or the hub and lever on it, if `valve` (see
+   * KNOB); else the pipe from the wall.
+   */
+  | { kind: 'faucet'; i: number; spout?: boolean; valve?: boolean }
   /** The button under the beacon that silences the alarms. */
   | { kind: 'alarm' }
   /** The button by the porthole that shuts its blinds, or opens them. */
@@ -67,6 +71,8 @@ export interface FaucetSpot {
   output: Fluid;
   /** The player's note, written above its knob; empty for none. */
   note: string;
+  /** How far its valve is open: 0 (shut) to 1 (fully open, FILL_RATE), as a tool's valve is (see faucetRate). */
+  valve: number;
 }
 
 /** Everything the view needs to draw one frame. */
@@ -102,6 +108,12 @@ export interface Frame {
   footprints: readonly (Vec3 & { hx: number; hz: number; yaw: number; ok: boolean; square?: boolean })[];
   /** Every clamp stand, each with what it holds up, to grab that by it. */
   stands: readonly { s: Stand; of: Pick }[];
+  /**
+   * What's being moved by a ghost (see Held.ghost in engine.ts), drawn as one where it would come to rest if let go,
+   * with its stands, their bases `y` high; or, `ok` false, where it's held, red, since it can't be set down. The tool
+   * or scale itself is only for what it is (its kind, its valves, how many flasks ride on it): the ghost is a copy.
+   */
+  ghost: { tool?: Tool; scale?: Scale; pose: Pose; ok: boolean; stands: readonly { s: Stand; y: number }[] } | null;
   drops: readonly { at: Vec3; v: Vessel; hanging: boolean }[];
   /** The scale whose tare key is held down. */
   tarePress: Scale | null;
@@ -186,9 +198,9 @@ const PHOSPHOR = '64, 255, 110';
 /**
  * The separator's manifold, below its valve, in local units (y down): two arms sloping down from a peak under its
  * tank, midway between its spouts, each `slope` (radians) below level, `thick` through and `deep` front to back,
- * reaching `over` past its spout; `top` is how far down the peak's top is.
+ * reaching `over` past its spout; `top` is how far down the peak's top is, just under its valve.
  */
-const SEP_ARMS = { top: 102, slope: Math.PI / 12, thick: 12, deep: 20, over: 10 };
+const SEP_ARMS = { top: TANK_SECTION.h + 18, slope: Math.PI / 12, thick: 12, deep: 20, over: 10 };
 /** Height of each line of a label, in world units. */
 const LABEL_H = 10;
 /** How far above a flask's mouth or a scale's platform its note sits, to the note's middle. */
@@ -2341,7 +2353,7 @@ class ToolView {
       this.lids.push(lid);
     };
 
-    // the funnel, over the cell in front of the wall, with its fluid settling into it as drawn (see STATION_FUNNEL)
+    // the funnel, out over the counter, with its fluid settling into it as drawn (see STATION_FUNNEL)
     const built = art.children.length;
     glassFrom(art, frustum(fx, f.y, f.y + f.h, 2 * f.w, 2 * f.w, FUNNEL_TIP, FUNNEL_TIP, true));
     const fm = new FluidMesh([frustum(fx, f.y + 0.5, f.y + f.h - 0.5, 2 * f.w - 1.5, 2 * f.w - 1.5, FUNNEL_TIP - 1, FUNNEL_TIP - 1, false)], art);
@@ -2847,6 +2859,143 @@ class StandView {
     this.arm.position.set(0, s.clampY, len / 2);
     this.arm.scale.set(2.6, 2.6, len);
     this.jaw.position.set(0, s.clampY, len);
+  }
+}
+
+/* ---------------- ghosts ---------------- */
+
+/**
+ * The layer a ghost is drawn on (see GhostView), apart from everything else: only the frame's main render draws it,
+ * so it casts no shadow, nothing's shadow lamp light is stopped by it (see Exposer, which goes by layer 0), and it
+ * hides no guide.
+ */
+const GHOST_LAYER = 7;
+/** The outline round a ghost that can't be set down (see GhostView.outline): the red of a footprint that can't go. */
+const GHOST_RED = '#e0604c';
+/** How a ghost looks (see GhostView): how much of each of its materials' opacity it keeps, and its red where it can't go. */
+export const GHOST: { opacity: number; least: number; red: number; redMix: number; glow: number; tint: number | null; tintMix: number } = {
+  opacity: 0.55, least: 0.28, red: 0xe0604c, redMix: 0.75, glow: 0x5a686c,
+  // a pale cyan it's all tinted toward, so it's told from the real thing (null for its own colors; for trying looks
+  // out, from the console in a dev build)
+  tint: 0xbfe8ff, tintMix: 0.6,
+};
+
+/**
+ * A ghost of what's being moved (see Frame.ghost): a new, empty one of it, drawn as it would be, but see-through,
+ * with nothing in it, and red where it can't be set down; not in the world (see GHOST_LAYER), and nothing to aim at.
+ */
+class GhostView {
+  private holder = new THREE.Group();
+  private key = '';
+  private tool?: { t: Tool; v: ToolView };
+  private scale?: { sc: Scale; v: ScaleView; flasks: FlaskView[] };
+  private stands: StandView[] = [];
+  /** Each material of the ghost's, as the copies it's drawn with, as it can go and as it can't; and back. */
+  private copies = new Map<THREE.Material, { ok: THREE.Material; bad: THREE.Material }>();
+  private originals = new Map<THREE.Material, THREE.Material>();
+  private red: boolean | null = null;
+
+  /** Its meshes, to outline (see View.render), and whether it can't rest, for the outline's red; none if it's hidden. */
+  outline(): { meshes: THREE.Object3D[]; red: boolean } {
+    const meshes: THREE.Object3D[] = [];
+    if (this.holder.visible) this.holder.traverseVisible((o) => (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) && meshes.push(o));
+    return { meshes, red: !!this.red };
+  }
+
+  constructor(scene: THREE.Scene) {
+    scene.add(this.holder);
+  }
+
+  update(g: Frame['ghost'], clock: number, energies: readonly number[]): void {
+    const key = (!g ? '' : g.tool ? `tool ${g.tool.kind}` : `scale ${g.scale!.load.map((l) => l.dx).join(',')}`) + ` ${JSON.stringify(GHOST)}`;
+    if (key !== this.key) this.build(g, key);
+    this.holder.visible = !!g;
+    if (!g) return;
+    const none = new Set<Vessel>();
+    if (this.tool) {
+      const { t, v } = this.tool;
+      t.pose = g.pose;
+      t.valves.splice(0, t.valves.length, ...g.tool!.valves);
+      v.update(clock, energies, none);
+    }
+    if (this.scale) {
+      const { sc, v, flasks } = this.scale;
+      sc.pose = g.pose;
+      v.update(false, null);
+      flasks.forEach((fv, i) => {
+        fv.f.pose = onScale(sc, g.scale!.load[i].dx);
+        fv.update(none);
+      });
+    }
+    while (this.stands.length < g.stands.length) this.stands.push(new StandView(this.holder));
+    this.stands.forEach((v, i) => {
+      const st = g.stands[i];
+      v.group.visible = !!st;
+      if (st) v.update(st.s, st.y);
+    });
+    this.red = !g.ok;
+    this.ghostly();
+  }
+
+  /** Make a new ghost of what's moved now, if anything is, in place of the last. */
+  private build(g: Frame['ghost'], key: string): void {
+    this.key = key;
+    for (const { ok, bad } of this.copies.values()) for (const c of [ok, bad]) c.dispose();
+    this.copies.clear();
+    this.originals.clear();
+    this.tool?.v.dispose();
+    this.scale?.v.dispose();
+    for (const f of this.scale?.flasks ?? []) f.dispose();
+    this.tool = this.scale = undefined;
+    const none = new Map<THREE.Object3D, Pick>();
+    if (g?.tool) {
+      const t = new Tool(g.tool.kind, -1);
+      this.tool = { t, v: new ToolView(t, this.holder, none) };
+    } else if (g?.scale) {
+      const sc = new Scale();
+      this.scale = { sc, v: new ScaleView(sc, this.holder, none), flasks: g.scale.load.map(() => new FlaskView(new Flask(CAP), this.holder, none)) };
+    }
+  }
+
+  /**
+   * Put everything of the ghost's on its own layer, unlit by nothing and casting nothing, its labels hidden, each
+   * material swapped for its ghost's (made the first time it's met): see-through, and red if it can't go.
+   */
+  private ghostly(): void {
+    const copy = (m: THREE.Material, red: boolean): THREE.Material => {
+      const c = m.clone();
+      c.transparent = true;
+      c.opacity = Math.max(GHOST.least, m.opacity * GHOST.opacity);
+      c.depthWrite = false;
+      if (c instanceof THREE.MeshPhysicalMaterial) c.transmission = 0;
+      // (a little light of its own, so it shows against the dark as well as the light)
+      (c as THREE.Material & { emissive?: THREE.Color }).emissive?.set(GHOST.glow);
+      if (GHOST.tint !== null && !red) {
+        (c as THREE.Material & { color?: THREE.Color }).color?.lerp(new THREE.Color(GHOST.tint), GHOST.tintMix);
+        (c as THREE.Material & { emissive?: THREE.Color }).emissive?.set(GHOST.tint).multiplyScalar(0.35);
+      }
+      if (red) {
+        (c as THREE.Material & { color?: THREE.Color }).color?.lerp(new THREE.Color(GHOST.red), GHOST.redMix);
+        (c as THREE.Material & { emissive?: THREE.Color }).emissive?.set(GHOST.red).multiplyScalar(0.25);
+      }
+      this.originals.set(c, m);
+      return c;
+    };
+    const ghostOf = (m: THREE.Material): THREE.Material => {
+      const o = this.originals.get(m) ?? m;
+      let got = this.copies.get(o);
+      if (!got) this.copies.set(o, (got = { ok: copy(o, false), bad: copy(o, true) }));
+      return this.red ? got.bad : got.ok;
+    };
+    this.holder.traverse((o) => {
+      o.layers.set(GHOST_LAYER);
+      o.castShadow = o.receiveShadow = false;
+      if (o instanceof THREE.Sprite || o.userData.bent) o.visible = false;
+      if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
+        const mesh = o as THREE.Mesh;
+        mesh.material = Array.isArray(mesh.material) ? mesh.material.map(ghostOf) : ghostOf(mesh.material);
+      }
+    });
   }
 }
 
@@ -3742,8 +3891,8 @@ function buildFaucets(
   scene: THREE.Scene,
   faucets: readonly FaucetSpot[],
   pickables: Map<THREE.Object3D, Pick>,
-): { mats: THREE.MeshPhysicalMaterial[]; notes: Label[] } {
-  if (!faucets.length) return { mats: [], notes: [] };
+): { mats: THREE.MeshPhysicalMaterial[]; notes: Label[]; levers: THREE.Group[] } {
+  if (!faucets.length) return { mats: [], notes: [], levers: [] };
   const g = new THREE.Group();
   const at = (p: Vec3) => new THREE.Vector3(p.x, p.y, p.z);
   const onWall = faucets.filter((fa) => !fa.base);
@@ -3771,6 +3920,7 @@ function buildFaucets(
     }
   }
   const notes: Label[] = [];
+  const levers: THREE.Group[] = [];
   const mats = faucets.map(({ wall, spout, base }, i) => {
     const elbow = new THREE.Vector3(spout.x, wall.y, spout.z);
     pickables.set(rod(g, chromeMat, at(wall), elbow, 3.5), { kind: 'faucet', i });
@@ -3807,12 +3957,33 @@ function buildFaucets(
     knob.position.copy(elbow);
     knob.castShadow = true;
     g.add(knob);
-    pickables.set(knob, { kind: 'faucet', i });
+    pickables.set(knob, { kind: 'faucet', i, valve: true });
     pickables.set(tip, { kind: 'faucet', i, spout: true });
+    // its valve on the knob's front, as a tool's is on its face: a dark hub, and a black lever on it that points
+    // where it's turned (see View.update), turning about the way the pipe reaches out
+    const valve = new THREE.Group();
+    const pose = knobPose({ spout, wall });
+    valve.position.copy(at(pose));
+    valve.rotation.y = pose.yaw;
+    const hub = new THREE.Mesh(unitCylinder, leverMat);
+    hub.rotation.x = Math.PI / 2;
+    hub.scale.set(KNOB.hub, KNOB.r + KNOB.hubH, KNOB.hub);
+    hub.position.z = (KNOB.r + KNOB.hubH) / 2;
+    valve.add(hub);
+    pickables.set(hub, { kind: 'faucet', i, valve: true });
+    const pivot = new THREE.Group();
+    pivot.position.z = KNOB.r + KNOB.hubH + 1;
+    const lever = new THREE.Mesh(new THREE.BoxGeometry(KNOB.lever + 2, 3, 2).translate(KNOB.lever / 2 - 1, 0, 0), leverMat);
+    lever.castShadow = true;
+    pivot.add(lever);
+    valve.add(pivot);
+    pickables.set(lever, { kind: 'faucet', i, valve: true });
+    g.add(valve);
+    levers.push(pivot);
     return mat;
   });
   scene.add(g);
-  return { mats, notes };
+  return { mats, notes, levers };
 }
 
 /* ---------------- the view ---------------- */
@@ -4265,7 +4436,7 @@ class Outliner {
   }
 
   /** Outline `meshes` over what `renderer` last drew of `scene`. */
-  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, meshes: THREE.Object3D[]): void {
+  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, meshes: THREE.Object3D[], color: string = OUTLINE.color): void {
     const width = OUTLINE.width * renderer.getPixelRatio();
     if (width <= 0 || !meshes.length) return;
     const reach = Math.min(254, Math.ceil(width + 0.5));
@@ -4307,7 +4478,7 @@ class Outliner {
     u.texel.value = texel;
     u.reach.value = reach;
     u.width.value = width;
-    (u.color.value as THREE.Color).set(OUTLINE.color);
+    (u.color.value as THREE.Color).set(color);
     this.quad.material = this.down;
     renderer.setRenderTarget(null);
     renderer.autoClear = false;
@@ -4687,8 +4858,11 @@ export class View {
   private scales = new Map<Scale, ScaleView>();
   private hoses = new Map<Hose, HoseView>();
   private stands: StandView[] = [];
+  private ghost: GhostView;
   private faucetMats: THREE.MeshStandardMaterial[] = [];
   private faucetNotes: Label[] = [];
+  /** Each faucet's valve's lever, turned to its setting (see buildFaucets). */
+  private faucetLevers: THREE.Group[] = [];
   private streams: THREE.Mesh[] = [];
   private guides: THREE.Mesh[] = [];
   private rims: { g: THREE.Group; mat: THREE.MeshBasicMaterial; sides: THREE.Mesh[]; ring: THREE.Mesh }[] = [];
@@ -4745,6 +4919,7 @@ export class View {
     this.blindsButton = new BlindsButton(this.scene, this.pickables);
     this.airlock = new AirlockView(this.scene, this.pickables, eye);
     this.cabinet = new CabinetView(this.scene, this.pickables);
+    this.ghost = new GhostView(this.scene);
     // what metal and glass reflect: the room itself, seen from its middle at eye height, before anything's in it, and
     // again once its surfaces have their textures (see textures.ts)
     const reflect = () => {
@@ -4760,6 +4935,7 @@ export class View {
     const fs = buildFaucets(this.scene, faucets, this.pickables);
     this.faucetMats = fs.mats;
     this.faucetNotes = fs.notes;
+    this.faucetLevers = fs.levers;
   }
 
   /** A little picture of each kind of thing the equipment wheels make (see IconStudio). */
@@ -4832,9 +5008,13 @@ export class View {
         }
       }
       this.faucetNotes[i]?.set(fa.note);
+      // shut points right, open straight up, as a tool's valve's lever does
+      const lever = this.faucetLevers[i];
+      if (lever) lever.rotation.z = (fa.valve * Math.PI) / 2;
     });
 
     this.updateStands(fr);
+    this.ghost.update(fr.ghost, fr.clock, fr.energies);
     this.updateStreams(fr);
     this.updateGuides(fr);
 
@@ -4858,10 +5038,15 @@ export class View {
     this.renderer.getDrawingBufferSize(refractScreen.value);
     this.renderer.transmissionResolutionScale = REFRACT.scale;
     this.camera.layers.enable(REFRACT_LAYER);
+    this.camera.layers.enable(GHOST_LAYER);
     this.renderer.render(scene, this.camera);
     this.camera.layers.disable(REFRACT_LAYER);
+    this.camera.layers.disable(GHOST_LAYER);
     this.renderGuides();
     this.renderOutline(fr.hot);
+    // what's moved by a ghost is outlined there, always, red if it can't go, its destination crisp against anything
+    const ghost = this.ghost.outline();
+    if (ghost.meshes.length) this.outliner.render(this.renderer, scene, this.camera, ghost.meshes, ghost.red ? GHOST_RED : OUTLINE.color);
     this.shine();
   }
 
