@@ -83,8 +83,10 @@ export interface FaucetSpot {
   valve: number;
   /** The angle its valve is drawn and turned at, as a tool's (see settleAngle in bodies.ts): never saved. */
   angle?: number;
-  /** The stopcock fitted on it, at its tip or on the end of its hose, if there is one (see Cock). */
+  /** The stopcock fitted at its tip, if there is one (see Cock). */
   cock: Cock | null;
+  /** The stopcock on the end of its hose, under the nozzle, if the hose is out and there is one. */
+  end: Cock | null;
 }
 
 /** Everything the view needs to draw one frame. */
@@ -2812,7 +2814,7 @@ class ToolView {
     const { t } = this;
     const sh = t.shape;
     t.cocks.forEach((c, j) => {
-      const want = c && !c.nozzle ? c : null;
+      const want = c;
       const was = this.cocks[j];
       if (was && was.c !== want) {
         was.v.dispose();
@@ -3141,9 +3143,9 @@ class GhostView {
       // with the stopcocks it has at its spouts' tips (and so none it doesn't), as they're set
       g.tool!.cocks.forEach((c, j) => {
         const mine = t.cocks[j];
-        if (!c || c.nozzle) t.cocks[j] = null;
+        if (!c) t.cocks[j] = null;
         else if (mine) Object.assign(mine, { valve: c.valve, angle: c.angle });
-        else t.cocks[j] = { valve: c.valve, angle: c.angle, nozzle: false };
+        else t.cocks[j] = { valve: c.valve, angle: c.angle };
       });
       v.update(clock, energies, none);
     }
@@ -4243,7 +4245,7 @@ function partOf(p: Pick): unknown {
     case 'hose': {
       const m = p.h.on;
       // (a stopcock on its end is a part of its own, as one at the spout's tip is)
-      if (p.cock) return 'tool' in m ? `tool ${m.tool.id} cock ${m.spout}` : `faucet ${m.faucet} cock`;
+      if (p.cock) return 'tool' in m ? `tool ${m.tool.id} end ${m.spout}` : `faucet ${m.faucet} end`;
       return 'tool' in m ? `tool ${m.tool.id} spout ${m.spout}` : `faucet ${m.faucet} spout`;
     }
     case 'faucet': return p.spout ? `faucet ${p.i} spout` : p.valve ? `faucet ${p.i} valve` : p.cock ? `faucet ${p.i} cock` : `faucet ${p.i}`;
@@ -4305,7 +4307,7 @@ function specimen(k: Stocked, scene: THREE.Object3D): THREE.Object3D {
   } else if (k === 'stopcock') {
     // shut, as it's put away
     const v = new CockView(scene, null, null);
-    v.set({ valve: 0, nozzle: false });
+    v.set({ valve: 0 });
     root = v.group;
   } else {
     const v = new ToolView(new Tool(k, -1), scene, none);
@@ -5315,7 +5317,7 @@ export class View {
       const wheel = this.faucetWheels[i];
       if (wheel) wheel.rotation.z = -settleAngle('valve', fa.angle, fa.valve);
       // a stopcock at its tip hangs from it, facing as its valve does; its foot is the faucet's spout
-      const want = fa.cock && !fa.cock.nozzle ? fa.cock : null;
+      const want = fa.cock;
       const was = this.faucetCocks[i];
       if (was && was.c !== want) {
         was.v.dispose();

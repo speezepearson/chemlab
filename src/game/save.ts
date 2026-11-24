@@ -22,7 +22,7 @@ export interface SaveState {
    * before faucets had valves, when they ran all the time, has none: its faucets load fully open. And the stopcock on
    * each, if there is one (see Cock): how it's set, and whether it's on the end of its hose.
    */
-  faucets?: { x: number; y: number; note?: string; valve?: number; cock?: { valve: number; nozzle?: boolean } | null }[];
+  faucets?: { x: number; y: number; note?: string; valve?: number; cock?: { valve: number; nozzle?: boolean } | null; end?: { valve: number } | null }[];
   chem?: { bonds: ChemParams['bonds']; swapA: number; heatCap: number };
   /** The target the receptacle has taken so far, by volume, toward the goal; none if left out. */
   delivered?: number;
@@ -74,10 +74,12 @@ export interface SavedTool extends SavedDepth {
    */
   valves: number[];
   /**
-   * Per spout, the stopcock fitted on it (see Cock), or null for none: its setting, and whether it's on the end of the
-   * spout's hose rather than at its tip. A save from before there were stopcocks has none.
+   * Per spout, the stopcock fitted at its tip (see Cock), or null for none: its setting. A save from before there were
+   * stopcocks has none; one from when a spout had only one, on either end, says `nozzle` of one on its hose's end.
    */
   cocks?: ({ valve: number; nozzle?: boolean } | null)[];
+  /** Per spout, the stopcock on the end of its hose (see Tool.ends), or null for none. */
+  ends?: ({ valve: number } | null)[];
   tanks: SavedVessel[];
   /** Per spout, the drop hanging there, if any. */
   drops?: SavedVessel[];

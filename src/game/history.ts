@@ -19,7 +19,7 @@ export interface Things {
   tools: Tool[];
   scales: Scale[];
   hoses: Hose[];
-  faucets: { note: string; valve: number; cock: Cock | null }[];
+  faucets: { note: string; valve: number; cock: Cock | null; end: Cock | null }[];
   /** What's in the equipment cabinet, changed in place. */
   stock: Stock;
 }
@@ -27,10 +27,10 @@ export interface Things {
 /** The lab's arrangement at some moment (see arrangement). */
 export interface Arrangement {
   flasks: { f: Flask; pose: Pose; label: string }[];
-  tools: { t: Tool; pose: Pose; valves: number[]; cocks: ({ valve: number; nozzle: boolean } | null)[]; note: string; labels: string[]; lit: boolean }[];
+  tools: { t: Tool; pose: Pose; valves: number[]; cocks: ({ valve: number } | null)[]; ends: ({ valve: number } | null)[]; note: string; labels: string[]; lit: boolean }[];
   scales: { sc: Scale; pose: Pose; load: { f: Flask; dx: number }[]; tare: number; note: string }[];
   hoses: { h: Hose; outlet: Vec3; turn: number; reach: number }[];
-  faucets: { note: string; valve: number; cock: { valve: number; nozzle: boolean } | null }[];
+  faucets: { note: string; valve: number; cock: { valve: number } | null; end: { valve: number } | null }[];
   stock: Stock;
   alarmsOff: boolean;
   blindsShut: boolean;
@@ -44,12 +44,13 @@ export function arrangement(l: Things, sw: Switches): Arrangement {
   return {
     flasks: l.flasks.map((f) => ({ f, pose: { ...f.pose }, label: f.label })),
     tools: l.tools.map((t) => ({
-      t, pose: { ...t.pose }, valves: [...t.valves], cocks: t.cocks.map((c) => c && { valve: c.valve, nozzle: c.nozzle }),
+      t, pose: { ...t.pose }, valves: [...t.valves], cocks: t.cocks.map((c) => c && { valve: c.valve }),
+      ends: t.ends.map((c) => c && { valve: c.valve }),
       note: t.note, labels: t.tanks.map((v) => v.label), lit: t.lit,
     })),
     scales: l.scales.map((sc) => ({ sc, pose: { ...sc.pose }, load: sc.load.map((x) => ({ ...x })), tare: sc.tare, note: sc.note })),
     hoses: l.hoses.map((h) => ({ h, outlet: { ...h.outlet }, turn: h.turn, reach: h.reach })),
-    faucets: l.faucets.map(({ note, valve, cock }) => ({ note, valve, cock: cock && { valve: cock.valve, nozzle: cock.nozzle } })),
+    faucets: l.faucets.map(({ note, valve, cock, end }) => ({ note, valve, cock: cock && { valve: cock.valve }, end: end && { valve: end.valve } })),
     stock: copyStock(l.stock),
     alarmsOff: sw.alarmsOff,
     blindsShut: sw.blindsShut,
@@ -62,11 +63,12 @@ export function arrange(l: Things, a: Arrangement): void {
   l.tools.splice(
     0,
     Infinity,
-    ...a.tools.map(({ t, pose, valves, cocks, note, labels, lit }) => {
+    ...a.tools.map(({ t, pose, valves, cocks, ends, note, labels, lit }) => {
       Object.assign(t, { pose: { ...pose }, note, lit });
       t.valves.splice(0, Infinity, ...valves);
       // (a stopcock still there is the same one, set as it was; its angle is worked out afresh, see settleAngle)
-      cocks.forEach((c, j) => (t.cocks[j] = c && Object.assign(t.cocks[j] ?? { valve: 0, nozzle: false }, c)));
+      cocks.forEach((c, j) => (t.cocks[j] = c && Object.assign(t.cocks[j] ?? { valve: 0 }, c)));
+      ends.forEach((c, j) => (t.ends[j] = c && Object.assign(t.ends[j] ?? { valve: 0 }, c)));
       t.tanks.forEach((v, k) => (v.label = labels[k] ?? ''));
       return t;
     }),
@@ -82,8 +84,10 @@ export function arrange(l: Things, a: Arrangement): void {
   );
   l.hoses.splice(0, Infinity, ...a.hoses.map(({ h, outlet, turn, reach }) => Object.assign(h, { outlet: { ...outlet }, turn, reach })));
   l.faucets.forEach((fa, i) => {
-    const { note, valve, cock } = a.faucets[i] ?? { note: '', valve: fa.valve, cock: null };
-    Object.assign(fa, { note, valve, cock: cock && Object.assign(fa.cock ?? { valve: 0, nozzle: false }, cock) });
+    const { note, valve, cock, end } = a.faucets[i] ?? { note: '', valve: fa.valve, cock: null, end: null };
+    Object.assign(fa, {
+      note, valve, cock: cock && Object.assign(fa.cock ?? { valve: 0 }, cock), end: end && Object.assign(fa.end ?? { valve: 0 }, end),
+    });
   });
   for (const k of Object.keys(a.stock) as Stocked[]) l.stock[k].splice(0, Infinity, ...a.stock[k]);
 }

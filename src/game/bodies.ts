@@ -120,7 +120,7 @@ export function spoutTip(t: Tool, j: number): Vec3 {
  */
 export function spoutAt(t: Tool, j: number): Vec3 {
   const tip = spoutTip(t, j);
-  return t.cocks[j] && !t.cocks[j]!.nozzle ? { ...tip, y: tip.y - STOPCOCK.drop } : tip;
+  return t.cocks[j] ? { ...tip, y: tip.y - STOPCOCK.drop } : tip;
 }
 
 /** A built-in valve's center, in the tool's flat frame (see ToolShape.valves). */
@@ -199,7 +199,7 @@ export type ToolPart = { x0: number; x1: number; y0: number; y1: number; hz: num
 export function cockParts(t: Tool): ToolPart[] {
   const out: ToolPart[] = [];
   t.cocks.forEach((c, j) => {
-    if (!c || c.nozzle) return;
+    if (!c) return;
     const x = t.shape.spouts[j];
     const { y0, y1, hx, z0, z1 } = COCK_EXTENT;
     out.push({ x0: x - hx, x1: x + hx, y0: t.shape.spoutY + y0, y1: t.shape.spoutY + y1, hz: (z1 - z0) / 2, z: plumbZ(t) + (z0 + z1) / 2 });

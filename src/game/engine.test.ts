@@ -82,7 +82,7 @@ interface Inside {
 }
 
 /** Fit a stopcock at the tip of t's first spout, set to v (see Tool.cocks), or set the one there to v. */
-const cock = (t: Tool, v: number) => (t.cocks[0] = { valve: v, nozzle: false });
+const cock = (t: Tool, v: number) => (t.cocks[0] = { valve: v });
 
 /** Whether the lab has t's stands up, as t stands (see toolStands). */
 const standing = (l: { in: Inside }, t: Tool) =>
@@ -1974,7 +1974,7 @@ describe('faucets’ valves', () => {
     l.in.target = { kind: 'faucet', i: 0, spout: true, point: fa.spout };
     l.in.leftDown(false);
     expect(l.in.held).toBeNull();
-    expect(fa.cock).toEqual({ valve: 0, nozzle: false });
+    expect(fa.cock).toEqual({ valve: 0 });
     const I = l.in as unknown as { faucetOutlet(i: number): { y: number } };
     expect(I.faucetOutlet(0).y).toBe(fa.spout.y - STOPCOCK.drop);
     run(l, 1);
@@ -1982,30 +1982,46 @@ describe('faucets’ valves', () => {
     fa.cock!.valve = 0.5;
     run(l, 1);
     expect(volume(f) / faucetRate(0.5)).toBeCloseTo(1, 3);
+    // with another on its hose's end, as far as both are open
+    const nozzle = new Hose({ faucet: 0 }, { x: fa.spout.x, y: fa.spout.y - 40, z: fa.spout.z }, NOZZLE_REACH.min);
+    taps(l).hoses.push(nozzle);
+    expect(l.e.spawn('stopcock')).toBe(true);
+    l.in.target = { kind: 'hose', h: nozzle, point: nozzle.outlet };
+    l.in.leftDown(false);
+    const fe = fa as unknown as { end: Cock | null };
+    expect(fe.end).toEqual({ valve: 0 });
+    fe.end!.valve = 0.5;
+    const was = volume(f);
+    run(l, 1);
+    expect((volume(f) - was) / faucetRate(0.25)).toBeCloseTo(1, 2);
+    const s0 = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    expect([s0.faucets![0].cock, s0.faucets![0].end]).toEqual([{ valve: 0.5 }, { valve: 0.5 }]);
+    fe.end = null;
+    taps(l).hoses.splice(0);
     fa.valve = 0.5;
     const had = volume(f);
     run(l, 1);
     expect((volume(f) - had) / faucetRate(0.25)).toBeCloseTo(1, 3);
     // its handwheel turns it, the rest of it takes it off, and its foot is the faucet's spout
     l.in.target = { kind: 'faucet', i: 0, cock: true, turns: true };
-    expect(l.in.valveAimed()).toEqual({ cock: { faucet: 0 } });
+    expect(l.in.valveAimed()).toEqual({ cock: { m: { faucet: 0 }, nozzle: false } });
     // a save keeps it, and a save from before there were stopcocks has none
     const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
     expect(s.faucets![0].cock).toEqual({ valve: 0.5 });
     l.e.restore(s, DEFAULT_PRESET);
-    expect((taps(l).faucets[0] as unknown as { cock: Cock | null }).cock).toEqual({ valve: 0.5, nozzle: false });
+    expect((taps(l).faucets[0] as unknown as { cock: Cock | null }).cock).toEqual({ valve: 0.5 });
     delete s.faucets![0].cock;
     l.e.restore(s, DEFAULT_PRESET);
     expect((taps(l).faucets[0] as unknown as { cock: Cock | null }).cock).toBeNull();
     l.e.restore(JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState, DEFAULT_PRESET);
     l.in.target = { kind: 'faucet', i: 0, cock: true };
     const fb = taps(l).faucets[0] as unknown as { cock: Cock | null };
-    fb.cock = { valve: 0.5, nozzle: false };
+    fb.cock = { valve: 0.5 };
     l.in.leftDown(false);
     expect(fb.cock).toBeNull();
     expect(l.in.held?.kind).toBe('cock');
     l.in.putBack();
-    expect(fb.cock).toEqual({ valve: 0.5, nozzle: false });
+    expect(fb.cock).toEqual({ valve: 0.5 });
   });
 
   it('take none on the station’s waste spigot, but one on its reservoir’s faucet, which it throttles', () => {
@@ -2016,7 +2032,7 @@ describe('faucets’ valves', () => {
     expect(l.in.placement(l.in.held)).not.toHaveProperty('rest', expect.objectContaining({ cock: expect.objectContaining({ m: { tool: st, spout: 0 } }) }));
     l.in.target = { kind: 'tool', t: st, part: 'spout', k: 1, point: spoutTip(st, 1) };
     l.in.leftDown(false);
-    expect(st.cocks).toEqual([null, { valve: 0, nozzle: false }]);
+    expect(st.cocks).toEqual([null, { valve: 0 }]);
     st.valves[0] = 1;
     const ref = st.tanks[1];
     const was = ref.N;
@@ -2116,7 +2132,7 @@ describe('faucets’ valves', () => {
     l.in.target = { kind: 'tool', t, part: 'cock', k: 0, point: spoutAt(t, 0) } as never;
     expect(l.in.valveAimed()).toBeNull();
     l.in.target = { kind: 'tool', t, part: 'cock', k: 0, turns: true, point: spoutAt(t, 0) } as never;
-    expect(l.in.valveAimed()).toEqual({ cock: { tool: t, spout: 0 } });
+    expect(l.in.valveAimed()).toEqual({ cock: { m: { tool: t, spout: 0 }, nozzle: false } });
     const tip = spoutTip(t, 0);
     const face = (dx: number, dy: number) => ({ x: tip.x + dx, y: tip.y - STOPCOCK.wheelY - dy, z: tip.z + 400 });
     let at = face(20, 0);
@@ -2166,7 +2182,7 @@ describe('stopcocks', () => {
       const t = new Tool(kind, 0);
       const fitted = ['dispenser', 'pipette', 'tank', 'dilatometer'].includes(kind);
       expect(t.cocks.length, kind).toBe(t.shape.spouts.length);
-      for (const c of t.cocks) expect(c, kind).toEqual(fitted ? { valve: 0, nozzle: false } : null);
+      for (const c of t.cocks) expect(c, kind).toEqual(fitted ? { valve: 0 } : null);
       t.shape.spouts.forEach((_, j) => expect(t.open(j), kind).toBe(fitted ? 0 : 1));
     }
   });
@@ -2190,7 +2206,7 @@ describe('stopcocks', () => {
     atSpout(l, pip);
     l.in.leftDown(false);
     expect(cocks(l).held).toBeNull();
-    expect(pip.cocks[0]).toEqual({ valve: 0, nozzle: false });
+    expect(pip.cocks[0]).toEqual({ valve: 0 });
     expect(spoutAt(pip, 0)).toEqual({ ...tip, y: tip.y - STOPCOCK.drop });
     pip.tanks[0].setMolecules(singleOf('R'), CAP / 20);
     run(l, 1);
@@ -2198,10 +2214,10 @@ describe('stopcocks', () => {
     // taken off, the spout's open again, and Q puts it back as it was
     atCock(l, pip);
     l.in.leftDown(false);
-    expect(cocks(l).held?.c).toEqual({ valve: 0, nozzle: false });
+    expect(cocks(l).held?.c).toEqual({ valve: 0 });
     expect(pip.cocks[0]).toBeNull();
     l.in.putBack();
-    expect(pip.cocks[0]).toEqual({ valve: 0, nozzle: false });
+    expect(pip.cocks[0]).toEqual({ valve: 0 });
     // taken off and put away, it's back in its compartment
     atCock(l, pip);
     l.in.leftDown(false);
@@ -2210,7 +2226,7 @@ describe('stopcocks', () => {
     expect(l.in.stock.stopcock.filter(Boolean)).toHaveLength(n);
     // each was one step to undo
     l.e.undo();
-    expect(pip.cocks[0]).toEqual({ valve: 0, nozzle: false });
+    expect(pip.cocks[0]).toEqual({ valve: 0 });
     expect(l.in.stock.stopcock.filter(Boolean)).toHaveLength(n - 1);
   });
 
@@ -2253,7 +2269,7 @@ describe('stopcocks', () => {
     const n = l.in.stock.stopcock.filter(Boolean).length;
     expect(l.e.spawn('dispenser')).toBe(true);
     const d = l.in.held!.t!;
-    expect(d.cocks).toEqual([{ valve: 0, nozzle: false }]);
+    expect(d.cocks).toEqual([{ valve: 0 }]);
     l.in.putAway();
     expect(l.in.stock.stopcock.filter(Boolean)).toHaveLength(n);
     // a loose one put away with its compartment full is just gone
@@ -2267,7 +2283,7 @@ describe('stopcocks', () => {
   it('are kept by a save, and one in hand as put back; a save from before them fits them as its valves were', () => {
     const l = lab();
     const pip = bare(l);
-    pip.cocks[0] = { valve: 0.3, nozzle: false };
+    pip.cocks[0] = { valve: 0.3 };
     atCock(l, pip);
     l.in.leftDown(false);
     expect(pip.cocks[0]).toBeNull();
@@ -2275,7 +2291,7 @@ describe('stopcocks', () => {
     const saved = s.tools.find((t) => t.id === pip.id)!;
     expect(saved.cocks).toEqual([{ valve: 0.3 }]);
     l.e.restore(s, DEFAULT_PRESET);
-    expect(l.in.tools.find((t) => t.id === pip.id)!.cocks).toEqual([{ valve: 0.3, nozzle: false }]);
+    expect(l.in.tools.find((t) => t.id === pip.id)!.cocks).toEqual([{ valve: 0.3 }]);
     // none saved on it: none
     saved.cocks = [null];
     l.e.restore(s, DEFAULT_PRESET);
@@ -2287,14 +2303,14 @@ describe('stopcocks', () => {
     for (const t of s.tools) if (t.id === pip.id) Object.assign(t, { valves: [0.3], cocks: undefined });
     l.e.restore(s, DEFAULT_PRESET);
     const by = (id: number) => l.in.tools.find((t) => t.id === id)!;
-    expect(by(950).cocks).toEqual([{ valve: 0.3, nozzle: false }, { valve: 0.3, nozzle: false }]);
+    expect(by(950).cocks).toEqual([{ valve: 0.3 }, { valve: 0.3 }]);
     expect(by(950).valves).toEqual([]);
-    expect(by(951).cocks).toEqual([{ valve: 0.2, nozzle: false }, { valve: 0.7, nozzle: false }]);
+    expect(by(951).cocks).toEqual([{ valve: 0.2 }, { valve: 0.7 }]);
     expect(by(951).valves).toEqual([0.4]);
     expect(by(952).cocks).toEqual([null, null]);
     expect(by(952).valves).toEqual([0.8]);
     expect(by(953).cocks).toEqual([null]);
-    expect(by(pip.id).cocks).toEqual([{ valve: 0.3, nozzle: false }]);
+    expect(by(pip.id).cocks).toEqual([{ valve: 0.3 }]);
   });
 
   it('are fitted by the demos where their valves used to be set', () => {
@@ -2309,7 +2325,7 @@ describe('stopcocks', () => {
     const pip = bare(l);
     const tip = spoutTip(pip, 0);
     // a spout's stopcock stays at its tip as the hose is pulled out, and the hose runs from its foot
-    pip.cocks[0] = { valve: 1, nozzle: false };
+    pip.cocks[0] = { valve: 1 };
     atSpout(l, pip);
     l.in.leftDown(false);
     expect(cocks(l).held?.kind).toBe('hose');
@@ -2326,7 +2342,7 @@ describe('stopcocks', () => {
     l.in.target = { kind: 'hose', h: nozzle, point: nozzle.outlet };
     l.in.leftDown(false);
     expect(cocks(l).held).toBeNull();
-    expect(pip.cocks[0]).toEqual({ valve: 0, nozzle: true });
+    expect([pip.cocks[0], pip.ends[0]]).toEqual([null, { valve: 0 }]);
     // the hose still runs from the spout's bare tip, and what it lets out leaves the stopcock's foot
     expect(I.mountAt(nozzle.on)).toEqual(tip);
     expect(I.outletAt(pip, 0)).toEqual({ ...nozzle.outlet, y: nozzle.outlet.y - STOPCOCK.drop });
@@ -2336,31 +2352,146 @@ describe('stopcocks', () => {
     expect(pip.tanks[0].N).toBe(CAP / 20);
     // it's turned, and taken off, there just as at a tip
     l.in.target = { kind: 'hose', h: nozzle, cock: true, turns: true, point: nozzle.outlet };
-    expect(l.in.valveAimed()).toEqual({ cock: { tool: pip, spout: 0 } });
+    expect(l.in.valveAimed()).toEqual({ cock: { m: { tool: pip, spout: 0 }, nozzle: true } });
     l.in.target = { kind: 'hose', h: nozzle, cock: true, point: nozzle.outlet };
     l.in.leftDown(false);
-    expect(pip.cocks[0]).toBeNull();
+    expect(pip.ends[0]).toBeNull();
     l.in.putBack();
-    expect(pip.cocks[0]).toEqual({ valve: 0, nozzle: true });
-    // the hose rolled up, the stopcock goes up to the spout's tip
+    expect(pip.ends[0]).toEqual({ valve: 0 });
+    // the hose rolled up, the stopcock goes up to the spout's tip, which has none
     l.in.target = { kind: 'hose', h: nozzle, point: nozzle.outlet };
     l.in.leftDown(false);
     expect(cocks(l).held?.kind).toBe('hose');
     l.in.putAway();
     expect(cocks(l).hoses).toHaveLength(0);
-    expect(pip.cocks[0]).toEqual({ valve: 0, nozzle: false });
+    expect([pip.cocks[0], pip.ends[0]]).toEqual([{ valve: 0 }, null]);
     expect(I.outletAt(pip, 0)).toEqual({ ...tip, y: tip.y - STOPCOCK.drop });
-    // and a save keeps one on a hose's end there
-    pip.cocks[0]!.nozzle = true;
+  });
+
+  it('go one at a spout’s tip and one on its hose’s end, each on its own, and let it out as far as both are open', () => {
+    const l = lab();
+    const pip = bare(l);
+    const tip = spoutTip(pip, 0);
+    const I = l.in as unknown as { mountAt(m: unknown): unknown; outletAt(t: Tool, j: number): { x: number; y: number; z: number }; valveAimed(): unknown };
+    pip.cocks[0] = { valve: 0.5 };
+    const nozzle = new Hose({ tool: pip, spout: 0 }, { x: tip.x + 2 * CELL, y: tip.y, z: tip.z }, NOZZLE_REACH.min);
     cocks(l).hoses.push(nozzle);
+    // the tip's taken, but the hose's end is free: aimed at the nozzle, the second goes on there
+    expect(l.e.spawn('stopcock')).toBe(true);
+    atSpout(l, pip);
+    expect('why' in l.in.placement(l.in.held)).toBe(true);
+    l.in.target = { kind: 'hose', h: nozzle, point: nozzle.outlet };
+    l.in.leftDown(false);
+    expect(cocks(l).held).toBeNull();
+    expect([pip.cocks[0], pip.ends[0]]).toEqual([{ valve: 0.5 }, { valve: 0 }]);
+    // the hose runs from the tip's stopcock's foot, and lets out at the end's
+    expect(I.mountAt(nozzle.on)).toEqual({ ...tip, y: tip.y - STOPCOCK.drop });
+    expect(I.outletAt(pip, 0)).toEqual({ ...nozzle.outlet, y: nozzle.outlet.y - STOPCOCK.drop });
+    // the two multiply
+    pip.ends[0]!.valve = 0.4;
+    expect(pip.open(0)).toBeCloseTo(0.2, 12);
+    // each is turned, and taken off, by itself
+    l.in.target = { kind: 'tool', t: pip, part: 'cock', k: 0, turns: true, point: tip };
+    expect(l.in.valveAimed()).toEqual({ cock: { m: { tool: pip, spout: 0 }, nozzle: false } });
+    l.in.target = { kind: 'hose', h: nozzle, cock: true, turns: true, point: nozzle.outlet };
+    expect(l.in.valveAimed()).toEqual({ cock: { m: { tool: pip, spout: 0 }, nozzle: true } });
+    l.in.target = { kind: 'tool', t: pip, part: 'cock', k: 0, point: tip };
+    l.in.leftDown(false);
+    expect([pip.cocks[0], pip.ends[0]]).toEqual([null, { valve: 0.4 }]);
+    l.in.putBack();
+    expect([pip.cocks[0], pip.ends[0]]).toEqual([{ valve: 0.5 }, { valve: 0.4 }]);
+    // a save keeps both, and loads them back
     const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
-    expect(s.tools.find((t) => t.id === pip.id)!.cocks).toEqual([{ valve: 0, nozzle: true }]);
+    const saved = s.tools.find((t) => t.id === pip.id)!;
+    expect([saved.cocks, saved.ends]).toEqual([[{ valve: 0.5 }], [{ valve: 0.4 }]]);
     l.e.restore(s, DEFAULT_PRESET);
-    expect(l.in.tools.find((t) => t.id === pip.id)!.cocks).toEqual([{ valve: 0, nozzle: true }]);
-    // one saved on a hose's end with no hose out is at the spout's tip
+    const again = l.in.tools.find((t) => t.id === pip.id)!;
+    expect([again.cocks, again.ends]).toEqual([[{ valve: 0.5 }], [{ valve: 0.4 }]]);
+    // one on a hose's end with no hose, the tip taken, goes back in the cabinet
+    const n = l.in.stock.stopcock.filter(Boolean).length;
     s.hoses = [];
     l.e.restore(s, DEFAULT_PRESET);
-    expect(l.in.tools.find((t) => t.id === pip.id)!.cocks).toEqual([{ valve: 0, nozzle: false }]);
+    const bare2 = l.in.tools.find((t) => t.id === pip.id)!;
+    expect([bare2.cocks, bare2.ends]).toEqual([[{ valve: 0.5 }], [null]]);
+    expect(l.in.stock.stopcock.filter(Boolean)).toHaveLength(Math.min(STOCK.stopcock, n + 1));
+  });
+
+  it('load as one on the end of a hose, if it is there, from a save from when a spout had only one, said by `nozzle`', () => {
+    const l = lab();
+    const pip = bare(l);
+    const tip = spoutTip(pip, 0);
+    cocks(l).hoses.push(new Hose({ tool: pip, spout: 0 }, { x: tip.x + 2 * CELL, y: tip.y, z: tip.z }, NOZZLE_REACH.min));
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    const saved = s.tools.find((t) => t.id === pip.id)!;
+    saved.cocks = [{ valve: 0.3, nozzle: true }];
+    delete saved.ends;
+    l.e.restore(s, DEFAULT_PRESET);
+    let t = l.in.tools.find((u) => u.id === pip.id)!;
+    expect([t.cocks, t.ends]).toEqual([[null], [{ valve: 0.3 }]]);
+    // and with no hose, at the tip
+    s.hoses = [];
+    l.e.restore(s, DEFAULT_PRESET);
+    t = l.in.tools.find((u) => u.id === pip.id)!;
+    expect([t.cocks, t.ends]).toEqual([[{ valve: 0.3 }], [null]]);
+  });
+
+  it('rolled up on its hose with one at the tip already, the end one comes into her hand, and one undo puts both back', () => {
+    const l = lab();
+    const pip = bare(l);
+    const tip = spoutTip(pip, 0);
+    pip.cocks[0] = { valve: 0.5 };
+    const nozzle = new Hose({ tool: pip, spout: 0 }, { x: tip.x + 2 * CELL, y: tip.y, z: tip.z }, NOZZLE_REACH.min);
+    cocks(l).hoses.push(nozzle);
+    pip.ends[0] = { valve: 0.7 };
+    // (with a place for it in its compartment)
+    l.in.stock.stopcock.fill(false, 8);
+    l.in.target = { kind: 'hose', h: nozzle, point: nozzle.outlet };
+    l.in.leftDown(false);
+    expect(cocks(l).held?.kind).toBe('hose');
+    l.in.putAway();
+    expect(cocks(l).hoses).toHaveLength(0);
+    expect([pip.cocks[0], pip.ends[0]]).toEqual([{ valve: 0.5 }, null]);
+    // in hand, as one fresh from the cabinet, set as it was: Q puts it in the cabinet
+    expect(cocks(l).held?.kind).toBe('cock');
+    expect(cocks(l).held?.c).toEqual({ valve: 0.7 });
+    expect(cocks(l).held?.from).toBeUndefined();
+    const n = l.in.stock.stopcock.filter(Boolean).length;
+    l.in.putBack();
+    expect(cocks(l).held).toBeNull();
+    expect(l.in.stock.stopcock.filter(Boolean)).toHaveLength(n + 1);
+    // one undo: the hose out, with its stopcock on its end, and the cabinet as it was
+    l.e.undo();
+    expect(cocks(l).hoses).toEqual([nozzle]);
+    expect([pip.cocks[0], pip.ends[0]]).toEqual([{ valve: 0.5 }, { valve: 0.7 }]);
+    expect(l.in.stock.stopcock.filter(Boolean)).toHaveLength(n);
+  });
+
+  it('go with a tool put away, both of them; and through the changeover, an end one with the tip taken goes in the cabinet', () => {
+    const l = lab();
+    const pip = bare(l);
+    const tip = spoutTip(pip, 0);
+    pip.cocks[0] = { valve: 0.5 };
+    pip.ends[0] = { valve: 0.7 };
+    cocks(l).hoses.push(new Hose({ tool: pip, spout: 0 }, { x: tip.x + 2 * CELL, y: tip.y, z: tip.z }, NOZZLE_REACH.min));
+    l.in.stock.stopcock.fill(false, 8);
+    const n = l.in.stock.stopcock.filter(Boolean).length;
+    l.in.target = { kind: 'tool', t: pip, part: 'body', k: 0, point: tip };
+    l.in.grabOrRelease(false);
+    l.in.putAway();
+    expect(l.in.tools).not.toContain(pip);
+    expect(cocks(l).hoses).toHaveLength(0);
+    expect(l.in.stock.stopcock.filter(Boolean)).toHaveLength(n);
+    // the station: one at its faucet's tip, one on its hose's end
+    const st = l.in.tools.find((t) => t.kind === 'receptacle')!;
+    const ft = spoutTip(st, 1);
+    st.cocks[1] = { valve: 1 };
+    st.ends[1] = { valve: 1 };
+    cocks(l).hoses.push(new Hose({ tool: st, spout: 1 }, { x: ft.x - 100, y: ft.y, z: ft.z }, NOZZLE_REACH.min));
+    st.swap = 0;
+    l.in.simulate(0.02);
+    expect(cocks(l).hoses).toHaveLength(0);
+    expect([st.cocks[1], st.ends[1]]).toEqual([{ valve: 1 }, null]);
+    expect(l.in.stock.stopcock.filter(Boolean)).toHaveLength(n + 1);
   });
 
   it('go on no nozzle docked on an instrument’s tube; and one docking with a stopcock on its end sends it to the spout', () => {
@@ -2377,12 +2508,19 @@ describe('stopcocks', () => {
     l.in.putAway();
     // a nozzle with one on its end, taken up and docked, leaves it at the spout's tip
     nozzle.outlet = { x: top.x + CELL, y: top.y + 60, z: top.z };
-    pip.cocks[0] = { valve: 0.5, nozzle: true };
+    pip.ends[0] = { valve: 0.5 };
     l.in.target = { kind: 'hose', h: nozzle, point: nozzle.outlet };
     l.in.leftDown(false);
     expect(cocks(l).held?.kind).toBe('hose');
-    (l.in as unknown as { setDown(h: unknown, r: unknown): void }).setDown(l.in.held, { pose: { x: top.x, y: top.y + 1, z: top.z, yaw: 0 }, hose: { turn: 0, reach: NOZZLE_REACH.min } });
-    expect(pip.cocks[0]).toEqual({ valve: 0.5, nozzle: false });
+    const I = l.in as unknown as { snapped(h: unknown, p: unknown): { y: number }; setDown(h: unknown, r: unknown): void };
+    const over = { x: top.x, y: top.y + 40, z: top.z, yaw: 0 };
+    expect(I.snapped(l.in.held, over).y).toBe(top.y + 1);
+    // but not with one at the tip already
+    pip.cocks[0] = { valve: 1 };
+    expect(I.snapped(l.in.held, over).y).toBe(over.y);
+    pip.cocks[0] = null;
+    I.setDown(l.in.held, { pose: { x: top.x, y: top.y + 1, z: top.z, yaw: 0 }, hose: { turn: 0, reach: NOZZLE_REACH.min } });
+    expect([pip.cocks[0], pip.ends[0]]).toEqual([{ valve: 0.5 }, null]);
   });
 
   /** A flask set down with its mouth just under p. */

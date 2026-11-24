@@ -23,7 +23,7 @@ const G = singleOf('G');
 const atomTotal = (v: { n: Float64Array }) => SPECIES.reduce((t, s) => t + v.n[s.i] * s.size, 0);
 /** A tool with a stopcock at the tip of each of its spouts, set as `open` says, spout by spout (see Tool.cocks). */
 function cocked(t: Tool, open: readonly number[]): Tool {
-  open.forEach((valve, j) => (t.cocks[j] = { valve, nozzle: false }));
+  open.forEach((valve, j) => (t.cocks[j] = { valve }));
   return t;
 }
 
@@ -1531,7 +1531,7 @@ describe('dispenser', () => {
 
   it('comes with a stopcock shut, and dispenses nothing when shut or empty', () => {
     const d = new Tool('dispenser', 0);
-    expect(d.cocks).toEqual([{ valve: 0, nozzle: false }]);
+    expect(d.cocks).toEqual([{ valve: 0 }]);
     filled(d.tanks[0], R, CAP, 1);
     expect(d.step(0.1)).toEqual([null]);
     expect(d.tanks[0].N).toBe(CAP);

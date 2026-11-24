@@ -1619,15 +1619,14 @@ export class Blotter extends Vessel {
 
 /**
  * A stopcock: a short inline fitting with a handwheel on it (see STOPCOCK in bodies.ts), fitted on a spout or a
- * faucet's, at its tip, or on the end of the hose pulled out of it, under its nozzle (`nozzle`). What leaves the spout
- * leaves it at the stopcock's foot, as far as it's open: `valve`, 0 (shut) to 1 (fully open), set as a plain valve's
- * handwheel is turned (see valveAt in bodies.ts), at `angle` as it's drawn and turned (never saved: see settleAngle).
- * There's at most one on each spout or faucet.
+ * faucet's, at its tip (see Tool.cocks), or on the end of the hose pulled out of it, under its nozzle (see Tool.ends).
+ * What passes through it leaves at its foot, as far as it's open: `valve`, 0 (shut) to 1 (fully open), set as a plain
+ * valve's handwheel is turned (see valveAt in bodies.ts), at `angle` as it's drawn and turned (never saved: see
+ * settleAngle). There's at most one at each end: none on another.
  */
 export interface Cock {
   valve: number;
   angle?: number;
-  nozzle: boolean;
 }
 
 /**
@@ -1699,10 +1698,15 @@ export class Tool {
    */
   readonly valves: number[];
   /**
-   * Per spout, the stopcock fitted on it, if there is one (see Cock), which says how open the spout is (see open); a
-   * spout with none is fully open. A tool that comes fitted (see ToolShape.fitted) starts with a shut one on each.
+   * Per spout, the stopcock fitted at its tip, if there is one (see Cock); a tool that comes fitted (see
+   * ToolShape.fitted) starts with a shut one on each.
    */
   readonly cocks: (Cock | null)[];
+  /**
+   * Per spout, the stopcock on the end of its hose, under the nozzle, if the hose is out and there is one. Between
+   * them, the two say how open the spout is (see open); with neither, it's fully open.
+   */
+  readonly ends: (Cock | null)[];
   /**
    * Per valve, the angle it's drawn and turned at (see valveAngle in bodies.ts), which says no more than `valves` does
    * about how it's set: never saved, and worked out afresh from `valves` whenever that's been set some other way.
@@ -1854,7 +1858,8 @@ export class Tool {
     this.glow = new Float32Array(kind === 'shadowlamp' ? SCREEN.cells ** 2 : 0);
     const nValves = SHAPES[kind].valves?.length ?? 0;
     this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' ? 0.5 : 0));
-    this.cocks = this.shape.spouts.map(() => (SHAPES[kind].fitted ? { valve: 0, nozzle: false } : null));
+    this.cocks = this.shape.spouts.map(() => (SHAPES[kind].fitted ? { valve: 0 } : null));
+    this.ends = this.shape.spouts.map(() => null);
     this.out = this.shape.spouts.map(() => null);
     this.flow = this.shape.spouts.map(() => 0);
     this.drops = this.shape.spouts.map(() => new Vessel(Infinity));
@@ -2312,11 +2317,11 @@ export class Tool {
 
   /**
    * How open spout j is, from 0 (shut) to 1 (fully open): it lets out that share of what it would fully open (see
-   * step). That's how its stopcock is set, wherever on the spout or its hose that is (see cocks); with none, it's
-   * fully open.
+   * step). That's how its stopcocks are set, the one at its tip (see cocks) times the one on its hose's end (see
+   * ends), one that isn't there counting as fully open.
    */
   open(j: number): number {
-    return this.cocks[j]?.valve ?? 1;
+    return (this.cocks[j]?.valve ?? 1) * (this.ends[j]?.valve ?? 1);
   }
 
   /**

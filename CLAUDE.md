@@ -217,8 +217,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   spout's fluid leaves at its hose's nozzle if it's out, so wherever fluid leaves a spout or faucet, use the engine's
   `outletAt` and `faucetOutlet`, not `spoutAt` or `fa.spout`.
 - **Stopcocks** aren't a tool either, nor have a pose: tools have no flow valves of their own, and what throttles a
-  spout is the stopcock on it, `Tool.cocks[j]` (a `Cock`: its setting, its angle, never saved, and whether it's on the
-  hose's end), null for none, which is fully open (`Tool.open`). It lives with its outlet, so it moves, is saved and is
+  spout is what's on it: a place for one at its tip, `Tool.cocks[j]`, and one on its hose's end, `Tool.ends[j]` (each a
+  `Cock`, its setting and its angle, never saved, or null for none; a faucet's `cock` and `end` likewise), no stacking.
+  `Tool.open` is the product, a missing one fully open. The engine names a place by `CockSpot` (`nozzle` for the end:
+  `cockAt`, `setCock`), and an end stopcock left with no hose goes to the tip, or the cabinet (`tidyCocks`). It lives with its outlet, so it moves, is saved and is
   undone with it; in hand it's the engine's `Held` of kind `'cock'`, and it's stocked in the cabinet as `'stopcock'`.
   Whatever asks where fluid leaves must go through the engine's `outletAt`/`faucetOutlet`/`mountAt`/`nozzleOut` (or
   `spoutAt` in `bodies.ts`), which count it; `spoutTip` is the bare tip. A tool comes with a shut one on each spout if

@@ -13,7 +13,7 @@ function lab(): Things {
   const t = new Tool('dispenser', 0, { x: 250, y: 800, z: 150, yaw: 0 });
   const sc = new Scale({ x: 450, y: 420, z: 150, yaw: 0 });
   const h = new Hose({ tool: t, spout: 0 }, { x: 250, y: 600, z: 150 }, 50);
-  return { flasks: [f], tools: [t], scales: [sc], hoses: [h], faucets: [{ note: '', valve: 0, cock: null }], stock: stockWith({}) };
+  return { flasks: [f], tools: [t], scales: [sc], hoses: [h], faucets: [{ note: '', valve: 0, cock: null, end: null }], stock: stockWith({}) };
 }
 
 describe('arrangement', () => {
@@ -104,9 +104,16 @@ describe('arrangement', () => {
     const c = l.tools[0].cocks[0];
     l.tools[0].cocks[0] = null;
     expect(sameArrangement(a, arrangement(l, sw))).toBe(false);
-    l.tools[0].cocks[0] = { ...c!, nozzle: true };
+    l.tools[0].ends[0] = { ...c! };
     expect(sameArrangement(a, arrangement(l, sw))).toBe(false);
     l.tools[0].cocks[0] = c;
+    expect(sameArrangement(a, arrangement(l, sw))).toBe(false);
+    // and one on the end of the hose is put back as it was too
+    const b = arrangement(l, sw);
+    l.tools[0].ends[0] = null;
+    arrange(l, b);
+    expect(l.tools[0].ends[0]).toEqual({ valve: 0 });
+    l.tools[0].ends[0] = null;
     expect(sameArrangement(a, arrangement(l, { ...sw, blindsShut: true }))).toBe(false);
     l.flasks.push(new Flask(100));
     expect(sameArrangement(a, arrangement(l, sw))).toBe(false);
