@@ -101,7 +101,8 @@ function TouchButton({
  * On a touch screen, while playing: the stick that walks, bottom left, and the one that looks, bottom right; and
  * buttons standing in for the keys and the mouse's left button. Over the look stick, Grab (the left button) and, with
  * something in hand, E, named for what it'll do, or with empty hands on a handwheel or a dial, Q and E, each turning
- * it while it's held, as the keys do; and Note (Enter) when there's something to write a note about, and Nap (N) when a nap can be had. Over the move stick, while something's held, a pad to drag (across to turn it,
+ * it while it's held, as the keys do; and Note (Enter) when there's something to write a note about, Nap (N) when a nap can be had, and Hose (C) when
+ * there's a spout near the crosshair to pull a hose out of. Over the move stick, while something's held, a pad to drag (across to turn it,
  * up and down to hold it further or nearer, or for a hose's nozzle, to slide its stand out or in) and Put away
  * (Backspace).
  */
@@ -114,6 +115,7 @@ export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudSta
       <div className="touch-buttons right">
         {hud.label && <TouchButton label="Note" className="small" down={() => engine.touchNote()} />}
         {hud.nap && <TouchButton label="Nap" className="small" down={() => engine.touchNap()} />}
+        {hud.hose && <TouchButton label="Hose" className="small" down={() => engine.touchHose()} />}
         {hud.holding ? (
           <TouchButton label={hud.hand} lit={hud.use} down={() => engine.touchKey('KeyE', true)} up={() => engine.touchKey('KeyE', false)} />
         ) : (

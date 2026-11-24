@@ -29,7 +29,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   the click that lets sound play), and the lab stays paused under it, so click `.intro-start` first.
 - Headless Chromium won't capture the mouse, and WebGL needs a software renderer. Launch with
   `args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']`, then in dev builds the engine is
-  `window.lab`: `lab.debug({ locked: true, x, z, yaw, pitch })` acts as if the mouse were captured, so keys (Q and E,
+  `window.lab`: `lab.debug({ locked: true, x, z, yaw, pitch })` acts as if the mouse were captured, so keys (Q, E and C,
   1 and 2, WASD) and the left button work, and puts the player somewhere. Yaw 0 faces the back wall; pitch is up,
   in radians. Its private fields (`held`, `target`, `tools`, `turning`, ...) are reachable from `page.evaluate`.
 - Software rendering is slow, a few frames a second, so wait longer than you'd think, and remember that a screenshot
@@ -114,9 +114,13 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     wheel's key (1 or 2) is held, and which sector that picks. The engine holds the open one's state (`wheel`,
     `openWheel`, `closeWheel`) and `Wheel` in `Hud.tsx` draws it.
   - `outline.ts` is the player's settings for the two outlines round what the crosshair is on: the part it's on
-    (`partOf` in `view.ts`: a valve, a stopcock, a tank, a spout with its hose), and faintly the whole thing that's part of
+    (`partOf` in `view.ts`: a valve, a stopcock, a tank, a hose; a spout is the tool's), and faintly the whole thing that's part of
     (`thingOf`). The view's `Outliner` draws each over the finished frame, from a mask of the meshes whose picks have
     that key.
+  - `hoseAim.ts` is the player's setting for how far off the crosshair a spout's outlet may be for C to pull out its
+    hose: the half-angle of a cone round it, in degrees, as seen at the normal field of view (`HOSE_AIM.deg`), which
+    `aimCone` narrows as the view zooms in; the engine's `hoseAim` finds that spout, the fewest degrees off, within
+    REACH.
   - `finish.ts` is the player's setting for the metal's shine, 0 matte to 1 mirror-smooth, 0.5 as built (`AS_BUILT`), starting at 0.4 (`FINISH`),
     and the roughness it gives a metal. `metal()` in `textures.ts` registers a material for it; the view applies it.
   - `smell.ts` is what a sniff (F) makes of a fluid, pure and DOM-free: the ten odorants and Nadia's similes for them
@@ -215,7 +219,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     repairs (`toCounters`). Tests that want a scene laid out in cells use `src/game/testLayout.ts`.
     The multiplexer and the separator are three cells across for two inlets or outlets, symmetrical,
     the one in the middle a cell from each of the others: the user prefers that to a narrower tool that isn't.
-- **Hoses** aren't a tool: every spout and faucet has one, pulled out with the left button (`Hose.on` says which). A
+- **Hoses** aren't a tool: every spout and faucet has one, pulled out with C from the spout nearest the crosshair
+  (`hoseAim`, never by the left button, which picks a tool up by its spout as anywhere else; `Hose.on` says which). A
   spout's fluid leaves at its hose's nozzle if it's out, so wherever fluid leaves a spout or faucet, use the engine's
   `outletAt` and `faucetOutlet`, not `spoutAt` or `fa.spout`.
 - **Stopcocks** aren't a tool either, nor have a pose: tools have no flow valves of their own, and what throttles a
@@ -231,7 +236,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   the multiplexer's selector, the heater's tap, dials, the station's faucet.
 - **What's drawn is what's hit.** Every mesh a `ToolView` builds is registered as part of the tool for the crosshair's
   raycast, so empty space around it isn't. Register a mesh yourself only to make it a specific part (a tank, valve,
-  spout or button: a spout's is its tip and the pipe that runs to it alone); sprites (labels) aren't hit. There are
+  spout or button: a spout's is its tip and the pipe that runs to it alone, which a stopcock in hand is aimed at, though
+  for the left button and the outline it's the tool's); a stopcock's foot is the stopcock's. Sprites (labels) aren't hit. There are
   two exceptions. Clamp stands (`StandView`) aren't hit at all: the crosshair goes through them to what's behind, and
   what they hold is picked up by itself (only a sniff's `clearance` counts them). And each `FluidMesh`'s bent copy of
   what's behind a clear fluid (`bentMat` in `view.ts`), on a layer of its own (`REFRACT_LAYER`) drawn only in the

@@ -841,7 +841,7 @@ class CockView {
   constructor(
     parent: THREE.Object3D,
     private pickables: Map<THREE.Object3D, Pick> | null,
-    picks: { cock: Pick; turns: Pick; foot: Pick } | null,
+    picks: { cock: Pick; turns: Pick } | null,
   ) {
     const b = buildCock();
     this.group = b.group;
@@ -851,7 +851,8 @@ class CockView {
     if (pickables && picks) {
       for (const m of b.body) pickables.set(m, picks.cock);
       for (const m of b.turns) pickables.set(m, picks.turns);
-      pickables.set(b.foot, picks.foot);
+      // (its foot is part of it: the left button there takes it off, as anywhere on it but its handwheel)
+      pickables.set(b.foot, picks.cock);
     }
   }
 
@@ -2827,7 +2828,6 @@ class ToolView {
         const picks = {
           cock: { kind: 'tool', t, part: 'cock', k: j } as const,
           turns: { kind: 'tool', t, part: 'cock', k: j, turns: true } as const,
-          foot: { kind: 'tool', t, part: 'spout', k: j } as const,
         };
         const v = new CockView(this.art, this.pickables, picks);
         v.group.position.copy(v3(sh.spouts[j], sh.spoutY, plumbZ(t)));
@@ -3007,7 +3007,7 @@ class HoseView {
       this.cock = null;
     }
     if (cock && !this.cock) {
-      const picks = { cock: { kind: 'hose', h, cock: true } as const, turns: { kind: 'hose', h, cock: true, turns: true } as const, foot: { kind: 'hose', h } as const };
+      const picks = { cock: { kind: 'hose', h, cock: true } as const, turns: { kind: 'hose', h, cock: true, turns: true } as const };
       this.cock = { v: new CockView(this.outlet, this.pickables, picks), c: cock };
     }
     if (this.cock) {
@@ -4238,20 +4238,22 @@ function partOf(p: Pick): unknown {
       if (p.part === 'button') return `tool ${t.id} button`;
       if (t.kind === 'shadowlamp') return null;
       if (p.part === 'tank') return `tool ${t.id} tank ${p.k}`;
-      if (p.part === 'spout') return `tool ${t.id} spout ${p.k}`;
+      // (a spout is the tool's: the left button there picks the tool up, and C pulls hoses out wherever the crosshair is)
+      if (p.part === 'spout') return t.shape.fixed ? null : t;
       if (p.part === 'cock') return `tool ${t.id} cock ${p.k}`;
-      // (the station's one valve is its faucet's, so it goes with that spout)
-      if (p.part === 'valve') return t.shape.fixed ? `tool ${t.id} spout ${t.shape.spouts.indexOf(valveLocal(t, p.k).x)}` : `tool ${t.id} valve ${p.k}`;
+      if (p.part === 'valve') return `tool ${t.id} valve ${p.k}`;
       return t.shape.fixed ? null : t;
     }
     case 'scale': return p.sc;
     case 'hose': {
       const m = p.h.on;
-      // (a stopcock on its end is a part of its own, as one at the spout's tip is)
+      // (a stopcock on its end is a part of its own, as one at the spout's tip is; the rest, its tube and nozzle, the
+      // left button takes hold of by its nozzle)
       if (p.cock) return 'tool' in m ? `tool ${m.tool.id} end ${m.spout}` : `faucet ${m.faucet} end`;
-      return 'tool' in m ? `tool ${m.tool.id} spout ${m.spout}` : `faucet ${m.faucet} spout`;
+      return p.h;
     }
-    case 'faucet': return p.spout ? `faucet ${p.i} spout` : p.valve ? `faucet ${p.i} valve` : p.cock ? `faucet ${p.i} cock` : `faucet ${p.i}`;
+    // (its spout is just the faucet: the left button does nothing on either)
+    case 'faucet': return p.valve ? `faucet ${p.i} valve` : p.cock ? `faucet ${p.i} cock` : `faucet ${p.i}`;
     default: return p.kind;
   }
 }
@@ -5545,7 +5547,6 @@ export class View {
       if (want && !this.faucetCocks[i]) {
         const picks = {
           cock: { kind: 'faucet', i, cock: true } as const, turns: { kind: 'faucet', i, cock: true, turns: true } as const,
-          foot: { kind: 'faucet', i, spout: true } as const,
         };
         const v = new CockView(scene, pickables, picks);
         v.group.position.set(fa.spout.x, fa.spout.y, fa.spout.z);

@@ -8,6 +8,7 @@ import {
   FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, magnetShift, nozzleMounts, nozzleStand, onScale, onTool, platformSpot, scaleBox, scaleCenter, snapReach, spoutAt, standBase,
   spoutTip, tankMouth, tankNoteY, toolBox, toolCenter, toolStands, type Magnets, type NozzleMount, type Stand,
 } from './bodies';
+import { HOSE_AIM, aimCone } from './hoseAim';
 import { CABINET, endless, isStocked, putIn, stockWith, takeFrom, takeSlot, type Stock, type Stocked } from './cabinet';
 import { changeover, type ChangeoverSound } from './changeover';
 import { chime } from './chime';
@@ -82,6 +83,8 @@ export interface Hud {
    * a thermometer into what's looked at.
    */
   use: boolean;
+  /** Whether C would pull out the hose of a spout or faucet near the crosshair (see GameEngine.hoseAim). */
+  hose: boolean;
   /** Whether Enter would write a note about what the crosshair is on (see GameEngine.note). */
   label: boolean;
   /** What E does now with what's in hand, in a word, for the touch screen's button that stands in for it. */
@@ -1585,6 +1588,11 @@ export class GameEngine {
     if (this.locked) this.putAway();
   }
 
+  /** C: pull out the hose of the spout or faucet nearest the crosshair (see hoseAim). */
+  touchHose(): void {
+    if (this.locked) this.pullAimed();
+  }
+
   /**
    * Q or E, pressed or let go, as the keys are (see keyDown): with something in hand, E uses it and Q puts it back;
    * with empty hands, each turns the handwheel or dial looked at, while it's held.
@@ -1717,6 +1725,7 @@ export class GameEngine {
         return;
       }
       if (e.code === 'KeyE' || e.code === 'KeyQ') this.keyDown(e.code);
+      if (e.code === 'KeyC') this.pullAimed();
       if (e.code === 'KeyR') this.turn();
       if (e.code === 'Enter') {
         // the note's text box opens at once, and this Enter mustn't be taken as finishing it
@@ -2181,16 +2190,38 @@ export class GameEngine {
   }
 
   /**
-   * The spout or faucet the crosshair is on, to pull a hose out of: a faucet's spout or the pipe down to it (not its
-   * valve), or a tool's spout, its tip or the pipe that runs to it alone. Null if it's on
-   * neither.
+   * The spout or faucet whose hose C would pull out: of every one whose hose isn't out (and can be worked: nothing
+   * on the station can through its changeover), the one whose outlet (where its hose would run from, see mountAt) is
+   * the fewest degrees off the crosshair as the eyes see it, within the player's setting (HOSE_AIM.deg, see hoseAim.ts:
+   * a cone round the crosshair, narrowed as the view zooms in so it covers as much of the screen, see aimCone) and
+   * within REACH of the eyes. Null with something in hand, or nothing near, or while she can't act (sniffing,
+   * napping, in the pod, an equipment wheel open).
    */
-  private mountAimed(): HoseMount | null {
-    const p = this.target;
-    if (p?.kind === 'faucet') return p.spout ? { faucet: p.i } : null;
-    // (nothing on the station can be worked through its changeover)
-    if (p?.kind !== 'tool' || p.part !== 'spout' || !p.t.shape.spouts.length || p.t.swap !== null) return null;
-    return { tool: p.t, spout: p.k };
+  private hoseAim(): HoseMount | null {
+    if (this.held || this.wheel || this.sniffing || this.dozing() || inPod(this.wake) || this.previewing) return null;
+    const eye = this.eye();
+    const look = this.lookDir();
+    // the tangent of the cone's half-angle, which an outlet's off-axis distance over its distance along must be within
+    let best = aimCone(HOSE_AIM.deg, this.fov(), FOV);
+    let out: HoseMount | null = null;
+    const consider = (m: HoseMount) => {
+      if (this.hoseOn(m)) return;
+      const q = this.mountAt(m);
+      const v = { x: q.x - eye.x, y: q.y - eye.y, z: q.z - eye.z };
+      const along = v.x * look.x + v.y * look.y + v.z * look.z;
+      if (along <= 0 || Math.hypot(v.x, v.y, v.z) > REACH) return;
+      const off = Math.hypot(v.x - along * look.x, v.y - along * look.y, v.z - along * look.z) / along;
+      if (off <= best) [best, out] = [off, m];
+    };
+    for (const t of this.tools) if (t.swap === null) t.shape.spouts.forEach((_, spout) => consider({ tool: t, spout }));
+    this.faucets.forEach((_, faucet) => consider({ faucet }));
+    return out;
+  }
+
+  /** C: pull out the hose of the spout or faucet nearest the crosshair, if there is one (see hoseAim). */
+  private pullAimed(): void {
+    const m = this.hoseAim();
+    if (m) this.pullHose(m);
   }
 
   /**
@@ -2421,13 +2452,7 @@ export class GameEngine {
       this.takeCock(cock);
       return;
     }
-    // with empty hands, a spout or faucet's hose is pulled out, or its nozzle taken hold of if it's out, and so is a
-    // nozzle looked at
-    const m = this.held ? null : this.mountAimed();
-    if (m) {
-      this.pullHose(m);
-      return;
-    }
+    // with empty hands, a hose's nozzle looked at is taken hold of (C pulls one out: see hoseAim)
     if (!this.held && p?.kind === 'hose') {
       this.holdHose(p.h);
       return;
@@ -3944,9 +3969,8 @@ export class GameEngine {
     else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
     else if (p?.kind === 'tool' && p.part === 'button') add(['LMB'], p.t.lit ? 'put the lamp out' : 'light the lamp');
     else if (this.pressable()) add(['LMB'], 'press it');
-    const m = h ? null : this.mountAimed();
+    if (this.hoseAim()) add(['C'], 'pull out its hose');
     if (!h && this.cockAimed()) add(['LMB'], 'take the stopcock off');
-    else if (m) add(['LMB'], this.hoseOn(m) ? 'take hold of its hose' : 'pull out its hose');
     else if (!h && p?.kind === 'hose') add(['LMB'], 'take hold of it');
     else if (!h && p && this.grabbable(p) && !this.onButton()) {
       add(['LMB'], 'pick it up');
@@ -3973,13 +3997,13 @@ export class GameEngine {
 
   /**
    * Whether the left button would do something (see leftDown): press the key or button the crosshair is on, or else set
-   * down what's held, if it can be, or with empty hands, pull out a hose or pick up what's looked at.
+   * down what's held, if it can be, or with empty hands, take off a stopcock or pick up what's looked at (a hose's nozzle among them).
    */
   private leftWouldDo(): boolean {
     if (this.onButton()) return this.pressable();
     if (this.held) return this.intoCabinet() || (!!this.placed && 'rest' in this.placed);
     const p = this.target;
-    return !!this.cockAimed() || !!this.mountAimed() || (!!p && this.grabbable(p));
+    return !!this.cockAimed() || (!!p && this.grabbable(p));
   }
 
   /** Whether the crosshair is on a key or button, which takes the left button's click even with something in hand. */
@@ -4379,6 +4403,7 @@ export class GameEngine {
       turn: this.turnWouldDo() || !!this.turning,
       use: !this.sniffing && this.useWouldDo(),
       label: !inPod(this.wake) && !!this.targetNote(),
+      hose: !!this.hoseAim(),
       hand: h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : 'Dip',
       note: this.flash?.text ?? null,
       tip: !!this.flash?.tip,
