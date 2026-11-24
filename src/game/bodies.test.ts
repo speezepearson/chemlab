@@ -157,10 +157,13 @@ describe('the shadow lamp', () => {
     expect(toWorld(LAMP_POSE, { x: box.x0, y: 0, z: 0 }).x).toBeGreaterThan(cell(0).x);
   });
 
-  it("is solid in its enclosure, its two side walls and its end wall, all as tall as it is, and its channel's floor", () => {
+  it("is solid in its enclosure and end wall, as tall as it is, its two side walls, half as tall, and its channel's floor", () => {
     const parts = solids(b);
     expect(parts).toHaveLength(5);
-    for (const p of parts.slice(0, 4)) expect([p.y - p.hy, p.y + p.hy].map((y) => +y.toFixed(6))).toEqual([LIFT, LIFT + h]);
+    expect(LAMP.sides).toBe(h / 2);
+    parts.slice(0, 4).forEach((p, i) =>
+      expect([p.y - p.hy, p.y + p.hy].map((y) => +y.toFixed(6))).toEqual([LIFT, LIFT + (i === 1 || i === 2 ? LAMP.sides : h)]),
+    );
     const [enclosure, near, far, end, floor] = parts;
     // the floor is a plate on the bench from wall to wall, from the enclosure to the end wall, and it's where space.ts
     // says the channel's floor is

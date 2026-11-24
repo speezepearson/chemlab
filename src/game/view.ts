@@ -2158,13 +2158,15 @@ class ToolView {
    */
   private buildLamp(pick: (m: THREE.Object3D, part: 'button') => void): void {
     const { art } = this;
-    const { h, wall, floor, box, channel: ch, window: win } = LAMP;
+    const { h, sides, wall, floor, box, channel: ch, window: win } = LAMP;
     const out = ch.z + wall;
-    // the enclosure, the two side walls from its face on, and the end wall across them
+    // the enclosure, the two side walls from its face on, half as high (see LAMP.sides), and the end wall across
+    // them, full height, from side to side: each a closed block, so the enclosure's and end wall's faces show above
+    // the side walls
     block(art, panelMat, box.x0, box.x1, 0, h, -out, out, 1.5);
-    block(art, panelMat, ch.x0, ch.x1 + wall, 0, h, ch.z, out);
-    block(art, panelMat, ch.x0, ch.x1 + wall, 0, h, -out, -ch.z);
-    block(art, panelMat, ch.x1, ch.x1 + wall, 0, h, -ch.z, ch.z);
+    block(art, panelMat, ch.x0, ch.x1, h - sides, h, ch.z, out);
+    block(art, panelMat, ch.x0, ch.x1, h - sides, h, -out, -ch.z);
+    block(art, panelMat, ch.x1, ch.x1 + wall, 0, h, -out, out);
     block(art, panelMat, ch.x0, ch.x1, h - floor, h, -ch.z, ch.z);
     // the pane in the enclosure's face: dark glass, glowing with the lamp's light while it's lit, in a dark bezel
     const glass = new THREE.MeshStandardMaterial({ color: 0x6f6a86, roughness: 0.25, metalness: 0, emissive: LAMP_GLOW, emissiveIntensity: 0 });

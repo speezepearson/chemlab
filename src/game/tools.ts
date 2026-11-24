@@ -845,7 +845,8 @@ export const SCREEN = { side: 80, cells: 64, tau: 0.7, still: 1e-3, most: 7 };
  * channel's far end is an end wall, with the lamp's screen set in its inner face, facing the lamp (see SCREEN). In
  * its own frame (x along it, from the lamp toward the screen; y down from its top; z toward its front, which is the
  * room; from the middle of the channel), in world units:
- * - h: how tall it is, enclosure and walls alike: as tall as its channel is wide;
+ * - h: how tall its enclosure and its end wall are: as tall as its channel is wide;
+ * - sides: how tall its channel's two side walls are, half that, so what stands in the channel is easy to see into;
  * - wall: how thick its side walls and its end wall are;
  * - floor: how thick the plate that floors the channel is (see LAMP_FLOOR in space.ts, which is where it is in the
  *   room): as thick as the margin under the beam is high, so the light's lower edge is level with its top, and the
@@ -871,7 +872,7 @@ export const SCREEN = { side: 80, cells: 64, tau: 0.7, still: 1e-3, most: 7 };
  *   e^−10 of it, none.
  */
 export const LAMP = {
-  h: 100, wall: 6, floor: LAMP_FLOOR.y - LIFT, dim: 0.2, spread: 0.016,
+  h: 100, sides: 50, wall: 6, floor: LAMP_FLOOR.y - LIFT, dim: 0.2, spread: 0.016,
   box: { x0: -4.5 * CELL, x1: -2.5 * CELL },
   channel: { x0: -2.5 * CELL, x1: 2.5 * CELL, z: 50 },
   window: { r: SCREEN.side / 2, y: 50 },

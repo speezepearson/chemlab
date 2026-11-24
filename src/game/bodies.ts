@@ -224,8 +224,9 @@ function shapeParts(t: Tool): ToolPart[] {
     ];
   }
   if (t.kind === 'shadowlamp') {
-    const { h, wall, floor, box, channel: ch } = LAMP;
-    const side = { x0: ch.x0, x1: ch.x1, y0: 0, y1: h, hz: wall / 2 };
+    const { h, sides, wall, floor, box, channel: ch } = LAMP;
+    // (the side walls are lower than the enclosure and the end wall: see LAMP.sides)
+    const side = { x0: ch.x0, x1: ch.x1, y0: h - sides, y1: h, hz: wall / 2 };
     return [
       { x0: box.x0, x1: box.x1, y0: 0, y1: h, hz: ch.z + wall },
       { ...side, z: ch.z + wall / 2 },
