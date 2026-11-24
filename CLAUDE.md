@@ -121,10 +121,11 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     (`partOf` in `view.ts`: a valve, a stopcock, a tank; a spout is the tool's, and a hose is never outlined), and faintly the whole thing that's part of
     (`thingOf`). The view's `Outliner` draws each over the finished frame, from a mask of the meshes whose picks have
     that key.
-  - `hoseAim.ts` is the player's setting for how far off the crosshair a spout's outlet or a nozzle may be for C to take hold of its
-    hose: the half-angle of a cone round it, in degrees, as seen at the normal field of view (`HOSE_AIM.deg`), which
-    `aimCone` narrows as the view zooms in; the engine's `hoseAim` finds the spout's outlet or nozzle that's the fewest
-    degrees off, within REACH. The Appearance panel's *Hose aim* slider sets it.
+  - `aim.ts` is the player's setting for how far off the crosshair what C, Q and E act on may be: the half-angle of a
+    cone round it, in degrees, as seen at the normal field of view (`AIM.deg`), which `aimCone` narrows as the view
+    zooms in. The engine's `aimOff` and `nearestAimed` are the one test (the cone, and REACH) that both `hoseAim` (the
+    spout's outlet or nozzle C takes a hose by) and `aimedValve` (the handwheel or dial Q and E turn, unless the
+    crosshair is right on one) use. The Appearance panel's *Aim* slider sets it.
   - `finish.ts` is the player's setting for the metal's shine, 0 matte to 1 mirror-smooth, 0.5 as built (`AS_BUILT`), starting at 0.4 (`FINISH`),
     and the roughness it gives a metal. `metal()` in `textures.ts` registers a material for it; the view applies it.
   - `smell.ts` is what a sniff (F) makes of a fluid, pure and DOM-free: the ten odorants and Nadia's similes for them
@@ -224,7 +225,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     The multiplexer and the separator are three cells across for two inlets or outlets, symmetrical,
     the one in the middle a cell from each of the others: the user prefers that to a narrower tool that isn't.
 - **Hoses** aren't a tool: every spout and faucet has one, which C pulls out, or takes hold of if it's out, by the
-  spout or nozzle nearest the crosshair (`hoseAim`). The left button never takes one: on a spout it picks the tool
+  spout or nozzle nearest the crosshair (`hoseAim`, see aim.ts). The left button never takes one: on a spout it picks the tool
   up, as anywhere else, and a hose's tube and nozzle aren't hit at all (only a stopcock on its end is). C, not the
   left button, sets a nozzle in hand down (`keyC`, through the same `release`), its hint where `placement` says. `Hose.on`
   says which spout or faucet it's on. A
@@ -257,7 +258,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   does it itself. A per-instance one must be disposed with its view, which lets it go.
 - **An outline always takes in what the crosshair is on.** This is the user's rule: the mesh hit is always one of the
   meshes outlined at full strength (`partOf` in `view.ts`). So a mesh's registered part must be what's outlined for
-  it, and what the buttons act on, never a neighbour chosen by nearness to where it's hit. Clamp stands and hoses are
+  it, and what the left button acts on, never a neighbour chosen by nearness to where it's hit. The outline and the
+  left button go by what the crosshair is on; C, Q and E go by nearness to it (see aim.ts), and mark what they'd act
+  on with their own hints instead (`KeyHint`). Clamp stands and hoses are
   never outlined, which is why they aren't hit.
 - **What's drawn is what casts a shadow.** The shadow lamp's light (`Exposer` in `view.ts`) goes by the meshes in the
   scene in its channel, between its pane and its screen: opaque ones stop it, see-through ones (`transparent` materials) don't, and

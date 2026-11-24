@@ -8,7 +8,7 @@ import {
   FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, magnetShift, nozzleMounts, nozzleStand, onScale, onTool, platformSpot, scaleBox, scaleCenter, snapReach, spoutAt, standBase,
   spoutTip, tankMouth, tankNoteY, toolBox, toolCenter, toolStands, type Magnets, type NozzleMount, type Stand,
 } from './bodies';
-import { HOSE_AIM, aimCone } from './hoseAim';
+import { AIM, aimCone } from './aim';
 import { CABINET, endless, isStocked, putIn, stockWith, takeFrom, takeSlot, type Stock, type Stocked } from './cabinet';
 import { changeover, type ChangeoverSound } from './changeover';
 import { chime } from './chime';
@@ -76,7 +76,7 @@ export interface Hud {
    * or set down what's held or pick up what's looked at.
    */
   press: boolean;
-  /** Whether Q and E, held, would turn the handwheel or dial looked at (see GameEngine.turnWouldDo). */
+  /** Whether Q and E, held, would turn a handwheel or dial near the crosshair (see GameEngine.aimedValve). */
   turn: boolean;
   /**
    * Whether E, held, would use what's in hand: pour a flask, let fluid out of a hose's nozzle, or dip a wicking strip or
@@ -1803,39 +1803,83 @@ export class GameEngine {
     if (this.turning && !this.keys.has('KeyQ') && !this.keys.has('KeyE')) this.endTurn();
   }
 
-  /** Whether Q and E would turn something now: with empty hands, on a handwheel or a dial (see valveAimed). */
+  /** Whether Q and E would turn something now: with empty hands, a handwheel or a dial near the crosshair (see aimedValve). */
   private turnWouldDo(): boolean {
-    return !this.held && !this.wheel && !this.sniffing && !this.dozing() && !inPod(this.wake) && !this.previewing && !!this.valveAimed();
+    return !!this.aimedValve();
   }
 
-  /** Take hold of the handwheel or dial looked at, to turn it with Q and E while either's held: one step to undo. */
+  /**
+   * The handwheel or dial Q and E would turn: the one the crosshair is on (see valveAimed); or else, of every one that
+   * can be worked (a tool's built-in valves and dials, its stopcocks at its spouts' tips and on its hoses' ends, and
+   * a faucet's valve and stopcocks; nothing on the station through its changeover), the one whose middle is fewest
+   * degrees off the crosshair, within the player's aim (see nearestAimed). Null with something in hand, or while she
+   * can't act.
+   */
+  private aimedValve(): ValveRef | null {
+    if (this.held || this.wheel || this.sniffing || this.dozing() || inPod(this.wake) || this.previewing) return null;
+    const on = this.valveAimed();
+    if (on) return on;
+    const all: ValveRef[] = [];
+    for (const t of this.tools) {
+      if (t.swap !== null) continue;
+      (t.shape.valves ?? []).forEach((_, k) => all.push({ t, k }));
+      t.cocks.forEach((c, spout) => c && all.push({ cock: { m: { tool: t, spout }, nozzle: false } }));
+    }
+    this.faucets.forEach((fa, faucet) => {
+      all.push({ faucet });
+      if (fa.cock) all.push({ cock: { m: { faucet }, nozzle: false } });
+    });
+    for (const h of this.hoses) if (this.endOn(h.on) && !('tool' in h.on && h.on.tool.swap !== null)) all.push({ cock: { m: h.on, nozzle: true } });
+    return this.nearestAimed(all, (v) => this.valveFace(v).at);
+  }
+
+  /** Take hold of the handwheel or dial Q and E would turn (see aimedValve), to turn it while either's held: one step to undo. */
   private startTurn(): void {
-    if (this.turning || !this.turnWouldDo()) return;
-    const k = this.valveAimed()!;
+    const k = this.turning ? null : this.aimedValve();
+    if (!k) return;
     this.mark();
     this.turning = { ...k, dir: 0, for: 0 };
   }
 
-  /** Whether two valves are the same one. */
-  private static sameValve(a: ValveRef, b: ValveRef): boolean {
-    if ('t' in a) return 't' in b && a.t === b.t && a.k === b.k;
-    if ('faucet' in a) return 'faucet' in b && a.faucet === b.faucet;
-    return 'cock' in b && sameMount(a.cock.m, b.cock.m) && a.cock.nozzle === b.cock.nozzle;
+  /**
+   * How far off the crosshair a point is, as the tangent of the angle at the eyes between them, if it's within the
+   * player's aim (AIM.deg, see aim.ts: a cone round the crosshair, narrowed as the view zooms in so it covers as much
+   * of the screen, see aimCone) and REACH of the eyes; null if it isn't.
+   */
+  private aimOff(p: Vec3): number | null {
+    const eye = this.eye();
+    const look = this.lookDir();
+    const v = { x: p.x - eye.x, y: p.y - eye.y, z: p.z - eye.z };
+    const along = v.x * look.x + v.y * look.y + v.z * look.z;
+    if (along <= 0 || Math.hypot(v.x, v.y, v.z) > REACH) return null;
+    const off = Math.hypot(v.x - along * look.x, v.y - along * look.y, v.z - along * look.z) / along;
+    return off <= aimCone(AIM.deg, this.fov(), FOV) ? off : null;
+  }
+
+  /** Of `items`, the one whose point (`at`) is fewest degrees off the crosshair, within the aim (see aimOff); null if none is. */
+  private nearestAimed<T>(items: Iterable<T>, at: (x: T) => Vec3): T | null {
+    let best = Infinity;
+    let out: T | null = null;
+    for (const x of items) {
+      const off = this.aimOff(at(x));
+      if (off !== null && off <= best) [best, out] = [off, x];
+    }
+    return out;
   }
 
   /**
    * Turn the valve being turned for `dt` real seconds (it's the player's own doing, like walking): clockwise as she
    * sees it while E's held, anticlockwise while Q is, and not at all while both are, at TURN_RATE, from slow when
-   * the key was pressed (or the other let go) to fast. It's let go of once neither key is held, or the crosshair leaves
-   * it, or something comes into her hand.
+   * the key was pressed (or the other let go) to fast. It stays the one turned while it's within the aim, though
+   * another come nearer the crosshair, and it's let go of once neither key is held, or it's out of the aim (see aimOff),
+   * or something comes into her hand.
    */
   private stepTurn(dt: number): void {
     const tr = this.turning;
     if (!tr) return;
-    const k = this.valveAimed();
     const q = this.keys.has('KeyQ');
     const e = this.keys.has('KeyE');
-    if (this.held || !k || !GameEngine.sameValve(k, tr) || (!q && !e)) {
+    if (this.held || ('cock' in tr && !this.cockAt(tr.cock)) || this.aimOff(this.valveFace(tr).at) === null || (!q && !e)) {
       this.endTurn();
       return;
     }
@@ -1902,7 +1946,7 @@ export class GameEngine {
    * in its face, facing the eyes, a little outside its rim, with the side of the key held lit.
    */
   private turnHint(): Frame['turnHint'] {
-    const v = this.turning ?? (this.turnWouldDo() ? this.valveAimed() : null);
+    const v = this.turning ?? this.aimedValve();
     if (!v) return null;
     const f = this.valveFace(v);
     const q = this.keys.has('KeyQ');
@@ -2193,32 +2237,21 @@ export class GameEngine {
    * The hose C would take hold of: of every spout and faucet (that can be worked: nothing on the station can through
    * its changeover), by its outlet (its tip, or the foot of a stopcock there: where its hose runs from, see mountAt,
    * whether the hose is out or not), and of the nozzle of every hose that's out, the one the fewest degrees off the
-   * crosshair as the eyes see it, within the player's setting (HOSE_AIM.deg, see hoseAim.ts: a cone round the
-   * crosshair, narrowed as the view zooms in so it covers as much of the screen, see aimCone) and within REACH of the
-   * eyes. It says which spout or faucet, its hose if that's out, whether it was its nozzle, and where that point is.
-   * Null with something in hand, or nothing near, or while she can't act (sniffing, napping, in the pod, an
+   * crosshair as the eyes see it, within the player's aim (see aimOff). It says which spout or faucet, its hose if
+   * that's out, whether it was its nozzle, and where that point is. Null with something in hand, or nothing near, or while she can't act (sniffing, napping, in the pod, an
    * equipment wheel open).
    */
   private hoseAim(): { m: HoseMount; hose: Hose | null; nozzle: boolean; at: Vec3 } | null {
     if (this.held || this.wheel || this.sniffing || this.dozing() || inPod(this.wake) || this.previewing) return null;
-    const eye = this.eye();
-    const look = this.lookDir();
-    // the tangent of the cone's half-angle, which a point's off-axis distance over its distance along must be within
-    let best = aimCone(HOSE_AIM.deg, this.fov(), FOV);
-    let out: { m: HoseMount; hose: Hose | null; nozzle: boolean; at: Vec3 } | null = null;
-    const consider = (m: HoseMount, nozzle: boolean) => {
+    const all: { m: HoseMount; hose: Hose | null; nozzle: boolean; at: Vec3 }[] = [];
+    const add = (m: HoseMount, nozzle: boolean) => {
       const hose = this.hoseOn(m) ?? null;
-      const q = nozzle ? hose!.outlet : this.mountAt(m);
-      const v = { x: q.x - eye.x, y: q.y - eye.y, z: q.z - eye.z };
-      const along = v.x * look.x + v.y * look.y + v.z * look.z;
-      if (along <= 0 || Math.hypot(v.x, v.y, v.z) > REACH) return;
-      const off = Math.hypot(v.x - along * look.x, v.y - along * look.y, v.z - along * look.z) / along;
-      if (off <= best) [best, out] = [off, { m, hose, nozzle, at: q }];
+      all.push({ m, hose, nozzle, at: nozzle ? hose!.outlet : this.mountAt(m) });
     };
-    for (const t of this.tools) if (t.swap === null) t.shape.spouts.forEach((_, spout) => consider({ tool: t, spout }, false));
-    this.faucets.forEach((_, faucet) => consider({ faucet }, false));
-    for (const h of this.hoses) if (!('tool' in h.on) || h.on.tool.swap === null) consider(h.on, true);
-    return out;
+    for (const t of this.tools) if (t.swap === null) t.shape.spouts.forEach((_, spout) => add({ tool: t, spout }, false));
+    this.faucets.forEach((_, faucet) => add({ faucet }, false));
+    for (const h of this.hoses) if (!('tool' in h.on) || h.on.tool.swap === null) add(h.on, true);
+    return this.nearestAimed(all, (c) => c.at);
   }
 
   /**
@@ -3991,7 +4024,7 @@ export class GameEngine {
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it back in the cabinet');
       add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it back in the cabinet') : h.ghost ? 'leave it where it is' : 'put it back');
     } else {
-      const v = this.turning ?? (this.turnWouldDo() ? this.valveAimed() : null);
+      const v = this.turning ?? this.aimedValve();
       if (v) add(['Q, E'], `hold to turn the ${'cock' in v ? 'stopcock' : 't' in v && v.k === v.t.shape.dial ? 'dial' : 'valve'}`);
       add([WHEEL_KEYS.join(', ')], 'hold to grab equipment');
     }

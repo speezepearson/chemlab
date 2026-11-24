@@ -17,7 +17,7 @@ import { FAUCETS, faucetRate, faucetTarget, faucetValveAt } from './faucets';
 import { FILL_RATE } from './config';
 import type { SaveState } from './save';
 import { CELL, LAMP_FLOOR, LIFT, REACH, counterUnder, toWorld } from './space';
-import { HOSE_AIM, HOSE_DEG } from './hoseAim';
+import { AIM, AIM_DEG } from './aim';
 import { toCell } from './testLayout';
 import {
   DRIP, DRIP_FLOW, Hose, INLINE_TOOLS, MAX_FLOW, PAPER_TAU, REFERENCE_FLOW, SCREEN, SHAPES, TEST_PAPER, UNIQUE_TOOLS, bondReading, bondShares, paperReading,
@@ -2196,19 +2196,28 @@ describe('faucets’ valves', () => {
     expect(fa.angle!).toBeLessThan(was);
   });
 
-  it('turns only from a fresh press, not with both keys, and lets go when the crosshair leaves it', () => {
+  /** Where valve v's face is, to look at (see the engine's valveFace). */
+  const faceOf = (l: Lab, v: unknown) => (l.in as unknown as { valveFace(v: unknown): { at: { x: number; y: number; z: number } } }).valveFace(v).at;
+  /** Stand `d` in front of `p`, as lookAt does, the eyes `deg` degrees above it. */
+  const lookAbove = (l: Lab, p: { x: number; y: number; z: number }, deg: number, d = 200) =>
+    l.e.debug({ x: p.x, z: p.z + d, yaw: 0, pitch: Math.atan2(p.y - 620, d) + (deg * Math.PI) / 180, locked: true });
+  /** What Q and E would turn (see the engine's aimedValve). */
+  const aimedValve = (l: Lab) => (l.in as unknown as { aimedValve(): unknown }).aimedValve();
+
+  it('turns only from a fresh press, not with both keys, and lets go when it leaves the aim', () => {
     const l = lab();
     const t = new Tool('heater', 99, { x: SPOT.x, y: LIFT + 400, z: SPOT.z, yaw: 0 }, [1]);
     (taps(l) as unknown as { tools: Tool[] }).tools.push(t);
-    l.e.debug({ x: SPOT.x, z: SPOT.z + 300, yaw: 0, pitch: 0, locked: true });
-    // the pipe beside it, or anything else of the tool, isn't its valve
-    l.in.target = { kind: 'tool', t, part: 'spout', k: 0, point: spoutAt(t, 0) } as never;
-    expect(l.in.valveAimed()).toBeNull();
+    const tap = faceOf(l, { t, k: 0 });
+    // looking well away from it, E does nothing
+    l.e.debug({ x: SPOT.x, z: SPOT.z + 300, yaw: 1, pitch: 0, locked: true });
+    l.in.target = null;
     l.e.touchKey('KeyE', true);
     l.in.move(0.1);
     expect(turning(l)).toBeNull();
     // E already down as the crosshair comes onto it turns nothing
-    l.in.target = { kind: 'tool', t, part: 'valve', k: 0, point: spoutAt(t, 0) } as never;
+    lookAt(l, tap);
+    l.in.target = { kind: 'tool', t, part: 'valve', k: 0, point: tap } as never;
     l.in.move(0.1);
     expect(t.valves[0]).toBe(1);
     l.e.touchKey('KeyE', false);
@@ -2223,8 +2232,9 @@ describe('faucets’ valves', () => {
     l.e.touchKey('KeyE', false);
     l.in.move(0.2);
     expect(t.angles[0]).toBeLessThan(a);
-    // the crosshair off it, it's let go of, Q still down
+    // looking away past the aim, it's let go of, Q still down
     l.in.target = null;
+    lookAbove(l, tap, AIM.deg + 1);
     l.in.move(0.1);
     expect(turning(l)).toBeNull();
     l.e.touchKey('KeyQ', false);
@@ -2234,20 +2244,21 @@ describe('faucets’ valves', () => {
     const l = lab();
     const t = new Tool('heater', 99, { x: SPOT.x, y: LIFT + 400, z: SPOT.z, yaw: 0 }, [1]);
     (taps(l) as unknown as { tools: Tool[] }).tools.push(t);
-    l.in.target = { kind: 'tool', t, part: 'valve', k: 0, point: spoutAt(t, 0) } as never;
+    const tap = faceOf(l, { t, k: 0 });
+    l.in.target = { kind: 'tool', t, part: 'valve', k: 0, point: tap } as never;
     // from in front, clockwise is its own clockwise
-    l.e.debug({ x: SPOT.x, z: SPOT.z + 300, yaw: 0, pitch: 0, locked: true });
+    lookAt(l, tap);
     hold(l, 'KeyE', 0.2);
     const a = t.angles[0]!;
     expect(a).toBeGreaterThan(0);
     // from behind, it's the other way round
-    l.e.debug({ x: SPOT.x, z: SPOT.z - 300, yaw: Math.PI, pitch: 0, locked: true });
+    l.e.debug({ x: tap.x, z: tap.z - 300, yaw: Math.PI, pitch: Math.atan2(tap.y - 620, 300), locked: true });
     hold(l, 'KeyE', 0.2);
     expect(t.angles[0]).toBeCloseTo(0, 9);
     // its dial turns only as far as its stop, however long E's held
     const d = t.shape.dial!;
-    l.e.debug({ x: SPOT.x, z: SPOT.z + 300, yaw: 0, pitch: 0, locked: true });
-    l.in.target = { kind: 'tool', t, part: 'valve', k: d, point: spoutAt(t, 0) } as never;
+    lookAt(l, faceOf(l, { t, k: d }));
+    l.in.target = { kind: 'tool', t, part: 'valve', k: d, point: tap } as never;
     hold(l, 'KeyE', 4);
     expect(t.valves[d]).toBe(1);
     expect(t.angles[d]).toBeCloseTo(DIAL_STOP, 9);
@@ -2259,9 +2270,9 @@ describe('faucets’ valves', () => {
     const l = lab();
     const t = new Tool('dispenser', 99, { x: SPOT.x, y: LIFT + 400, z: SPOT.z, yaw: 0 });
     (taps(l) as unknown as { tools: Tool[] }).tools.push(t);
-    l.e.debug({ x: SPOT.x, z: SPOT.z + 300, yaw: 0, pitch: 0, locked: true });
     const c = t.cocks[0]!;
-    // only its handwheel (and the hub it's on) turns it; its collar and barrel are for taking it off
+    lookAt(l, faceOf(l, { cock: { m: { tool: t, spout: 0 }, nozzle: false } }));
+    // only its handwheel (and the hub it's on) is it, for the crosshair; its collar and barrel are for taking it off
     l.in.target = { kind: 'tool', t, part: 'cock', k: 0, point: spoutAt(t, 0) } as never;
     expect(l.in.valveAimed()).toBeNull();
     l.in.target = { kind: 'tool', t, part: 'cock', k: 0, turns: true, point: spoutAt(t, 0) } as never;
@@ -2281,6 +2292,61 @@ describe('faucets’ valves', () => {
     expect(t.cocks[0]!.valve).toBe(0);
     l.e.undo(true);
     expect(t.cocks[0]!.valve).toBeCloseTo(open, 9);
+  });
+
+  it('turns the handwheel within the aim of the crosshair, though it isn’t on it, and none further off', () => {
+    const l = lab();
+    const t = new Tool('dispenser', 99, { x: SPOT.x, y: LIFT + 400, z: SPOT.z, yaw: 0 });
+    (taps(l) as unknown as { tools: Tool[] }).tools.push(t);
+    const c = t.cocks[0]!;
+    const v = { cock: { m: { tool: t, spout: 0 }, nozzle: false } };
+    const at = faceOf(l, v);
+    l.in.target = null;
+    lookAbove(l, at, AIM.deg + 0.5);
+    expect(aimedValve(l)).toBeNull();
+    hold(l, 'KeyE', 0.5);
+    expect(c.valve).toBe(0);
+    lookAbove(l, at, AIM.deg - 0.5);
+    expect(aimedValve(l)).toEqual(v);
+    hold(l, 'KeyE', 0.5);
+    expect(c.valve).toBeGreaterThan(0);
+  });
+
+  it('turns the one fewest degrees off, but the one the crosshair is on first; and keeps turning it till it leaves the aim', () => {
+    const l = lab();
+    const t = new Tool('heater', 99, { x: SPOT.x, y: LIFT + 400, z: SPOT.z, yaw: 0 }, [1]);
+    (taps(l) as unknown as { tools: Tool[] }).tools.push(t);
+    const d = t.shape.dial!;
+    const [tap, dial] = [faceOf(l, { t, k: 0 }), faceOf(l, { t, k: d })];
+    const between = (k: number) => ({ x: tap.x + k * (dial.x - tap.x), y: tap.y + k * (dial.y - tap.y), z: tap.z + k * (dial.z - tap.z) });
+    // (with the aim wide enough to take in both)
+    const was = AIM.deg;
+    AIM.deg = AIM_DEG.max;
+    l.in.target = null;
+    lookAt(l, between(0.3));
+    expect(aimedValve(l)).toEqual({ t, k: 0 });
+    lookAt(l, between(0.7));
+    expect(aimedValve(l)).toEqual({ t, k: d });
+    // the crosshair on the tap, though the dial is nearer
+    l.in.target = { kind: 'tool', t, part: 'valve', k: 0, point: tap } as never;
+    expect(aimedValve(l)).toEqual({ t, k: 0 });
+    // turning the tap, it goes on turning it as the dial comes nearer
+    l.in.target = null;
+    lookAt(l, between(0.3));
+    l.e.touchKey('KeyE', true);
+    l.in.move(0.2);
+    const a = t.angles[0]!;
+    const dialWas = t.valves[d];
+    lookAt(l, between(0.7));
+    l.in.move(0.2);
+    expect(t.angles[0]).toBeGreaterThan(a);
+    expect(t.valves[d]).toBe(dialWas);
+    AIM.deg = was;
+    // and out of the aim, it's let go of
+    lookAbove(l, tap, AIM.deg + 1, 300);
+    l.in.move(0.1);
+    expect(turning(l)).toBeNull();
+    l.e.touchKey('KeyE', false);
   });
 });
 
@@ -2310,22 +2376,22 @@ describe('C', () => {
     const t = separator(l);
     const [a, b] = [spoutAt(t, 0), spoutAt(t, 1)];
     // looking a little nearer the second than the first, it's the second's (with the cone wide enough to take in both)
-    const was = HOSE_AIM.deg;
-    HOSE_AIM.deg = HOSE_DEG.max;
+    const was = AIM.deg;
+    AIM.deg = AIM_DEG.max;
     lookAt(l, { x: a.x + 0.6 * (b.x - a.x), y: a.y, z: a.z });
     expect(aimed(l)).toEqual({ tool: t, spout: 1 });
     lookAt(l, { x: a.x + 0.4 * (b.x - a.x), y: a.y, z: a.z });
     expect(aimed(l)).toEqual({ tool: t, spout: 0 });
-    HOSE_AIM.deg = was;
+    AIM.deg = was;
     // within the player's setting of the crosshair, in degrees, and no further: looked at from in front, and then
     // that much higher
     const off = (deg: number) => {
       const d = 200;
       l.e.debug({ x: a.x, z: a.z + d, yaw: 0, pitch: Math.atan2(a.y - 620, d) + (deg * Math.PI) / 180, locked: true });
     };
-    off(HOSE_AIM.deg - 0.5);
+    off(AIM.deg - 0.5);
     expect(aimed(l)).toEqual({ tool: t, spout: 0 });
-    off(HOSE_AIM.deg + 0.5);
+    off(AIM.deg + 0.5);
     expect(aimed(l)).toBeNull();
     // and not out of reach, however straight at it
     lookAt(l, a, REACH + 20);
@@ -2364,14 +2430,14 @@ describe('C', () => {
     lookAt(l, nozzle);
     expect(pulls(l).hoseAim()).toMatchObject({ m: { tool: t, spout: 0 }, hose, nozzle: true });
     // of the two, the one fewer degrees off (with the cone wide enough to take in both)
-    const was = HOSE_AIM.deg;
-    HOSE_AIM.deg = HOSE_DEG.max;
+    const was = AIM.deg;
+    AIM.deg = AIM_DEG.max;
     const between = (k: number) => lookAt(l, { x: a.x + k * (nozzle.x - a.x), y: a.y + k * (nozzle.y - a.y), z: a.z }, 400);
     between(0.3);
     expect(pulls(l).hoseAim()?.nozzle).toBe(false);
     between(0.7);
     expect(pulls(l).hoseAim()?.nozzle).toBe(true);
-    HOSE_AIM.deg = was;
+    AIM.deg = was;
     // C at the spout brings the nozzle to hand from where it was; Q puts it back there, leaving nothing to undo
     lookAt(l, a);
     l.e.touchHose();
