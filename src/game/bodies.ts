@@ -714,11 +714,11 @@ export const valveZ = (t: Tool) => plumbZ(t) + (t.shape.wall ? 2.5 : 2) + VALVE_
 /** How far in front of the tool's middle a dial is (see ToolShape.dial): on the front face of the box it's set in. */
 export const dialZ = (t: Tool) => TOOL_DEPTH[t.kind].body / 2 + 3;
 
-/** How far in front of the tool's middle valve k's face is, which the aim is taken on to turn it: a handwheel's or a dial's. */
-export const valveFaceZ = (t: Tool, k: number) => (k === t.shape.dial ? dialZ(t) : valveZ(t));
+/** How far out from a dial's middle its tick marks reach, round its knob (see the view's buildDial). */
+export const DIAL_REACH = 13;
 
-/** How close to a valve's middle, in a tool's local units, the aim can be before its angle stops meaning anything: its hub. */
-export const VALVE_DEADZONE = 3;
+/** How far in front of the tool's middle valve k is, at its middle: a handwheel's or a dial's. */
+export const valveFaceZ = (t: Tool, k: number) => (k === t.shape.dial ? dialZ(t) : valveZ(t));
 
 /** How a valve turns (see valveAt): a plain valve's handwheel, a multiplexer's selector, or a dial. */
 export type LeverKind = 'valve' | 'join' | 'dial';
@@ -776,22 +776,6 @@ export function settleAngle(kind: LeverKind, a: number | undefined, v: number): 
 /** A valve at angle `a` turned by `d` (clockwise): as far as that, all the way round, but a dial only to its stops. */
 export function sweep(kind: LeverKind, a: number, d: number): number {
   return kind === 'dial' ? Math.max(-DIAL_STOP, Math.min(DIAL_STOP, a + d)) : a + d;
-}
-
-/**
- * The angle round a valve's middle of a point (dx, dy) from it on its face (x right, y down), clockwise from straight
- * up; null within VALVE_DEADZONE of the middle, where it's too jumpy to mean anything.
- */
-export function aimAngle(dx: number, dy: number): number | null {
-  return Math.hypot(dx, dy) < VALVE_DEADZONE ? null : Math.atan2(dx, -dy);
-}
-
-/**
- * How far round a valve's middle the aim swept between two angles of it (see aimAngle), clockwise, the short way: what
- * turns it. Nothing if either is in the dead zone.
- */
-export function swept(from: number | null, to: number | null): number {
-  return from === null || to === null ? 0 : wrapAngle(to - from);
 }
 
 /** How valve k of tool t turns (see valveAt). */

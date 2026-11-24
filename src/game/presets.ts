@@ -121,7 +121,7 @@ export const PRESETS: readonly Preset[] = [
     name: 'Heat exchanger demo',
     description:
       'Hot red and room-temperature green pass each other in a counterflow heat exchanger, trading heat but not ' +
-      'mixing: the red comes out cool and the green hot. Slower flows trade more. Look at a stopcock’s handwheel and hold the right button, then sweep round it to turn it: its bar along the pipe is open, across it shut.',
+      'mixing: the red comes out cool and the green hot. Slower flows trade more. Look at a stopcock’s handwheel and hold Q or E to turn it, anticlockwise or clockwise: its bar along the pipe is open, across it shut.',
     flasks: [],
     tools: [
       // over the exchanger's two tanks, half a cell either side of its middle; it stands as far forward as their

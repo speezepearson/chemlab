@@ -3,7 +3,7 @@ import { BOND_KEYS } from '../chem/atoms';
 import { ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
-import { FLASK_R, MAGNET, NEAR, NEAR_STEP, NOZZLE_REACH, PLATFORM_REACH, flaskLip, flaskMouth, onScale, plumbZ, spoutAt, spoutTip, valveAt, valveLocal, STOPCOCK, VALVE_WHEEL, tankMouth, scaleBox, standBase, toolBounds, toolBox, toolStands, type Stand } from './bodies';
+import { FLASK_R, MAGNET, NEAR, NEAR_STEP, NOZZLE_REACH, PLATFORM_REACH, flaskLip, flaskMouth, onScale, plumbZ, spoutAt, spoutTip, settleAngle, DIAL_STOP, STOPCOCK, VALVE_WHEEL, tankMouth, scaleBox, standBase, toolBounds, toolBox, toolStands, type Stand } from './bodies';
 import { boxesOverlap } from './physics';
 import { STOCK } from './cabinet';
 import { WHEELS } from './wheel';
@@ -1242,7 +1242,7 @@ describe('E', () => {
     expect(use(l).held?.f).toBe(f);
     expect(f.tilt).toBeGreaterThan(0);
     // let go of (the touch screen's stand-in, as the key's keyup does), it rights itself
-    l.e.hand(false);
+    l.e.touchKey('KeyE', false);
     expect(use(l).using).toBe(false);
     for (let i = 0; i < 20; i++) l.in.move(0.05);
     expect(f.tilt).toBe(0);
@@ -2131,90 +2131,124 @@ describe('faucets’ valves', () => {
     expect(volume(out!) / (0.5 * REFERENCE_FLOW * 0.1)).toBeCloseTo(1, 4);
   });
 
-  it('turns by its handwheel as a tool’s valve does, from press to let go one step to undo', () => {
+  /** Hold Q or E down for `s` real seconds, a frame every `step`, as a press of the key does, and let it go. */
+  function hold(l: Lab, code: 'KeyQ' | 'KeyE', s: number, step = 0.02): void {
+    l.e.touchKey(code, true);
+    for (let i = 0; i < Math.round(s / step); i++) l.in.move(step);
+    l.e.touchKey(code, false);
+  }
+  /** What the engine knows of a valve being turned. */
+  const turning = (l: Lab) => (l.in as unknown as { turning: unknown }).turning;
+
+  it('turns by its handwheel with Q and E as a tool’s valve does, from press to let go one step to undo', () => {
     const l = lab();
-    const fa = taps(l).faucets[0];
-    l.e.debug({ x: fa.spout.x - 300, z: fa.spout.z, yaw: -Math.PI / 2, pitch: 0, locked: true });
+    const fa = taps(l).faucets[0] as unknown as { valve: number; angle?: number };
+    l.e.debug({ x: taps(l).faucets[0].spout.x - 300, z: taps(l).faucets[0].spout.z, yaw: -Math.PI / 2, pitch: 0, locked: true });
     l.in.target = { kind: 'faucet', i: 0, valve: true };
     expect(l.in.valveAimed()).toEqual({ faucet: 0 });
     // the rest of the faucet isn't its valve
     l.in.target = { kind: 'faucet', i: 0 };
     expect(l.in.valveAimed()).toBeNull();
     l.in.target = { kind: 'faucet', i: 0, valve: true };
-    expect(taps(l).history.canUndo).toBe(false);
-    // the pointer, on the handwheel's face, straight above its middle: taking hold of it there turns nothing
-    const knob = faucetValveAt(fa);
     // (on the drop, clear of the pipe from the wall above, 3.5 in radius, and the spout's tip, 7 tall, below, on every faucet)
     for (const f of taps(l).faucets) {
       const v = faucetValveAt(f);
       expect(f.wall.y - 3.5 - (v.y + VALVE_WHEEL.r)).toBeGreaterThanOrEqual(2);
       expect(v.y - VALVE_WHEEL.r - (f.spout.y + 7)).toBeGreaterThanOrEqual(2);
     }
-    let at = { x: knob.x, y: knob.y + 20, z: knob.z };
-    taps(l).view.ray = () => ({ o: { x: at.x - 300, y: at.y, z: at.z }, d: { x: 1, y: 0, z: 0 } });
-    l.e.hand(true);
+    expect(taps(l).history.canUndo).toBe(false);
     expect(fa.valve).toBe(0);
-    taps(l).look(0, -1, false);
+    // a tap of E turns it clockwise a few degrees: still shut (see VALVE_SHUT)
+    const shut = settleAngle('valve', fa.angle, fa.valve);
+    hold(l, 'KeyE', 0.1);
+    const tap = fa.angle! - shut;
+    expect(tap).toBeGreaterThan((1 * Math.PI) / 180);
+    expect(tap).toBeLessThan((8 * Math.PI) / 180);
     expect(fa.valve).toBe(0);
-    // swept an eighth of a turn clockwise round it (as seen facing the wall, right is +z), from shut to as open as
-    // that is (less than half: it stays shut a little way either side of square, see VALVE_SHUT)...
-    const eighth = valveAt('valve', Math.PI / 4);
-    expect(eighth).toBeGreaterThan(0);
-    expect(eighth).toBeLessThan(0.5);
-    at = { x: knob.x, y: knob.y + 20, z: knob.z + 20 };
-    taps(l).look(1, 0, false);
-    expect(fa.valve).toBeCloseTo(eighth, 9);
-    // ...and on to straight right, a quarter turn from where it was taken, fully open
-    at = { x: knob.x, y: knob.y, z: knob.z + 20 };
-    taps(l).look(1, 0, false);
-    expect(fa.valve).toBeCloseTo(1, 9);
-    l.e.hand(false);
+    expect(turning(l)).toBeNull();
+    // (so it's no step to undo: its setting's as it was)
+    expect(taps(l).history.canUndo).toBe(false);
+    // held, it opens, from press to let go one step to undo
+    const tapped = fa.angle!;
+    hold(l, 'KeyE', 0.5);
+    const first = fa.angle! - tapped;
+    expect(fa.valve).toBeGreaterThan(0);
     expect(taps(l).history.canUndo).toBe(true);
     l.e.undo();
     expect(fa.valve).toBe(0);
     expect(taps(l).history.canUndo).toBe(false);
     l.e.undo(true);
-    expect(fa.valve).toBeCloseTo(1, 9);
+    expect(fa.valve).toBeGreaterThan(0);
+    // and it speeds up as it's held: held a second, it turns more than twice as far as held half of one
+    const mid = fa.angle!;
+    hold(l, 'KeyE', 1);
+    expect(fa.angle! - mid).toBeGreaterThan(2 * first);
+    // Q turns it back the other way
+    const was = fa.angle!;
+    hold(l, 'KeyQ', 0.3);
+    expect(fa.angle!).toBeLessThan(was);
   });
 
-  it("turns a tool's valve only by its handwheel, and by how far it's swept round, not where it's pointed", () => {
+  it('turns only from a fresh press, not with both keys, and lets go when the crosshair leaves it', () => {
     const l = lab();
-    // (the heater's tap's valve, a plain one, built in)
     const t = new Tool('heater', 99, { x: SPOT.x, y: LIFT + 400, z: SPOT.z, yaw: 0 }, [1]);
     (taps(l) as unknown as { tools: Tool[] }).tools.push(t);
     l.e.debug({ x: SPOT.x, z: SPOT.z + 300, yaw: 0, pitch: 0, locked: true });
     // the pipe beside it, or anything else of the tool, isn't its valve
     l.in.target = { kind: 'tool', t, part: 'spout', k: 0, point: spoutAt(t, 0) } as never;
     expect(l.in.valveAimed()).toBeNull();
+    l.e.touchKey('KeyE', true);
+    l.in.move(0.1);
+    expect(turning(l)).toBeNull();
+    // E already down as the crosshair comes onto it turns nothing
     l.in.target = { kind: 'tool', t, part: 'valve', k: 0, point: spoutAt(t, 0) } as never;
-    expect(l.in.valveAimed()).toEqual({ t, k: 0 });
-    // the pointer on its face, from in front: taken hold of to its right, which would have shut a lever, nothing turns
-    const c = valveLocal(t, 0);
-    const face = (dx: number, dy: number) => ({ x: t.pose.x + c.x + dx, y: t.pose.y - c.y - dy, z: t.pose.z + 400 });
-    let at = face(20, 0);
-    taps(l).view.ray = () => ({ o: at, d: { x: 0, y: 0, z: -1 } });
-    l.e.hand(true);
+    l.in.move(0.1);
     expect(t.valves[0]).toBe(1);
-    // swept a quarter turn round, down to below it (y down on its face), it shuts; and on round to the left, it opens again
-    at = face(14, 14);
-    taps(l).look(1, 0, false);
-    at = face(0, 20);
-    taps(l).look(1, 0, false);
-    expect(t.valves[0]).toBeCloseTo(0, 9);
-    at = face(-20, 0);
-    taps(l).look(1, 0, false);
-    expect(t.valves[0]).toBeCloseTo(1, 9);
-    // through its middle, nothing; coming out the other side, it goes on from where it was
-    at = face(0.5, 0.5);
-    taps(l).look(1, 0, false);
-    expect(t.valves[0]).toBeCloseTo(1, 9);
-    at = face(20, 0);
-    taps(l).look(1, 0, false);
-    expect(t.valves[0]).toBeCloseTo(1, 9);
-    l.e.hand(false);
+    l.e.touchKey('KeyE', false);
+    // pressed afresh, it does; with Q down too, it stops
+    l.e.touchKey('KeyE', true);
+    l.in.move(0.2);
+    const a = t.angles[0]!;
+    expect(a).toBeGreaterThan(0);
+    l.e.touchKey('KeyQ', true);
+    l.in.move(0.2);
+    expect(t.angles[0]).toBe(a);
+    l.e.touchKey('KeyE', false);
+    l.in.move(0.2);
+    expect(t.angles[0]).toBeLessThan(a);
+    // the crosshair off it, it's let go of, Q still down
+    l.in.target = null;
+    l.in.move(0.1);
+    expect(turning(l)).toBeNull();
+    l.e.touchKey('KeyQ', false);
   });
 
-  it('turns a stopcock by its handwheel just as a plain valve, from press to let go one step to undo', () => {
+  it('turns clockwise with E as it’s seen, even from behind, and a dial only to its stops', () => {
+    const l = lab();
+    const t = new Tool('heater', 99, { x: SPOT.x, y: LIFT + 400, z: SPOT.z, yaw: 0 }, [1]);
+    (taps(l) as unknown as { tools: Tool[] }).tools.push(t);
+    l.in.target = { kind: 'tool', t, part: 'valve', k: 0, point: spoutAt(t, 0) } as never;
+    // from in front, clockwise is its own clockwise
+    l.e.debug({ x: SPOT.x, z: SPOT.z + 300, yaw: 0, pitch: 0, locked: true });
+    hold(l, 'KeyE', 0.2);
+    const a = t.angles[0]!;
+    expect(a).toBeGreaterThan(0);
+    // from behind, it's the other way round
+    l.e.debug({ x: SPOT.x, z: SPOT.z - 300, yaw: Math.PI, pitch: 0, locked: true });
+    hold(l, 'KeyE', 0.2);
+    expect(t.angles[0]).toBeCloseTo(0, 9);
+    // its dial turns only as far as its stop, however long E's held
+    const d = t.shape.dial!;
+    l.e.debug({ x: SPOT.x, z: SPOT.z + 300, yaw: 0, pitch: 0, locked: true });
+    l.in.target = { kind: 'tool', t, part: 'valve', k: d, point: spoutAt(t, 0) } as never;
+    hold(l, 'KeyE', 4);
+    expect(t.valves[d]).toBe(1);
+    expect(t.angles[d]).toBeCloseTo(DIAL_STOP, 9);
+    hold(l, 'KeyQ', 0.1);
+    expect(t.valves[d]).toBeLessThan(1);
+  });
+
+  it('turns a stopcock by its handwheel just as a plain valve: E opens it, Q shuts it again, each one step to undo', () => {
     const l = lab();
     const t = new Tool('dispenser', 99, { x: SPOT.x, y: LIFT + 400, z: SPOT.z, yaw: 0 });
     (taps(l) as unknown as { tools: Tool[] }).tools.push(t);
@@ -2225,29 +2259,21 @@ describe('faucets’ valves', () => {
     expect(l.in.valveAimed()).toBeNull();
     l.in.target = { kind: 'tool', t, part: 'cock', k: 0, turns: true, point: spoutAt(t, 0) } as never;
     expect(l.in.valveAimed()).toEqual({ cock: { m: { tool: t, spout: 0 }, nozzle: false } });
-    const tip = spoutTip(t, 0);
-    const face = (dx: number, dy: number) => ({ x: tip.x + dx, y: tip.y - STOPCOCK.wheelY - dy, z: tip.z + 400 });
-    let at = face(20, 0);
-    taps(l).view.ray = () => ({ o: at, d: { x: 0, y: 0, z: -1 } });
-    l.e.hand(true);
-    // shut, as it comes: a quarter turn round, anticlockwise, opens it
+    // shut, as it comes; E held turns it open
     expect(c.valve).toBe(0);
-    at = face(14, -14);
-    taps(l).look(1, 0, false);
-    at = face(0, -20);
-    taps(l).look(1, 0, false);
-    expect(c.valve).toBeCloseTo(1, 9);
-    at = face(-14, -14);
-    taps(l).look(1, 0, false);
-    // (an eighth of a turn on, it's as open as that is: see VALVE_SHUT)
-    const eighth = valveAt('valve', Math.PI / 4);
-    expect(c.valve).toBeCloseTo(eighth, 9);
-    l.e.hand(false);
+    hold(l, 'KeyE', 0.5);
+    expect(c.valve).toBeGreaterThan(0.5);
+    const open = c.valve;
+    // and Q, back shut
+    hold(l, 'KeyQ', 0.5);
+    expect(c.valve).toBe(0);
     expect(t.cocks[0]).toBe(c);
+    l.e.undo();
+    expect(t.cocks[0]!.valve).toBeCloseTo(open, 9);
     l.e.undo();
     expect(t.cocks[0]!.valve).toBe(0);
     l.e.undo(true);
-    expect(t.cocks[0]!.valve).toBeCloseTo(eighth, 9);
+    expect(t.cocks[0]!.valve).toBeCloseTo(open, 9);
   });
 });
 

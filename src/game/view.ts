@@ -10,7 +10,7 @@ import type { Fluid } from '../chem/reactions';
 import { OUTLINE } from './outline';
 import { glowFalloff } from './appearance';
 import {
-  NOZZLE_H, STAND_BASE, STAND_ROD, STOPCOCK, TOOL_DEPTH, onScale, onTool, openingOf, plumbZ, tankNoteY, tankRect, valveLocal, valveZ, dialZ, settleAngle, valveAngle, VALVE_WHEEL, type Stand,
+  NOZZLE_H, STAND_BASE, STAND_ROD, STOPCOCK, TOOL_DEPTH, onScale, onTool, openingOf, plumbZ, tankNoteY, tankRect, valveLocal, valveZ, dialZ, DIAL_REACH, settleAngle, valveAngle, VALVE_WHEEL, type Stand,
 } from './bodies';
 import { SPECIES } from '../chem/species';
 import { CAP, DELIVERY, GOAL_PURITY, TRACE } from './config';
@@ -136,6 +136,12 @@ export interface Frame {
    * if there's no room for it (`ok` false); or with nowhere to go, just in hand (`ok` null), not outlined.
    */
   loose: { cock: Cock; pose: Pose; ok: boolean | null } | null;
+  /**
+   * The arrow of Q and E over the top of the handwheel or dial they'd turn (see TurnHint): its valve's middle, just in
+   * front of its face; the way it faces, toward the eyes; how far out from the middle its arc runs; and whether Q's
+   * side (−1) or E's (1) is lit, for the key held, or neither (0).
+   */
+  turnHint: { at: Vec3; yaw: number; r: number; lit: number } | null;
   drops: readonly { at: Vec3; v: Vessel; hanging: boolean }[];
   /** The scale whose tare key is held down. */
   tarePress: Scale | null;
@@ -2384,7 +2390,7 @@ class ToolView {
     for (let i = 0; i <= 6; i++) {
       const a = at(i / 6);
       const tick = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2.5, 0.6), darkMat);
-      tick.position.copy(v3(vc.x + 11.75 * Math.sin(a), vc.y - 11.75 * Math.cos(a), z - 2.5));
+      tick.position.copy(v3(vc.x + (DIAL_REACH - 1.25) * Math.sin(a), vc.y - (DIAL_REACH - 1.25) * Math.cos(a), z - 2.5));
       tick.rotation.z = -a;
       this.art.add(tick);
     }
@@ -5188,6 +5194,145 @@ class Exposer {
 /** How long the shine setting must be still before what reflects the metal is drawn again (see View.refinish), in real ms. */
 const REFINISH_MS = 400;
 
+/**
+ * The arrow of Q and E over the top of the handwheel or dial they'd turn (see Frame.turnHint): a double-headed arrow
+ * curving round its rim from about 11 o'clock to 1 o'clock, a little outside it, with Q at its left end and E at its
+ * right, all in the handwheel's own face, upright as it's seen, light with a dark edge so it reads on anything, in the
+ * key caps' typeface. It's drawn in a scene of its own over the finished frame, unlit and through everything, so
+ * nothing hides it (not even a stopcock's collar right over its handwheel), and it's nothing to aim at, to outline,
+ * to cast a shadow or to stop the shadow lamp's light. Far off, it's drawn bigger, so its letters are never less than
+ * TURN_HINT.minPx tall on the screen; never smaller than it is.
+ */
+class TurnHint {
+  /**
+   * Its picture, in units of the radius its arc runs at, from the valve's middle: the arc's ends `ends` radians either
+   * side of straight up, its line `line` wide with an edge `edge` round it, its arrowheads `head` long; its letters'
+   * middles `letter` out from the arc's ends, and as tall (their caps) as `cap`; the picture's extent `x` either side
+   * of the middle and `y0` to `y1` up, `px` pixels to a unit.
+   */
+  private static readonly L = { ends: Math.PI / 6, line: 0.09, edge: 0.05, head: 0.22, letter: 0.33, cap: 0.3, x: 1.32, y0: 0.4, y1: 1.32, px: 220 };
+  private scene = new THREE.Scene();
+  private canvas = document.createElement('canvas');
+  private tex = new THREE.CanvasTexture(this.canvas);
+  private mesh: THREE.Mesh;
+  /** Which side it was last drawn lit (see Frame.turnHint), to draw it again only when that changes. */
+  private lit: number | null = null;
+
+  constructor() {
+    const L = TurnHint.L;
+    this.canvas.width = Math.round(2 * L.x * L.px);
+    this.canvas.height = Math.round((L.y1 - L.y0) * L.px);
+    this.tex.colorSpace = THREE.SRGBColorSpace;
+    const geom = new THREE.PlaneGeometry(2 * L.x, L.y1 - L.y0).translate(0, (L.y0 + L.y1) / 2, 0);
+    const mat = new THREE.MeshBasicMaterial({ map: this.tex, transparent: true, depthTest: false, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
+    this.mesh = new THREE.Mesh(geom, mat);
+    this.mesh.visible = false;
+    this.scene.add(this.mesh);
+    // drawn again once the key caps' typeface has come
+    document.fonts?.load(`600 ${L.px}px "Schibsted Grotesk"`).then(() => {
+      if (this.lit !== null) this.draw(this.lit);
+    }, () => {});
+  }
+
+  /** Draw its picture, with the side of the key held (−1 Q, 1 E) lit and the other faint, or neither (0). */
+  private draw(lit: number): void {
+    this.lit = lit;
+    const L = TurnHint.L;
+    const c = this.canvas.getContext('2d');
+    if (!c) return;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    // units of the arc's radius, from the valve's middle, y up
+    c.setTransform(L.px, 0, 0, -L.px, L.x * L.px, L.y1 * L.px);
+    const at = (a: number, r = 1) => [r * Math.sin(a), r * Math.cos(a)] as const;
+    const back = L.head * 0.85;
+    // the arc, short of its ends, and each end's arrowhead, its tip on the arc a little past the end
+    const shape = (side: -1 | 1) => {
+      c.beginPath();
+      c.arc(0, 0, 1, Math.PI / 2, Math.PI / 2 - side * (L.ends - back), side > 0);
+      const tip = at(side * (L.ends + 0.04));
+      const a = side * (L.ends - back);
+      const [l, r] = [at(a, 1 - L.head * 0.55), at(a, 1 + L.head * 0.55)];
+      c.moveTo(tip[0], tip[1]);
+      c.lineTo(l[0], l[1]);
+      c.lineTo(r[0], r[1]);
+      c.closePath();
+    };
+    const letter = (side: -1 | 1) => {
+      const [x, y] = at(side * L.ends);
+      c.save();
+      c.translate(x + side * L.letter, y - 0.04);
+      c.scale(1, -1);
+      c.font = `600 ${L.cap / 0.72}px "Schibsted Grotesk", sans-serif`;
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.lineJoin = 'round';
+      c.lineWidth = 2 * L.edge;
+      c.strokeStyle = '#1b2320';
+      c.strokeText(side < 0 ? 'Q' : 'E', 0, 0);
+      c.fillStyle = this.ink(side, lit);
+      c.fillText(side < 0 ? 'Q' : 'E', 0, 0);
+      c.restore();
+    };
+    c.lineJoin = 'round';
+    c.lineCap = 'round';
+    // the faint side first, if one is, so the lit one is over it where they meet
+    const sides = lit > 0 ? ([-1, 1] as const) : ([1, -1] as const);
+    // the dark edge of the whole arrow, then its light line over it, so no edge crosses the line where the halves meet
+    for (const side of sides) {
+      c.globalAlpha = lit && lit !== side ? 0.45 : 1;
+      shape(side);
+      c.lineWidth = L.line + 2 * L.edge;
+      c.strokeStyle = c.fillStyle = '#1b2320';
+      c.stroke();
+      c.fill();
+    }
+    for (const side of sides) {
+      c.globalAlpha = lit && lit !== side ? 0.45 : 1;
+      shape(side);
+      c.lineWidth = L.line;
+      c.strokeStyle = c.fillStyle = this.ink(side, lit);
+      c.stroke();
+      c.fill();
+      letter(side);
+    }
+    c.globalAlpha = 1;
+    this.tex.needsUpdate = true;
+  }
+
+  /** The light it's drawn in: as the key caps on the display, or pure white for the side of the key held. */
+  private ink(side: number, lit: number): string {
+    return lit === side ? '#ffffff' : '#eef0eb';
+  }
+
+  /** Put it over the handwheel or dial it's for (see Frame.turnHint), or hide it. */
+  update(h: Frame['turnHint'], camera: THREE.PerspectiveCamera, cssH: number): void {
+    this.mesh.visible = !!h;
+    if (!h) return;
+    if (h.lit !== this.lit) this.draw(h.lit);
+    const at = new THREE.Vector3(h.at.x, h.at.y, h.at.z);
+    // how many CSS pixels a unit is there, and how big it must be drawn for its letters to be tall enough
+    const px = cssH / (2 * camera.position.distanceTo(at) * Math.tan((camera.fov * Math.PI) / 360));
+    const grow = Math.max(1, TURN_HINT.minPx / (TurnHint.L.cap * h.r * px));
+    this.mesh.position.copy(at);
+    this.mesh.rotation.set(0, h.yaw, 0);
+    this.mesh.scale.setScalar(h.r * grow);
+  }
+
+  /** Draw it over the finished frame, if it's up. */
+  render(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
+    if (!this.mesh.visible) return;
+    renderer.autoClear = false;
+    renderer.shadowMap.autoUpdate = false;
+    renderer.render(this.scene, camera);
+    renderer.shadowMap.autoUpdate = true;
+    renderer.autoClear = true;
+  }
+}
+
+/** The arrow of Q and E (see TurnHint): its letters are never less than `minPx` CSS pixels tall on the screen. */
+const TURN_HINT = { minPx: 12 };
+
 /** Draws the lab with Three.js, from the player's eyes, and says what's under the crosshair. */
 export class View {
   /** The field of view is 90°, top to bottom, until the player zooms in (see look). */
@@ -5226,6 +5371,7 @@ export class View {
   private roomLights: { light: THREE.Light; base: number }[] = [];
   private raycaster = new THREE.Raycaster();
   private outliner = new Outliner();
+  private turnHint = new TurnHint();
   /** Works out where the shadow lamp's light falls (see Exposer), once it's first needed. */
   private exposer?: Exposer;
   private studio = new IconStudio(Math.min(2, window.devicePixelRatio || 1));
@@ -5412,6 +5558,7 @@ export class View {
     this.updateStands(fr);
     this.ghost.update(fr.ghost, fr.clock, fr.energies);
     this.updateLoose(fr);
+    this.turnHint.update(fr.turnHint, this.camera, this.renderer.domElement.clientHeight);
     this.updateStreams(fr);
     this.updateGuides(fr);
 
@@ -5447,6 +5594,8 @@ export class View {
     // and so is a stopcock in hand where it would go on, red if there's no room for it there
     const loose = fr.loose && this.loose && fr.loose.ok !== null ? this.loose.v.group.children : [];
     if (loose.length) this.outliner.render(this.renderer, scene, this.camera, loose, 1, fr.loose!.ok ? OUTLINE.color : GHOST_RED);
+    // and over it all, the arrow of Q and E over a handwheel or a dial they'd turn
+    this.turnHint.render(this.renderer, this.camera);
     this.shine();
   }
 

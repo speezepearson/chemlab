@@ -105,7 +105,7 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
   opacity:.75;mix-blend-mode:difference;
 }
 .crosshair.dim{opacity:.25}
-/* the mouse hints: at the crosshair's own height, the left button's due left of it and the right button's due right */
+/* the hints: at the crosshair's own height, the left button's due left of it and E's due right */
 .hints{position:absolute;left:50%;top:50%;pointer-events:none;z-index:2}
 .hints span{position:absolute;top:0;transform:translateY(-50%);display:flex}
 .hints .left{right:16px}
@@ -135,10 +135,6 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .doable .mouse rect{fill:rgba(238,240,235,.85);stroke:#1b2320;stroke-width:1.2}
 .doable .mouse path{fill:none;stroke:#1b2320;stroke-width:1.2}
 .doable .mouse path.lit{fill:#2f6a56;stroke:none}
-.aim{
-  position:absolute;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;pointer-events:none;z-index:2;
-  border:2px solid #fff;mix-blend-mode:difference;
-}
 .note{
   position:absolute;left:50%;top:calc(50% + 40px);transform:translateX(-50%);pointer-events:none;z-index:2;
   color:#f3d9d4;background:rgba(40,14,10,.6);padding:3px 10px;border-radius:6px;font-size:13px;

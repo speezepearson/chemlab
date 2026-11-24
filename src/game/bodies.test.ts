@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FLASK_R, MAGNET, NOZZLE_REACH, PLATFORM_REACH, magnetShift, STAND_BASE, aimAngle, angleOf, settleAngle, swept, turnValve, valveAt, valveAngle, leverKind, VALVE_DEADZONE, VALVE_SHUT, DIAL_STOP, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
+  FLASK_R, MAGNET, NOZZLE_REACH, PLATFORM_REACH, magnetShift, STAND_BASE, angleOf, settleAngle, turnValve, valveAt, valveAngle, leverKind, VALVE_SHUT, DIAL_STOP, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
   docked, nozzleBox, nozzleMounts, nozzleStand, onScale, platformSpot, scaleBox, snapReach, spoutAt, standBase, tankMouth, toolBounds, toolBox, toolStands,
   plumbZ,
 } from './bodies';
@@ -284,8 +284,6 @@ describe('tools in the room', () => {
 
 describe('valves', () => {
   const Q = Math.PI / 2;
-  /** The aim's angle round a valve, clockwise from straight up, as a point `r` from its middle (x right, y down). */
-  const aim = (a: number, r = 20) => aimAngle(r * Math.sin(a), -r * Math.cos(a));
 
   it("open a plain valve with its bar along the pipe and shut it with the bar square to it, twice a turn", () => {
     // (from fully open, it's `run` round to where it shuts, a little short of square: see VALVE_SHUT)
@@ -349,21 +347,6 @@ describe('valves', () => {
     // (halfway back to where it shuts, a little short of square: see VALVE_SHUT)
     turnValve(t, 0, -(Q - VALVE_SHUT) / 2);
     expect(t.valves[0]).toBeCloseTo(0.5, 12);
-  });
-
-  it('turn by how far the aim swept round, the short way, even across straight down', () => {
-    // from just left of straight down to just right of it is a small turn anticlockwise, not most of a turn
-    expect(swept(aim(2 * Q + 0.1), aim(2 * Q - 0.1))).toBeCloseTo(-0.2, 9);
-    expect(swept(aim(-2 * Q + 0.1), aim(2 * Q - 0.1))).toBeCloseTo(-0.2, 9);
-    expect(swept(aim(0.3), aim(0.5))).toBeCloseTo(0.2, 9);
-  });
-
-  it('turn nothing going into or coming out of the dead zone round the middle', () => {
-    const inside = aimAngle(VALVE_DEADZONE / 2, 0);
-    expect(inside).toBeNull();
-    expect(swept(aim(0.4), inside)).toBe(0);
-    expect(swept(inside, aim(1.2))).toBe(0);
-    expect(aimAngle(VALVE_DEADZONE * 2, 0)).toBeCloseTo(Q, 12);
   });
 
   it('stop a dial at its two ends, and turn it back from one at once', () => {

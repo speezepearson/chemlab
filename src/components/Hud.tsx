@@ -99,8 +99,9 @@ function TouchButton({
 
 /**
  * On a touch screen, while playing: the stick that walks, bottom left, and the one that looks, bottom right; and
- * buttons standing in for the keys and the mouse's buttons. Over the look stick, Grab (the left button) and E, which
- * is named for what it'll do and, with empty hands, is the right button, which turns a valve: while one turns, it moves the aim round it as the finger drags, turning it by how far that sweeps round; and Note (Enter) when there's something to write a note about, and Nap (N) when a nap can be had. Over the move stick, while something's held, a pad to drag (across to turn it,
+ * buttons standing in for the keys and the mouse's left button. Over the look stick, Grab (the left button) and, with
+ * something in hand, E, named for what it'll do, or with empty hands on a handwheel or a dial, Q and E, each turning
+ * it while it's held, as the keys do; and Note (Enter) when there's something to write a note about, and Nap (N) when a nap can be had. Over the move stick, while something's held, a pad to drag (across to turn it,
  * up and down to hold it further or nearer, or for a hose's nozzle, to slide its stand out or in) and Put away
  * (Backspace).
  */
@@ -113,13 +114,16 @@ export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudSta
       <div className="touch-buttons right">
         {hud.label && <TouchButton label="Note" className="small" down={() => engine.touchNote()} />}
         {hud.nap && <TouchButton label="Nap" className="small" down={() => engine.touchNap()} />}
-        <TouchButton
-          label={hud.hand}
-          lit={hud.use || hud.right}
-          down={() => engine.hand(true)}
-          up={() => engine.hand(false)}
-          drag={(dx, dy) => engine.handDrag(dx, dy)}
-        />
+        {hud.holding ? (
+          <TouchButton label={hud.hand} lit={hud.use} down={() => engine.touchKey('KeyE', true)} up={() => engine.touchKey('KeyE', false)} />
+        ) : (
+          hud.turn && (
+            <>
+              <TouchButton label="Q ↺" lit down={() => engine.touchKey('KeyQ', true)} up={() => engine.touchKey('KeyQ', false)} />
+              <TouchButton label="E ↻" lit down={() => engine.touchKey('KeyE', true)} up={() => engine.touchKey('KeyE', false)} />
+            </>
+          )
+        )}
         <TouchButton label={hud.holding ? 'Drop' : 'Grab'} lit={hud.grab || hud.drop} down={() => engine.touchGrab()} />
       </div>
       <div className="touch-buttons left">
@@ -130,20 +134,20 @@ export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudSta
   );
 }
 
-/** A little mouse with one button lit: that button would do something. */
-function MouseHint({ side }: { side: 'left' | 'right' }) {
+/** A little mouse with its left button lit: that button would do something. */
+function MouseHint() {
   return (
     <svg className="mouse" viewBox="0 0 12 17" aria-hidden="true">
       <rect x="0.6" y="0.6" width="10.8" height="15.8" rx="5.4" />
-      <path className={side === 'left' ? 'lit' : 'lit right'} d={side === 'left' ? 'M6 0.6 A5.4 5.4 0 0 0 0.6 6 V7 H6 Z' : 'M6 0.6 A5.4 5.4 0 0 1 11.4 6 V7 H6 Z'} />
+      <path className="lit" d="M6 0.6 A5.4 5.4 0 0 0 0.6 6 V7 H6 Z" />
       <path d="M0.6 7 H11.4 M6 0.6 V7" />
     </svg>
   );
 }
 
-/** One key or button of an action (see Action): a key cap, or a little mouse with the button lit. */
+/** One key or button of an action (see Action): a key cap, or a little mouse with its left button lit. */
 function Key({ k }: { k: string }) {
-  if (k === 'LMB' || k === 'RMB') return <MouseHint side={k === 'LMB' ? 'left' : 'right'} />;
+  if (k === 'LMB') return <MouseHint />;
   return <kbd>{k}</kbd>;
 }
 
@@ -252,7 +256,8 @@ function Smell({ smell }: { smell: NonNullable<HudState['smell']> }) {
 }
 
 /**
- * The crosshair, with hints by it for what the mouse buttons (or, on its right, E) would do, or an equipment wheel while it's held open; the aim while a valve turns; under
+ * The crosshair, with hints by it for what the left button (on its left) and E (on its right) would do, or an equipment
+ * wheel while it's held open; under
  * the crosshair, what the last sniff smelled of, coming up a piece at a time and then fading out; and, on a
  * screen with a mouse and keys, everything else that can be done just now, in a corner, unless `/` has hidden it.
  */
@@ -265,30 +270,23 @@ export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; 
         <Wheel wheel={hud.wheel} engine={engine} />
       ) : (
         <>
-          {/* (dim while a valve turns, or she's sniffing: it aims at nothing then) */}
-          <div className={hud.aim || hud.sniffing ? 'crosshair dim' : 'crosshair'} />
+          {/* (dim while she's sniffing: it aims at nothing then) */}
+          <div className={hud.sniffing ? 'crosshair dim' : 'crosshair'} />
           {/* each on its own side of the crosshair, whether or not the other's there */}
           <div className="hints">
             {hud.press && (
               <span className="left">
-                <MouseHint side="left" />
+                <MouseHint />
               </span>
             )}
-            {hud.use ? (
+            {hud.use && (
               <span className="right">
                 <kbd>E</kbd>
               </span>
-            ) : (
-              hud.right && (
-                <span className="right">
-                  <MouseHint side="right" />
-                </span>
-              )
             )}
           </div>
         </>
       )}
-      {hud.aim && <div className="aim" style={{ left: hud.aim.x, top: hud.aim.y }} />}
       {hud.note && <div className={hud.tip ? 'note tip' : 'note'}>{hud.note}</div>}
       {/* what the last sniff smelled of: a new one comes up afresh, even if it reads the same */}
       {hud.smell && <Smell key={hud.smell.n} smell={hud.smell} />}

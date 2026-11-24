@@ -4,7 +4,7 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
-  COCK_EXTENT, COCK_WHEEL_Z, FLASK_CENTER, FLASK_LIP, NEAR, NEAR_STEP, NOZZLE_H, NOZZLE_REACH, PLATFORM_REACH, STAND_MAX, STOPCOCK, aimAngle, cockBox, settleAngle, swept, sweep, turnValve, valveAt, valveFaceZ, valveLocal, VALVE_WHEEL, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
+  COCK_EXTENT, COCK_WHEEL_Z, FLASK_CENTER, FLASK_LIP, NEAR, NEAR_STEP, NOZZLE_H, NOZZLE_REACH, PLATFORM_REACH, STAND_MAX, STOPCOCK, cockBox, settleAngle, sweep, turnValve, valveAt, valveFaceZ, valveLocal, VALVE_WHEEL, DIAL_REACH, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
   FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, magnetShift, nozzleMounts, nozzleStand, onScale, onTool, platformSpot, scaleBox, scaleCenter, snapReach, spoutAt, standBase,
   spoutTip, tankMouth, tankNoteY, toolBox, toolCenter, toolStands, type Magnets, type NozzleMount, type Stand,
 } from './bodies';
@@ -75,19 +75,17 @@ export interface Hud {
    * or set down what's held or pick up what's looked at.
    */
   press: boolean;
-  /** Whether the right button would do something: turn the valve looked at. */
-  right: boolean;
+  /** Whether Q and E, held, would turn the handwheel or dial looked at (see GameEngine.turnWouldDo). */
+  turn: boolean;
   /**
    * Whether E, held, would use what's in hand: pour a flask, let fluid out of a hose's nozzle, or dip a wicking strip or
    * a thermometer into what's looked at.
    */
   use: boolean;
-  /** While a valve is being turned, where the pointer that turns it by sweeping round it is, in CSS pixels. */
-  aim: { x: number; y: number } | null;
   /** Whether Enter would write a note about what the crosshair is on (see GameEngine.note). */
   label: boolean;
-  /** What E (or, with empty hands, the right button) does now, in a word, for the touch screen's button that stands in for it. */
-  hand: 'Pour' | 'Flow' | 'Dip' | 'Turn';
+  /** What E does now with what's in hand, in a word, for the touch screen's button that stands in for it. */
+  hand: 'Pour' | 'Flow' | 'Dip';
   /** A brief note, like there being no room for something. */
   note: string | null;
   /** Whether the note is a tip, something the player can now do, not something they can't. */
@@ -133,7 +131,7 @@ export interface Hud {
 
 /**
  * Something the player can do just now: the keys or buttons that do it, pressed together, and what it does, in a few
- * words. Keys are named as on the keyboard; 'LMB' and 'RMB' are the mouse's left and right buttons, 'Wheel' its wheel, and '↑↓' moving it up and down. `off` if it can't be done here, though
+ * words. Keys are named as on the keyboard (two keys either of which does it, in one cap, as 'Q, E'); 'LMB' is the mouse's left button, 'Wheel' its wheel, and '↑↓' moving it up and down. `off` if it can't be done here, though
  * it could elsewhere.
  */
 export interface Action {
@@ -325,6 +323,14 @@ const FOV = 90;
  */
 const ZOOM = { fov: 30, s: 0.12 };
 const TURN_SENS = 0.008;
+/**
+ * How fast Q and E turn a handwheel or a dial (see stepTurn), in radians per real second (it's the player's own doing,
+ * like walking): slowly at first, `from`, so a tap moves it only a few degrees and it can be set finely, then faster,
+ * evenly up to `to` over the first `ramp` real seconds the key's held, so it can be swung round without waiting.
+ */
+const TURN_RATE = { from: (40 * Math.PI) / 180, to: (240 * Math.PI) / 180, ramp: 0.8 };
+/** How far outside a handwheel's or a dial's rim the arrow of Q and E over its top runs (see turnHint). */
+const TURN_HINT_GAP = 3;
 /** How far a held nozzle's stand slides out per pixel the mouse moves up with Shift. */
 const REACH_SENS = 0.5;
 /** How fast the look stick turns the view when pushed all the way, in radians per real second: across, and up or down. */
@@ -438,11 +444,11 @@ export class GameEngine {
    */
   private using = false;
   /**
-   * A valve being turned with the right button (a tool's or a faucet's), where on screen the pointer turning it is, and
-   * the angle round the valve's middle it was last at (see aimAngle), which it turns the valve by sweeping round from;
-   * null while it's in the dead zone, or before it's first been taken.
+   * A valve being turned with Q and E (a tool's handwheel or dial, a stopcock's, or a faucet's; see stepTurn): which way
+   * it's turning, as the keys held say (1 clockwise as seen, −1 anticlockwise, 0 neither), and for how many real
+   * seconds it has been turning that way, for its speed (see TURN_RATE).
    */
-  private turning: (ValveRef & { aim: { x: number; y: number }; last: number | null }) | null = null;
+  private turning: (ValveRef & { dir: number; for: number }) | null = null;
   /** How far the view is zoomed in (see ZOOM), from 0, not at all, to 1. */
   private zoom = 0;
   /**
@@ -1580,22 +1586,17 @@ export class GameEngine {
   }
 
   /**
-   * E, pressed or let go: it pours, lets fluid out, or dips a strip or a thermometer; or with empty hands, as the right
-   * button, it turns the valve looked at.
+   * Q or E, pressed or let go, as the keys are (see keyDown): with something in hand, E uses it and Q puts it back;
+   * with empty hands, each turns the handwheel or dial looked at, while it's held.
    */
-  hand(down: boolean): void {
+  touchKey(code: 'KeyQ' | 'KeyE', down: boolean): void {
     if (!down) {
-      this.using = false;
-      this.endTurn();
+      this.keys.delete(code);
+      this.keyUp(code);
     } else if (this.locked) {
-      if (this.held) this.useDown();
-      else this.rightDown();
+      this.keys.add(code);
+      this.keyDown(code);
     }
-  }
-
-  /** A finger dragged (dx, dy) pixels on the right button's stand-in: while a valve turns, it moves the aim. */
-  handDrag(dx: number, dy: number): void {
-    if (this.turning) this.look(dx, dy, false);
   }
 
   /**
@@ -1660,14 +1661,13 @@ export class GameEngine {
       e.preventDefault();
       // the wheel has the mouse while it's open, and her hands do nothing while she sniffs
       if (this.wheel || this.sniffing) return;
+      // (the right button does nothing: E uses what's in hand, and Q and E turn valves)
       if (e.button === 0) this.leftDown(e.shiftKey);
-      // (what's in hand is used with E, not the right button)
-      if (e.button === 2 && !this.held) this.rightDown();
     });
     on(window, 'mouseup', (e) => {
       if (e.button === 0) this.tarePress = null;
-      if (e.button === 2) this.endTurn();
     });
+    // (nor does the browser's menu open for it)
     on(c, 'contextmenu', (e) => e.preventDefault());
     on(window, 'mousemove', (e) => {
       if (!this.locked) return;
@@ -1716,8 +1716,7 @@ export class GameEngine {
         e.preventDefault();
         return;
       }
-      if (e.code === 'KeyE') this.useDown();
-      if (e.code === 'KeyQ') this.putBack();
+      if (e.code === 'KeyE' || e.code === 'KeyQ') this.keyDown(e.code);
       if (e.code === 'KeyR') this.turn();
       if (e.code === 'Enter') {
         // the note's text box opens at once, and this Enter mustn't be taken as finishing it
@@ -1739,7 +1738,7 @@ export class GameEngine {
     });
     on(window, 'keyup', (e) => {
       this.keys.delete(e.code);
-      if (e.code === 'KeyE') this.using = false;
+      if (e.code === 'KeyE' || e.code === 'KeyQ') this.keyUp(e.code);
       // (letting go of Alt mustn't open the browser's menu either)
       if (this.locked && (e.code === 'AltLeft' || e.code === 'AltRight')) e.preventDefault();
       const wheel = WHEEL_CODES.indexOf(e.code);
@@ -1747,6 +1746,8 @@ export class GameEngine {
     });
     on(window, 'blur', () => {
       this.keys.clear();
+      this.using = false;
+      this.endTurn();
       this.wheel = null;
     });
   }
@@ -1757,15 +1758,8 @@ export class GameEngine {
     return Math.max(r + HOLD_NEAR, Math.min(r + HOLD_FAR, d));
   }
 
-  /** The mouse moved by (dx, dy) pixels: sweep round a valve to turn it, slide a held nozzle's stand (with Shift), or look around. */
+  /** The mouse moved by (dx, dy) pixels: slide a held nozzle's stand (with Shift), or look around. */
   private look(dx: number, dy: number, shift: boolean): void {
-    if (this.turning) {
-      const a = this.turning.aim;
-      a.x = Math.max(0, Math.min(this.viewW, a.x + dx));
-      a.y = Math.max(0, Math.min(this.viewH, a.y + dy));
-      this.aimTurning();
-      return;
-    }
     // with Shift, a held nozzle's stand slides along its arm instead (R turns things: see turn)
     if (shift && this.held?.kind === 'hose') {
       this.slideReach(this.held, dy);
@@ -1784,47 +1778,128 @@ export class GameEngine {
   }
 
   /**
-   * Turn the valve being turned by as far as the pointer has swept round its middle since it was last taken, on the face
-   * it lies on (a tool's handwheel's or dial's, or a faucet's, see faucetValvePose): never to where the
-   * pointer is, only by how far it's gone round, so taking hold of it moves nothing, and nor does the pointer coming out
-   * of the dead zone round its middle.
+   * Q or E pressed (a fresh press, not the key repeating): with something in hand, E uses it (see useDown) and Q puts it
+   * back (see putBack); with empty hands, on a handwheel or a dial, either takes hold of it to turn it (see stepTurn).
    */
-  private aimTurning(): void {
+  private keyDown(code: 'KeyQ' | 'KeyE'): void {
+    if (this.held) {
+      if (code === 'KeyE') this.useDown();
+      else this.putBack();
+    } else this.startTurn();
+  }
+
+  /** Q or E let go: E stops using what's in hand; a valve stops turning once neither's held (see stepTurn). */
+  private keyUp(code: 'KeyQ' | 'KeyE'): void {
+    if (code === 'KeyE') this.using = false;
+    if (this.turning && !this.keys.has('KeyQ') && !this.keys.has('KeyE')) this.endTurn();
+  }
+
+  /** Whether Q and E would turn something now: with empty hands, on a handwheel or a dial (see valveAimed). */
+  private turnWouldDo(): boolean {
+    return !this.held && !this.wheel && !this.sniffing && !this.dozing() && !inPod(this.wake) && !this.previewing && !!this.valveAimed();
+  }
+
+  /** Take hold of the handwheel or dial looked at, to turn it with Q and E while either's held: one step to undo. */
+  private startTurn(): void {
+    if (this.turning || !this.turnWouldDo()) return;
+    const k = this.valveAimed()!;
+    this.mark();
+    this.turning = { ...k, dir: 0, for: 0 };
+  }
+
+  /** Whether two valves are the same one. */
+  private static sameValve(a: ValveRef, b: ValveRef): boolean {
+    if ('t' in a) return 't' in b && a.t === b.t && a.k === b.k;
+    if ('faucet' in a) return 'faucet' in b && a.faucet === b.faucet;
+    return 'cock' in b && sameMount(a.cock.m, b.cock.m) && a.cock.nozzle === b.cock.nozzle;
+  }
+
+  /**
+   * Turn the valve being turned for `dt` real seconds (it's the player's own doing, like walking): clockwise as she
+   * sees it while E's held, anticlockwise while Q is, and not at all while both are, at TURN_RATE, from slow when
+   * the key was pressed (or the other let go) to fast. It's let go of once neither key is held, or the crosshair leaves
+   * it, or something comes into her hand.
+   */
+  private stepTurn(dt: number): void {
     const tr = this.turning;
-    if (!tr || !this.viewW) return;
-    const { aim } = tr;
-    const { o, d } = this.view.ray((aim.x / this.viewW) * 2 - 1, 1 - (aim.y / this.viewH) * 2);
-    const t = 't' in tr ? tr.t : null;
-    const fa = 'faucet' in tr ? this.faucets[tr.faucet] : null;
-    const cock = 'cock' in tr ? this.cockAt(tr.cock) : null;
-    if ('cock' in tr && !cock) return;
-    const pose = t ? t.pose : 'cock' in tr ? this.cockFrame(tr.cock) : faucetValvePose(fa!);
-    const n = { x: Math.sin(pose.yaw), y: 0, z: Math.cos(pose.yaw) };
-    const p0 =
-      t && 't' in tr ? onTool(t, 0, 0, valveFaceZ(t, tr.k))
-      : cock ? toWorld(pose, { x: 0, y: 0, z: COCK_WHEEL_Z + VALVE_WHEEL.thick / 2 })
-      : toWorld(pose, { x: 0, y: 0, z: FAUCET_VALVE.pipe + VALVE_WHEEL.gap + VALVE_WHEEL.thick });
-    const dn = d.x * n.x + d.z * n.z;
-    if (Math.abs(dn) < 1e-3) return;
-    const s = ((p0.x - o.x) * n.x + (p0.z - o.z) * n.z) / dn;
-    if (s <= 0) return;
-    const l = toLocal(pose, { x: o.x + d.x * s, y: o.y + d.y * s, z: o.z + d.z * s });
-    // the pointer's angle round the valve's middle, x right and y down on its face
-    const c = 't' in tr ? valveLocal(tr.t, tr.k) : cock ? { x: 0, y: STOPCOCK.wheelY } : { x: 0, y: 0 };
-    const a = aimAngle(l.x - c.x, -l.y - c.y);
-    const by = swept(tr.last, a);
-    tr.last = a;
-    if (!by) return;
-    if ('t' in tr) turnValve(tr.t, tr.k, by);
-    else if (cock) {
+    if (!tr) return;
+    const k = this.valveAimed();
+    const q = this.keys.has('KeyQ');
+    const e = this.keys.has('KeyE');
+    if (this.held || !k || !GameEngine.sameValve(k, tr) || (!q && !e)) {
+      this.endTurn();
+      return;
+    }
+    const dir = (e ? 1 : 0) - (q ? 1 : 0);
+    if (dir !== tr.dir) [tr.dir, tr.for] = [dir, 0];
+    if (!dir) return;
+    // how far it's gone round after t seconds held, speeding up evenly through the ramp
+    const { from, to, ramp } = TURN_RATE;
+    const gone = (t: number) => (t < ramp ? from * t + ((to - from) * t * t) / (2 * ramp) : (from + to) * (ramp / 2) + to * (t - ramp));
+    const by = gone(tr.for + dt) - gone(tr.for);
+    tr.for += dt;
+    this.turnBy(tr, dir * (this.valveFace(tr).front ? by : -by));
+  }
+
+  /** Turn a valve by `by` radians, clockwise as seen from in front (see sweep), a dial only as far as its stops. */
+  private turnBy(v: ValveRef, by: number): void {
+    if ('t' in v) turnValve(v.t, v.k, by);
+    else if ('cock' in v) {
+      const cock = this.cockAt(v.cock);
+      if (!cock) return;
       // a stopcock turns as a plain valve does
       cock.angle = sweep('valve', settleAngle('valve', cock.angle, cock.valve), by);
       cock.valve = valveAt('valve', cock.angle);
-    } else if (fa) {
+    } else {
       // a faucet's valve turns as a tool's plain valve does
+      const fa = this.faucets[v.faucet];
       fa.angle = sweep('valve', settleAngle('valve', fa.angle, fa.valve), by);
       fa.valve = valveAt('valve', fa.angle);
     }
+  }
+
+  /**
+   * Where a valve's face is: its middle, just in front of it, the way it faces (a handwheel's or a dial's face is
+   * upright, turned only about the vertical), how far out its rim is, and whether the eyes are in front of it.
+   */
+  private valveFace(v: ValveRef): { at: Vec3; yaw: number; r: number; front: boolean } {
+    const ahead = 0.5;
+    let at: Vec3;
+    let yaw: number;
+    let r = VALVE_WHEEL.r;
+    if ('t' in v) {
+      const c = valveLocal(v.t, v.k);
+      const dial = v.k === v.t.shape.dial;
+      if (dial) r = DIAL_REACH;
+      // (a dial's pointer stands a little proud of the face it's set in)
+      at = onTool(v.t, c.x, c.y, valveFaceZ(v.t, v.k) + (dial ? 2.1 : VALVE_WHEEL.thick / 2) + ahead);
+      yaw = v.t.pose.yaw;
+    } else if ('cock' in v) {
+      const pose = this.cockFrame(v.cock);
+      at = toWorld(pose, { x: 0, y: -STOPCOCK.wheelY, z: COCK_WHEEL_Z + VALVE_WHEEL.thick / 2 + ahead });
+      yaw = pose.yaw;
+    } else {
+      const pose = faucetValvePose(this.faucets[v.faucet]);
+      at = toWorld(pose, { x: 0, y: 0, z: FAUCET_VALVE.pipe + VALVE_WHEEL.gap + VALVE_WHEEL.thick + ahead });
+      yaw = pose.yaw;
+    }
+    const eye = this.eye();
+    const front = (eye.x - at.x) * Math.sin(yaw) + (eye.z - at.z) * Math.cos(yaw) >= 0;
+    return { at, yaw, r, front };
+  }
+
+  /**
+   * The arrow of Q and E over the top of the handwheel or dial that they'd turn, or are turning (see Frame.turnHint):
+   * in its face, facing the eyes, a little outside its rim, with the side of the key held lit.
+   */
+  private turnHint(): Frame['turnHint'] {
+    const v = this.turning ?? (this.turnWouldDo() ? this.valveAimed() : null);
+    if (!v) return null;
+    const f = this.valveFace(v);
+    const q = this.keys.has('KeyQ');
+    const e = this.keys.has('KeyE');
+    const lit = !this.turning || q === e ? 0 : e ? 1 : -1;
+    return { at: f.at, yaw: f.front ? f.yaw : f.yaw + Math.PI, r: f.r + TURN_HINT_GAP, lit };
   }
 
   /**
@@ -2578,16 +2653,6 @@ export class GameEngine {
     if (h.kind === 'tool' && h.t.kind === 'strip' && this.mouthAimed()) this.tapping = true;
   }
 
-  /** The right button pressed, with empty hands: take hold of the valve looked at, to turn it. */
-  private rightDown(): void {
-    if (this.dozing() || inPod(this.wake) || this.held) return;
-    const k = this.valveAimed();
-    if (!k) return;
-    this.mark();
-    this.turning = { ...k, aim: { x: this.viewW / 2, y: this.viewH / 2 }, last: null };
-    this.aimTurning();
-  }
-
   /**
    * The open top of the vessel the crosshair is on, to pour a held flask into: a flask's, or a tool's tank's; or, with
    * `sheets`, the face of a sheet of blotting paper (see BLOTTERS), which is poured onto but has nothing to dip into.
@@ -2973,7 +3038,7 @@ export class GameEngine {
     const g = this.gaze();
     this.view.look(g.eye, g.yaw, g.pitch, this.fov());
     // (sniffing, the crosshair stays on what it was on from where she stands)
-    if (!this.turning && !this.sniffing) this.target = this.previewing ? null : this.view.pick(REACH, this.heldObject());
+    if (!this.sniffing) this.target = this.previewing ? null : this.view.pick(REACH, this.heldObject());
     this.simulate(dt);
     // the end stands the lab still as it was when there was enough, so it goes on in real time
     if (this.arrival && this.wake !== 'pod') this.stepWake(dt);
@@ -3000,6 +3065,7 @@ export class GameEngine {
     }
     // shut in the pod, or in the preview of the end, they can only look
     if (inPod(this.wake) || this.previewing) return;
+    this.stepTurn(dt);
     const h = this.held;
     if (!still && (fwd || side)) {
       // keys walk at full speed whichever way; the move stick as far as it's pushed
@@ -3752,7 +3818,7 @@ export class GameEngine {
       energies: BOND_KEYS.map((k) => this.chem.params.bonds[k].E), alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
       airlock: this.airlockLook(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(), ghost: this.ghostFrame(pl),
-      loose: this.looseFrame(),
+      loose: this.looseFrame(), turnHint: this.turnHint(),
     });
   }
 
@@ -3819,13 +3885,7 @@ export class GameEngine {
   private actions(): Action[] {
     const out: Action[] = [];
     const add = (keys: string[], does: string, off = false) => out.push(off ? { keys, does, off } : { keys, does });
-    // turning a valve takes the mouse over until the button's let go
-    if (this.turning) {
-      add(['Mouse'], 'sweep round to turn it');
-      add(['RMB'], 'let go when it’s set');
-      return out;
-    }
-    // and so does an equipment wheel, until its key's let go
+    // an equipment wheel takes the mouse over until its key's let go
     if (this.wheel) {
       add(['Mouse'], 'point at what to take');
       add([WHEEL_KEYS[this.wheel.which]], 'let go to take it');
@@ -3876,7 +3936,8 @@ export class GameEngine {
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it back in the cabinet');
       add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it back in the cabinet') : h.ghost ? 'leave it where it is' : 'put it back');
     } else {
-      if (this.rightWouldDo()) add(['RMB'], `hold and sweep round it to turn the ${this.valveAimed() && 'cock' in this.valveAimed()! ? 'stopcock' : 'valve'}`);
+      const v = this.turning ?? (this.turnWouldDo() ? this.valveAimed() : null);
+      if (v) add(['Q, E'], `hold to turn the ${'cock' in v ? 'stopcock' : 't' in v && v.k === v.t.shape.dial ? 'dial' : 'valve'}`);
       add([WHEEL_KEYS.join(', ')], 'hold to grab equipment');
     }
     if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
@@ -4245,11 +4306,6 @@ export class GameEngine {
     }
   }
 
-  /** Whether the right button would do something now: turn the valve looked at (see Hud.right). */
-  private rightWouldDo(): boolean {
-    return !this.held && !this.turning && !!this.valveAimed();
-  }
-
   /** Whether E, held, would use what's in hand now (see useDown and Hud.use). */
   private useWouldDo(): boolean {
     if (this.using) return false;
@@ -4320,11 +4376,10 @@ export class GameEngine {
       holding: !!this.held,
       drop: !!this.placed && 'rest' in this.placed,
       press: !this.sniffing && this.leftWouldDo(),
-      right: !this.sniffing && this.rightWouldDo(),
+      turn: this.turnWouldDo() || !!this.turning,
       use: !this.sniffing && this.useWouldDo(),
-      aim: this.turning ? { ...this.turning.aim } : null,
       label: !inPod(this.wake) && !!this.targetNote(),
-      hand: h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : h?.kind === 'tool' && isDipper(h.t.kind) ? 'Dip' : 'Turn',
+      hand: h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : 'Dip',
       note: this.flash?.text ?? null,
       tip: !!this.flash?.tip,
       actions: this.actions(),

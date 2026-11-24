@@ -29,11 +29,13 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   the click that lets sound play), and the lab stays paused under it, so click `.intro-start` first.
 - Headless Chromium won't capture the mouse, and WebGL needs a software renderer. Launch with
   `args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']`, then in dev builds the engine is
-  `window.lab`: `lab.debug({ locked: true, x, z, yaw, pitch })` acts as if the mouse were captured, so keys (E,
-  1 and 2, WASD) and mouse buttons work, and puts the player somewhere. Yaw 0 faces the back wall; pitch is up,
+  `window.lab`: `lab.debug({ locked: true, x, z, yaw, pitch })` acts as if the mouse were captured, so keys (Q and E,
+  1 and 2, WASD) and the left button work, and puts the player somewhere. Yaw 0 faces the back wall; pitch is up,
   in radians. Its private fields (`held`, `target`, `tools`, `turning`, ...) are reachable from `page.evaluate`.
 - Software rendering is slow, a few frames a second, so wait longer than you'd think, and remember that a screenshot
   takes real time during which the sim runs on.
+- Q and E turn a handwheel by real time, but a frame counts for at most 0.1 s, so in software rendering a valve turns
+  far slower than in play: hold the key longer, and read `t.angles`, `cock.angle` or `fa.angle` to see how far.
 - Pass `ignoreHTTPSErrors: true` to `browser.newContext`, or the Google font (Schibsted Grotesk) fails to load through
   the sandbox's proxy and pages render in a fallback font, hiding font-specific bugs.
 - Tools drain fast at 16×. Use slow stopcocks, or screenshot early, to catch something mid-flow.
@@ -77,7 +79,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     dipper's foot (a thermometer's bulb, a wicking strip's tip) is in (`bathAt`), which the engine hands each one every
     frame (`Tool.bath`, or for a strip `Tool.dipIn`, which also says whether it may drink), where a dipper aimed at
     a mouth hovers and dips (`dipPoses`), and how valves turn: a valve has an angle (`Tool.angles`, never saved),
-    turned by how far the aim sweeps round it (`turnValve`), which says its setting (`valveAt`); `valves` is still all
+    turned with Q and E held (the engine's `stepTurn`, through `turnValve`), which says its setting (`valveAt`); `valves` is still all
     the sim reads and all a save keeps, and whenever it's set any other way the angle is worked out afresh from it in
     one place (`settleAngle`, through `valveAngle`; a stopcock's angle lives on its `Cock`). It also has a stopcock's
     shape (`STOPCOCK`, `COCK_EXTENT`, `cockBox`, `cockParts`) and where a spout's tip is (`spoutTip`) as against where
@@ -158,7 +160,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
   caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
-  notice; the player themselves (walking, looking, carrying, tipping a flask, their eyes closing for a nap, their head leaning in to a vessel's rim to sniff it and coming back), which is input, not the sim; and what
+  notice; the player themselves (walking, looking, carrying, tipping a flask, turning a handwheel or a dial with Q and E, their eyes closing for a nap, their head leaning in to a vessel's rim to sniff it and coming back), which is input, not the sim; and what
   isn't in the world (the HUD, the guides' flashing). While the player sleeps in the cryopod, or naps, the lab is run as ever in
   windows and jumped ahead between them (`sleep.ts`): still sim time, just not substep by substep through the jumps.
   And once the reservoir holds the goal, the lab stands still as it was then through the end (the welcome to Mu Ceti,
