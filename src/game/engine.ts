@@ -83,7 +83,7 @@ export interface Hud {
    * a thermometer into what's looked at.
    */
   use: boolean;
-  /** Whether C would pull out the hose of a spout or faucet near the crosshair (see GameEngine.hoseAim). */
+  /** Whether C would take hold of a hose, by a spout, faucet or nozzle near the crosshair (see GameEngine.hoseAim). */
   hose: boolean;
   /** Whether Enter would write a note about what the crosshair is on (see GameEngine.note). */
   label: boolean;
@@ -1588,7 +1588,7 @@ export class GameEngine {
     if (this.locked) this.putAway();
   }
 
-  /** C: pull out the hose of the spout or faucet nearest the crosshair (see hoseAim). */
+  /** C: take hold of the hose nearest the crosshair (see hoseAim). */
   touchHose(): void {
     if (this.locked) this.pullAimed();
   }
@@ -2190,44 +2190,56 @@ export class GameEngine {
   }
 
   /**
-   * The spout or faucet whose hose C would pull out: of every one whose hose isn't out (and can be worked: nothing
-   * on the station can through its changeover), the one whose outlet (where its hose would run from, see mountAt) is
-   * the fewest degrees off the crosshair as the eyes see it, within the player's setting (HOSE_AIM.deg, see hoseAim.ts:
-   * a cone round the crosshair, narrowed as the view zooms in so it covers as much of the screen, see aimCone) and
-   * within REACH of the eyes. Null with something in hand, or nothing near, or while she can't act (sniffing,
-   * napping, in the pod, an equipment wheel open).
+   * The hose C would take hold of: of every spout and faucet (that can be worked: nothing on the station can through
+   * its changeover), by its outlet (its tip, or the foot of a stopcock there: where its hose runs from, see mountAt,
+   * whether the hose is out or not), and of the nozzle of every hose that's out, the one the fewest degrees off the
+   * crosshair as the eyes see it, within the player's setting (HOSE_AIM.deg, see hoseAim.ts: a cone round the
+   * crosshair, narrowed as the view zooms in so it covers as much of the screen, see aimCone) and within REACH of the
+   * eyes. It says which spout or faucet, its hose if that's out, whether it was its nozzle, and where that point is.
+   * Null with something in hand, or nothing near, or while she can't act (sniffing, napping, in the pod, an
+   * equipment wheel open).
    */
-  private hoseAim(): HoseMount | null {
+  private hoseAim(): { m: HoseMount; hose: Hose | null; nozzle: boolean; at: Vec3 } | null {
     if (this.held || this.wheel || this.sniffing || this.dozing() || inPod(this.wake) || this.previewing) return null;
     const eye = this.eye();
     const look = this.lookDir();
-    // the tangent of the cone's half-angle, which an outlet's off-axis distance over its distance along must be within
+    // the tangent of the cone's half-angle, which a point's off-axis distance over its distance along must be within
     let best = aimCone(HOSE_AIM.deg, this.fov(), FOV);
-    let out: HoseMount | null = null;
-    const consider = (m: HoseMount) => {
-      if (this.hoseOn(m)) return;
-      const q = this.mountAt(m);
+    let out: { m: HoseMount; hose: Hose | null; nozzle: boolean; at: Vec3 } | null = null;
+    const consider = (m: HoseMount, nozzle: boolean) => {
+      const hose = this.hoseOn(m) ?? null;
+      const q = nozzle ? hose!.outlet : this.mountAt(m);
       const v = { x: q.x - eye.x, y: q.y - eye.y, z: q.z - eye.z };
       const along = v.x * look.x + v.y * look.y + v.z * look.z;
       if (along <= 0 || Math.hypot(v.x, v.y, v.z) > REACH) return;
       const off = Math.hypot(v.x - along * look.x, v.y - along * look.y, v.z - along * look.z) / along;
-      if (off <= best) [best, out] = [off, m];
+      if (off <= best) [best, out] = [off, { m, hose, nozzle, at: q }];
     };
-    for (const t of this.tools) if (t.swap === null) t.shape.spouts.forEach((_, spout) => consider({ tool: t, spout }));
-    this.faucets.forEach((_, faucet) => consider({ faucet }));
+    for (const t of this.tools) if (t.swap === null) t.shape.spouts.forEach((_, spout) => consider({ tool: t, spout }, false));
+    this.faucets.forEach((_, faucet) => consider({ faucet }, false));
+    for (const h of this.hoses) if (!('tool' in h.on) || h.on.tool.swap === null) consider(h.on, true);
     return out;
   }
 
-  /** Where C's hint goes (see Frame.hoseHint): the outlet of the spout whose hose it would pull out, if there's one. */
-  private hoseHintAt(): Vec3 | null {
-    const m = this.hoseAim();
-    return m && this.mountAt(m);
+  /**
+   * Where C's hint goes (see Frame.hoseHint): the point that C would take hold of a hose by (see hoseAim), whether
+   * it's a nozzle, and whether a stopcock's on that nozzle.
+   */
+  private hoseHintAt(): Frame['hoseHint'] {
+    const a = this.hoseAim();
+    return a && { at: a.at, nozzle: a.nozzle, cock: a.nozzle && !!this.endOn(a.m) };
   }
 
-  /** C: pull out the hose of the spout or faucet nearest the crosshair, if there is one (see hoseAim). */
+  /**
+   * C: take hold of the hose nearest the crosshair (see hoseAim): by a spout whose hose is rolled up, pull it out; by
+   * one whose hose is out, bring its nozzle back to the hand from wherever it is; by its nozzle, take hold of it
+   * there. Q puts it back where it was, as for anything picked up.
+   */
   private pullAimed(): void {
-    const m = this.hoseAim();
-    if (m) this.pullHose(m);
+    const a = this.hoseAim();
+    if (!a) return;
+    if (a.nozzle) this.holdHose(a.hose!);
+    else this.pullHose(a.m);
   }
 
   /**
@@ -3975,7 +3987,8 @@ export class GameEngine {
     else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
     else if (p?.kind === 'tool' && p.part === 'button') add(['LMB'], p.t.lit ? 'put the lamp out' : 'light the lamp');
     else if (this.pressable()) add(['LMB'], 'press it');
-    if (this.hoseAim()) add(['C'], 'pull out its hose');
+    const pull = this.hoseAim();
+    if (pull) add(['C'], !pull.hose ? 'pull out its hose' : pull.nozzle ? 'take hold of it' : 'take hold of its hose');
     if (!h && this.cockAimed()) add(['LMB'], 'take the stopcock off');
     else if (!h && p?.kind === 'hose') add(['LMB'], 'take hold of it');
     else if (!h && p && this.grabbable(p) && !this.onButton()) {

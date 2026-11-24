@@ -102,7 +102,7 @@ function TouchButton({
  * buttons standing in for the keys and the mouse's left button. Over the look stick, Grab (the left button) and, with
  * something in hand, E, named for what it'll do, or with empty hands on a handwheel or a dial, Q and E, each turning
  * it while it's held, as the keys do; and Note (Enter) when there's something to write a note about, Nap (N) when a nap can be had, and Hose (C) when
- * there's a spout near the crosshair to pull a hose out of. Over the move stick, while something's held, a pad to drag (across to turn it,
+ * there's a spout or nozzle near the crosshair to take a hose by. Over the move stick, while something's held, a pad to drag (across to turn it,
  * up and down to hold it further or nearer, or for a hose's nozzle, to slide its stand out or in) and Put away
  * (Backspace).
  */

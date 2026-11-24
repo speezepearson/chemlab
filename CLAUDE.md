@@ -77,8 +77,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     The screen's cells each close on that light over a couple of sim seconds (`Tool.fluoresce`, `SCREEN.tau`).
     And it draws the keys' hints in the lab (`KeyHint`: a canvas picture on a plane, in a scene of its own, `hints`,
     drawn over the finished frame, so it's never picked, outlined, shadowed or seen by the `Exposer`): the arrow of
-    Q and E over a handwheel or dial (`turnHint`, `Frame.turnHint`), and C's at the outlet of the spout whose hose
-    it'd pull out (`hoseHint`, `Frame.hoseHint`).
+    Q and E over a handwheel or dial (`turnHint`, `Frame.turnHint`), and C's at the spout or nozzle it'd take a
+    hose by (`hoseHint`, `Frame.hoseHint`).
   - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room, what fluid a
     dipper's foot (a thermometer's bulb, a wicking strip's tip) is in (`bathAt`), which the engine hands each one every
     frame (`Tool.bath`, or for a strip `Tool.dipIn`, which also says whether it may drink), where a dipper aimed at
@@ -121,10 +121,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     (`partOf` in `view.ts`: a valve, a stopcock, a tank, a hose; a spout is the tool's), and faintly the whole thing that's part of
     (`thingOf`). The view's `Outliner` draws each over the finished frame, from a mask of the meshes whose picks have
     that key.
-  - `hoseAim.ts` is the player's setting for how far off the crosshair a spout's outlet may be for C to pull out its
+  - `hoseAim.ts` is the player's setting for how far off the crosshair a spout's outlet or a nozzle may be for C to take hold of its
     hose: the half-angle of a cone round it, in degrees, as seen at the normal field of view (`HOSE_AIM.deg`), which
-    `aimCone` narrows as the view zooms in; the engine's `hoseAim` finds that spout, the fewest degrees off, within
-    REACH. The Appearance panel's *Hose aim* slider sets it.
+    `aimCone` narrows as the view zooms in; the engine's `hoseAim` finds the spout's outlet or nozzle that's the fewest
+    degrees off, within REACH. The Appearance panel's *Hose aim* slider sets it.
   - `finish.ts` is the player's setting for the metal's shine, 0 matte to 1 mirror-smooth, 0.5 as built (`AS_BUILT`), starting at 0.4 (`FINISH`),
     and the roughness it gives a metal. `metal()` in `textures.ts` registers a material for it; the view applies it.
   - `smell.ts` is what a sniff (F) makes of a fluid, pure and DOM-free: the ten odorants and Nadia's similes for them
@@ -223,8 +223,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     repairs (`toCounters`). Tests that want a scene laid out in cells use `src/game/testLayout.ts`.
     The multiplexer and the separator are three cells across for two inlets or outlets, symmetrical,
     the one in the middle a cell from each of the others: the user prefers that to a narrower tool that isn't.
-- **Hoses** aren't a tool: every spout and faucet has one, pulled out with C from the spout nearest the crosshair
-  (`hoseAim`, never by the left button, which picks a tool up by its spout as anywhere else; `Hose.on` says which). A
+- **Hoses** aren't a tool: every spout and faucet has one, which C pulls out, or takes hold of if it's out, by the
+  spout or nozzle nearest the crosshair (`hoseAim`; never the left button on a spout, which picks a tool up by its
+  spout as anywhere else; `Hose.on` says which). A
   spout's fluid leaves at its hose's nozzle if it's out, so wherever fluid leaves a spout or faucet, use the engine's
   `outletAt` and `faucetOutlet`, not `spoutAt` or `fa.spout`.
 - **Stopcocks** aren't a tool either, nor have a pose: tools have no flow valves of their own, and what throttles a

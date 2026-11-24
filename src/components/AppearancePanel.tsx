@@ -32,7 +32,7 @@ const GROUPS: Group[] = [
 /**
  * Debug panel: live-tune the temperature appearance curves and how composition looks (see game/appearance.ts), and
  * the outline round what the crosshair is on (see game/outline.ts), how shiny the lab's metal is (see game/finish.ts),
- * and how far off the crosshair a spout may be for C to pull out its hose (see game/hoseAim.ts).
+ * and how far off the crosshair a spout or nozzle may be for C to take hold of its hose (see game/hoseAim.ts).
  */
 export function AppearancePanel() {
   const [, rerender] = useReducer((x: number) => x + 1, 0);
@@ -208,7 +208,7 @@ export function AppearancePanel() {
             </tr>
             <tr className="group">
               <td colSpan={2}>
-                <b>Hose aim</b> <span>how far off the crosshair a spout may be for C to pull out its hose, in degrees</span>
+                <b>Hose aim</b> <span>how far off the crosshair a spout or nozzle may be for C to take hold of its hose, in degrees</span>
               </td>
             </tr>
             <tr>

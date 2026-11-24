@@ -2286,7 +2286,7 @@ describe('faucets’ valves', () => {
 describe('C', () => {
   /** The engine's own things these tests reach into. */
   interface Pulls {
-    hoseAim(): unknown;
+    hoseAim(): { m: unknown; hose: Hose | null; nozzle: boolean } | null;
     hoses: Hose[];
     tools: Tool[];
     faucets: { spout: { x: number; y: number; z: number } }[];
@@ -2295,6 +2295,8 @@ describe('C', () => {
     history: { canUndo: boolean };
   }
   const pulls = (l: Lab) => l.in as unknown as Pulls;
+  /** The spout or faucet C would take hold of a hose by, or that of the nozzle it would. */
+  const aimed = (l: Lab) => pulls(l).hoseAim()?.m ?? null;
   /** A separator on its stand over SPOT, its two spouts a few cells apart, side by side across the view. */
   const separator = (l: Lab) => {
     const t = new Tool('separator', 99, { x: SPOT.x + 2 * CELL, y: LIFT + 400, z: SPOT.z, yaw: 0 });
@@ -2310,9 +2312,9 @@ describe('C', () => {
     const was = HOSE_AIM.deg;
     HOSE_AIM.deg = HOSE_DEG.max;
     lookAt(l, { x: a.x + 0.6 * (b.x - a.x), y: a.y, z: a.z });
-    expect(pulls(l).hoseAim()).toEqual({ tool: t, spout: 1 });
+    expect(aimed(l)).toEqual({ tool: t, spout: 1 });
     lookAt(l, { x: a.x + 0.4 * (b.x - a.x), y: a.y, z: a.z });
-    expect(pulls(l).hoseAim()).toEqual({ tool: t, spout: 0 });
+    expect(aimed(l)).toEqual({ tool: t, spout: 0 });
     HOSE_AIM.deg = was;
     // within the player's setting of the crosshair, in degrees, and no further: looked at from in front, and then
     // that much higher
@@ -2321,16 +2323,16 @@ describe('C', () => {
       l.e.debug({ x: a.x, z: a.z + d, yaw: 0, pitch: Math.atan2(a.y - 620, d) + (deg * Math.PI) / 180, locked: true });
     };
     off(HOSE_AIM.deg - 0.5);
-    expect(pulls(l).hoseAim()).toEqual({ tool: t, spout: 0 });
+    expect(aimed(l)).toEqual({ tool: t, spout: 0 });
     off(HOSE_AIM.deg + 0.5);
-    expect(pulls(l).hoseAim()).toBeNull();
+    expect(aimed(l)).toBeNull();
     // and not out of reach, however straight at it
     lookAt(l, a, REACH + 20);
-    expect(pulls(l).hoseAim()).toBeNull();
+    expect(aimed(l)).toBeNull();
     // nor with something in hand
     lookAt(l, a);
     expect(l.e.spawn('flask')).toBe(true);
-    expect(pulls(l).hoseAim()).toBeNull();
+    expect(aimed(l)).toBeNull();
     l.in.putBack();
     // pulled out, its nozzle's in hand, one step to undo
     expect(pulls(l).history.canUndo).toBe(false);
@@ -2346,25 +2348,55 @@ describe('C', () => {
     expect(pulls(l).history.canUndo).toBe(false);
   });
 
-  it('skips a spout whose hose is out, for the next nearest', () => {
+  it('takes hold of a hose that’s out, by its spout or its nozzle, whichever is nearer the crosshair', () => {
     const l = lab();
     const t = separator(l);
-    const [a, b] = [spoutAt(t, 0), spoutAt(t, 1)];
-    pulls(l).hoses.push(new Hose({ tool: t, spout: 0 }, { x: a.x - 3 * CELL, y: a.y, z: a.z }, NOZZLE_REACH.min));
-    // (with the cone wide enough to take in both)
+    const a = spoutAt(t, 0);
+    const nozzle = { x: a.x - 3 * CELL, y: a.y - 20, z: a.z };
+    const hose = new Hose({ tool: t, spout: 0 }, nozzle, NOZZLE_REACH.min);
+    pulls(l).hoses.push(hose);
+    // by its spout, measured to the spout itself, not to where the hose has gone
+    expect(pulls(l).mountAt({ tool: t, spout: 0 })).toEqual(a);
+    lookAt(l, a);
+    expect(pulls(l).hoseAim()).toMatchObject({ m: { tool: t, spout: 0 }, hose, nozzle: false });
+    // by its nozzle
+    lookAt(l, nozzle);
+    expect(pulls(l).hoseAim()).toMatchObject({ m: { tool: t, spout: 0 }, hose, nozzle: true });
+    // of the two, the one fewer degrees off (with the cone wide enough to take in both)
     const was = HOSE_AIM.deg;
     HOSE_AIM.deg = HOSE_DEG.max;
-    lookAt(l, a, 400);
-    expect(Math.atan2(Math.abs(b.x - a.x), 400)).toBeLessThan((HOSE_DEG.max * Math.PI) / 180);
-    expect(pulls(l).hoseAim()).toEqual({ tool: t, spout: 1 });
+    const between = (k: number) => lookAt(l, { x: a.x + k * (nozzle.x - a.x), y: a.y + k * (nozzle.y - a.y), z: a.z }, 400);
+    between(0.3);
+    expect(pulls(l).hoseAim()?.nozzle).toBe(false);
+    between(0.7);
+    expect(pulls(l).hoseAim()?.nozzle).toBe(true);
     HOSE_AIM.deg = was;
+    // C at the spout brings the nozzle to hand from where it was; Q puts it back there, leaving nothing to undo
+    lookAt(l, a);
+    l.e.touchHose();
+    expect(pulls(l).held?.h).toBe(hose);
+    expect(pulls(l).hoses).toHaveLength(1);
+    l.in.putBack();
+    expect(l.in.held).toBeNull();
+    expect(hose.outlet).toEqual(nozzle);
+    expect(pulls(l).history.canUndo).toBe(false);
+    // C at the nozzle takes hold of it there, and set down again, it's a step to undo
+    lookAt(l, nozzle);
+    l.e.touchHose();
+    expect(pulls(l).held?.h).toBe(hose);
+    hands(l).placeHeld(l.in.held, { ...nozzle, x: nozzle.x - CELL, yaw: 0 });
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    expect(pulls(l).history.canUndo).toBe(true);
+    l.e.undo();
+    expect(hose.outlet).toEqual(nozzle);
   });
 
   it('pulls out a faucet’s hose', () => {
     const l = lab();
     const at = pulls(l).mountAt({ faucet: 0 });
     l.e.debug({ x: at.x - 200, z: at.z, yaw: -Math.PI / 2, pitch: Math.atan2(at.y - 620, 200), locked: true });
-    expect(pulls(l).hoseAim()).toEqual({ faucet: 0 });
+    expect(aimed(l)).toEqual({ faucet: 0 });
     l.e.touchHose();
     expect(pulls(l).held?.kind).toBe('hose');
     expect(pulls(l).held?.h?.on).toEqual({ faucet: 0 });

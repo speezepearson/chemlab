@@ -1,5 +1,5 @@
 /**
- * The player's setting for how far off the crosshair a spout may be for C to pull out its hose (see
+ * The player's setting for how far off the crosshair a spout or nozzle may be for C to take hold of its hose (see
  * GameEngine.hoseAim): `deg`, the half-angle in degrees of a cone round the crosshair, as seen at the view's normal
  * field of view (see aimCone), from HOSE_DEG.min to HOSE_DEG.max in steps of HOSE_DEG.step. Kept in local storage,
  * not in saves: it's a preference, like the outline and the finish.
