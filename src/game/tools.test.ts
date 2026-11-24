@@ -251,7 +251,7 @@ describe('flow meter', () => {
   });
 
   it('lets nothing out while empty', () => {
-    const t = new Tool('splitter', 0);
+    const t = new Tool('separator', 0);
     expect(t.step(0.02)).toEqual([null, null]);
     expect(t.flow).toEqual([0, 0]);
   });
@@ -1578,51 +1578,6 @@ describe('dispenser', () => {
   });
 });
 
-describe('splitter', () => {
-  function run(valve: number | undefined) {
-    const sp = new Tool('splitter', 0, undefined, valve === undefined ? [] : [valve]);
-    filled(sp.tanks[0], R, FUNNEL_CAP, 4);
-    const [l, r] = sp.step(0.05);
-    return { sp, l, r };
-  }
-
-  it('drains its funnel at FUNNEL_RATE times how high the fluid stands, so half full at half the rate', () => {
-    const sp = new Tool('splitter', 0);
-    filled(sp.tanks[0], R, FUNNEL_CAP / 2, 1);
-    expect(sp.level(0)).toBe(0.5);
-    const [l, r] = sp.step(0.01);
-    expect(((l?.N ?? 0) + (r?.N ?? 0)) / (FUNNEL_RATE * 0.5 * 0.01)).toBeCloseTo(1, 5);
-  });
-
-  it('drains a full funnel at FUNNEL_RATE, whatever the valve says', () => {
-    for (const v of [0, 0.3, 1]) {
-      const { sp, l, r } = run(v);
-      const out = (l?.N ?? 0) + (r?.N ?? 0);
-      expect(out / (FUNNEL_RATE * 0.05)).toBeCloseTo(1, 6);
-      expect(out + sp.tanks[0].N).toBe(FUNNEL_CAP);
-    }
-  });
-
-  it('sends everything left with the valve at 0, and everything right at 1', () => {
-    expect(run(0).r).toBeNull();
-    expect(run(1).l).toBeNull();
-  });
-
-  it('starts split evenly, and splits in proportion to the valve, heat with it', () => {
-    const even = run(undefined);
-    expect(even.sp.valves[0]).toBe(0.5);
-    expect(even.l!.N / even.r!.N).toBeCloseTo(1, 3);
-    const { l, r } = run(0.25);
-    expect(r!.N / (l!.N + r!.N)).toBeCloseTo(0.25, 3);
-    expect(temperature(l!)).toBeCloseTo(4, 3);
-    expect(temperature(r!)).toBeCloseTo(4, 3);
-  });
-
-  it('holds only a little', () => {
-    expect(new Tool('splitter', 0).tanks[0].cap).toBe(FUNNEL_CAP);
-  });
-});
-
 describe('multiplexer', () => {
   /** A step of a multiplexer with its valve at `valve`, its left funnel full of R at T 2 and its right full of G at T 6. */
   function run(valve: number | undefined, h = 0.01) {
@@ -2049,8 +2004,8 @@ describe('separator', () => {
     expect(tankX(t.shape.tanks[0])).toBe(0);
   });
 
-  it('is symmetrical, as the splitter and the multiplexer are: each one\'s inlets and outlets are about its middle', () => {
-    for (const kind of ['separator', 'splitter', 'multiplexer'] as const) {
+  it('is symmetrical, as the multiplexer is: each one\'s inlets and outlets are about its middle', () => {
+    for (const kind of ['separator', 'multiplexer'] as const) {
       const sh = SHAPES[kind];
       const xs = [...sh.tanks.map(tankX), ...sh.spouts].sort((a, b) => a - b);
       expect(xs, kind).toEqual([-CELL, 0, CELL]);
@@ -2223,15 +2178,23 @@ describe('each spout as open as it is', () => {
     });
   });
 
-  it('keeps in a splitter’s funnel the share its selector sends to a shut spout', () => {
-    const sp = opened(new Tool('splitter', 0, undefined, [0.5]), [0, 1]);
-    filled(sp.tanks[0], R, FUNNEL_CAP, 1);
-    const level = sp.level(0);
-    const was = sp.tanks[0].N;
-    const [a, b] = sp.step(0.01);
-    expect(a).toBeNull();
-    expect(b!.N / (0.5 * FUNNEL_RATE * level * 0.01)).toBeCloseTo(1, 2);
-    expect(was - sp.tanks[0].N).toBe(b!.N);
+  it('keeps in a size sorter’s funnel the share its screens send to a shut spout', () => {
+    const before = SORTER.strength;
+    SORTER.strength = 0;
+    try {
+      // (sorting not at all, a quarter of everything goes each way)
+      const so = opened(new Tool('sorter', 0), [1, 1, 1, 0]);
+      filled(so.tanks[0], R, FUNNEL_CAP, 1);
+      const level = so.level(0);
+      const was = so.tanks[0].N;
+      const out = so.step(0.01);
+      expect(out[3]).toBeNull();
+      const total = out.reduce((t, v) => t + (v?.N ?? 0), 0);
+      expect(total / (0.75 * FUNNEL_RATE * level * 0.01)).toBeCloseTo(1, 2);
+      expect(was - so.tanks[0].N).toBe(total);
+    } finally {
+      SORTER.strength = before;
+    }
   });
 
   it('lets a spout of its own out as far as it’s open', () => {

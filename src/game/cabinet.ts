@@ -29,7 +29,7 @@ export const endless = (k: Stocked) => ENDLESS.includes(k);
  * and go back with it.
  */
 export const STOCK: Record<Stocked, number> = {
-  flask: 30, scale: 8, stopcock: 16, dispenser: 8, pipette: 8, exchanger: 8, separator: 8, splitter: 8, multiplexer: 8, sorter: 8,
+  flask: 30, scale: 8, stopcock: 16, dispenser: 8, pipette: 8, exchanger: 8, separator: 8, multiplexer: 8, sorter: 8,
   heater: 8, tank: 8, meter: 8, dilatometer: 8, column: 8,
   // drawn as this many, but endless
   thermometer: 16, thermometerWide: 16, strip: 16, testpaper: 16, bondpaper: 16,
@@ -64,7 +64,7 @@ const BAYS: readonly (readonly (readonly Compartment[])[])[] = [
   ],
   [
     [{ kind: 'exchanger', cols: 2, high: 1, deep: 4 }],
-    [{ kind: 'splitter', cols: 1, high: 2, deep: 4 }, { kind: 'pipette', cols: 2, high: 1, deep: 4 }],
+    [{ kind: 'pipette', cols: 2, high: 1, deep: 4 }],
     [{ kind: 'dilatometer', cols: 2, high: 1, deep: 4 }],
     [{ kind: 'column', cols: 1, high: 1, deep: 8 }, { kind: 'meter', cols: 1, high: 1, deep: 8 }],
   ],

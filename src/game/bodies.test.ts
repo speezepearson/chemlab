@@ -12,7 +12,7 @@ import { AIRLOCK } from './airlock';
 import { boxesOverlap, solids } from './physics';
 import { LAMP_POSE } from './presets';
 import { SCALE_SHAPE, Scale } from './scale';
-import { CELL, COUNTERS, LAMP_AREA, LAMP_FLOOR, LAMP_Z, LIFT, ROOM, counterUnder, fromFrac, groundAt, toFrac, toWorld, wrapAngle } from './space';
+import { CELL, COUNTERS, LAMP_AREA, LAMP_FLOOR, LAMP_Z, LIFT, ROOM, counterUnder, fromFrac, groundAt, toFrac, toWorld } from './space';
 import { SCALE_ANCHOR, onCell, toCell, toolAnchor } from './testLayout';
 import { BULB_Y, COLUMN, SPOUT_STUB, TANK_H, Hose, INLINE_DOCK, LAMP, SCREEN, SHAPES, STRIP, STRIP_FOOT, THERMOMETER_ROD, Tool, dipUnder, footY, mouthBelow, type ToolKind } from './tools';
 
@@ -305,20 +305,17 @@ describe('valves', () => {
     expect(valveAt('valve', Q / 2)).toBeCloseTo((Q / 2 - VALVE_SHUT) / (Q - VALVE_SHUT), 12);
   });
 
-  it("send a splitter's all left pointing left, half each way up or down, and all right pointing right", () => {
+  it("take a multiplexer's all from the left pointing left, half from each up or down, and all from the right pointing right", () => {
     for (const [a, v] of [[-Q, 0], [0, 0.5], [Q, 1], [2 * Q, 0.5], [3 * Q, 0], [Q / 2, 0.75], [-Q / 2, 0.25], [2.5 * Q, 0.25], [5 * Q, 1]])
-      for (const kind of ['split', 'join'] as const) expect(valveAt(kind, a), `${kind} ${a}`).toBeCloseTo(v, 12);
+      expect(valveAt('join', a), `join ${a}`).toBeCloseTo(v, 12);
   });
 
   it('draw any setting at an angle that comes back to it, the plain valve shut a quarter turn clockwise', () => {
-    for (const kind of ['valve', 'split', 'join', 'dial'] as const)
+    for (const kind of ['valve', 'join', 'dial'] as const)
       for (const v of [0, 0.1, 0.25, 0.5, 0.8, 1]) expect(valveAt(kind, angleOf(kind, v)), `${kind} ${v}`).toBeCloseTo(v, 12);
     expect(angleOf('valve', 0)).toBeCloseTo(Q, 12);
     expect(angleOf('valve', 1)).toBe(0);
-    // a splitter's pointer rests toward its fork, below it, and a multiplexer's toward its join, above
-    expect(wrapAngle(angleOf('split', 0))).toBeCloseTo(-Q, 12);
-    expect(Math.abs(wrapAngle(angleOf('split', 0.5)))).toBeCloseTo(2 * Q, 12);
-    expect(angleOf('split', 1)).toBeCloseTo(Q, 12);
+    // a multiplexer's pointer rests toward where its funnels join, above it
     expect(angleOf('join', 0)).toBeCloseTo(-Q, 12);
     expect(angleOf('join', 0.5)).toBeCloseTo(0, 12);
     expect(angleOf('join', 1)).toBeCloseTo(Q, 12);
@@ -384,7 +381,7 @@ describe('valves', () => {
 
   it('are built in only where they share out or set something, not to let a spout out slower', () => {
     const builtIn = (Object.keys(SHAPES) as ToolKind[]).filter((k) => SHAPES[k].valves);
-    expect(builtIn.sort()).toEqual(['dilatometer', 'heater', 'multiplexer', 'receptacle', 'splitter']);
+    expect(builtIn.sort()).toEqual(['dilatometer', 'heater', 'multiplexer', 'receptacle']);
     for (const kind of Object.keys(SHAPES) as ToolKind[]) expect(new Tool(kind, 0).valves.length, kind).toBe(SHAPES[kind].valves?.length ?? 0);
   });
 
@@ -397,8 +394,7 @@ describe('valves', () => {
     expect(SHAPES.column.spoutY - COLUMN.tube.y1).toBe(SPOUT_STUB);
   });
 
-  it("tell a splitter's and a multiplexer's pointers from the plain valves", () => {
-    expect(leverKind(new Tool('splitter', 0), 0)).toBe('split');
+  it("tell a multiplexer's pointer from the plain valves", () => {
     expect(leverKind(new Tool('multiplexer', 0), 0)).toBe('join');
     expect(leverKind(new Tool('heater', 0), 0)).toBe('valve');
   });

@@ -720,11 +720,8 @@ export const valveFaceZ = (t: Tool, k: number) => (k === t.shape.dial ? dialZ(t)
 /** How close to a valve's middle, in a tool's local units, the aim can be before its angle stops meaning anything: its hub. */
 export const VALVE_DEADZONE = 3;
 
-/**
- * How a valve turns (see valveAt): a plain valve's handwheel, a splitter's, a multiplexer's (which turns as a splitter's
- * does, and differs only in where it rests, see angleOf), or a dial.
- */
-export type LeverKind = 'valve' | 'split' | 'join' | 'dial';
+/** How a valve turns (see valveAt): a plain valve's handwheel, a multiplexer's selector, or a dial. */
+export type LeverKind = 'valve' | 'join' | 'dial';
 
 /**
  * How far either way from square to its pipe a plain valve's bar can be and the valve still be shut: 10°. So it
@@ -739,9 +736,9 @@ export const DIAL_STOP = 0.75 * Math.PI;
 /**
  * What a valve at angle `a` (radians clockwise from straight up, as seen from in front) is set to. A plain valve's bar
  * runs across its handwheel: along the pipe (upright) it's fully open (1), square to it, or within VALVE_SHUT of that,
- * shut (0), and partly open in between, evenly from where it stops being shut, so it opens and shuts twice a turn. A splitter's or multiplexer's handwheel has a pointer instead: straight
- * left sends everything left (0), straight up half each way, straight right everything right (1), straight down half
- * each way again, and on round to the left. Both turn all the way round. A dial turns clockwise from down-left (0) to
+ * shut (0), and partly open in between, evenly from where it stops being shut, so it opens and shuts twice a turn. A multiplexer's handwheel has a pointer instead: straight
+ * left takes only from the left (0), straight up half from each, straight right only from the right (1), straight
+ * down half from each again, and on round to the left. Both turn all the way round. A dial turns clockwise from down-left (0) to
  * down-right (1), and no further (see sweep).
  */
 export function valveAt(kind: LeverKind, a: number): number {
@@ -758,13 +755,11 @@ export function valveAt(kind: LeverKind, a: number): number {
 /**
  * Where a valve set to `v` is drawn, when nothing says otherwise (see valveAngle): a plain valve's bar a quarter turn
  * clockwise from upright when shut, square to its pipe, and as far short of that as says `v` when it isn't (see
- * VALVE_SHUT); a splitter's pointer on the lower half (left for 0, right for 1), toward the fork
- * under it, so straight down for an even split; a multiplexer's on the upper half, toward the funnels joining over it;
+ * VALVE_SHUT); a multiplexer's pointer on the upper half (left for 0, right for 1), toward the funnels joining over it;
  * a dial on its arc.
  */
 export function angleOf(kind: LeverKind, v: number): number {
   if (kind === 'dial') return -DIAL_STOP + 2 * DIAL_STOP * v;
-  if (kind === 'split') return (1.5 - v) * Math.PI;
   if (kind === 'join') return (v - 0.5) * Math.PI;
   return v > 0 ? (1 - v) * (Math.PI / 2 - VALVE_SHUT) : Math.PI / 2;
 }
@@ -801,7 +796,7 @@ export function swept(from: number | null, to: number | null): number {
 
 /** How valve k of tool t turns (see valveAt). */
 export function leverKind(t: Tool, k: number): LeverKind {
-  return k === t.shape.dial ? 'dial' : t.kind === 'splitter' ? 'split' : t.kind === 'multiplexer' ? 'join' : 'valve';
+  return k === t.shape.dial ? 'dial' : t.kind === 'multiplexer' ? 'join' : 'valve';
 }
 
 /** Valve k's angle as it's drawn and turned (see settleAngle), kept with the tool (Tool.angles). */

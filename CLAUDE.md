@@ -211,7 +211,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     footprints draw whatever `placement()` says, so anything that changes where things go goes through it. The
     special snaps sit on top (`snapped`: `docked`; `dipAim` for dippers). On load nothing's moved but
     repairs (`toCounters`). Tests that want a scene laid out in cells use `src/game/testLayout.ts`.
-    The splitter, the multiplexer and the separator are three cells across for two outlets or inlets, symmetrical,
+    The multiplexer and the separator are three cells across for two inlets or outlets, symmetrical,
     the one in the middle a cell from each of the others: the user prefers that to a narrower tool that isn't.
 - **Hoses** aren't a tool: every spout and faucet has one, pulled out with the left button (`Hose.on` says which). A
   spout's fluid leaves at its hose's nozzle if it's out, so wherever fluid leaves a spout or faucet, use the engine's
@@ -226,7 +226,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   `spoutAt` in `bodies.ts`), which count it; `spoutTip` is the bare tip. A tool comes with a shut one on each spout if
   its shape is `fitted` (the dispenser, the pipette, the big tank and the swell bulbs). A tool feeding several spouts from one tank throttles them by
   `throttle` in `tools.ts`. Built-in valves (`ToolShape.valves`) are only controls that share out or set something:
-  the splitter's and multiplexer's selectors, the heater's tap, dials, the station's faucet.
+  the multiplexer's selector, the heater's tap, dials, the station's faucet.
 - **What's drawn is what's hit.** Every mesh a `ToolView` builds is registered as part of the tool for the crosshair's
   raycast, so empty space around it isn't. Register a mesh yourself only to make it a specific part (a tank, valve,
   spout or button: a spout's is its tip and the pipe that runs to it alone); sprites (labels) aren't hit. There are
@@ -296,7 +296,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   name. A tool's own state goes in `Tool.memory` as numbers (a sheet of blotting paper keeps what it shows there
   only while that's still coming up; with none, it loads showing all it holds).
   A saved tool of a kind there no longer is (the composition analyzer, which the test paper replaced, the bond
-  visualizer, which the bond paper replaced, the dish, the sleeper culture and the shadow paper, which the shadow lamp's own screen replaced) is dropped as
+  visualizer, which the bond paper replaced, the dish, the sleeper culture, the shadow paper, which the shadow lamp's own screen replaced, and the splitter) is dropped as
   the save loads, with the hoses on its spouts (its id isn't given to a tool the load adds, or that tool would get
   them); so is a stored volume slider for a sound that's gone (`parseVolumes`).
 
