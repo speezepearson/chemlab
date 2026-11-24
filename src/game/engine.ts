@@ -4,8 +4,8 @@ import { NS, SPECIES, TARGET } from '../chem/species';
 import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
 import {
-  COCK_EXTENT, COCK_WHEEL_Z, FLASK_CENTER, FLASK_LIP, NEAR, NEAR_STEP, NOZZLE_H, NOZZLE_REACH, SCALE_SLOTS, STAND_MAX, STOPCOCK, aimAngle, cockBox, settleAngle, swept, sweep, turnValve, valveAt, valveFaceZ, valveLocal, VALVE_WHEEL, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
-  FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, magnetShift, nozzleMounts, nozzleStand, onScale, onTool, scaleBox, scaleCenter, scaleSpot, snapReach, spoutAt, standBase,
+  COCK_EXTENT, COCK_WHEEL_Z, FLASK_CENTER, FLASK_LIP, NEAR, NEAR_STEP, NOZZLE_H, NOZZLE_REACH, PLATFORM_REACH, STAND_MAX, STOPCOCK, aimAngle, cockBox, settleAngle, swept, sweep, turnValve, valveAt, valveFaceZ, valveLocal, VALVE_WHEEL, bathAt, dipPoses, dippedIn, footAt, flaskBox, flaskFluid,
+  FLASK_CATCH, flaskLip, flaskMouth, nozzleBox, paperMouth, tankFluid, docked, magnetShift, nozzleMounts, nozzleStand, onScale, onTool, platformSpot, scaleBox, scaleCenter, snapReach, spoutAt, standBase,
   spoutTip, tankMouth, tankNoteY, toolBox, toolCenter, toolStands, type Magnets, type NozzleMount, type Stand,
 } from './bodies';
 import { CABINET, endless, isStocked, putIn, stockWith, takeFrom, takeSlot, type Stock, type Stocked } from './cabinet';
@@ -166,7 +166,7 @@ interface Aim {
 /** Where something let go of comes to rest (see GameEngine.rest): its pose, and for a flask, the scale it stands on. */
 interface Rest {
   pose: Pose;
-  scale?: { sc: Scale; dx: number };
+  scale?: { sc: Scale; dx: number; dz: number };
   /** For a hose's nozzle, where its stand goes (see nozzleMounts). */
   hose?: NozzleMount;
   /** Where each hose following what's held would come to rest with it, in Held.follow's order (see followRests). */
@@ -403,8 +403,6 @@ const NAP_HINT_MS = 9000;
 const NAP_S = { close: 0.9, open: 0.6 };
 /** A flask's outline's area, in local units squared, for how exposed its fluid is (see exposures). */
 const FLASK_AREA = areaBelow(FLASK_OUTLINE, 0);
-/** What stands for a flask not yet on a scale's empty place, as an open top a magnet lines up (see magnets). */
-const SCALE_PLACE = new Vessel(0);
 /** Width of the stem a funnel-shaped tank narrows to, in local units. */
 const FUNNEL_STEM = 6;
 
@@ -893,7 +891,7 @@ export class GameEngine {
       })),
       scales: this.scales.map((sc) => ({
         ...this.frac(sc.pose), ...depth(sc.pose), tare: sc.tare,
-        load: sc.load.map(({ f, dx }) => ({ f: this.flasks.indexOf(f), dx })).filter((l) => l.f >= 0),
+        load: sc.load.map(({ f, dx, dz }) => ({ f: this.flasks.indexOf(f), dx, dz })).filter((l) => l.f >= 0),
         ...(sc.note ? { note: sc.note } : {}),
       })),
       hoses: this.hoses.map((h) => ({
@@ -986,7 +984,7 @@ export class GameEngine {
       const sc = new Scale(pose(fromFrac({ x: ss.fx, y: ss.fy }), ss));
       sc.tare = ss.tare ?? 0;
       if (typeof ss.note === 'string') sc.note = ss.note;
-      for (const { f, dx } of ss.load ?? []) if (this.flasks[f]) sc.put(this.flasks[f], dx);
+      for (const { f, dx, dz } of ss.load ?? []) if (this.flasks[f]) sc.put(this.flasks[f], dx, Number.isFinite(dz) ? dz! : 0);
       return sc;
     });
     // a hose on a spout or a faucet; older saves' hoses whose funnels hung under one become its, and the rest are
@@ -1202,13 +1200,10 @@ export class GameEngine {
       if (t.shape.fixed) continue;
       for (let i = 0; i < 3 && !onCounter(t); i++) t.pose = { ...toWorld(t.pose, { x: 0, y: 0, z: CELL }), yaw: t.pose.yaw };
     }
-    for (const sc of this.scales) {
-      const load = sc.load.splice(0);
-      for (const { f, dx } of load) {
-        const slot = dx < 0 ? SCALE_SLOTS[0] : SCALE_SLOTS[1];
-        if (!sc.load.some((l) => l.dx === slot)) sc.put(f, slot);
-      }
-    }
+    // (a flask a save left hanging off a scale's platform is brought in onto it)
+    const { x: rx, z: rz } = PLATFORM_REACH;
+    for (const sc of this.scales)
+      for (const l of sc.load) [l.dx, l.dz] = [Math.max(-rx, Math.min(rx, l.dx)), Math.max(-rz, Math.min(rz, l.dz))];
     for (const h of this.hoses) {
       for (let i = 0; i < 3 && counterUnder(standBase(nozzleStand(h.outlet, h.turn, h.reach), 0)) === null; i++)
         h.outlet = toWorld({ ...h.outlet, yaw: h.turn }, { x: 0, y: 0, z: CELL });
@@ -1217,7 +1212,7 @@ export class GameEngine {
 
   /** Stand each flask on a scale where the scale now is. */
   private settle(): void {
-    for (const sc of this.scales) for (const { f, dx } of sc.load) f.pose = onScale(sc, dx);
+    for (const sc of this.scales) for (const { f, dx, dz } of sc.load) f.pose = onScale(sc, dx, dz);
   }
 
   /** The flasks standing on scales. */
@@ -1857,7 +1852,8 @@ export class GameEngine {
     this.mark();
     if (p.kind === 'flask') {
       const sc = this.scales.find((s) => s.load.some((l) => l.f === p.f));
-      const scale = sc && { sc, dx: sc.load.find((l) => l.f === p.f)!.dx };
+      const on = sc?.load.find((l) => l.f === p.f);
+      const scale = sc && on && { sc, dx: on.dx, dz: on.dz };
       for (const s of this.scales) s.remove(p.f);
       h = { kind: 'flask', f: p.f, relYaw: 0, dist: 0, from: { pose: { ...p.f.pose }, ...(scale ? { scale } : {}) } };
     } else if (p.kind === 'tool') {
@@ -2312,7 +2308,7 @@ export class GameEngine {
     if (h.kind === 'flask') {
       h.f.tilt = 0;
       if (rest.scale) {
-        rest.scale.sc.put(h.f, rest.scale.dx);
+        rest.scale.sc.put(h.f, rest.scale.dx, rest.scale.dz);
         this.settle();
       }
     }
@@ -3358,8 +3354,6 @@ export class GameEngine {
       });
     } else if (h.kind === 'scale') {
       for (const { f } of h.sc.load) mine.add(f);
-      // (and where a flask would go on it, for a guide to show it lined up under a spout before a flask's there)
-      mine.add(SCALE_PLACE);
     }
     // (one docked on an instrument's tube lets out at its tip: a stopcock on its end goes to the spout's tip, see setDown)
     else if (h.kind === 'hose') outlets.push({ at: this.isDocked(h.h.outlet) ? h.h.outlet : this.nozzleOut(h.h), lip: false });
@@ -3438,7 +3432,6 @@ export class GameEngine {
       });
     } else if (h.kind === 'scale') {
       for (const { f } of h.sc.load) vs.add(f);
-      mouths.push(...this.emptyPlaces(h.sc));
     } else if (h.kind === 'hose') outlets.push({ ...this.nozzleOut(h.h) });
     const all = this.mouthsWith(h);
     mouths.push(...all.filter((m) => vs.has(m.v)));
@@ -3456,17 +3449,6 @@ export class GameEngine {
     this.putAt(h, at);
     if (h.kind === 'flask') h.f.tilt = tilt;
     return out;
-  }
-
-  /**
-   * A scale's places for a flask with no flask on them, as open tops at a flask's mouth's height, standing in for
-   * the flask that's not there yet (see SCALE_PLACE), for the magnet and the guides.
-   */
-  private emptyPlaces(sc: Scale): Mouth[] {
-    return SCALE_SLOTS.filter((dx) => !sc.load.some((l) => l.dx === dx)).map((dx) => {
-      const o = onScale(sc, dx);
-      return { v: SCALE_PLACE, x: o.x, y: o.y, z: o.z, hx: FLASK_CATCH, hz: FLASK_CATCH, yaw: o.yaw };
-    });
   }
 
   /**
@@ -3584,13 +3566,14 @@ export class GameEngine {
     }
     const stands = this.standsAt(h, p);
     if (stands.length) return onStands(stands);
+    // a flask stands on a scale's platform, as on a counter, just where it's held over it (see platformSpot)
     if (h.kind === 'flask')
       for (const sc of this.scales) {
-        const dx = scaleSpot(sc, p, Infinity);
-        if (dx === null) continue;
-        const pose = onScale(sc, dx);
+        const spot = platformSpot(sc, p);
+        if (!spot) continue;
+        const pose = onScale(sc, spot.dx, spot.dz);
         const to = this.boxAt(h, pose);
-        return blocked(to) ? 'No room' : { pose, scale: { sc, dx } };
+        return blocked(to) ? 'No room' : { pose, scale: { sc, ...spot } };
       }
     const top = counterUnder(box);
     if (top === null) return 'Set it down on a counter';
@@ -3669,9 +3652,7 @@ export class GameEngine {
       const tilt = h.kind === 'flask' ? h.f.tilt : 0;
       if (h.kind === 'flask') h.f.tilt = 0;
       this.putAt(h, pl.rest.pose);
-      // (a scale's empty places too, as if flasks stood there)
-      const places = h.kind === 'scale' ? this.emptyPlaces(h.sc) : [];
-      for (const a of this.aims(h, [...this.mouthsWith(h), ...places])) if (a.held !== 'lip') out.push(guide(a, 'snap'));
+      for (const a of this.aims(h, this.mouthsWith(h))) if (a.held !== 'lip') out.push(guide(a, 'snap'));
       this.putAt(h, at);
       if (h.kind === 'flask') h.f.tilt = tilt;
     }

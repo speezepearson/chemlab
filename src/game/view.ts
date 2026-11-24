@@ -3126,7 +3126,7 @@ class GhostView {
   }
 
   update(g: Frame['ghost'], clock: number, energies: readonly number[]): void {
-    const key = (!g ? '' : g.tool ? `tool ${g.tool.kind}` : `scale ${g.scale!.load.map((l) => l.dx).join(',')}`) + ` ${JSON.stringify(GHOST)}`;
+    const key = (!g ? '' : g.tool ? `tool ${g.tool.kind}` : `scale ${g.scale!.load.length}`) + ` ${JSON.stringify(GHOST)}`;
     if (key !== this.key) this.build(g, key);
     this.holder.visible = !!g;
     if (!g) return;
@@ -3149,7 +3149,7 @@ class GhostView {
       sc.pose = g.pose;
       v.update(false, null);
       flasks.forEach((fv, i) => {
-        fv.f.pose = onScale(sc, g.scale!.load[i].dx);
+        fv.f.pose = onScale(sc, g.scale!.load[i].dx, g.scale!.load[i].dz);
         fv.update(none);
       });
     }

@@ -496,13 +496,18 @@ export function flaskBox(f: Flask): Box {
 
 /* ---------------- scales ---------------- */
 
-/** Where a flask standing on a scale `dx` along its platform has its mouth, facing the way the scale does. */
-export function onScale(sc: Scale, dx: number): Pose {
-  return { ...toWorld(sc.pose, { x: dx, y: FLASK_H, z: 0 }), yaw: sc.pose.yaw };
+/**
+ * Where a flask standing on a scale `dx` along its platform and `dz` across it has its mouth, facing the way the scale
+ * does.
+ */
+export function onScale(sc: Scale, dx: number, dz = 0): Pose {
+  return { ...toWorld(sc.pose, { x: dx, y: FLASK_H, z: dz }), yaw: sc.pose.yaw };
 }
 
-/** Where along its platform a scale stands flasks: half a cell (see CELL) either side of its middle, a cell apart. */
-export const SCALE_SLOTS = [-CELL / 2, CELL / 2];
+/**
+ * How far a flask can stand from the middle of a scale's platform, along it and across it, with its base wholly on it.
+ */
+export const PLATFORM_REACH = { x: SCALE_SHAPE.platform.x1 - FLASK_R, z: SCALE_SHAPE.depth - FLASK_R };
 
 /**
  * A scale's body and platform in the room; with `load`, reaching up over whatever's standing on it too (as it's
@@ -524,21 +529,15 @@ export function scaleCenter(sc: Scale): Vec3 {
 }
 
 /**
- * Where a flask let go of with its mouth at `p` would stand on a scale: `dx` along the platform, at the nearer of its
- * places for a flask (see SCALE_SLOTS), if it's over the platform, above it but no more than `reach` above it. Null if
- * it isn't.
+ * Where on a scale's platform a flask let go of with its mouth at `p` would stand, as on a counter: just there, `dx`
+ * along it and `dz` across it in the scale's frame, if its base is wholly on the platform (see PLATFORM_REACH), and
+ * it's no lower than a little under the platform's top. Null if not.
  */
-export function scaleSpot(sc: Scale, p: Vec3, reach = 60): number | null {
-  const { platform: pl, depth } = SCALE_SHAPE;
-  const c = Math.cos(sc.pose.yaw);
-  const s = Math.sin(sc.pose.yaw);
-  const dx = p.x - sc.pose.x;
-  const dz = p.z - sc.pose.z;
-  const lx = dx * c - dz * s;
-  const lz = dx * s + dz * c;
-  const above = p.y - FLASK_H - sc.pose.y;
-  if (lx < pl.x0 || lx > pl.x1 || Math.abs(lz) > depth || above < -10 || above > reach) return null;
-  return lx < 0 ? SCALE_SLOTS[0] : SCALE_SLOTS[1];
+export function platformSpot(sc: Scale, p: Vec3): { dx: number; dz: number } | null {
+  const l = toLocal(sc.pose, p);
+  const r = PLATFORM_REACH;
+  if (Math.abs(l.x) > r.x + 1e-9 || Math.abs(l.z) > r.z + 1e-9 || p.y - FLASK_H - sc.pose.y < -10) return null;
+  return { dx: l.x, dz: l.z };
 }
 
 /* ---------------- hoses ---------------- */

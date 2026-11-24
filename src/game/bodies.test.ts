@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FLASK_R, MAGNET, NOZZLE_REACH, SCALE_SLOTS, magnetShift, STAND_BASE, aimAngle, angleOf, settleAngle, swept, turnValve, valveAt, valveAngle, leverKind, VALVE_DEADZONE, VALVE_SHUT, DIAL_STOP, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
-  docked, nozzleBox, nozzleMounts, nozzleStand, onScale, scaleBox, scaleSpot, snapReach, spoutAt, standBase, tankMouth, toolBounds, toolBox, toolStands,
+  FLASK_R, MAGNET, NOZZLE_REACH, PLATFORM_REACH, magnetShift, STAND_BASE, aimAngle, angleOf, settleAngle, swept, turnValve, valveAt, valveAngle, leverKind, VALVE_DEADZONE, VALVE_SHUT, DIAL_STOP, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
+  docked, nozzleBox, nozzleMounts, nozzleStand, onScale, platformSpot, scaleBox, snapReach, spoutAt, standBase, tankMouth, toolBounds, toolBox, toolStands,
   plumbZ,
 } from './bodies';
 import { SOLVENT_SPECIES, singleOf } from '../chem/species';
@@ -422,20 +422,30 @@ describe('flasks in the room', () => {
   });
 });
 
-describe('scaleSpot', () => {
-  const sc = new Scale(at(0, 400, 0));
-  it('stands a flask let go just over the platform on it, at the nearer of its two places', () => {
-    expect(scaleSpot(sc, { x: 30, y: 400 + FLASK_H + 20, z: 0 })).toBe(SCALE_SLOTS[1]);
-    expect(scaleSpot(sc, { x: SCALE_SHAPE.platform.x1 - 5, y: 400 + FLASK_H + 5, z: 10 })).toBe(SCALE_SLOTS[1]);
-    expect(scaleSpot(sc, { x: -10, y: 400 + FLASK_H + 5, z: 0 })).toBe(SCALE_SLOTS[0]);
-    expect(onScale(sc, 30).y).toBeCloseTo(400 + FLASK_H);
+describe('platformSpot', () => {
+  const sc = new Scale(at(0, 400, 0, Math.PI / 2));
+  /** A point in the scale's frame, in the room. */
+  const on = (x: number, y: number, z: number) => toWorld(sc.pose, { x, y, z });
+  it('stands a flask let go over the platform on it just where it is held, its base wholly on it', () => {
+    expect(PLATFORM_REACH.x).toBe(SCALE_SHAPE.platform.x1 - FLASK_R);
+    expect(PLATFORM_REACH.z).toBe(SCALE_SHAPE.depth - FLASK_R);
+    for (const [x, z] of [[0, 0], [-17, 0.5], [PLATFORM_REACH.x, -PLATFORM_REACH.z]]) {
+      const spot = platformSpot(sc, on(x, FLASK_H + 20, z))!;
+      expect(spot.dx).toBeCloseTo(x, 9);
+      expect(spot.dz).toBeCloseTo(z, 9);
+      // (well above it too: it comes down onto it, as onto a counter)
+      expect(platformSpot(sc, on(x, FLASK_H + 300, z))).not.toBeNull();
+    }
+    const p = onScale(sc, -17, 0.5);
+    expect(p.y).toBeCloseTo(400 + FLASK_H);
+    const want = on(-17, FLASK_H, 0.5);
+    expect([p.x, p.z]).toEqual([want.x, want.z]);
   });
 
-  it("leaves one that's too high, too low or off to the side", () => {
-    expect(scaleSpot(sc, { x: 30, y: 400 + FLASK_H + 120, z: 0 })).toBeNull();
-    expect(scaleSpot(sc, { x: 30, y: 400 + FLASK_H - 40, z: 0 })).toBeNull();
-    expect(scaleSpot(sc, { x: 30, y: 400 + FLASK_H, z: 80 })).toBeNull();
-    expect(scaleSpot(sc, { x: SCALE_SHAPE.platform.x1 + 10, y: 400 + FLASK_H, z: 0 })).toBeNull();
+  it("leaves one that's below the platform, or hangs off its edge", () => {
+    expect(platformSpot(sc, on(0, FLASK_H - 40, 0))).toBeNull();
+    expect(platformSpot(sc, on(PLATFORM_REACH.x + 1, FLASK_H, 0))).toBeNull();
+    expect(platformSpot(sc, on(0, FLASK_H, PLATFORM_REACH.z + 1))).toBeNull();
   });
 });
 

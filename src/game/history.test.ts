@@ -78,13 +78,13 @@ describe('arrangement', () => {
     const [f] = l.flasks;
     const [sc] = l.scales;
     const [h] = l.hoses;
-    sc.put(f, 50);
+    sc.put(f, 25, 1);
     const a = arrangement(l, sw);
     sc.remove(f);
     h.outlet = { x: 0, y: 0, z: 0 };
     h.turn = 2;
     arrange(l, a);
-    expect(sc.load).toEqual([{ f, dx: 50 }]);
+    expect(sc.load).toEqual([{ f, dx: 25, dz: 1 }]);
     expect(h.outlet).toEqual({ x: 250, y: 600, z: 150 });
     expect(h.turn).toBe(0);
   });

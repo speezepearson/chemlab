@@ -28,7 +28,7 @@ export interface Things {
 export interface Arrangement {
   flasks: { f: Flask; pose: Pose; label: string }[];
   tools: { t: Tool; pose: Pose; valves: number[]; cocks: ({ valve: number } | null)[]; ends: ({ valve: number } | null)[]; note: string; labels: string[]; lit: boolean }[];
-  scales: { sc: Scale; pose: Pose; load: { f: Flask; dx: number }[]; tare: number; note: string }[];
+  scales: { sc: Scale; pose: Pose; load: { f: Flask; dx: number; dz: number }[]; tare: number; note: string }[];
   hoses: { h: Hose; outlet: Vec3; turn: number; reach: number }[];
   faucets: { note: string; valve: number; cock: { valve: number } | null; end: { valve: number } | null }[];
   stock: Stock;
@@ -105,7 +105,7 @@ export function sameArrangement(a: Arrangement, b: Arrangement): boolean {
       ...x,
       flasks: x.flasks.map(({ pose, label }) => ({ pose, label })),
       tools: x.tools.map(({ t: _, ...rest }) => rest),
-      scales: x.scales.map(({ sc: _, load, ...rest }) => ({ ...rest, load: load.map(({ f, dx }) => ({ f: ids.get(f) ?? -1, dx })) })),
+      scales: x.scales.map(({ sc: _, load, ...rest }) => ({ ...rest, load: load.map(({ f, dx, dz }) => ({ f: ids.get(f) ?? -1, dx, dz })) })),
       hoses: x.hoses.map(({ h: _, ...rest }) => rest),
     });
   return values(a) === values(b);

@@ -112,8 +112,11 @@ export interface SavedScale extends SavedDepth {
   fx: number;
   fy: number;
   tare: number;
-  /** Flasks standing on it, by index into `flasks`. */
-  load: { f: number; dx: number }[];
+  /**
+   * Flasks standing on it, by index into `flasks`, and where on its platform: `dx` along it and `dz` across it, from
+   * its middle (a save from when a flask stood in one of two places along it has no `dz`: it stood across its middle).
+   */
+  load: { f: number; dx: number; dz?: number }[];
   /** The player's note about it, if any. */
   note?: string;
 }

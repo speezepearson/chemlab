@@ -3,7 +3,7 @@ import { BOND_KEYS } from '../chem/atoms';
 import { ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
-import { FLASK_R, MAGNET, NEAR, NEAR_STEP, NOZZLE_REACH, SCALE_SLOTS, flaskLip, flaskMouth, onScale, plumbZ, spoutAt, spoutTip, valveAt, valveLocal, STOPCOCK, VALVE_WHEEL, tankMouth, scaleBox, standBase, toolBounds, toolBox, toolStands, type Stand } from './bodies';
+import { FLASK_R, MAGNET, NEAR, NEAR_STEP, NOZZLE_REACH, PLATFORM_REACH, flaskLip, flaskMouth, onScale, plumbZ, spoutAt, spoutTip, valveAt, valveLocal, STOPCOCK, VALVE_WHEEL, tankMouth, scaleBox, standBase, toolBounds, toolBox, toolStands, type Stand } from './bodies';
 import { boxesOverlap } from './physics';
 import { STOCK } from './cabinet';
 import { WHEELS } from './wheel';
@@ -1388,39 +1388,64 @@ describe('setting things down', () => {
     expect(rests(l)!.pose.z).toBeLessThanOrEqual(front - FLASK_R + 1e-9);
   });
 
-  it('pulls an empty scale under two faucets side by side, its places for a flask under them, and both flasks on it catch', () => {
+  it('has no places of its own for a magnet: an empty scale is set down just where it is held', () => {
     const l = lab();
     const [a, b] = more(l).faucets.map((fa) => fa.spout);
-    for (const fa of more(l).faucets.slice(0, 2)) fa.valve = 1;
-    expect(Math.hypot(a.x - b.x, a.z - b.z)).toBeCloseTo(SCALE_SLOTS[1] - SCALE_SLOTS[0], 6);
     const mid = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
     const yaw = Math.atan2(-(b.z - a.z), b.x - a.x);
     const sc = setAt(l, 'scale', { x: mid.x - 6, y: LIFT + 100, z: mid.z + 8, yaw }) as Scale;
-    const places = SCALE_SLOTS.map((dx) => onScale(sc, dx));
-    for (const [p, s] of [[places[0], a], [places[1], b]]) {
-      expect(p.x).toBeCloseTo(s.x, 6);
-      expect(p.z).toBeCloseTo(s.z, 6);
-    }
-    const fs = places.map((p) => setAt(l, 'flask', { ...p, y: p.y + 40, x: p.x + 4 }) as Flask);
+    expect([sc.pose.x, sc.pose.z]).toEqual([mid.x - 6, mid.z + 8]);
+  });
+
+  it('stands a flask on a scale just where it is held over the platform, as on a counter, or pulled under a faucet', () => {
+    const l = lab();
+    const [a, b] = more(l).faucets.map((fa) => fa.spout);
+    for (const fa of more(l).faucets.slice(0, 2)) fa.valve = 1;
+    const mid = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
+    const yaw = Math.atan2(-(b.z - a.z), b.x - a.x);
+    const sc = setAt(l, 'scale', { x: mid.x, y: LIFT + 100, z: mid.z, yaw }) as Scale;
+    // off-centre, away from any faucet's magnet: just where it's held
+    const spot = onScale(sc, -PLATFORM_REACH.x, 0.5);
+    l.in.keys.add('AltLeft');
+    const f = setAt(l, 'flask', { ...spot, y: spot.y + 40 }) as Flask;
+    l.in.keys.delete('AltLeft');
+    expect(sc.load).toEqual([{ f, dx: expect.closeTo(-PLATFORM_REACH.x, 6), dz: expect.closeTo(0.5, 6) }]);
+    expect(f.pose.y).toBeCloseTo(sc.pose.y + 70, 6);
+    // a second, held over the first, is set down beside it, not in it
+    holdAt(l, 'flask', { ...spot, y: spot.y + 40 });
+    const g = l.in.held!.f!;
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    expect(Math.hypot(g.pose.x - f.pose.x, g.pose.z - f.pose.z)).toBeGreaterThanOrEqual(2 * FLASK_R - 1e-6);
+    // under the faucets, held near them over the platform, each is pulled under its spout by its own magnet, and catches
+    sc.remove(f);
+    sc.remove(g);
+    more(l).flasks.splice(0);
+    const fs = [a, b].map((s) => setAt(l, 'flask', { ...s, y: sc.pose.y + 120, x: s.x + 4, yaw: 0 }) as Flask);
     expect(sc.load.map((x) => x.f)).toEqual(fs);
+    fs.forEach((h, i) => expect([h.pose.x, h.pose.z].map((v) => +v.toFixed(6))).toEqual([[a, b][i].x, [a, b][i].z].map((v) => +v.toFixed(6))));
     run(l, 1);
     expect(fs[0].n[more(l).faucets[0].start.start]).toBeGreaterThan(0);
     expect(fs[1].n[more(l).faucets[1].start.start]).toBeGreaterThan(0);
+    // and a save keeps where each stands
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    expect(s.scales[0].load.every((x) => Number.isFinite(x.dz))).toBe(true);
+    l.e.restore(s, DEFAULT_PRESET);
+    const sc2 = more(l).scales[0];
+    expect(sc2.load.map((x) => +x.dx.toFixed(6))).toEqual(sc.load.map((x) => +x.dx.toFixed(6)));
+    // a save from when it had two places for a flask, which kept no dz, loads them where they stood, across its middle
+    for (const x of s.scales[0].load) delete x.dz;
+    l.e.restore(s, DEFAULT_PRESET);
+    expect(more(l).scales[0].load.map((x) => x.dz)).toEqual([0, 0]);
   });
 
-  it('shows green guides from two faucets into an empty scale’s places as it will be set down under them, and none far off', () => {
+  it('shows no guides into an empty scale held under two faucets: it has no places of its own', () => {
     const l = lab();
     const [a, b] = more(l).faucets.map((fa) => fa.spout);
     const mid = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
     const yaw = Math.atan2(-(b.z - a.z), b.x - a.x);
-    const G = l.in as unknown as { guides(pl: unknown): { from: { x: number; z: number }; look: string; mouth: { x: number; z: number } }[] };
+    const G = l.in as unknown as { guides(pl: unknown): { look: string }[] };
     holdAt(l, 'scale' as 'pipette', { x: mid.x - 6, y: LIFT + 100, z: mid.z + 8, yaw });
-    const gs = G.guides(l.in.placement(l.in.held)).filter((g) => g.look === 'snap');
-    expect(gs).toHaveLength(2);
-    for (const s of [a, b]) expect(gs.some((g) => Math.hypot(g.from.x - s.x, g.from.z - s.z) < 1e-6 && Math.hypot(g.mouth.x - s.x, g.mouth.z - s.z) < 1e-6)).toBe(true);
-    l.in.putAway();
-    // held well away from the faucets, it lines up with nothing
-    holdAt(l, 'scale' as 'pipette', { x: mid.x - 6, y: LIFT + 100, z: mid.z + 8 + 4 * CELL, yaw });
     expect(G.guides(l.in.placement(l.in.held)).filter((g) => g.look === 'snap')).toHaveLength(0);
   });
 });
@@ -1520,7 +1545,7 @@ describe('ghost moves', () => {
     const sc = (l.in.held as unknown as { sc: Scale }).sc;
     l.in.release();
     expect(l.in.held).toBeNull();
-    const place = onScale(sc, SCALE_SLOTS[1]);
+    const place = onScale(sc, CELL / 2);
     holdAt(l, 'flask', { x: place.x, y: place.y + 40, z: place.z, yaw: 0 });
     const f = l.in.held!.f!;
     l.in.release();
@@ -1545,7 +1570,8 @@ describe('ghost moves', () => {
     l.in.release();
     expect(l.in.held).toBeNull();
     expect(sc.pose.z).toBeCloseTo(to.z, 6);
-    expect(f.pose.z).toBeCloseTo(onScale(sc, SCALE_SLOTS[1]).z, 6);
+    const on = sc.load[0];
+    expect(f.pose.z).toBeCloseTo(onScale(sc, on.dx, on.dz).z, 6);
     expect(g(l).hoses[0].outlet.z).toBeCloseTo(f.pose.z, 6);
     // one step: undone, the scale's back, and the hose rolled back up
     l.e.undo();
