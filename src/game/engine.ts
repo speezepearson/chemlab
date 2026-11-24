@@ -452,6 +452,12 @@ export class GameEngine {
    * seconds it has been turning that way, for its speed (see TURN_RATE).
    */
   private turning: (ValveRef & { dir: number; for: number }) | null = null;
+  /**
+   * While a frame's drawn, what C and Q and E would act on (see hoseAim and aimedValve), found once for the frame, as
+   * looking past what's in the way takes a raycast or two; undefined till it's first asked for. Null between frames,
+   * when they're found afresh each time they're asked for.
+   */
+  private aimMemo: { hose?: ReturnType<GameEngine['findHoseAim']>; valve?: ValveRef | null } | null = null;
   /** How far the view is zoomed in (see ZOOM), from 0, not at all, to 1. */
   private zoom = 0;
   /**
@@ -1816,6 +1822,13 @@ export class GameEngine {
    * can't act.
    */
   private aimedValve(): ValveRef | null {
+    const memo = this.aimMemo;
+    if (memo) return memo.valve === undefined ? (memo.valve = this.findAimedValve()) : memo.valve;
+    return this.findAimedValve();
+  }
+
+  /** What aimedValve finds, afresh. */
+  private findAimedValve(): ValveRef | null {
     if (this.held || this.wheel || this.sniffing || this.dozing() || inPod(this.wake) || this.previewing) return null;
     const on = this.valveAimed();
     if (on) return on;
@@ -1830,7 +1843,16 @@ export class GameEngine {
       if (fa.cock) all.push({ cock: { m: { faucet }, nozzle: false } });
     });
     for (const h of this.hoses) if (this.endOn(h.on) && !('tool' in h.on && h.on.tool.swap !== null)) all.push({ cock: { m: h.on, nozzle: true } });
-    return this.nearestAimed(all, (v) => this.valveFace(v).at);
+    return this.nearestAimed(all, (v) => this.valveFace(v).at, GameEngine.valveOwner);
+  }
+
+  /** Whether the crosshair is right on a valve (see valveAimed), which nothing then hides. */
+  private onValve(v: ValveRef): boolean {
+    const k = this.valveAimed();
+    if (!k) return false;
+    if ('t' in v) return 't' in k && k.t === v.t && k.k === v.k;
+    if ('faucet' in v) return 'faucet' in k && k.faucet === v.faucet;
+    return 'cock' in k && sameMount(k.cock.m, v.cock.m) && k.cock.nozzle === v.cock.nozzle;
   }
 
   /** Take hold of the handwheel or dial Q and E would turn (see aimedValve), to turn it while either's held: one step to undo. */
@@ -1856,15 +1878,44 @@ export class GameEngine {
     return off <= aimCone(AIM.deg, this.fov(), FOV) ? off : null;
   }
 
-  /** Of `items`, the one whose point (`at`) is fewest degrees off the crosshair, within the aim (see aimOff); null if none is. */
-  private nearestAimed<T>(items: Iterable<T>, at: (x: T) => Vec3): T | null {
-    let best = Infinity;
-    let out: T | null = null;
+  /**
+   * Of `items`, the one whose point (`at`) is fewest degrees off the crosshair, within the aim (see aimOff), and not
+   * hidden from the eyes by anything but its own thing (`owner`, see hidden); null if none is. They're tried nearest
+   * first, so it's seldom more than one look past what's in the way. One with another point to be seen by (`also`) is
+   * hidden only if both are.
+   */
+  private nearestAimed<T>(items: Iterable<T>, at: (x: T) => Vec3, owner: (x: T) => HoseMount, also?: (x: T) => Vec3 | null): T | null {
+    const near: { x: T; p: Vec3; off: number }[] = [];
     for (const x of items) {
-      const off = this.aimOff(at(x));
-      if (off !== null && off <= best) [best, out] = [off, x];
+      const p = at(x);
+      const off = this.aimOff(p);
+      if (off !== null) near.push({ x, p, off });
     }
-    return out;
+    near.sort((a, b) => a.off - b.off);
+    const seen = (n: { x: T; p: Vec3 }) => {
+      if (!this.hidden(n.p, owner(n.x))) return true;
+      const q = also?.(n.x);
+      return !!q && !this.hidden(q, owner(n.x));
+    };
+    return near.find(seen)?.x ?? null;
+  }
+
+  /**
+   * Whether a point of something on a spout or faucet's mount (its spout, its valve, a stopcock or a hose on it) is
+   * hidden from the eyes by something in the way, glass included (see View.blocked), but the tool or faucet it's on,
+   * or the stopcocks on its outlets, which never hide their own.
+   */
+  private hidden(p: Vec3, m: HoseMount): boolean {
+    const own = (k: Pick): boolean =>
+      'tool' in m
+        ? (k.kind === 'tool' && k.t === m.tool) || (k.kind === 'hose' && 'tool' in k.h.on && k.h.on.tool === m.tool)
+        : (k.kind === 'faucet' && k.i === m.faucet) || (k.kind === 'hose' && 'faucet' in k.h.on && k.h.on.faucet === m.faucet);
+    return this.view.blocked(this.eye(), p, own);
+  }
+
+  /** The tool or faucet a valve is on, as a mount of it (see hidden). */
+  private static valveOwner(v: ValveRef): HoseMount {
+    return 't' in v ? { tool: v.t, spout: 0 } : 'faucet' in v ? { faucet: v.faucet } : v.cock.m;
   }
 
   /**
@@ -1879,7 +1930,8 @@ export class GameEngine {
     if (!tr) return;
     const q = this.keys.has('KeyQ');
     const e = this.keys.has('KeyE');
-    if (this.held || ('cock' in tr && !this.cockAt(tr.cock)) || this.aimOff(this.valveFace(tr).at) === null || (!q && !e)) {
+    const at = 'cock' in tr && !this.cockAt(tr.cock) ? null : this.valveFace(tr).at;
+    if (this.held || !at || this.aimOff(at) === null || (!q && !e) || (!this.onValve(tr) && this.hidden(at, GameEngine.valveOwner(tr)))) {
       this.endTurn();
       return;
     }
@@ -2236,12 +2288,20 @@ export class GameEngine {
   /**
    * The hose C would take hold of: of every spout and faucet (that can be worked: nothing on the station can through
    * its changeover), by its outlet (its tip, or the foot of a stopcock there: where its hose runs from, see mountAt,
-   * whether the hose is out or not), and of the nozzle of every hose that's out, the one the fewest degrees off the
-   * crosshair as the eyes see it, within the player's aim (see aimOff). It says which spout or faucet, its hose if
+   * whether the hose is out or not), and of the nozzle of every hose that's out, by its tip, the one the fewest degrees off the
+   * crosshair as the eyes see it, within the player's aim (see aimOff), that isn't hidden (see nearestAimed: a nozzle
+   * only if its tip and its top both are). It says which spout or faucet, its hose if
    * that's out, whether it was its nozzle, and where that point is. Null with something in hand, or nothing near, or while she can't act (sniffing, napping, in the pod, an
    * equipment wheel open).
    */
   private hoseAim(): { m: HoseMount; hose: Hose | null; nozzle: boolean; at: Vec3 } | null {
+    const memo = this.aimMemo;
+    if (memo) return memo.hose === undefined ? (memo.hose = this.findHoseAim()) : memo.hose;
+    return this.findHoseAim();
+  }
+
+  /** What hoseAim finds, afresh. */
+  private findHoseAim(): { m: HoseMount; hose: Hose | null; nozzle: boolean; at: Vec3 } | null {
     if (this.held || this.wheel || this.sniffing || this.dozing() || inPod(this.wake) || this.previewing) return null;
     const all: { m: HoseMount; hose: Hose | null; nozzle: boolean; at: Vec3 }[] = [];
     const add = (m: HoseMount, nozzle: boolean) => {
@@ -2251,7 +2311,8 @@ export class GameEngine {
     for (const t of this.tools) if (t.swap === null) t.shape.spouts.forEach((_, spout) => add({ tool: t, spout }, false));
     this.faucets.forEach((_, faucet) => add({ faucet }, false));
     for (const h of this.hoses) if (!('tool' in h.on) || h.on.tool.swap === null) add(h.on, true);
-    return this.nearestAimed(all, (c) => c.at);
+    // (a nozzle's tip may be down in what it's docked on, or in a mouth: then it's seen by its top)
+    return this.nearestAimed(all, (c) => c.at, (c) => c.m, (c) => (c.nozzle ? { ...c.at, y: c.at.y + NOZZLE_H } : null));
   }
 
   /**
@@ -3128,12 +3189,15 @@ export class GameEngine {
     // (sniffing, the crosshair stays on what it was on from where she stands)
     if (!this.sniffing) this.target = this.previewing ? null : this.view.pick(REACH, this.heldObject());
     this.simulate(dt);
+    // (what C, Q and E would act on, found at most once for the rest of the frame)
+    this.aimMemo = {};
     // the end stands the lab still as it was when there was enough, so it goes on in real time
     if (this.arrival && this.wake !== 'pod') this.stepWake(dt);
     if (this.riseT !== null) this.riseT = this.riseT + dt >= RISE_S ? null : this.riseT + dt;
     this.render(dt);
     this.inspect(now);
     this.hud(now);
+    this.aimMemo = null;
     this.raf = requestAnimationFrame(this.frame);
   };
 

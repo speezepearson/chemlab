@@ -125,7 +125,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     cone round it, in degrees, as seen at the normal field of view (`AIM.deg`), which `aimCone` narrows as the view
     zooms in. The engine's `aimOff` and `nearestAimed` are the one test (the cone, and REACH) that both `hoseAim` (the
     spout's outlet or nozzle C takes a hose by) and `aimedValve` (the handwheel or dial Q and E turn, unless the
-    crosshair is right on one) use. The Appearance panel's *Aim* slider sets it.
+    crosshair is right on one) use. Neither takes what's hidden from the eyes by anything the crosshair could be on but
+    its own tool or faucet (`hidden`, through the view's `blocked`, a raycast or two, tried nearest first; once a frame,
+    `aimMemo`). The Appearance panel's *Aim* slider sets it.
   - `finish.ts` is the player's setting for the metal's shine, 0 matte to 1 mirror-smooth, 0.5 as built (`AS_BUILT`), starting at 0.4 (`FINISH`),
     and the roughness it gives a metal. `metal()` in `textures.ts` registers a material for it; the view applies it.
   - `smell.ts` is what a sniff (F) makes of a fluid, pure and DOM-free: the ten odorants and Nadia's similes for them

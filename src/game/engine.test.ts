@@ -37,6 +37,9 @@ vi.mock('./view', () => ({
     pick(): null {
       return null;
     }
+    blocked(): boolean {
+      return false;
+    }
     project(): null {
       return null;
     }
@@ -2312,6 +2315,33 @@ describe('faucets’ valves', () => {
     expect(c.valve).toBeGreaterThan(0);
   });
 
+  it('turns none hidden behind something else, unless the crosshair is right on it, and lets go of one that comes to be', () => {
+    const l = lab();
+    const t = new Tool('dispenser', 99, { x: SPOT.x, y: LIFT + 400, z: SPOT.z, yaw: 0 });
+    (taps(l) as unknown as { tools: Tool[] }).tools.push(t);
+    const v = { cock: { m: { tool: t, spout: 0 }, nozzle: false } };
+    const at = faceOf(l, v);
+    const view = (l.in as unknown as { view: { blocked(): boolean } }).view;
+    lookAbove(l, at, AIM.deg / 2);
+    l.in.target = null;
+    expect(aimedValve(l)).toEqual(v);
+    view.blocked = () => true;
+    expect(aimedValve(l)).toBeNull();
+    // right on its handwheel, it's turned all the same
+    l.in.target = { kind: 'tool', t, part: 'cock', k: 0, turns: true, point: at } as never;
+    expect(aimedValve(l)).toEqual(v);
+    // being turned, it's let go of once it's hidden and the crosshair isn't on it
+    view.blocked = () => false;
+    l.in.target = null;
+    l.e.touchKey('KeyE', true);
+    l.in.move(0.1);
+    expect(turning(l)).not.toBeNull();
+    view.blocked = () => true;
+    l.in.move(0.1);
+    expect(turning(l)).toBeNull();
+    l.e.touchKey('KeyE', false);
+  });
+
   it('turns the one fewest degrees off, but the one the crosshair is on first; and keeps turning it till it leaves the aim', () => {
     const l = lab();
     const t = new Tool('heater', 99, { x: SPOT.x, y: LIFT + 400, z: SPOT.z, yaw: 0 }, [1]);
@@ -2482,6 +2512,43 @@ describe('C', () => {
     l.e.undo();
     expect(pulls(l).hoses).toHaveLength(0);
     expect(pulls(l).history.canUndo).toBe(false);
+  });
+
+  it('passes over what’s hidden behind something else for the next nearest, and takes none if all are', () => {
+    const l = lab();
+    const t = separator(l);
+    const [a, b] = [spoutAt(t, 0), spoutAt(t, 1)];
+    const was = AIM.deg;
+    AIM.deg = AIM_DEG.max;
+    const view = (l.in as unknown as { view: { blocked(from: unknown, to: { x: number }): boolean } }).view;
+    lookAt(l, { x: a.x + 0.3 * (b.x - a.x), y: a.y, z: a.z });
+    expect(aimed(l)).toEqual({ tool: t, spout: 0 });
+    // the nearer hidden, the next nearest
+    view.blocked = (_, to) => to.x === a.x;
+    expect(aimed(l)).toEqual({ tool: t, spout: 1 });
+    // both hidden, none
+    view.blocked = () => true;
+    expect(aimed(l)).toBeNull();
+    l.e.touchHose();
+    expect(l.in.held).toBeNull();
+    AIM.deg = was;
+  });
+
+  it('takes a nozzle whose tip is hidden, down in what it’s docked on, if its top isn’t', () => {
+    const l = lab();
+    const t = separator(l);
+    const a = spoutAt(t, 0);
+    lookAt(l, a);
+    l.e.touchHose();
+    hands(l).placeHeld(l.in.held, { ...a, x: a.x - 2 * CELL, y: a.y - 40, yaw: 0 });
+    l.e.touchHose();
+    const tip = pulls(l).hoses[0].outlet;
+    const view = (l.in as unknown as { view: { blocked(from: unknown, to: { y: number }): boolean } }).view;
+    lookAt(l, tip);
+    view.blocked = (_, to) => to.y === tip.y;
+    expect(pulls(l).hoseAim()?.nozzle).toBe(true);
+    view.blocked = () => true;
+    expect(pulls(l).hoseAim()).toBeNull();
   });
 
   it('pulls out a faucet’s hose', () => {

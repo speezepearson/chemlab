@@ -6044,6 +6044,25 @@ export class View {
   }
 
   /**
+   * Whether something the crosshair could be on (see pick; not a clamp stand, nor a hose's tube or nozzle) is between
+   * `from` and `to`, nearer than `to`, but for what `own` says is the thing `to` is part of, which never hides it, see
+   * through or not.
+   */
+  blocked(from: Vec3, to: Vec3, own: (p: Pick) => boolean): boolean {
+    const d = new THREE.Vector3(to.x - from.x, to.y - from.y, to.z - from.z);
+    const len = d.length();
+    if (len < 1e-6) return false;
+    this.raycaster.set(new THREE.Vector3(from.x, from.y, from.z), d.divideScalar(len));
+    this.raycaster.far = len - 0.5;
+    for (const hit of this.raycaster.intersectObjects([...this.pickables.keys()], false)) {
+      const p = this.pickables.get(hit.object);
+      if (p && p.kind !== 'cabinet' && !own(p)) return true;
+      if (p?.kind === 'cabinet' && !p.front) return true;
+    }
+    return false;
+  }
+
+  /**
    * How far from `from`, along the unit vector `dir`, the first thing drawn that the crosshair could be on is (see
    * pick), or a clamp stand or a hose's nozzle; Infinity if there's nothing within `reach`.
    */
