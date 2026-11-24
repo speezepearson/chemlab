@@ -83,6 +83,8 @@ export interface Hud {
    * a thermometer into what's looked at.
    */
   use: boolean;
+  /** Whether E's own hint is up in the lab, over the mouth it'd pour into (see Frame.pourHint), so it needs none by the crosshair. */
+  pouring: boolean;
   /** Whether C would take hold of a hose, by a spout, faucet or nozzle near the crosshair (see GameEngine.hoseAim). */
   hose: boolean;
   /** Whether Enter would write a note about what the crosshair is on (see GameEngine.note). */
@@ -2333,6 +2335,16 @@ export class GameEngine {
     return a && { at: a.at, nozzle: a.nozzle, cock: a.nozzle && !!this.endOn(a.m) };
   }
 
+  /**
+   * Where E's hint goes (see Frame.pourHint): the middle of the mouth E would pour the flask in hand into, as it would
+   * hold it over it (see useDown), if there's one and E would pour (not while it's pouring already). Null otherwise.
+   */
+  private pourHintAt(): Vec3 | null {
+    if (this.held?.kind !== 'flask' || this.sniffing || !this.useWouldDo()) return null;
+    const m = this.mouthAimed(true);
+    return m && { x: m.x, y: m.y, z: m.z };
+  }
+
   /** C: with a hose's nozzle in hand, set it down (see release); with empty hands, take hold of a hose (see pullAimed). */
   private keyC(): void {
     if (this.held?.kind === 'hose') this.release();
@@ -3970,7 +3982,7 @@ export class GameEngine {
       energies: BOND_KEYS.map((k) => this.chem.params.bonds[k].E), alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
       airlock: this.airlockLook(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(), ghost: this.ghostFrame(pl),
-      loose: this.looseFrame(), turnHint: this.turnHint(), hoseHint: this.hoseHintAt(),
+      loose: this.looseFrame(), turnHint: this.turnHint(), hoseHint: this.hoseHintAt(), pourHint: this.pourHintAt(),
     });
   }
 
@@ -4529,6 +4541,7 @@ export class GameEngine {
       press: !this.sniffing && this.leftWouldDo(),
       turn: this.turnWouldDo() || !!this.turning,
       use: !this.sniffing && this.useWouldDo(),
+      pouring: !!this.pourHintAt(),
       label: !inPod(this.wake) && !!this.targetNote(),
       hose: !!this.hoseAim(),
       hand: h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : 'Dip',

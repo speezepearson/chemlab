@@ -1266,6 +1266,33 @@ describe('E', () => {
   });
 });
 
+describe('E’s hint', () => {
+  it('shows over the mouth a flask in hand would be poured into, but not while it pours, nor for an empty one', () => {
+    const l = lab();
+    holdAt(l, 'flask', { x: SPOT.x, y: LIFT + 160, z: SPOT.z, yaw: 0 });
+    const f = hands(l).held!.f!;
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    holdAt(l, 'flask', { x: SPOT.x + 2 * CELL, y: LIFT + 160, z: SPOT.z, yaw: 0 });
+    const held = hands(l).held!.f!;
+    const I = l.in as unknown as { pourHintAt(): unknown; useDown(): void; using: boolean };
+    // (the open tops, as of the last step)
+    run(l, 0.05);
+    l.in.target = { kind: 'flask', f };
+    // empty, nothing to pour
+    expect(I.pourHintAt()).toBeNull();
+    held.setMolecules(singleOf('G'), 0.3 * CAP);
+    expect(I.pourHintAt()).toEqual(expect.objectContaining({ x: expect.closeTo(SPOT.x, 6), z: expect.closeTo(SPOT.z, 6) }));
+    I.useDown();
+    expect(I.pourHintAt()).toBeNull();
+    l.e.touchKey('KeyE', false);
+    expect(I.pourHintAt()).not.toBeNull();
+    // aimed at nothing in particular, none
+    l.in.target = null;
+    expect(I.pourHintAt()).toBeNull();
+  });
+});
+
 describe('setting things down', () => {
   /** More of the engine's own things: the faucets, the scales, and where things are made to face. */
   interface More {

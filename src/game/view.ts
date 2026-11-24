@@ -147,6 +147,8 @@ export interface Frame {
    * with a stopcock on it or not (`cock`).
    */
   hoseHint: { at: Vec3; nozzle: boolean; cock: boolean } | null;
+  /** The middle of the mouth E would pour the flask in hand into, for its hint over it (see pourHint). */
+  pourHint: Vec3 | null;
   drops: readonly { at: Vec3; v: Vessel; hanging: boolean }[];
   /** The scale whose tare key is held down. */
   tarePress: Scale | null;
@@ -5411,16 +5413,90 @@ function hoseHint(scene: THREE.Scene): KeyHint {
     c.fill();
     c.stroke();
     // the key cap, beside the hose's upper half
-    const kx = -(H.collar / 2 + K.gap + K.w);
-    const ky = -(H.drop / 2) - K.h / 2 + 4;
+    keyCap(c, 'C', -(H.collar / 2 + K.gap + K.w), -(H.drop / 2) - K.h / 2 + 4);
+  });
+}
+
+/** A key cap with letter `k` on it, its lower left corner at (x, y), as the display's key caps are (see HOSE_HINT.cap). */
+function keyCap(c: CanvasRenderingContext2D, k: string, x: number, y: number): void {
+  const K = HOSE_HINT.cap;
+  c.beginPath();
+  c.roundRect(x, y, K.w, K.h, K.r);
+  c.fillStyle = HINT_INK.light;
+  c.fill();
+  c.lineWidth = K.border;
+  c.strokeStyle = HINT_INK.dark;
+  c.stroke();
+  keyLetter(c, k, x + K.w / 2, y + K.h / 2, K.letter, HINT_INK.dark);
+}
+
+/**
+ * E's hint over the mouth a flask in hand would be poured into (see Frame.pourHint), as a KeyHint, in world units from
+ * the lip of a little flask tipped to pour, which is `over` above the middle of that mouth: an Erlenmeyer's outline
+ * (its neck `neck` wide and `neckH` tall, its base `base` wide, its corners rounded `r`, `h` below its mouth, with a
+ * rim `rim` proud of the mouth), tipped `tilt` radians about its lip so its body is to the right, drawn light with a
+ * dark edge as the hose of C's hint is, and what's in it gray, lying level up to the lip; from the lip a stream falls
+ * `stream`, with a drop under it, to just over the mouth. On its left, a key cap with an E on it, as C's. It stands
+ * upright, turned to face the eyes.
+ */
+const POUR_HINT = { over: 18, tilt: (75 * Math.PI) / 180, neck: 5.5, neckH: 8, base: 19, h: 24, r: 2.5, rim: 0.9, stream: 10, edge: 0.8, fluid: '#8a9a94' };
+
+function pourHint(scene: THREE.Scene): KeyHint {
+  const P = POUR_HINT;
+  const K = HOSE_HINT.cap;
+  // the flask, upright, its mouth's pouring corner at the origin and its body below
+  const flask = (c: CanvasRenderingContext2D) => {
+    const mid = P.neck / 2;
+    const [l, r] = [mid - P.base / 2, mid + P.base / 2];
     c.beginPath();
-    c.roundRect(kx, ky, K.w, K.h, K.r);
-    c.fillStyle = HINT_INK.light;
-    c.fill();
-    c.lineWidth = K.border;
+    c.moveTo(-P.rim, 0);
+    c.lineTo(0, -P.rim);
+    c.lineTo(0, -P.neckH);
+    c.arcTo(l, -P.h, mid, -P.h, P.r);
+    c.arcTo(r, -P.h, P.neck, -P.neckH, P.r);
+    c.lineTo(P.neck, -P.neckH);
+    c.lineTo(P.neck, -P.rim);
+    c.lineTo(P.neck + P.rim, 0);
+    c.closePath();
+  };
+  return new KeyHint(scene, { x0: -(K.w + 8), x1: 30, y0: -(P.stream + 6), y1: K.h + 2, px: 16, cap: K.letter }, (c) => {
+    // the stream, and a drop under it
+    c.beginPath();
+    c.moveTo(0, -0.5);
+    c.lineTo(0, -P.stream);
+    c.lineWidth = 1.6 + 2 * P.edge;
     c.strokeStyle = HINT_INK.dark;
     c.stroke();
-    keyLetter(c, 'C', kx + K.w / 2, ky + K.h / 2, K.letter, HINT_INK.dark);
+    c.lineWidth = 1.6;
+    c.strokeStyle = HINT_INK.light;
+    c.stroke();
+    c.beginPath();
+    c.arc(0, -P.stream - 2.8, 1.3, 0, 2 * Math.PI);
+    c.fillStyle = HINT_INK.light;
+    c.fill();
+    c.lineWidth = P.edge;
+    c.strokeStyle = HINT_INK.dark;
+    c.stroke();
+    // the flask, tipped about its lip, with what's in it lying level up to the lip
+    c.save();
+    c.rotate(P.tilt);
+    flask(c);
+    c.fillStyle = HINT_INK.light;
+    c.fill();
+    c.clip();
+    c.rotate(-P.tilt);
+    c.fillStyle = P.fluid;
+    c.fillRect(-40, -40, 80, 40);
+    c.restore();
+    c.save();
+    c.rotate(P.tilt);
+    flask(c);
+    c.lineWidth = 2 * P.edge;
+    c.strokeStyle = HINT_INK.dark;
+    c.stroke();
+    c.restore();
+    // the key cap, to the left
+    keyCap(c, 'E', -(K.w + 6), -2);
   });
 }
 
@@ -5466,6 +5542,7 @@ export class View {
   private hints = new THREE.Scene();
   private turnHint = turnHint(this.hints);
   private hoseHint = hoseHint(this.hints);
+  private pourHint = pourHint(this.hints);
   /** Works out where the shadow lamp's light falls (see Exposer), once it's first needed. */
   private exposer?: Exposer;
   private studio = new IconStudio(Math.min(2, window.devicePixelRatio || 1));
@@ -5710,11 +5787,15 @@ export class View {
       const up = h.nozzle ? HOSE_HINT.hose.drop + (h.cock ? HOSE_HINT.overCock : 0) : 0;
       this.hoseHint.show(h.at, Math.atan2(eye.x - h.at.x, eye.z - h.at.z), 1, 0, this.camera, cssH, up);
     } else this.hoseHint.hide();
+    const m = fr.pourHint;
+    // (far off, it grows up and away from the mouth, its stream still ending just over it)
+    if (m) this.pourHint.show(m, Math.atan2(eye.x - m.x, eye.z - m.z), 1, 0, this.camera, cssH, POUR_HINT.over);
+    else this.pourHint.hide();
   }
 
   /** Draw the keys' hints over the finished frame, if any are up. */
   private renderHints(): void {
-    if (!this.turnHint.visible && !this.hoseHint.visible) return;
+    if (!this.turnHint.visible && !this.hoseHint.visible && !this.pourHint.visible) return;
     const { renderer } = this;
     renderer.autoClear = false;
     renderer.shadowMap.autoUpdate = false;

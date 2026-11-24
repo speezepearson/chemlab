@@ -281,7 +281,7 @@ export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; 
                 <MouseHint />
               </span>
             )}
-            {hud.use && (
+            {hud.use && !hud.pouring && (
               <span className="right">
                 <kbd>E</kbd>
               </span>
