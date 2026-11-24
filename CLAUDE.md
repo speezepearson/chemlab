@@ -225,7 +225,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     the one in the middle a cell from each of the others: the user prefers that to a narrower tool that isn't.
 - **Hoses** aren't a tool: every spout and faucet has one, which C pulls out, or takes hold of if it's out, by the
   spout or nozzle nearest the crosshair (`hoseAim`). The left button never takes one: on a spout it picks the tool
-  up, as anywhere else, and a hose's tube and nozzle aren't hit at all (only a stopcock on its end is). `Hose.on`
+  up, as anywhere else, and a hose's tube and nozzle aren't hit at all (only a stopcock on its end is). C, not the
+  left button, sets a nozzle in hand down (`keyC`, through the same `release`), its hint where `placement` says. `Hose.on`
   says which spout or faucet it's on. A
   spout's fluid leaves at its hose's nozzle if it's out, so wherever fluid leaves a spout or faucet, use the engine's
   `outletAt` and `faucetOutlet`, not `spoutAt` or `fa.spout`.

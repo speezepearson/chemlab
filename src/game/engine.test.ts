@@ -2393,6 +2393,31 @@ describe('C', () => {
     expect(hose.outlet).toEqual(nozzle);
   });
 
+  it('sets a nozzle in hand down, not the left button, and that with the pull is one step to undo', () => {
+    const l = lab();
+    const t = separator(l);
+    const a = spoutAt(t, 0);
+    lookAt(l, a);
+    l.e.touchHose();
+    expect(pulls(l).held?.kind).toBe('hose');
+    const there = { ...a, x: a.x - 2 * CELL, y: a.y - 40, yaw: 0 };
+    hands(l).placeHeld(l.in.held, there);
+    // the left button sets nothing down
+    l.in.target = null;
+    l.in.leftDown(false);
+    expect(pulls(l).held?.kind).toBe('hose');
+    // C does, where the left button used to
+    hands(l).placeHeld(l.in.held, there);
+    l.e.touchHose();
+    expect(l.in.held).toBeNull();
+    expect(pulls(l).hoses).toHaveLength(1);
+    expect([pulls(l).hoses[0].outlet.x, pulls(l).hoses[0].outlet.z]).toEqual([there.x, there.z]);
+    expect(pulls(l).history.canUndo).toBe(true);
+    l.e.undo();
+    expect(pulls(l).hoses).toHaveLength(0);
+    expect(pulls(l).history.canUndo).toBe(false);
+  });
+
   it('pulls out a faucet’s hose', () => {
     const l = lab();
     const at = pulls(l).mountAt({ faucet: 0 });

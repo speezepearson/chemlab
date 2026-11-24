@@ -1590,7 +1590,7 @@ export class GameEngine {
 
   /** C: take hold of the hose nearest the crosshair (see hoseAim). */
   touchHose(): void {
-    if (this.locked) this.pullAimed();
+    if (this.locked) this.keyC();
   }
 
   /**
@@ -1725,7 +1725,7 @@ export class GameEngine {
         return;
       }
       if (e.code === 'KeyE' || e.code === 'KeyQ') this.keyDown(e.code);
-      if (e.code === 'KeyC') this.pullAimed();
+      if (e.code === 'KeyC') this.keyC();
       if (e.code === 'KeyR') this.turn();
       if (e.code === 'Enter') {
         // the note's text box opens at once, and this Enter mustn't be taken as finishing it
@@ -2222,12 +2222,27 @@ export class GameEngine {
   }
 
   /**
-   * Where C's hint goes (see Frame.hoseHint): the point that C would take hold of a hose by (see hoseAim), whether
-   * it's a nozzle, and whether a stopcock's on that nozzle.
+   * Where C's hint goes (see Frame.hoseHint): with a nozzle in hand, where C would set it down (see placement), if
+   * there's anywhere; otherwise the point that C would take hold of a hose by (see hoseAim). And whether it's a
+   * nozzle, and whether a stopcock's on that nozzle.
    */
   private hoseHintAt(): Frame['hoseHint'] {
+    // a nozzle in hand: where C would set it down, if it can be
+    const h = this.held;
+    if (h?.kind === 'hose') {
+      const pl = this.placed;
+      if (this.sniffing || !pl || !('rest' in pl)) return null;
+      const p = pl.rest.pose;
+      return { at: { x: p.x, y: p.y, z: p.z }, nozzle: true, cock: !!this.endOn(h.h.on) };
+    }
     const a = this.hoseAim();
     return a && { at: a.at, nozzle: a.nozzle, cock: a.nozzle && !!this.endOn(a.m) };
+  }
+
+  /** C: with a hose's nozzle in hand, set it down (see release); with empty hands, take hold of a hose (see pullAimed). */
+  private keyC(): void {
+    if (this.held?.kind === 'hose') this.release();
+    else this.pullAimed();
   }
 
   /**
@@ -2487,8 +2502,11 @@ export class GameEngine {
       this.change(() => p.t.press());
       return;
     }
-    // anywhere else, what's held is set down, or with empty hands, what's looked at picked up
-    if (this.held) this.release();
+    // anywhere else, what's held is set down (but a hose's nozzle: C sets that down), or with empty hands, what's
+    // looked at picked up
+    if (this.held) {
+      if (this.held.kind !== 'hose') this.release();
+    }
     else if (p && this.grabbable(p)) this.grabOrRelease(shift);
   }
 
@@ -3953,7 +3971,7 @@ export class GameEngine {
         : 'set it down';
       // a button looked at takes the click
       if (this.intoCabinet()) add(['LMB'], 'put it in the cabinet');
-      else if (!this.onButton()) add(['LMB'], ok ? how : `${how}: not here`, !ok);
+      else if (!this.onButton() || h.kind === 'hose') add([h.kind === 'hose' ? 'C' : 'LMB'], ok ? how : `${how}: not here`, !ok);
       if (this.useWouldDo())
         add(
           ['E'],
@@ -4013,7 +4031,7 @@ export class GameEngine {
    */
   private leftWouldDo(): boolean {
     if (this.onButton()) return this.pressable();
-    if (this.held) return this.intoCabinet() || (!!this.placed && 'rest' in this.placed);
+    if (this.held) return this.held.kind !== 'hose' && (this.intoCabinet() || (!!this.placed && 'rest' in this.placed));
     const p = this.target;
     return !!this.cockAimed() || (!!p && this.grabbable(p));
   }
