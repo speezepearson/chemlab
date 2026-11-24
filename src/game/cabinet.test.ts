@@ -47,6 +47,10 @@ describe('the equipment cabinet', () => {
       // each in one bay
       expect(CABINET.bays.some((bay) => b.x - b.hx >= bay.x0 - 1e-6 && b.x + b.hx <= bay.x1 + 1e-6)).toBe(true);
     }
+    // and each under any shelf over it, clear of the board
+    for (const { k, b } of all)
+      for (const sh of CABINET.shelves)
+        if (sh.x0 <= b.x && b.x <= sh.x1 && sh.y > b.y - b.hy + 1e-6) expect(b.y + b.hy, k).toBeLessThanOrEqual(sh.y - B.board - B.clear + 1e-6);
     // shrunk a hair, so things just touching (stacked) don't count
     const shrink = (b: Box): Box => ({ ...b, hx: b.hx - 0.01, hy: b.hy - 0.01, hz: b.hz - 0.01, parts: undefined });
     for (let i = 0; i < all.length; i++)

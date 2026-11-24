@@ -4316,13 +4316,81 @@ function specimen(k: Stocked, scene: THREE.Object3D): THREE.Object3D {
 }
 
 /**
+ * What's drawn of a view of a new one of a kind, in its own frame, for the cabinet (see CabinetView): the faces of its
+ * meshes, by material, and its edges' lines, by material. A mesh with a material for each group of its faces (an open
+ * box's glass, a flask's) is split by them, leaving out those whose material isn't drawn (an open box's top). Its
+ * labels are left out, and so is what's on a layer of its own (a clear fluid's bent copy of what's behind it); nothing
+ * else drawn may be, so anything a view of it ever draws that the cabinet can't is an error here, not a gap on a shelf.
+ */
+function stockParts(k: Stocked, root: THREE.Object3D) {
+  type Parts = Map<THREE.Material, THREE.BufferGeometry[]>;
+  const faces: Parts = new Map();
+  const edges: Parts = new Map();
+  const add = (parts: Parts, mat: THREE.Material, geom: THREE.BufferGeometry) => parts.set(mat, [...(parts.get(mat) ?? []), geom]);
+  root.traverseVisible((o) => {
+    if (o instanceof THREE.Sprite || !o.layers.isEnabled(0) || o.userData.bent) return;
+    if (o instanceof THREE.LineSegments && !Array.isArray(o.material)) {
+      const geom = new THREE.BufferGeometry().setAttribute('position', o.geometry.attributes.position.clone());
+      if (o.geometry.index) geom.setIndex(o.geometry.index.clone());
+      add(edges, o.material, (geom.index ? geom.toNonIndexed() : geom).applyMatrix4(o.matrixWorld));
+      return;
+    }
+    if (!(o instanceof THREE.Mesh) || o instanceof THREE.InstancedMesh) {
+      if ((o as THREE.Mesh).isMesh || o instanceof THREE.Line || o instanceof THREE.Points)
+        throw new Error(`The cabinet can't draw a ${o.type} of a ${k}`);
+      return;
+    }
+    const geom = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(o.matrixWorld);
+    for (const name of Object.keys(geom.attributes)) if (!['position', 'normal', 'uv', 'color'].includes(name)) geom.deleteAttribute(name);
+    const mats: THREE.Material[] = Array.isArray(o.material) ? o.material : [o.material];
+    if (!Array.isArray(o.material)) {
+      geom.clearGroups();
+      if (o.material.visible) add(faces, o.material, geom);
+      return;
+    }
+    if (geom.groups.length === 0) throw new Error(`A ${k} has a mesh with a material for each group, but no groups`);
+    const n = geom.attributes.position.count;
+    for (const { start, count, materialIndex } of geom.groups) {
+      const mat = mats[materialIndex ?? 0];
+      if (!mat) throw new Error(`A ${k} has a mesh with a group for a material it hasn't`);
+      if (!mat.visible) continue;
+      const part = new THREE.BufferGeometry();
+      const end = Math.min(n, start + count);
+      for (const [name, a] of Object.entries(geom.attributes)) {
+        const at = a as THREE.BufferAttribute;
+        part.setAttribute(name, new THREE.BufferAttribute(at.array.slice(start * at.itemSize, end * at.itemSize), at.itemSize, at.normalized));
+      }
+      add(faces, mat, part);
+    }
+  });
+  return { faces, edges };
+}
+
+/** Geometries made one, for the cabinet's `k`; it throws if they can't be, rather than leave any of them out. */
+function merged(k: Stocked, set: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  if (set.length === 1) return set[0];
+  const geom = mergeGeometries(set);
+  if (!geom) throw new Error(`The cabinet can't make a ${k}'s meshes one`);
+  return geom;
+}
+
+/**
  * The equipment cabinet (see cabinet.ts): open steel shelving on a dark plinth, and what stands on its shelves. Each
  * kind is drawn from one view of a new one of it, made once, whose meshes are drawn again in each filled slot as an
  * instanced mesh: there are over a hundred things in it, and none of them changes while it's there.
  */
 class CabinetView {
   /** Each kind's meshes, as instanced meshes, with where each mesh is in the kind's own frame. */
-  private kinds = new Map<Stocked, { meshes: { im: THREE.InstancedMesh; rel: THREE.Matrix4 }[]; drawn: number[]; proxy: THREE.Group }>();
+  private kinds = new Map<
+    Stocked,
+    {
+      meshes: { im: THREE.InstancedMesh; rel: THREE.Matrix4 }[];
+      /** Its edges' lines, through every filled slot, and what they are in its own frame (see update). */
+      lines: { obj: THREE.LineSegments; src: Float32Array }[];
+      drawn: number[];
+      proxy: THREE.Group;
+    }
+  >();
   /** What the stock was when last drawn, to redraw only when it changes. */
   private key = '';
 
@@ -4360,20 +4428,11 @@ class CabinetView {
     // what stands on the shelves, each kind drawn from a view of a new one
     const proto = new THREE.Scene();
     for (const k of Object.keys(C.slots) as Stocked[]) {
-      const root = specimen(k, proto);
+      const { faces, edges } = stockParts(k, specimen(k, proto));
       const slots = C.slots[k];
       const proxy = new THREE.Group();
       const meshes: { im: THREE.InstancedMesh; rel: THREE.Matrix4 }[] = [];
-      // its meshes in its own frame, those of each material made one where they can be, to draw fewer of them
-      const byMat = new Map<THREE.Material | THREE.Material[], THREE.BufferGeometry[]>();
-      root.traverseVisible((o) => {
-        if (!(o instanceof THREE.Mesh) || o instanceof THREE.InstancedMesh || !o.layers.isEnabled(0) || o.userData.bent) return;
-        const geom = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(o.matrixWorld);
-        for (const name of Object.keys(geom.attributes)) if (!['position', 'normal', 'uv', 'color'].includes(name)) geom.deleteAttribute(name);
-        geom.clearGroups();
-        byMat.set(o.material, [...(byMat.get(o.material) ?? []), geom]);
-      });
-      for (const [mat, geoms] of byMat) {
+      for (const [mat, geoms] of faces) {
         // geometries can be made one only if they have the same attributes
         const sets = new Map<string, THREE.BufferGeometry[]>();
         for (const geom of geoms) {
@@ -4381,7 +4440,7 @@ class CabinetView {
           sets.set(key, [...(sets.get(key) ?? []), geom]);
         }
         for (const set of sets.values()) {
-          const geom = set.length > 1 ? (mergeGeometries(set) ?? set[0]) : set[0];
+          const geom = merged(k, set);
           const im = new THREE.InstancedMesh(geom, mat, slots.length);
           im.frustumCulled = false;
           im.count = 0;
@@ -4394,8 +4453,15 @@ class CabinetView {
           proxy.add(m);
         }
       }
+      // the edges of its glass, which can't be instanced: one set of lines for each material, through every filled slot
+      const lines = [...edges].map(([mat, geoms]) => {
+        const obj = new THREE.LineSegments(new THREE.BufferGeometry(), mat);
+        obj.frustumCulled = false;
+        g.add(obj);
+        return { obj, src: merged(k, geoms).attributes.position.array as Float32Array };
+      });
       scene.add(proxy);
-      this.kinds.set(k, { meshes, drawn: [], proxy });
+      this.kinds.set(k, { meshes, lines, drawn: [], proxy });
     }
   }
 
@@ -4404,19 +4470,29 @@ class CabinetView {
     const key = JSON.stringify(stock);
     if (key === this.key) return;
     this.key = key;
-    const at = new THREE.Matrix4();
     const m = new THREE.Matrix4();
-    for (const [k, v] of this.kinds) {
-      v.drawn = stock[k].flatMap((filled, i) => (filled ? [i] : []));
-      for (const { im, rel } of v.meshes) {
-        v.drawn.forEach((slot, j) => {
-          const p = CABINET.slots[k][slot];
-          at.makeRotationY(p.yaw).setPosition(p.x, p.y, p.z);
-          im.setMatrixAt(j, m.multiplyMatrices(at, rel));
-        });
-        im.count = v.drawn.length;
+    const v = new THREE.Vector3();
+    for (const [k, kind] of this.kinds) {
+      kind.drawn = stock[k].flatMap((filled, i) => (filled ? [i] : []));
+      const places = kind.drawn.map((slot) => {
+        const p = CABINET.slots[k][slot];
+        return new THREE.Matrix4().makeRotationY(p.yaw).setPosition(p.x, p.y, p.z);
+      });
+      for (const { im, rel } of kind.meshes) {
+        places.forEach((place, j) => im.setMatrixAt(j, m.multiplyMatrices(place, rel)));
+        im.count = places.length;
         im.instanceMatrix.needsUpdate = true;
         im.computeBoundingSphere();
+      }
+      for (const { obj, src } of kind.lines) {
+        const pos = new Float32Array(src.length * places.length);
+        places.forEach((place, j) => {
+          for (let i = 0; i < src.length; i += 3) {
+            v.fromArray(src, i).applyMatrix4(place).toArray(pos, j * src.length + i);
+          }
+        });
+        obj.geometry.dispose();
+        obj.geometry = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(pos, 3));
       }
     }
   }
