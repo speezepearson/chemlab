@@ -45,6 +45,12 @@ export const toCardinal = (yaw: number) => wrapAngle(Math.round(yaw / (Math.PI /
  */
 export const WALL_PANEL = { w: 220, h: ROOM.y1 / 3 };
 
+/** The player's eyes' height, and their body's radius. */
+export const EYE = 620;
+export const PLAYER_R = 45;
+/** How far from the player's eyes something can be and still be picked up or pressed. */
+export const REACH = 460;
+
 /** Height of every counter: the sink counters along the walls, and the islands. */
 export const LIFT = 420;
 /** How far the back wall's counter comes out from it: three cells. */

@@ -29,7 +29,7 @@ import { Scale, glassGrams } from './scale';
 import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
 import { script, smell, span, type Fragment } from './smell';
 import {
-  CELL, COUNTERS, LIFT, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toCardinal, toFrac, toLocal, toWorld, wrapAngle,
+  CELL, COUNTERS, EYE, LIFT, PLAYER_R, REACH, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toCardinal, toFrac, toLocal, toWorld, wrapAngle,
   type Pose, type Vec3,
 } from './space';
 import {
@@ -273,9 +273,6 @@ const DIP_S = 0.2;
 const DIP_SOAK = 0.35;
 /** How fast a falling drop speeds up, in world units per sim second squared: a 500-unit fall takes 0.7 s. */
 const GRAVITY = 2000;
-/** The player's eyes, and their body's radius. */
-const EYE = 620;
-const PLAYER_R = 45;
 /** Walking speed, in world units per real second. */
 const WALK = 840;
 /** Where the player stands in the pod, and how they face: out at the lab, eyes a little down. */
@@ -285,8 +282,6 @@ const IN_POD = { x: POD.x, z: POD.z, yaw: 0, pitch: -0.12 };
  * else, so it stays responsive.
  */
 const SLEEP_SLICE_MS = 12;
-/** How far away something can be and still be picked up or pressed. */
-const REACH = 460;
 /**
  * The heater as older saves have it: with four spouts, three taps' and then its end's, and as many valves, a tap's
  * each and then its dial. `kept` are the two of each that it still has, in order: its middle tap, which drew from

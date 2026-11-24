@@ -1,7 +1,7 @@
 import { COCK_EXTENT, FLASK_CENTER, FLASK_R, scaleBox, toolBox } from './bodies';
 import { FLASK_H } from './flaskShape';
 import { Scale } from './scale';
-import { CABINET_AREA, type Pose, type Vec3 } from './space';
+import { CABINET_AREA, CELL, EYE, PLAYER_R, REACH, type Pose, type Vec3 } from './space';
 import { Tool, type ToolKind } from './tools';
 
 /**
@@ -80,12 +80,30 @@ const BAYS: readonly (readonly (readonly Compartment[])[])[] = [
 ];
 
 /**
- * The cabinet's build, in world units: a plinth `base` high under the shelves; uprights `side` thick between the bays
- * and at the ends; shelves `board` thick, each `clear` above the tallest thing on the one below; a back panel `back`
- * thick; a `gap` between things side by side and one behind another; and a top `board` thick, `top` above the highest
- * shelf's things.
+ * The cabinet's build, in world units: uprights `side` thick between the bays and at the ends; shelves `board` thick,
+ * each `clear` above the tallest thing on the one below; a back panel `back` thick; a `gap` between things side by side
+ * and one behind another; and a top `board` thick, `top` above the highest shelf's things. Under the shelves is a
+ * solid plinth, as high as SHELF_REACH puts the lowest of them (see CabinetLayout.base).
  */
-export const CABINET_BUILD = { base: 120, side: 8, board: 4, clear: 10, back: 4, gap: 2, top: 16 };
+export const CABINET_BUILD = { side: 8, board: 4, clear: 10, back: 4, gap: 2, top: 16 };
+
+/**
+ * How far out from the cabinet's front someone is taken to stand to take things from it: a stride (a cell) out, past
+ * their own girth (PLAYER_R), not pressed up against it.
+ */
+export const STAND_OFF = PLAYER_R + CELL;
+
+/**
+ * How low and how high what's on the cabinet's shelves can be, at the front, and still be picked up from STAND_OFF out:
+ * within REACH of the eyes, EYE up, so from about 173 to about 1067. Nothing in the cabinet stands lower or reaches
+ * higher. The user couldn't reach all the way down to its old bottom shelves, on a plinth 120 high, whose things'
+ * feet, and all of a low thing like the heater, were out of reach from there; so the shelves now start well above this
+ * (see layout).
+ */
+export const SHELF_REACH = (() => {
+  const r = Math.sqrt(REACH ** 2 - (STAND_OFF + CABINET_BUILD.gap) ** 2);
+  return { lo: EYE - r, hi: EYE + r };
+})();
 
 /** A kind's size, as its box is drawn (w across, h tall, d deep), and where that box's middle is from its pose. */
 function sizeOf(k: Stocked): { w: number; h: number; d: number; c: Vec3 } {
@@ -119,6 +137,8 @@ export interface CabinetLayout {
   x1: number;
   z0: number;
   z1: number;
+  /** The top of its plinth, where its lowest shelves are. */
+  base: number;
   y1: number;
   bays: { x0: number; x1: number }[];
   shelves: Shelf[];
@@ -128,10 +148,18 @@ export interface CabinetLayout {
   need: { w: number; h: number; d: number };
 }
 
-/** Lay the cabinet out (see CabinetLayout), filling CABINET_AREA across, with whatever room is left shared among its bays. */
+/**
+ * Lay the cabinet out (see CabinetLayout), filling CABINET_AREA across, with whatever room is left shared among its
+ * bays. Its tallest bay's things are in the middle of SHELF_REACH, as much room in reach under them as over them, and
+ * every bay's shelves start as high: as far off the floor as they can be, with the tallest bay still in reach.
+ */
 function layout(): CabinetLayout {
   const B = CABINET_BUILD;
   const { x0, x1, z0, z1 } = CABINET_AREA;
+  const shelfH = (shelf: readonly Compartment[]) => Math.max(...shelf.map((cp) => compartmentSize(cp).h));
+  const tallest = Math.max(...BAYS.map((bay) => bay.reduce((h, sh) => h + shelfH(sh), 0) + (bay.length - 1) * (B.clear + B.board)));
+  const { lo, hi } = SHELF_REACH;
+  const base = Math.round(lo + Math.max(0, (hi - lo - tallest) / 2));
   const widths = BAYS.map((bay) => Math.max(...bay.map((sh) => sh.reduce((w, cp) => w + compartmentSize(cp).w, 0))));
   const needW = widths.reduce((a, b) => a + b, 0) + (BAYS.length + 1) * B.side;
   const spare = (x1 - x0 - needW) / BAYS.length;
@@ -145,7 +173,7 @@ function layout(): CabinetLayout {
   BAYS.forEach((bay, i) => {
     const bw = widths[i] + spare;
     bays.push({ x0: bx, x1: bx + bw });
-    let y = B.base;
+    let y = base;
     for (const shelf of bay) {
       shelves.push({ x0: bx, x1: bx + bw, y });
       // its compartments spread evenly across the bay
@@ -178,7 +206,7 @@ function layout(): CabinetLayout {
     needH = Math.max(needH, y);
     bx += bw + B.side;
   });
-  return { x0, x1, z0, z1, y1: needH + B.top, bays, shelves, slots, need: { w: needW, h: needH, d: needD + B.back + B.gap } };
+  return { x0, x1, z0, z1, base, y1: needH + B.top, bays, shelves, slots, need: { w: needW, h: needH, d: needD + B.back + B.gap } };
 }
 
 export const CABINET: CabinetLayout = layout();

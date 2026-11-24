@@ -4409,17 +4409,17 @@ class CabinetView {
     const kick = new THREE.MeshStandardMaterial({ color: 0x1e2322, roughness: 0.8, metalness: 0.1 });
     // a plinth set in a little at the foot, under a panel to the first shelf
     box(kick, C.x0, C.x1, 0, 48, C.z0, C.z1 - 10);
-    box(cabinetMat, C.x0, C.x1, 48, B.base, C.z0, C.z1);
-    box(cabinetBackMat, C.x0, C.x1, B.base, C.y1, C.z0, C.z0 + B.back);
+    box(cabinetMat, C.x0, C.x1, 48, C.base, C.z0, C.z1);
+    box(cabinetBackMat, C.x0, C.x1, C.base, C.y1, C.z0, C.z0 + B.back);
     box(cabinetMat, C.x0, C.x1, C.y1 - B.top / 2, C.y1, C.z0, C.z1);
     // the uprights: one at each end and one between each two bays
     const ends = [C.x0, ...C.bays.map((b) => b.x1)];
-    for (const x of ends) box(cabinetMat, x, x + B.side, B.base, C.y1 - B.top / 2, C.z0, C.z1);
+    for (const x of ends) box(cabinetMat, x, x + B.side, C.base, C.y1 - B.top / 2, C.z0, C.z1);
     // the shelves, each under what stands on it (the first is the plinth's top)
-    for (const sh of C.shelves) if (sh.y > B.base) box(cabinetMat, sh.x0, sh.x1, sh.y - B.board, sh.y, C.z0 + B.back, C.z1 - 2);
+    for (const sh of C.shelves) if (sh.y > C.base) box(cabinetMat, sh.x0, sh.x1, sh.y - B.board, sh.y, C.z0 + B.back, C.z1 - 2);
     // its open front, never drawn, to aim what's held at to put it in (see View.pick)
-    const front = new THREE.Mesh(new THREE.PlaneGeometry(C.x1 - C.x0, C.y1 - B.base), new THREE.MeshBasicMaterial());
-    front.position.set((C.x0 + C.x1) / 2, (B.base + C.y1) / 2, C.z1);
+    const front = new THREE.Mesh(new THREE.PlaneGeometry(C.x1 - C.x0, C.y1 - C.base), new THREE.MeshBasicMaterial());
+    front.position.set((C.x0 + C.x1) / 2, (C.base + C.y1) / 2, C.z1);
     front.visible = false;
     g.add(front);
     pickables.set(front, { kind: 'cabinet', front: true });
