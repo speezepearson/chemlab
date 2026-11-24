@@ -2199,7 +2199,7 @@ describe('stopcocks', () => {
     const tip = spoutTip(pip, 0);
     expect(spoutAt(pip, 0)).toEqual(tip);
     const n = l.in.stock.stopcock.filter(Boolean).length;
-    expect(WHEELS[1]).toContain('stopcock');
+    expect(WHEELS[0]).toContain('stopcock');
     expect(l.e.spawn('stopcock')).toBe(true);
     expect(l.in.stock.stopcock.filter(Boolean)).toHaveLength(n - 1);
     // away from any spout it goes nowhere, and says so
