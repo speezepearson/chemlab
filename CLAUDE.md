@@ -118,7 +118,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     wheel's key (1 or 2) is held, and which sector that picks. The engine holds the open one's state (`wheel`,
     `openWheel`, `closeWheel`) and `Wheel` in `Hud.tsx` draws it.
   - `outline.ts` is the player's settings for the two outlines round what the crosshair is on: the part it's on
-    (`partOf` in `view.ts`: a valve, a stopcock, a tank, a hose; a spout is the tool's), and faintly the whole thing that's part of
+    (`partOf` in `view.ts`: a valve, a stopcock, a tank; a spout is the tool's, and a hose is never outlined), and faintly the whole thing that's part of
     (`thingOf`). The view's `Outliner` draws each over the finished frame, from a mask of the meshes whose picks have
     that key.
   - `hoseAim.ts` is the player's setting for how far off the crosshair a spout's outlet or a nozzle may be for C to take hold of its
@@ -224,8 +224,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     The multiplexer and the separator are three cells across for two inlets or outlets, symmetrical,
     the one in the middle a cell from each of the others: the user prefers that to a narrower tool that isn't.
 - **Hoses** aren't a tool: every spout and faucet has one, which C pulls out, or takes hold of if it's out, by the
-  spout or nozzle nearest the crosshair (`hoseAim`; never the left button on a spout, which picks a tool up by its
-  spout as anywhere else; `Hose.on` says which). A
+  spout or nozzle nearest the crosshair (`hoseAim`). The left button never takes one: on a spout it picks the tool
+  up, as anywhere else, and a hose's tube and nozzle aren't hit at all (only a stopcock on its end is). `Hose.on`
+  says which spout or faucet it's on. A
   spout's fluid leaves at its hose's nozzle if it's out, so wherever fluid leaves a spout or faucet, use the engine's
   `outletAt` and `faucetOutlet`, not `spoutAt` or `fa.spout`.
 - **Stopcocks** aren't a tool either, nor have a pose: tools have no flow valves of their own, and what throttles a
@@ -243,8 +244,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   raycast, so empty space around it isn't. Register a mesh yourself only to make it a specific part (a tank, valve,
   spout or button: a spout's is its tip and the pipe that runs to it alone, which a stopcock in hand is aimed at, though
   for the left button and the outline it's the tool's); a stopcock's foot is the stopcock's. Sprites (labels) aren't hit. There are
-  two exceptions. Clamp stands (`StandView`) aren't hit at all: the crosshair goes through them to what's behind, and
-  what they hold is picked up by itself (only a sniff's `clearance` counts them). And each `FluidMesh`'s bent copy of
+  three exceptions. Clamp stands (`StandView`) aren't hit at all: the crosshair goes through them to what's behind, and
+  what they hold is picked up by itself (only a sniff's `clearance` counts them). Nor are a hose's tube and nozzle
+  (`HoseView`), so a flask under a nozzle is picked up through it; C finds a hose by nearness instead, and a sniff's
+  `clearance` counts the nozzle; a stopcock on its end is hit as any stopcock is. And each `FluidMesh`'s bent copy of
   what's behind a clear fluid (`bentMat` in `view.ts`), on a layer of its own (`REFRACT_LAYER`) drawn only in the
   frame's main render. It's the only thing using three.js's `transmission`, whose extra pass runs whenever anything
   transmissive is in view, so don't give other materials `transmission` lightly.
@@ -253,8 +256,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   does it itself. A per-instance one must be disposed with its view, which lets it go.
 - **An outline always takes in what the crosshair is on.** This is the user's rule: the mesh hit is always one of the
   meshes outlined at full strength (`partOf` in `view.ts`). So a mesh's registered part must be what's outlined for
-  it, and what the buttons act on, never a neighbour chosen by nearness to where it's hit. Clamp stands are never
-  outlined, which is why they aren't hit.
+  it, and what the buttons act on, never a neighbour chosen by nearness to where it's hit. Clamp stands and hoses are
+  never outlined, which is why they aren't hit.
 - **What's drawn is what casts a shadow.** The shadow lamp's light (`Exposer` in `view.ts`) goes by the meshes in the
   scene in its channel, between its pane and its screen: opaque ones stop it, see-through ones (`transparent` materials) don't, and
   fluid dims it by its rings. So whatever draws fluid, in any material, must mark that material with `shade()` each

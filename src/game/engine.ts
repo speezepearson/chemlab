@@ -2470,11 +2470,6 @@ export class GameEngine {
       this.takeCock(cock);
       return;
     }
-    // with empty hands, a hose's nozzle looked at is taken hold of (C pulls one out: see hoseAim)
-    if (!this.held && p?.kind === 'hose') {
-      this.holdHose(p.h);
-      return;
-    }
     if (p?.kind === 'alarm') {
       this.change(() => this.setAlarmsOff(!this.alarmsOff));
       return;
@@ -2815,7 +2810,7 @@ export class GameEngine {
   /**
    * Where a held stopcock would go on, if it were let go of now: a place on an outlet with none in it (see takesCock
    * and CockSpot: a spout's tip and its hose's end are each a place), the one the crosshair is on (a spout's tip, or a
-   * hose's nozzle), or else the one nearest the line it's on, within
+   * faucet's), or else the one nearest the line it's on (as a hose's end always is, the crosshair passing through it), within
    * COCK_SNAP of it and REACH of the eyes; and why it can't, if it would be in something there (see cockRoom). Null if there's nowhere near.
    */
   private cockAim(): { spot: CockSpot; pose: Pose; why: string | null } | null {
@@ -2825,8 +2820,7 @@ export class GameEngine {
     const p = this.target;
     let spot: CockSpot | null = null;
     if (p?.kind === 'tool' && p.part === 'spout' && p.t.swap === null && free(tip({ tool: p.t, spout: p.k }))) spot = tip({ tool: p.t, spout: p.k });
-    // a hose's nozzle, for one on its end; or a faucet's spout
-    if (p?.kind === 'hose' && !p.cock && free(end(p.h.on))) spot = end(p.h.on);
+    // or a faucet's spout (a hose's end, which the crosshair passes through, is found by nearness, below)
     if (p?.kind === 'faucet' && p.spout && free(tip({ faucet: p.i }))) spot = tip({ faucet: p.i });
     if (!spot) {
       // the one nearest the line the crosshair is on, within reach
@@ -3990,7 +3984,6 @@ export class GameEngine {
     const pull = this.hoseAim();
     if (pull) add(['C'], !pull.hose ? 'pull out its hose' : pull.nozzle ? 'take hold of it' : 'take hold of its hose');
     if (!h && this.cockAimed()) add(['LMB'], 'take the stopcock off');
-    else if (!h && p?.kind === 'hose') add(['LMB'], 'take hold of it');
     else if (!h && p && this.grabbable(p) && !this.onButton()) {
       add(['LMB'], 'pick it up');
       if (this.hooked(p)) add(['Shift', 'LMB'], 'pick it up still hooked up');
@@ -4016,7 +4009,7 @@ export class GameEngine {
 
   /**
    * Whether the left button would do something (see leftDown): press the key or button the crosshair is on, or else set
-   * down what's held, if it can be, or with empty hands, take off a stopcock or pick up what's looked at (a hose's nozzle among them).
+   * down what's held, if it can be, or with empty hands, take off a stopcock or pick up what's looked at.
    */
   private leftWouldDo(): boolean {
     if (this.onButton()) return this.pressable();

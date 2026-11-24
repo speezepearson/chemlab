@@ -1689,8 +1689,8 @@ describe('ghost moves', () => {
     // a hose's nozzle, taken hold of
     const h = new Hose({ faucet: 0 }, { x: SPOT.x, y: LIFT + 150, z: SPOT.z }, NOZZLE_REACH.min);
     (g(l).hoses as unknown as Hose[]).push(h);
-    l.in.target = { kind: 'hose', h };
-    g(l).grabOrRelease(false);
+    lookAt(l, h.outlet);
+    l.e.touchHose();
     expect(g(l).held!.kind).toBe('hose');
     expect(g(l).held!.ghost).toBeUndefined();
   });
@@ -2080,7 +2080,8 @@ describe('faucets’ valves', () => {
     const nozzle = new Hose({ faucet: 0 }, { x: fa.spout.x, y: fa.spout.y - 40, z: fa.spout.z }, NOZZLE_REACH.min);
     taps(l).hoses.push(nozzle);
     expect(l.e.spawn('stopcock')).toBe(true);
-    l.in.target = { kind: 'hose', h: nozzle, point: nozzle.outlet };
+    l.in.target = null;
+    lookAt(l, nozzle.outlet);
     l.in.leftDown(false);
     const fe = fa as unknown as { end: Cock | null };
     expect(fe.end).toEqual({ valve: 0 });
@@ -2602,7 +2603,8 @@ describe('stopcocks', () => {
     const nozzle = new Hose({ tool: pip, spout: 0 }, { x: tip.x + 2 * CELL, y: tip.y, z: tip.z }, NOZZLE_REACH.min);
     cocks(l).hoses.push(nozzle);
     expect(l.e.spawn('stopcock')).toBe(true);
-    l.in.target = { kind: 'hose', h: nozzle, point: nozzle.outlet };
+    l.in.target = null;
+    lookAt(l, nozzle.outlet);
     l.in.leftDown(false);
     expect(cocks(l).held).toBeNull();
     expect([pip.cocks[0], pip.ends[0]]).toEqual([null, { valve: 0 }]);
@@ -2622,8 +2624,9 @@ describe('stopcocks', () => {
     l.in.putBack();
     expect(pip.ends[0]).toEqual({ valve: 0 });
     // the hose rolled up, the stopcock goes up to the spout's tip, which has none
-    l.in.target = { kind: 'hose', h: nozzle, point: nozzle.outlet };
-    l.in.leftDown(false);
+    l.in.target = null;
+    lookAt(l, nozzle.outlet);
+    l.e.touchHose();
     expect(cocks(l).held?.kind).toBe('hose');
     l.in.putAway();
     expect(cocks(l).hoses).toHaveLength(0);
@@ -2643,7 +2646,8 @@ describe('stopcocks', () => {
     expect(l.e.spawn('stopcock')).toBe(true);
     atSpout(l, pip);
     expect('why' in l.in.placement(l.in.held)).toBe(true);
-    l.in.target = { kind: 'hose', h: nozzle, point: nozzle.outlet };
+    l.in.target = null;
+    lookAt(l, nozzle.outlet);
     l.in.leftDown(false);
     expect(cocks(l).held).toBeNull();
     expect([pip.cocks[0], pip.ends[0]]).toEqual([{ valve: 0.5 }, { valve: 0 }]);
@@ -2708,8 +2712,9 @@ describe('stopcocks', () => {
     pip.ends[0] = { valve: 0.7 };
     // (with a place for it in its compartment)
     l.in.stock.stopcock.fill(false, 8);
-    l.in.target = { kind: 'hose', h: nozzle, point: nozzle.outlet };
-    l.in.leftDown(false);
+    l.in.target = null;
+    lookAt(l, nozzle.outlet);
+    l.e.touchHose();
     expect(cocks(l).held?.kind).toBe('hose');
     l.in.putAway();
     expect(cocks(l).hoses).toHaveLength(0);
@@ -2766,14 +2771,16 @@ describe('stopcocks', () => {
     const nozzle = new Hose({ tool: pip, spout: 0 }, { x: top.x, y: top.y + 1, z: top.z }, NOZZLE_REACH.min);
     cocks(l).hoses.push(nozzle);
     expect(l.e.spawn('stopcock')).toBe(true);
-    l.in.target = { kind: 'hose', h: nozzle, point: nozzle.outlet };
+    l.in.target = null;
+    lookAt(l, nozzle.outlet);
     expect(l.in.placement(l.in.held)).toEqual({ why: 'No room for a stopcock there' });
     l.in.putAway();
     // a nozzle with one on its end, taken up and docked, leaves it at the spout's tip
     nozzle.outlet = { x: top.x + CELL, y: top.y + 60, z: top.z };
     pip.ends[0] = { valve: 0.5 };
-    l.in.target = { kind: 'hose', h: nozzle, point: nozzle.outlet };
-    l.in.leftDown(false);
+    l.in.target = null;
+    lookAt(l, nozzle.outlet);
+    l.e.touchHose();
     expect(cocks(l).held?.kind).toBe('hose');
     const I = l.in as unknown as { snapped(h: unknown, p: unknown): { y: number }; setDown(h: unknown, r: unknown): void };
     const over = { x: top.x, y: top.y + 40, z: top.z, yaw: 0 };

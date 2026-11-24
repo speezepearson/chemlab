@@ -2977,14 +2977,16 @@ const nozzleGeom = new THREE.CylinderGeometry(4, 3, NOZZLE_H, 12).translate(0, N
 
 /**
  * A hose pulled out of a spout or a faucet: a translucent tube drooping from the spout down to its nozzle, showing
- * what's running through it.
+ * what's running through it. Neither is hit, like a clamp stand, so the crosshair goes through them to what's behind,
+ * and neither is outlined (C takes a hose by its spout or nozzle, by nearness, see GameEngine.hoseAim); only a
+ * stopcock on its end is. Its nozzle is in the way of a sniff, though (see View.clearance).
  */
 class HoseView {
   private outlet = new THREE.Group();
   /** The stopcock drawn under its nozzle, if one's on its end, and the one it was drawn for. */
   private cock: { v: CockView; c: Cock } | null = null;
-  /** Not hit (only its nozzle is), but outlined with it (see View.renderOutline). */
   readonly tube: THREE.Mesh;
+  readonly nozzle: THREE.Mesh;
   private core: THREE.Mesh;
   private coreMat = new THREE.MeshBasicMaterial();
   private key = '';
@@ -2994,10 +2996,9 @@ class HoseView {
     scene: THREE.Object3D,
     private pickables: Map<THREE.Object3D, Pick>,
   ) {
-    const nozzle = new THREE.Mesh(nozzleGeom, pipeMat);
+    const nozzle = (this.nozzle = new THREE.Mesh(nozzleGeom, pipeMat));
     nozzle.castShadow = true;
     this.outlet.add(nozzle);
-    pickables.set(nozzle, { kind: 'hose', h });
     this.tube = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({ color: 0x7c8883, transparent: true, opacity: 0.45, roughness: 0.3, depthWrite: false }));
     this.core = new THREE.Mesh(new THREE.BufferGeometry(), this.coreMat);
     scene.add(this.outlet, this.tube, this.core);
@@ -4252,10 +4253,9 @@ function partOf(p: Pick): unknown {
     case 'scale': return p.sc;
     case 'hose': {
       const m = p.h.on;
-      // (a stopcock on its end is a part of its own, as one at the spout's tip is; the rest, its tube and nozzle, the
-      // left button takes hold of by its nozzle)
+      // (only a stopcock on its end is hit, a part of its own, as one at the spout's tip is)
       if (p.cock) return 'tool' in m ? `tool ${m.tool.id} end ${m.spout}` : `faucet ${m.faucet} end`;
-      return p.h;
+      return null;
     }
     // (its spout is just the faucet: the left button does nothing on either)
     case 'faucet': return p.valve ? `faucet ${p.i} valve` : p.cock ? `faucet ${p.i} cock` : `faucet ${p.i}`;
@@ -5871,8 +5871,7 @@ export class View {
     const focus = partOf(hot);
     if (focus === null) return;
     const whole = wholeOf(hot);
-    // (a hose's tube isn't hit, so it isn't among the pickables, but it's drawn as part of its hose)
-    const members: [THREE.Object3D, Pick][] = [...this.pickables, ...[...this.hoses.values()].map((v): [THREE.Object3D, Pick] => [v.tube, { kind: 'hose', h: v.h }])];
+    const members = this.pickables;
     const part: THREE.Object3D[] = [];
     const all: THREE.Object3D[] = [];
     for (const [o, p] of members) {
@@ -6046,13 +6045,14 @@ export class View {
 
   /**
    * How far from `from`, along the unit vector `dir`, the first thing drawn that the crosshair could be on is (see
-   * pick), or a clamp stand; Infinity if there's nothing within `reach`.
+   * pick), or a clamp stand or a hose's nozzle; Infinity if there's nothing within `reach`.
    */
   clearance(from: Vec3, dir: Vec3, reach: number): number {
     this.raycaster.set(new THREE.Vector3(from.x, from.y, from.z), new THREE.Vector3(dir.x, dir.y, dir.z));
     this.raycaster.far = reach;
     const stands = this.stands.filter((v) => v.group.visible).flatMap((v) => v.parts);
-    const hit = this.raycaster.intersectObjects([...this.pickables.keys(), ...stands], false)[0];
+    const nozzles = [...this.hoses.values()].map((v) => v.nozzle);
+    const hit = this.raycaster.intersectObjects([...this.pickables.keys(), ...stands, ...nozzles], false)[0];
     return hit ? hit.distance : Infinity;
   }
 
