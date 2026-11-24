@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FLASK_R, MAGNET, NOZZLE_REACH, SCALE_SLOTS, magnetShift, STAND_BASE, aimAngle, angleOf, settleAngle, swept, turnValve, valveAt, valveAngle, leverKind, VALVE_DEADZONE, DIAL_STOP, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
+  FLASK_R, MAGNET, NOZZLE_REACH, SCALE_SLOTS, magnetShift, STAND_BASE, aimAngle, angleOf, settleAngle, swept, turnValve, valveAt, valveAngle, leverKind, VALVE_DEADZONE, VALVE_SHUT, DIAL_STOP, bathAt, footAt, dipPoses, DIP_FLOOR, DIP_HOVER, STRIP_FLOOR, STRIP_STOOD, flaskBox, flaskFluid, flaskLip, flaskMouth, tankFluid,
   docked, nozzleBox, nozzleMounts, nozzleStand, onScale, scaleBox, scaleSpot, snapReach, spoutAt, standBase, tankMouth, toolBounds, toolBox, toolStands,
   plumbZ,
 } from './bodies';
@@ -285,8 +285,24 @@ describe('valves', () => {
   const aim = (a: number, r = 20) => aimAngle(r * Math.sin(a), -r * Math.cos(a));
 
   it("open a plain valve with its bar along the pipe and shut it with the bar square to it, twice a turn", () => {
-    for (const [a, v] of [[0, 1], [Q / 2, 0.5], [Q, 0], [1.5 * Q, 0.5], [2 * Q, 1], [3 * Q, 0], [4 * Q, 1], [-Q, 0], [-Q / 2, 0.5], [Q / 3, 2 / 3]])
+    // (from fully open, it's `run` round to where it shuts, a little short of square: see VALVE_SHUT)
+    const run = Q - VALVE_SHUT;
+    for (const [a, v] of [[0, 1], [run / 2, 0.5], [Q, 0], [2 * Q - run / 2, 0.5], [2 * Q, 1], [3 * Q, 0], [4 * Q, 1], [-Q, 0], [-run / 2, 0.5], [run / 3, 2 / 3]])
       expect(valveAt('valve', a), `${a}`).toBeCloseTo(v, 12);
+  });
+
+  it('shut a plain valve all the way while its bar is within a little of square to the pipe, and open it evenly from there', () => {
+    expect(VALVE_SHUT).toBeGreaterThan(0);
+    expect(VALVE_SHUT).toBeLessThan(Q / 2);
+    for (const side of [-1, 1]) {
+      for (const f of [0, 0.5, 1]) expect(valveAt('valve', Q + side * f * VALVE_SHUT), `${side} ${f}`).toBeCloseTo(0, 12);
+      // just past that it's only just open, not open by a jump
+      const just = valveAt('valve', Q + side * (VALVE_SHUT + 1e-3));
+      expect(just).toBeGreaterThan(0);
+      expect(just).toBeLessThan(0.01);
+    }
+    // so a bar halfway between along and square is less than half open
+    expect(valveAt('valve', Q / 2)).toBeCloseTo((Q / 2 - VALVE_SHUT) / (Q - VALVE_SHUT), 12);
   });
 
   it("send a splitter's all left pointing left, half each way up or down, and all right pointing right", () => {
@@ -311,7 +327,9 @@ describe('valves', () => {
   it('keep the angle they were turned to while it still says how they are set, and work it out afresh once it does not', () => {
     expect(settleAngle('valve', 3 * Q, 0)).toBe(3 * Q);
     expect(settleAngle('valve', 3 * Q, 1)).toBe(0);
-    expect(settleAngle('valve', undefined, 0.5)).toBeCloseTo(Q / 2, 12);
+    expect(settleAngle('valve', undefined, 0.5)).toBeCloseTo((Q - VALVE_SHUT) / 2, 12);
+    // (anywhere it's shut, it stays as it was turned)
+    expect(settleAngle('valve', Q - VALVE_SHUT / 2, 0)).toBe(Q - VALVE_SHUT / 2);
     // (the heater's tap's valve is a plain one)
     const t = new Tool('heater', 0, undefined, [1]);
     turnValve(t, 0, 2 * Q);
@@ -328,7 +346,8 @@ describe('valves', () => {
     expect(t.valves[0]).toBeCloseTo(0, 12);
     turnValve(t, 0, Q);
     expect(t.valves[0]).toBeCloseTo(1, 12);
-    turnValve(t, 0, -Q / 2);
+    // (halfway back to where it shuts, a little short of square: see VALVE_SHUT)
+    turnValve(t, 0, -(Q - VALVE_SHUT) / 2);
     expect(t.valves[0]).toBeCloseTo(0.5, 12);
   });
 

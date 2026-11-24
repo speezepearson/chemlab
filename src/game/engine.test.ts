@@ -3,7 +3,7 @@ import { BOND_KEYS } from '../chem/atoms';
 import { ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
-import { FLASK_R, MAGNET, NEAR, NEAR_STEP, NOZZLE_REACH, SCALE_SLOTS, flaskLip, flaskMouth, onScale, plumbZ, spoutAt, spoutTip, valveLocal, STOPCOCK, VALVE_WHEEL, tankMouth, scaleBox, standBase, toolBounds, toolBox, toolStands, type Stand } from './bodies';
+import { FLASK_R, MAGNET, NEAR, NEAR_STEP, NOZZLE_REACH, SCALE_SLOTS, flaskLip, flaskMouth, onScale, plumbZ, spoutAt, spoutTip, valveAt, valveLocal, STOPCOCK, VALVE_WHEEL, tankMouth, scaleBox, standBase, toolBounds, toolBox, toolStands, type Stand } from './bodies';
 import { boxesOverlap } from './physics';
 import { STOCK } from './cabinet';
 import { WHEELS } from './wheel';
@@ -2068,10 +2068,14 @@ describe('faucets’ valves', () => {
     expect(fa.valve).toBe(0);
     taps(l).look(0, -1, false);
     expect(fa.valve).toBe(0);
-    // swept an eighth of a turn clockwise round it (as seen facing the wall, right is +z), from shut to half open...
+    // swept an eighth of a turn clockwise round it (as seen facing the wall, right is +z), from shut to as open as
+    // that is (less than half: it stays shut a little way either side of square, see VALVE_SHUT)...
+    const eighth = valveAt('valve', Math.PI / 4);
+    expect(eighth).toBeGreaterThan(0);
+    expect(eighth).toBeLessThan(0.5);
     at = { x: knob.x, y: knob.y + 20, z: knob.z + 20 };
     taps(l).look(1, 0, false);
-    expect(fa.valve).toBeCloseTo(0.5, 9);
+    expect(fa.valve).toBeCloseTo(eighth, 9);
     // ...and on to straight right, a quarter turn from where it was taken, fully open
     at = { x: knob.x, y: knob.y, z: knob.z + 20 };
     taps(l).look(1, 0, false);
@@ -2147,13 +2151,15 @@ describe('faucets’ valves', () => {
     expect(c.valve).toBeCloseTo(1, 9);
     at = face(-14, -14);
     taps(l).look(1, 0, false);
-    expect(c.valve).toBeCloseTo(0.5, 9);
+    // (an eighth of a turn on, it's as open as that is: see VALVE_SHUT)
+    const eighth = valveAt('valve', Math.PI / 4);
+    expect(c.valve).toBeCloseTo(eighth, 9);
     l.e.hand(false);
     expect(t.cocks[0]).toBe(c);
     l.e.undo();
     expect(t.cocks[0]!.valve).toBe(0);
     l.e.undo(true);
-    expect(t.cocks[0]!.valve).toBeCloseTo(0.5, 9);
+    expect(t.cocks[0]!.valve).toBeCloseTo(eighth, 9);
   });
 });
 
