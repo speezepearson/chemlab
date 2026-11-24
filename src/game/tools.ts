@@ -615,7 +615,7 @@ export const BULB_Y = (THERMOMETER_ROD.bulb.y0 + THERMOMETER_ROD.bulb.y1) / 2;
 
 /**
  * The tools that are dipped (see Tool.bath): a wicking strip and the thermometers. They have no tanks; held with the
- * crosshair on an open top, one hovers upright over it, the right button lowers it in, and the left stands it in it.
+ * crosshair on an open top, one hovers upright over it, E lowers it in, and the left button stands it in it.
  */
 export const DIPPERS: readonly ToolKind[] = ['strip', 'thermometer', 'thermometerWide'];
 export const isDipper = (kind: ToolKind): boolean => DIPPERS.includes(kind);

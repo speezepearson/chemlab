@@ -99,8 +99,8 @@ function TouchButton({
 
 /**
  * On a touch screen, while playing: the stick that walks, bottom left, and the one that looks, bottom right; and
- * buttons standing in for the keys and the right button. Over the look stick, Grab (E) and the right button, which
- * is named for what it'll do and, while a valve turns, moves the aim round it as the finger drags, turning it by how far that sweeps round; and Note (Enter) when there's something to write a note about, and Nap (N) when a nap can be had. Over the move stick, while something's held, a pad to drag (across to turn it,
+ * buttons standing in for the keys and the mouse's buttons. Over the look stick, Grab (the left button) and E, which
+ * is named for what it'll do and, with empty hands, is the right button, which turns a valve: while one turns, it moves the aim round it as the finger drags, turning it by how far that sweeps round; and Note (Enter) when there's something to write a note about, and Nap (N) when a nap can be had. Over the move stick, while something's held, a pad to drag (across to turn it,
  * up and down to hold it further or nearer, or for a hose's nozzle, to slide its stand out or in) and Put away
  * (Backspace).
  */
@@ -115,7 +115,7 @@ export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudSta
         {hud.nap && <TouchButton label="Nap" className="small" down={() => engine.touchNap()} />}
         <TouchButton
           label={hud.hand}
-          lit={hud.right}
+          lit={hud.use || hud.right}
           down={() => engine.hand(true)}
           up={() => engine.hand(false)}
           drag={(dx, dy) => engine.handDrag(dx, dy)}
@@ -252,7 +252,7 @@ function Smell({ smell }: { smell: NonNullable<HudState['smell']> }) {
 }
 
 /**
- * The crosshair, with hints by it for what the mouse buttons would do, or an equipment wheel while it's held open; the aim while a valve turns; under
+ * The crosshair, with hints by it for what the mouse buttons (or, on its right, E) would do, or an equipment wheel while it's held open; the aim while a valve turns; under
  * the crosshair, what the last sniff smelled of, coming up a piece at a time and then fading out; and, on a
  * screen with a mouse and keys, everything else that can be done just now, in a corner, unless `/` has hidden it.
  */
@@ -274,10 +274,16 @@ export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; 
                 <MouseHint side="left" />
               </span>
             )}
-            {hud.right && (
+            {hud.use ? (
               <span className="right">
-                <MouseHint side="right" />
+                <kbd>E</kbd>
               </span>
+            ) : (
+              hud.right && (
+                <span className="right">
+                  <MouseHint side="right" />
+                </span>
+              )
             )}
           </div>
         </>

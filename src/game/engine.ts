@@ -68,23 +68,25 @@ export interface Hud {
   grab: boolean;
   /** Whether something is being held. */
   holding: boolean;
-  /** Whether E would set down what's held: whether there's somewhere for it to rest (see placement). */
+  /** Whether the left button would set down what's held: whether there's somewhere for it to rest (see placement). */
   drop: boolean;
   /**
    * Whether the left button would do something: press the key or button the crosshair is on, do something with a hose,
    * or set down what's held or pick up what's looked at.
    */
   press: boolean;
-  /**
-   * Whether the right button would do something: turn the valve looked at, let fluid out of what's held, or dip a held
-   * wicking strip or thermometer into what's looked at.
-   */
+  /** Whether the right button would do something: turn the valve looked at. */
   right: boolean;
+  /**
+   * Whether E, held, would use what's in hand: pour a flask, let fluid out of a hose's nozzle, or dip a wicking strip or
+   * a thermometer into what's looked at.
+   */
+  use: boolean;
   /** While a valve is being turned, where the pointer that turns it by sweeping round it is, in CSS pixels. */
   aim: { x: number; y: number } | null;
   /** Whether Enter would write a note about what the crosshair is on (see GameEngine.note). */
   label: boolean;
-  /** What the right button does now, in a word, for the touch screen's button that stands in for it. */
+  /** What E (or, with empty hands, the right button) does now, in a word, for the touch screen's button that stands in for it. */
   hand: 'Pour' | 'Flow' | 'Dip' | 'Turn';
   /** A brief note, like there being no room for something. */
   note: string | null;
@@ -430,8 +432,11 @@ export class GameEngine {
   /** Where the on-screen sticks are pushed (see stick). */
   private sticks = { move: { x: 0, y: 0 }, look: { x: 0, y: 0 } };
   private held: Held | null = null;
-  /** Whether the right button is held: a held flask tips and pours, a held hose lets fluid out, and a held dipper dips, only while it is. */
-  private rightHeld = false;
+  /**
+   * Whether what's in hand is being used, with E held down: a held flask tips and pours, a held hose lets fluid out,
+   * and a held dipper dips, only while it is (see useDown).
+   */
+  private using = false;
   /**
    * A valve being turned with the right button (a tool's or a faucet's), where on screen the pointer turning it is, and
    * the angle round the valve's middle it was last at (see aimAngle), which it turns the valve by sweeping round from;
@@ -455,14 +460,14 @@ export class GameEngine {
   private spillTime = 1;
   /** Drops that have let go of an outlet and are on their way down. */
   private falling: { v: Vessel; x: number; y: number; z: number; vy: number }[] = [];
-  /** Where the held flask is kept, over the mouth the right button was pressed on, while it's held (see pourPose). */
+  /** Where the held flask is kept, over the mouth E was pressed on, while it's held (see pourPose). */
   private pinned: Pose | null = null;
   /** How far a held dipper aimed at an open top is lowered into it, from 0 (hovering) to 1 (dipped; see dipAim). */
   private dip = 0;
   /** Real seconds the held wicking strip has been dipped in a fluid since its foot touched it (see DIP_SOAK). */
   private dipFor = 0;
   /**
-   * Whether the held wicking strip is still on its way in from a press of the right button: a tap, however brief, takes
+   * Whether the held wicking strip is still on its way in from a press of E: a tap, however brief, takes
    * it all the way in before it rises, so its foot always touches what it's dipped in (see dipping).
    */
   private tapping = false;
@@ -1551,9 +1556,9 @@ export class GameEngine {
     this.sticks[which] = { x, y };
   }
 
-  /* On a touch screen, the on-screen buttons stand in for the keys and the right button (see TouchControls). */
+  /* On a touch screen, the on-screen buttons stand in for the keys and the mouse's buttons (see TouchControls). */
 
-  /** E: pick up what the crosshair is on, or let go of what's held. */
+  /** The left button: pick up what the crosshair is on, or let go of what's held. */
   touchGrab(): void {
     if (this.locked) this.grabOrRelease(false);
   }
@@ -1574,12 +1579,18 @@ export class GameEngine {
     if (this.locked) this.putAway();
   }
 
-  /** The right button, pressed or let go: it pours, lets fluid out, dips a strip or a thermometer, or turns the valve looked at. */
+  /**
+   * E, pressed or let go: it pours, lets fluid out, or dips a strip or a thermometer; or with empty hands, as the right
+   * button, it turns the valve looked at.
+   */
   hand(down: boolean): void {
     if (!down) {
-      this.rightHeld = false;
+      this.using = false;
       this.endTurn();
-    } else if (this.locked) this.rightDown();
+    } else if (this.locked) {
+      if (this.held) this.useDown();
+      else this.rightDown();
+    }
   }
 
   /** A finger dragged (dx, dy) pixels on the right button's stand-in: while a valve turns, it moves the aim. */
@@ -1624,7 +1635,7 @@ export class GameEngine {
       this.locked = document.pointerLockElement === c;
       if (!this.locked) {
         this.keys.clear();
-        this.rightHeld = false;
+        this.using = false;
         this.endTurn();
         this.tarePress = null;
         this.wheel = null;
@@ -1650,14 +1661,12 @@ export class GameEngine {
       // the wheel has the mouse while it's open, and her hands do nothing while she sniffs
       if (this.wheel || this.sniffing) return;
       if (e.button === 0) this.leftDown(e.shiftKey);
-      if (e.button === 2) this.rightDown();
+      // (what's in hand is used with E, not the right button)
+      if (e.button === 2 && !this.held) this.rightDown();
     });
     on(window, 'mouseup', (e) => {
       if (e.button === 0) this.tarePress = null;
-      if (e.button === 2) {
-        this.rightHeld = false;
-        this.endTurn();
-      }
+      if (e.button === 2) this.endTurn();
     });
     on(c, 'contextmenu', (e) => e.preventDefault());
     on(window, 'mousemove', (e) => {
@@ -1707,7 +1716,7 @@ export class GameEngine {
         e.preventDefault();
         return;
       }
-      if (e.code === 'KeyE') this.grabOrRelease(e.shiftKey);
+      if (e.code === 'KeyE') this.useDown();
       if (e.code === 'KeyQ') this.putBack();
       if (e.code === 'KeyR') this.turn();
       if (e.code === 'Enter') {
@@ -1730,6 +1739,7 @@ export class GameEngine {
     });
     on(window, 'keyup', (e) => {
       this.keys.delete(e.code);
+      if (e.code === 'KeyE') this.using = false;
       // (letting go of Alt mustn't open the browser's menu either)
       if (this.locked && (e.code === 'AltLeft' || e.code === 'AltRight')) e.preventDefault();
       const wheel = WHEEL_CODES.indexOf(e.code);
@@ -2438,9 +2448,9 @@ export class GameEngine {
     this.sniffing = { v, lean: 0, to: m ? this.rimGaze(m) : hand!.gaze, hand: hand && hand.flask, until: null, leaving: false };
   }
 
-  /** Whether what's held is being poured, let flow or dipped, with the right button: there's no sniffing meanwhile. */
+  /** Whether what's held is being poured, let flow or dipped, with E: there's no sniffing meanwhile. */
   private handBusy(): boolean {
-    return !!this.held && this.rightHeld;
+    return !!this.held && this.using;
   }
 
   /**
@@ -2545,12 +2555,17 @@ export class GameEngine {
     return { x: grip.x + (s.hand.x - grip.x) * a, y: grip.y + (s.hand.y - grip.y) * a, z: grip.z + (s.hand.z - grip.z) * a, yaw: grip.yaw };
   }
 
-  private rightDown(): void {
+  /**
+   * E pressed, with something in hand: use it while E's held (see using). A flask tips to pour (over the flask or tank
+   * looked at, if any), a hose's nozzle lets fluid out, and a strip or a thermometer dips into the open top looked at.
+   */
+  private useDown(): void {
     if (this.dozing()) return;
     if (inPod(this.wake)) return;
-    this.rightHeld = true;
     const h = this.held;
-    if (h?.kind === 'flask') {
+    if (!h) return;
+    this.using = true;
+    if (h.kind === 'flask') {
       // on a flask or tank, the held flask goes over it to pour in
       const m = this.mouthAimed(true);
       this.pinned = m && this.pourPose(h, m);
@@ -2559,9 +2574,13 @@ export class GameEngine {
         this.faceFlask(h.f);
       }
     }
-    // a strip aimed at an open top goes all the way in, however soon the button's let go
-    if (h?.kind === 'tool' && h.t.kind === 'strip' && this.mouthAimed()) this.tapping = true;
-    if (h) return;
+    // a strip aimed at an open top goes all the way in, however soon E's let go
+    if (h.kind === 'tool' && h.t.kind === 'strip' && this.mouthAimed()) this.tapping = true;
+  }
+
+  /** The right button pressed, with empty hands: take hold of the valve looked at, to turn it. */
+  private rightDown(): void {
+    if (this.dozing() || inPod(this.wake) || this.held) return;
     const k = this.valveAimed();
     if (!k) return;
     this.mark();
@@ -2999,13 +3018,15 @@ export class GameEngine {
         return;
       }
     }
-    if (h?.kind !== 'flask' || !this.rightHeld) this.pinned = null;
+    // (what's let go of is no longer being used, so the next thing taken in hand isn't until E's pressed again)
+    if (!h) this.using = false;
+    if (h?.kind !== 'flask' || !this.using) this.pinned = null;
     // a nozzle held with the crosshair on an open top goes straight over it, where it would be set down to pour in;
-    // and a strip or a thermometer hovers over it, and lowers into it while the right button's held, or, a strip, until
+    // and a strip or a thermometer hovers over it, and lowers into it while E's held, or, a strip, until
     // it's all the way in from a tap
     const aim = h?.kind === 'tool' && isDipper(h.t.kind) ? this.dipAim(h) : null;
     if (!aim) this.tapping = false;
-    this.dip = aim ? Math.max(0, Math.min(1, this.dip + ((this.rightHeld || this.tapping ? 1 : -1) * dt) / DIP_S)) : 0;
+    this.dip = aim ? Math.max(0, Math.min(1, this.dip + ((this.using || this.tapping ? 1 : -1) * dt) / DIP_S)) : 0;
     if (!h) return;
     const lower = ease(this.dip);
     const over = h.kind === 'hose' ? this.nozzleOver(h)
@@ -3020,7 +3041,7 @@ export class GameEngine {
     this.placeHeld(h, this.pinned ?? this.heldAt(h));
     if (h.kind === 'flask') {
       this.faceFlask(h.f);
-      const goal = this.rightHeld ? POUR_ANG : 0;
+      const goal = this.using ? POUR_ANG : 0;
       const step = (POUR_ANG * dt) / TIP_S;
       h.f.tilt = h.f.tilt < goal ? Math.min(goal, h.f.tilt + step) : Math.max(goal, h.f.tilt - step);
     }
@@ -3097,16 +3118,16 @@ export class GameEngine {
     const h = this.held;
 
     // the held flask, tipped all the way, pours from its lip into whatever's below
-    const D = h?.kind === 'flask' && this.rightHeld && h.f.tilt >= POUR_ANG * 0.97 ? h.f : null;
+    const D = h?.kind === 'flask' && this.using && h.f.tilt >= POUR_ANG * 0.97 ? h.f : null;
     if (D && simDt > 0) {
       const from = flaskLip(D);
       this.pour = { from, into: mouthBelow(mouths, from) };
     }
 
-    // a hose's nozzle in hand lets nothing out without the right button: the tool or faucet it's pulled out of stops
+    // a hose's nozzle in hand lets nothing out without E: the tool or faucet it's pulled out of stops
     let stillTool: Tool | null = null;
     let stillFaucet: number | null = null;
-    if (!this.rightHeld && h?.kind === 'hose') {
+    if (!this.using && h?.kind === 'hose') {
       if ('tool' in h.h.on) stillTool = h.h.on.tool;
       else stillFaucet = h.h.on.faucet;
     }
@@ -3794,7 +3815,6 @@ export class GameEngine {
     });
   }
 
-  /** Whether the right button would do something now (see Hud.right). */
   /** Everything the player can do just now besides walking and looking (see Hud.actions). */
   private actions(): Action[] {
     const out: Action[] = [];
@@ -3837,9 +3857,9 @@ export class GameEngine {
       // a button looked at takes the click
       if (this.intoCabinet()) add(['LMB'], 'put it in the cabinet');
       else if (!this.onButton()) add(['LMB'], ok ? how : `${how}: not here`, !ok);
-      if (this.rightWouldDo())
+      if (this.useWouldDo())
         add(
-          ['RMB'],
+          ['E'],
           h.kind === 'tool' ? (h.t.kind === 'strip' ? 'tap to dip it, hold to soak it' : 'hold to dip it in')
           : h.kind !== 'flask' ? 'hold to let it flow'
           : this.mouthAimed() ? 'hold to pour into it'
@@ -3970,7 +3990,7 @@ export class GameEngine {
     if (this.held && !(this.held.kind === 'tool' && UNIQUE_TOOLS.includes(this.held.t.kind))) this.putAway();
     this.held = null;
     this.endTurn();
-    this.rightHeld = false;
+    this.using = false;
   }
 
   /** The player walked into the open pod: they ease into place in it, it closes on them, and they fall asleep (see Wake). */
@@ -4101,7 +4121,7 @@ export class GameEngine {
       if (this.napKnown && this.held && !inPod(this.wake)) this.say('Hands full');
       return;
     }
-    this.rightHeld = false;
+    this.using = false;
     this.keys.clear();
     this.wheel = null;
     this.flash = null;
@@ -4225,8 +4245,14 @@ export class GameEngine {
     }
   }
 
+  /** Whether the right button would do something now: turn the valve looked at (see Hud.right). */
   private rightWouldDo(): boolean {
-    if (this.rightHeld) return false;
+    return !this.held && !this.turning && !!this.valveAimed();
+  }
+
+  /** Whether E, held, would use what's in hand now (see useDown and Hud.use). */
+  private useWouldDo(): boolean {
+    if (this.using) return false;
     const h = this.held;
     if (h?.kind === 'flask') return h.f.N > TRACE;
     // a strip or a thermometer dips into the open top looked at
@@ -4236,13 +4262,13 @@ export class GameEngine {
     if (h?.kind === 'tool' || h?.kind === 'scale' || h?.kind === 'cock') return false;
     // a faucet runs if its valve's open
     if (h?.kind === 'hose') return 'tool' in h.h.on ? this.wouldFlow(h.h.on.tool) : this.faucetOpen(this.faucets[h.h.on.faucet]) > 0;
-    return !!this.valveAimed();
+    return false;
   }
 
   /**
    * What each dipper's foot is in (see footAt and dippedIn), from where it is now, held or set down; it doesn't change
    * much in a frame. A thermometer's bulb reads whatever it's in. A wicking strip counts as in a fluid only while it's
-   * set down, or held dipped with the right button (or on its way in from a tap of it, see tapping), so carrying one
+   * set down, or held dipped with E (or on its way in from a tap of it, see tapping), so carrying one
    * past fluid does nothing; it drinks it while it's set down, or once it's been held dipped DIP_SOAK real seconds
    * (`dt`, as the player's own movements go), so a tap only spots it (see Tool.dipIn).
    */
@@ -4254,7 +4280,7 @@ export class GameEngine {
       if (t.kind !== 'strip') continue;
       const held = h?.kind === 'tool' && h.t === t;
       // one in hand is in the fluid once it's all the way down, so its spot is as deep as it's dipped
-      const d = !held || ((this.rightHeld || this.tapping) && this.dip >= 1) ? dippedIn(footAt(t), this.flasks, this.tools) : null;
+      const d = !held || ((this.using || this.tapping) && this.dip >= 1) ? dippedIn(footAt(t), this.flasks, this.tools) : null;
       if (held && d) {
         dipped = true;
         this.dipFor += dt;
@@ -4295,6 +4321,7 @@ export class GameEngine {
       drop: !!this.placed && 'rest' in this.placed,
       press: !this.sniffing && this.leftWouldDo(),
       right: !this.sniffing && this.rightWouldDo(),
+      use: !this.sniffing && this.useWouldDo(),
       aim: this.turning ? { ...this.turning.aim } : null,
       label: !inPod(this.wake) && !!this.targetNote(),
       hand: h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : h?.kind === 'tool' && isDipper(h.t.kind) ? 'Dip' : 'Turn',

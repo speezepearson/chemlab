@@ -318,12 +318,12 @@ describe('test paper', () => {
     holdAt(l, 'flask', { x: SPOT.x, y: LIFT + 160, z: SPOT.z, yaw: 0 });
     const f = hands(l).held!.f!;
     f.setMolecules(G, 0.5 * CAP);
-    // tipped all the way, with the right button held, its lip over the sheet
-    const tipped = l.in as unknown as { rightHeld: boolean };
+    // tipped all the way, with E held, its lip over the sheet
+    const tipped = l.in as unknown as { using: boolean };
     const lip = flaskLip(f, Math.PI * 0.61);
     hands(l).placeHeld(l.in.held, { ...f.pose, x: f.pose.x + SPOT.x - lip.x, y: f.pose.y + 30, z: f.pose.z + SPOT.z - lip.z });
     f.tilt = Math.PI * 0.61;
-    tipped.rightHeld = true;
+    tipped.using = true;
     run(l, 1);
     expect(volume(paperOf(sheet)) / TEST_PAPER.cap).toBeCloseTo(1, 4);
     expect(paperReading(paperOf(sheet))).toEqual([[0, 1, 0, 0]]);
@@ -1224,6 +1224,38 @@ function look(l: { e: GameEngine; in: Inside }, x: number, z: number, tx: number
 }
 
 const lampOf = (l: Inside) => l.tools.filter((t) => t.kind === 'shadowlamp');
+
+describe('E', () => {
+  /** How E is pressed and let go, as the engine's own things (see useDown and using). */
+  type Use = { useDown(): void; using: boolean; held: { f?: Flask } | null };
+  const use = (l: Lab) => l.in as unknown as Use;
+
+  it('uses what’s in hand while it’s held, and neither sets it down nor picks anything up', () => {
+    const l = lab();
+    holdAt(l, 'flask', { x: SPOT.x, y: LIFT + 160, z: SPOT.z, yaw: 0 });
+    const f = use(l).held!.f!;
+    f.setMolecules(singleOf('G'), 0.5 * CAP);
+    use(l).useDown();
+    expect(use(l).using).toBe(true);
+    for (let i = 0; i < 20; i++) l.in.move(0.05);
+    // still in hand, tipping to pour
+    expect(use(l).held?.f).toBe(f);
+    expect(f.tilt).toBeGreaterThan(0);
+    // let go of (the touch screen's stand-in, as the key's keyup does), it rights itself
+    l.e.hand(false);
+    expect(use(l).using).toBe(false);
+    for (let i = 0; i < 20; i++) l.in.move(0.05);
+    expect(f.tilt).toBe(0);
+    // with empty hands, it picks up nothing, and isn't left in use for the next thing taken in hand
+    hands(l).placeHeld(l.in.held, { x: SPOT.x, y: LIFT + 160, z: SPOT.z, yaw: 0 });
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    l.in.target = { kind: 'flask', f };
+    use(l).useDown();
+    expect(l.in.held).toBeNull();
+    expect(use(l).using).toBe(false);
+  });
+});
 
 describe('setting things down', () => {
   /** More of the engine's own things: the faucets, the scales, and where things are made to face. */
