@@ -75,6 +75,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     between them, seen from the bulb: the engine only counts the sim seconds the screen has yet to catch up by
     (`Tool.owed`), which wait while nothing's drawn (the headless bench, sleep).
     The screen's cells each close on that light over a couple of sim seconds (`Tool.fluoresce`, `SCREEN.tau`).
+    And it draws the keys' hints in the lab (`KeyHint`: a canvas picture on a plane, in a scene of its own, `hints`,
+    drawn over the finished frame, so it's never picked, outlined, shadowed or seen by the `Exposer`): the arrow of
+    Q and E over a handwheel or dial (`turnHint`, `Frame.turnHint`), and C's at the outlet of the spout whose hose
+    it'd pull out (`hoseHint`, `Frame.hoseHint`).
   - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room, what fluid a
     dipper's foot (a thermometer's bulb, a wicking strip's tip) is in (`bathAt`), which the engine hands each one every
     frame (`Tool.bath`, or for a strip `Tool.dipIn`, which also says whether it may drink), where a dipper aimed at
@@ -120,7 +124,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `hoseAim.ts` is the player's setting for how far off the crosshair a spout's outlet may be for C to pull out its
     hose: the half-angle of a cone round it, in degrees, as seen at the normal field of view (`HOSE_AIM.deg`), which
     `aimCone` narrows as the view zooms in; the engine's `hoseAim` finds that spout, the fewest degrees off, within
-    REACH.
+    REACH. The Appearance panel's *Hose aim* slider sets it.
   - `finish.ts` is the player's setting for the metal's shine, 0 matte to 1 mirror-smooth, 0.5 as built (`AS_BUILT`), starting at 0.4 (`FINISH`),
     and the roughness it gives a metal. `metal()` in `textures.ts` registers a material for it; the view applies it.
   - `smell.ts` is what a sniff (F) makes of a fluid, pure and DOM-free: the ten odorants and Nadia's similes for them

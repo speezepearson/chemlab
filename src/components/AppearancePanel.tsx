@@ -1,6 +1,7 @@
 import { Fragment, useReducer, useState } from 'react';
 import { LOOK, resetLook, type ColorModel, type Look } from '../game/appearance';
 import { DEFAULT_FINISH, FINISH, setFinish } from '../game/finish';
+import { DEFAULT_HOSE_AIM, HOSE_AIM, HOSE_DEG, setHoseAim } from '../game/hoseAim';
 import { DEFAULT_OUTLINE, MAX_OUTLINE_WIDTH, OUTLINE, setOutline } from '../game/outline';
 import { DragNumber } from './DragNumber';
 
@@ -30,7 +31,8 @@ const GROUPS: Group[] = [
 
 /**
  * Debug panel: live-tune the temperature appearance curves and how composition looks (see game/appearance.ts), and
- * the outline round what the crosshair is on (see game/outline.ts), and how shiny the lab's metal is (see game/finish.ts).
+ * the outline round what the crosshair is on (see game/outline.ts), how shiny the lab's metal is (see game/finish.ts),
+ * and how far off the crosshair a spout may be for C to pull out its hose (see game/hoseAim.ts).
  */
 export function AppearancePanel() {
   const [, rerender] = useReducer((x: number) => x + 1, 0);
@@ -204,6 +206,31 @@ export function AppearancePanel() {
                 </label>
               </td>
             </tr>
+            <tr className="group">
+              <td colSpan={2}>
+                <b>Hose aim</b> <span>how far off the crosshair a spout may be for C to pull out its hose, in degrees</span>
+              </td>
+            </tr>
+            <tr>
+              <td>degrees</td>
+              <td>
+                <label className="slider">
+                  <input
+                    type="range"
+                    aria-label="hose aim"
+                    min={HOSE_DEG.min}
+                    max={HOSE_DEG.max}
+                    step={HOSE_DEG.step}
+                    value={HOSE_AIM.deg}
+                    onChange={(e) => {
+                      setHoseAim({ deg: +e.target.value });
+                      rerender();
+                    }}
+                  />
+                  <output>{HOSE_AIM.deg}</output>
+                </label>
+              </td>
+            </tr>
           </tbody>
         </table>
         <p>
@@ -215,6 +242,7 @@ export function AppearancePanel() {
               resetLook();
               setOutline({ ...DEFAULT_OUTLINE });
               setFinish({ ...DEFAULT_FINISH });
+              setHoseAim({ ...DEFAULT_HOSE_AIM });
               rerender();
             }}
           >

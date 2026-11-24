@@ -2218,6 +2218,12 @@ export class GameEngine {
     return out;
   }
 
+  /** Where C's hint goes (see Frame.hoseHint): the outlet of the spout whose hose it would pull out, if there's one. */
+  private hoseHintAt(): Vec3 | null {
+    const m = this.hoseAim();
+    return m && this.mountAt(m);
+  }
+
   /** C: pull out the hose of the spout or faucet nearest the crosshair, if there is one (see hoseAim). */
   private pullAimed(): void {
     const m = this.hoseAim();
@@ -3843,7 +3849,7 @@ export class GameEngine {
       energies: BOND_KEYS.map((k) => this.chem.params.bonds[k].E), alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
       airlock: this.airlockLook(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(), ghost: this.ghostFrame(pl),
-      loose: this.looseFrame(), turnHint: this.turnHint(),
+      loose: this.looseFrame(), turnHint: this.turnHint(), hoseHint: this.hoseHintAt(),
     });
   }
 

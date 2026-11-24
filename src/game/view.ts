@@ -137,11 +137,13 @@ export interface Frame {
    */
   loose: { cock: Cock; pose: Pose; ok: boolean | null } | null;
   /**
-   * The arrow of Q and E over the top of the handwheel or dial they'd turn (see TurnHint): its valve's middle, just in
+   * The arrow of Q and E over the top of the handwheel or dial they'd turn (see turnHint): its valve's middle, just in
    * front of its face; the way it faces, toward the eyes; how far out from the middle its arc runs; and whether Q's
    * side (−1) or E's (1) is lit, for the key held, or neither (0).
    */
   turnHint: { at: Vec3; yaw: number; r: number; lit: number } | null;
+  /** The outlet of the spout or faucet whose hose C would pull out, for its hint there (see hoseHint). */
+  hoseHint: Vec3 | null;
   drops: readonly { at: Vec3; v: Vessel; hanging: boolean }[];
   /** The scale whose tare key is held down. */
   tarePress: Scale | null;
@@ -5196,56 +5198,118 @@ class Exposer {
 /** How long the shine setting must be still before what reflects the metal is drawn again (see View.refinish), in real ms. */
 const REFINISH_MS = 400;
 
+/** The keys' hints in the lab (see KeyHint): their letters are never less than `minPx` CSS pixels tall on the screen. */
+const KEY_HINT = { minPx: 12 };
+/** The hints' dark edge, and their light, as the key caps on the display; and the light of a key that's held. */
+const HINT_INK = { dark: '#1b2320', light: '#eef0eb', lit: '#ffffff' };
+
 /**
- * The arrow of Q and E over the top of the handwheel or dial they'd turn (see Frame.turnHint): a double-headed arrow
- * curving round its rim from about 11 o'clock to 1 o'clock, a little outside it, with Q at its left end and E at its
- * right, all in the handwheel's own face, upright as it's seen, light with a dark edge so it reads on anything, in the
- * key caps' typeface. It's drawn in a scene of its own over the finished frame, unlit and through everything, so
- * nothing hides it (not even a stopcock's collar right over its handwheel), and it's nothing to aim at, to outline,
- * to cast a shadow or to stop the shadow lamp's light. Far off, it's drawn bigger, so its letters are never less than
- * TURN_HINT.minPx tall on the screen; never smaller than it is.
+ * A hint of what a key would do, drawn in the lab where it'd do it: a picture on a canvas, on a plane in the scene of
+ * hints (see View.hints), which is drawn over the finished frame, unlit and through everything, so nothing hides it,
+ * and which is nothing to aim at, to outline, to cast a shadow or to stop the shadow lamp's light. The picture is
+ * drawn in units of the plane (`box`, x right and y up from where it's put, `px` pixels to a unit), by `paint`, for a
+ * state (which key's held, say), again only when that changes, and again once the key caps' typeface has come. Far
+ * off it's drawn bigger, so that its letters (`cap` tall, in its units) are never less than KEY_HINT.minPx tall on
+ * the screen; never smaller than it is.
  */
-class TurnHint {
-  /**
-   * Its picture, in units of the radius its arc runs at, from the valve's middle: the arc's ends `ends` radians either
-   * side of straight up, its line `line` wide with an edge `edge` round it, its arrowheads `head` long; its letters'
-   * middles `letter` out from the arc's ends, and as tall (their caps) as `cap`; the picture's extent `x` either side
-   * of the middle and `y0` to `y1` up, `px` pixels to a unit.
-   */
-  private static readonly L = { ends: Math.PI / 6, line: 0.09, edge: 0.05, head: 0.22, letter: 0.33, cap: 0.3, x: 1.32, y0: 0.4, y1: 1.32, px: 220 };
-  private scene = new THREE.Scene();
+class KeyHint {
   private canvas = document.createElement('canvas');
   private tex = new THREE.CanvasTexture(this.canvas);
   private mesh: THREE.Mesh;
-  /** Which side it was last drawn lit (see Frame.turnHint), to draw it again only when that changes. */
-  private lit: number | null = null;
+  /** The state it was last drawn for. */
+  private state: number | null = null;
 
-  constructor() {
-    const L = TurnHint.L;
-    this.canvas.width = Math.round(2 * L.x * L.px);
-    this.canvas.height = Math.round((L.y1 - L.y0) * L.px);
+  constructor(
+    scene: THREE.Scene,
+    private box: { x0: number; x1: number; y0: number; y1: number; px: number; cap: number },
+    private paint: (c: CanvasRenderingContext2D, state: number) => void,
+  ) {
+    const { x0, x1, y0, y1, px } = box;
+    this.canvas.width = Math.round((x1 - x0) * px);
+    this.canvas.height = Math.round((y1 - y0) * px);
     this.tex.colorSpace = THREE.SRGBColorSpace;
-    const geom = new THREE.PlaneGeometry(2 * L.x, L.y1 - L.y0).translate(0, (L.y0 + L.y1) / 2, 0);
+    const geom = new THREE.PlaneGeometry(x1 - x0, y1 - y0).translate((x0 + x1) / 2, (y0 + y1) / 2, 0);
     const mat = new THREE.MeshBasicMaterial({ map: this.tex, transparent: true, depthTest: false, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
     this.mesh = new THREE.Mesh(geom, mat);
     this.mesh.visible = false;
-    this.scene.add(this.mesh);
-    // drawn again once the key caps' typeface has come
-    document.fonts?.load(`600 ${L.px}px "Schibsted Grotesk"`).then(() => {
-      if (this.lit !== null) this.draw(this.lit);
+    scene.add(this.mesh);
+    document.fonts?.load(`600 ${px}px "Schibsted Grotesk"`).then(() => {
+      if (this.state !== null) this.draw(this.state);
     }, () => {});
   }
 
-  /** Draw its picture, with the side of the key held (−1 Q, 1 E) lit and the other faint, or neither (0). */
-  private draw(lit: number): void {
-    this.lit = lit;
-    const L = TurnHint.L;
+  private draw(state: number): void {
+    this.state = state;
     const c = this.canvas.getContext('2d');
     if (!c) return;
+    const { x0, y1, px } = this.box;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    // units of the arc's radius, from the valve's middle, y up
-    c.setTransform(L.px, 0, 0, -L.px, L.x * L.px, L.y1 * L.px);
+    c.setTransform(px, 0, 0, -px, -x0 * px, y1 * px);
+    c.globalAlpha = 1;
+    c.lineJoin = 'round';
+    c.lineCap = 'round';
+    this.paint(c, state);
+    this.tex.needsUpdate = true;
+  }
+
+  /** Hide it. */
+  hide(): void {
+    this.mesh.visible = false;
+  }
+
+  /** Put it at `at`, facing `yaw`, `size` world units to a unit of its picture (or bigger, far off), drawn for `state`. */
+  show(at: Vec3, yaw: number, size: number, state: number, camera: THREE.PerspectiveCamera, cssH: number): void {
+    if (state !== this.state) this.draw(state);
+    const p = new THREE.Vector3(at.x, at.y, at.z);
+    // how many CSS pixels a unit is there, and how big it must be drawn for its letters to be tall enough
+    const px = cssH / (2 * camera.position.distanceTo(p) * Math.tan((camera.fov * Math.PI) / 360));
+    const grow = Math.max(1, KEY_HINT.minPx / (this.box.cap * size * px));
+    this.mesh.visible = true;
+    this.mesh.position.copy(p);
+    this.mesh.rotation.set(0, yaw, 0);
+    this.mesh.scale.setScalar(size * grow);
+  }
+
+  get visible(): boolean {
+    return this.mesh.visible;
+  }
+}
+
+/** Draw a key's letter, `k`, centered at (x, y) in a picture's units (y up), its caps `cap` tall. */
+function keyLetter(c: CanvasRenderingContext2D, k: string, x: number, y: number, cap: number, ink: string, edge = 0): void {
+  c.save();
+  c.translate(x, y);
+  c.scale(1, -1);
+  c.font = `600 ${cap / 0.72}px "Schibsted Grotesk", sans-serif`;
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  if (edge) {
+    c.lineJoin = 'round';
+    c.lineWidth = 2 * edge;
+    c.strokeStyle = HINT_INK.dark;
+    c.strokeText(k, 0, 0);
+  }
+  c.fillStyle = ink;
+  c.fillText(k, 0, 0);
+  c.restore();
+}
+
+/**
+ * The arrow of Q and E over the top of the handwheel or dial they'd turn (see Frame.turnHint), as a KeyHint: a
+ * double-headed arrow curving round its rim from about 11 o'clock to 1 o'clock, a little outside it, with Q at its
+ * left end and E at its right, all in the handwheel's own face, upright as it's seen, light with a dark edge so it
+ * reads on anything (even a stopcock's collar, right over its handwheel), the side of the key held lit and the other
+ * faint. Its picture is in units of the radius its arc runs at, from the valve's middle: the arc's ends `ends` radians
+ * either side of straight up, its line `line` wide with an edge `edge` round it, its arrowheads `head` long, and its
+ * letters' middles `letter` out from the arc's ends.
+ */
+const TURN_ARROW = { ends: Math.PI / 6, line: 0.09, edge: 0.05, head: 0.22, letter: 0.33 };
+
+function turnHint(scene: THREE.Scene): KeyHint {
+  const L = TURN_ARROW;
+  const ink = (side: number, lit: number) => (lit === side ? HINT_INK.lit : HINT_INK.light);
+  return new KeyHint(scene, { x0: -1.32, x1: 1.32, y0: 0.4, y1: 1.32, px: 220, cap: 0.3 }, (c, lit) => {
     const at = (a: number, r = 1) => [r * Math.sin(a), r * Math.cos(a)] as const;
     const back = L.head * 0.85;
     // the arc, short of its ends, and each end's arrowhead, its tip on the arc a little past the end
@@ -5260,24 +5324,6 @@ class TurnHint {
       c.lineTo(r[0], r[1]);
       c.closePath();
     };
-    const letter = (side: -1 | 1) => {
-      const [x, y] = at(side * L.ends);
-      c.save();
-      c.translate(x + side * L.letter, y - 0.04);
-      c.scale(1, -1);
-      c.font = `600 ${L.cap / 0.72}px "Schibsted Grotesk", sans-serif`;
-      c.textAlign = 'center';
-      c.textBaseline = 'middle';
-      c.lineJoin = 'round';
-      c.lineWidth = 2 * L.edge;
-      c.strokeStyle = '#1b2320';
-      c.strokeText(side < 0 ? 'Q' : 'E', 0, 0);
-      c.fillStyle = this.ink(side, lit);
-      c.fillText(side < 0 ? 'Q' : 'E', 0, 0);
-      c.restore();
-    };
-    c.lineJoin = 'round';
-    c.lineCap = 'round';
     // the faint side first, if one is, so the lit one is over it where they meet
     const sides = lit > 0 ? ([-1, 1] as const) : ([1, -1] as const);
     // the dark edge of the whole arrow, then its light line over it, so no edge crosses the line where the halves meet
@@ -5285,7 +5331,7 @@ class TurnHint {
       c.globalAlpha = lit && lit !== side ? 0.45 : 1;
       shape(side);
       c.lineWidth = L.line + 2 * L.edge;
-      c.strokeStyle = c.fillStyle = '#1b2320';
+      c.strokeStyle = c.fillStyle = HINT_INK.dark;
       c.stroke();
       c.fill();
     }
@@ -5293,47 +5339,82 @@ class TurnHint {
       c.globalAlpha = lit && lit !== side ? 0.45 : 1;
       shape(side);
       c.lineWidth = L.line;
-      c.strokeStyle = c.fillStyle = this.ink(side, lit);
+      c.strokeStyle = c.fillStyle = ink(side, lit);
       c.stroke();
       c.fill();
-      letter(side);
+      const [x, y] = at(side * L.ends);
+      keyLetter(c, side < 0 ? 'Q' : 'E', x + side * L.letter, y - 0.04, 0.3, ink(side, lit), L.edge);
     }
     c.globalAlpha = 1;
-    this.tex.needsUpdate = true;
-  }
-
-  /** The light it's drawn in: as the key caps on the display, or pure white for the side of the key held. */
-  private ink(side: number, lit: number): string {
-    return lit === side ? '#ffffff' : '#eef0eb';
-  }
-
-  /** Put it over the handwheel or dial it's for (see Frame.turnHint), or hide it. */
-  update(h: Frame['turnHint'], camera: THREE.PerspectiveCamera, cssH: number): void {
-    this.mesh.visible = !!h;
-    if (!h) return;
-    if (h.lit !== this.lit) this.draw(h.lit);
-    const at = new THREE.Vector3(h.at.x, h.at.y, h.at.z);
-    // how many CSS pixels a unit is there, and how big it must be drawn for its letters to be tall enough
-    const px = cssH / (2 * camera.position.distanceTo(at) * Math.tan((camera.fov * Math.PI) / 360));
-    const grow = Math.max(1, TURN_HINT.minPx / (TurnHint.L.cap * h.r * px));
-    this.mesh.position.copy(at);
-    this.mesh.rotation.set(0, h.yaw, 0);
-    this.mesh.scale.setScalar(h.r * grow);
-  }
-
-  /** Draw it over the finished frame, if it's up. */
-  render(renderer: THREE.WebGLRenderer, camera: THREE.Camera): void {
-    if (!this.mesh.visible) return;
-    renderer.autoClear = false;
-    renderer.shadowMap.autoUpdate = false;
-    renderer.render(this.scene, camera);
-    renderer.shadowMap.autoUpdate = true;
-    renderer.autoClear = true;
-  }
+  });
 }
 
-/** The arrow of Q and E (see TurnHint): its letters are never less than `minPx` CSS pixels tall on the screen. */
-const TURN_HINT = { minPx: 12 };
+/**
+ * C's hint, at the outlet of the spout whose hose it would pull out (see Frame.hoseHint), as a KeyHint, in world units
+ * from the outlet: on the right, a little hose hanging from it as if fitted there (`hose`: its collar `collar` wide at
+ * the top, a tube `tube` wide coming down, bending in an S `bend` to the right and down again, `drop` long in all,
+ * with a band round it `band` from its end, for the nozzle), drawn light with a dark edge, as the arrow of Q and E
+ * is; on its left, a key cap (`cap`: `w` by `h`, its corners rounded `r`, `gap` clear of the hose) with a C on it,
+ * as the display's key caps are, light with a dark border and letter. It stands upright, turned to face the eyes.
+ */
+const HOSE_HINT = {
+  hose: { collar: 6, tube: 3.4, bend: 8, drop: 28, band: 3.5, edge: 0.8 },
+  cap: { w: 13, h: 16, r: 2.5, gap: 4, letter: 7.5, border: 1.1 },
+};
+
+function hoseHint(scene: THREE.Scene): KeyHint {
+  const { hose: H, cap: K } = HOSE_HINT;
+  const x0 = -(K.w + K.gap + H.collar / 2 + 1);
+  return new KeyHint(scene, { x0, x1: H.bend + H.collar / 2 + 1, y0: -H.drop - 1, y1: 1, px: 16, cap: K.letter }, (c) => {
+    // the tube: down from the collar, an S to the right, and down again to its end
+    const top = -3;
+    const tube = () => {
+      c.beginPath();
+      c.moveTo(0, top);
+      c.lineTo(0, top - 3);
+      c.bezierCurveTo(0, top - 9, H.bend, -10, H.bend, -16);
+      c.lineTo(H.bend, -H.drop);
+    };
+    c.lineCap = 'butt';
+    tube();
+    c.lineWidth = H.tube + 2 * H.edge;
+    c.strokeStyle = HINT_INK.dark;
+    c.stroke();
+    tube();
+    c.lineWidth = H.tube;
+    c.strokeStyle = HINT_INK.light;
+    c.stroke();
+    // its end, and the band near it where the nozzle is
+    const across = (y: number, w: number) => {
+      c.beginPath();
+      c.moveTo(H.bend - H.tube / 2 - H.edge, y);
+      c.lineTo(H.bend + H.tube / 2 + H.edge, y);
+      c.lineWidth = w;
+      c.stroke();
+    };
+    c.strokeStyle = HINT_INK.dark;
+    across(-H.drop, H.edge * 1.6);
+    across(-H.drop + H.band, H.edge * 1.2);
+    // the collar at the top, its top at the outlet
+    c.fillStyle = HINT_INK.light;
+    c.lineWidth = H.edge;
+    c.beginPath();
+    c.rect(-H.collar / 2, top, H.collar, -top);
+    c.fill();
+    c.stroke();
+    // the key cap, beside the hose's upper half
+    const kx = -(H.collar / 2 + K.gap + K.w);
+    const ky = -(H.drop / 2) - K.h / 2 + 4;
+    c.beginPath();
+    c.roundRect(kx, ky, K.w, K.h, K.r);
+    c.fillStyle = HINT_INK.light;
+    c.fill();
+    c.lineWidth = K.border;
+    c.strokeStyle = HINT_INK.dark;
+    c.stroke();
+    keyLetter(c, 'C', kx + K.w / 2, ky + K.h / 2, K.letter, HINT_INK.dark);
+  });
+}
 
 /** Draws the lab with Three.js, from the player's eyes, and says what's under the crosshair. */
 export class View {
@@ -5373,7 +5454,10 @@ export class View {
   private roomLights: { light: THREE.Light; base: number }[] = [];
   private raycaster = new THREE.Raycaster();
   private outliner = new Outliner();
-  private turnHint = new TurnHint();
+  /** The keys' hints in the lab (see KeyHint), in a scene of their own, drawn over the finished frame. */
+  private hints = new THREE.Scene();
+  private turnHint = turnHint(this.hints);
+  private hoseHint = hoseHint(this.hints);
   /** Works out where the shadow lamp's light falls (see Exposer), once it's first needed. */
   private exposer?: Exposer;
   private studio = new IconStudio(Math.min(2, window.devicePixelRatio || 1));
@@ -5559,7 +5643,7 @@ export class View {
     this.updateStands(fr);
     this.ghost.update(fr.ghost, fr.clock, fr.energies);
     this.updateLoose(fr);
-    this.turnHint.update(fr.turnHint, this.camera, this.renderer.domElement.clientHeight);
+    this.updateHints(fr);
     this.updateStreams(fr);
     this.updateGuides(fr);
 
@@ -5595,9 +5679,36 @@ export class View {
     // and so is a stopcock in hand where it would go on, red if there's no room for it there
     const loose = fr.loose && this.loose && fr.loose.ok !== null ? this.loose.v.group.children : [];
     if (loose.length) this.outliner.render(this.renderer, scene, this.camera, loose, 1, fr.loose!.ok ? OUTLINE.color : GHOST_RED);
-    // and over it all, the arrow of Q and E over a handwheel or a dial they'd turn
-    this.turnHint.render(this.renderer, this.camera);
+    // and over it all, the keys' hints
+    this.renderHints();
     this.shine();
+  }
+
+  /**
+   * The keys' hints (see KeyHint): the arrow of Q and E over a handwheel or dial they'd turn, in its face (see
+   * Frame.turnHint), and C's at the outlet of the spout whose hose it'd pull out, turned to face the eyes (see
+   * Frame.hoseHint).
+   */
+  private updateHints(fr: Frame): void {
+    const cssH = this.renderer.domElement.clientHeight;
+    const t = fr.turnHint;
+    if (t) this.turnHint.show(t.at, t.yaw, t.r, t.lit, this.camera, cssH);
+    else this.turnHint.hide();
+    const h = fr.hoseHint;
+    const eye = this.camera.position;
+    if (h) this.hoseHint.show(h, Math.atan2(eye.x - h.x, eye.z - h.z), 1, 0, this.camera, cssH);
+    else this.hoseHint.hide();
+  }
+
+  /** Draw the keys' hints over the finished frame, if any are up. */
+  private renderHints(): void {
+    if (!this.turnHint.visible && !this.hoseHint.visible) return;
+    const { renderer } = this;
+    renderer.autoClear = false;
+    renderer.shadowMap.autoUpdate = false;
+    renderer.render(this.hints, this.camera);
+    renderer.shadowMap.autoUpdate = true;
+    renderer.autoClear = true;
   }
 
   /** The stopcock in hand (see Frame.loose), where it's held or would go on; nothing to aim at. */
