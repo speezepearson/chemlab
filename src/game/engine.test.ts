@@ -1625,6 +1625,16 @@ describe('ghost moves', () => {
     expect(where(u.pose)).toEqual(where(P));
   });
 
+  it('loads a cabinet saved with more slots of a kind than it has now, keeping those it has', () => {
+    const l = lab();
+    const s = JSON.parse(JSON.stringify(l.e.snapshot())) as SaveState;
+    const n = STOCK.tank;
+    // as saved when there were more of them, with the second empty and the rest full
+    s.cabinet = { ...s.cabinet, tank: Array.from({ length: n + 5 }, (_, i) => i).filter((i) => i !== 1) };
+    l.e.restore(s, DEFAULT_PRESET);
+    expect(l.in.stock.tank).toEqual(Array.from({ length: n }, (_, i) => i !== 1));
+  });
+
   it('puts a flask, a dipper, a sheet of test paper or a hose’s nozzle in hand, not a ghost', () => {
     const l = lab();
     for (const kind of ['flask', 'thermometer', 'testpaper'] as const) {

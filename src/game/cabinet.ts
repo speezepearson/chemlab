@@ -24,13 +24,13 @@ export const ENDLESS: readonly Stocked[] = ['thermometer', 'thermometerWide', 's
 export const endless = (k: Stocked) => ENDLESS.includes(k);
 
 /**
- * How many of each kind the cabinet holds, full: thirty flasks, sixteen stopcocks, and eight of everything else (see
- * ENDLESS). The stopcocks fitted on what comes out of it fitted (see ToolShape.fitted) aren't these: they come with it,
+ * How many of each kind the cabinet holds, full: thirty flasks, sixteen stopcocks, three big tanks (each holds a great
+ * deal, and the user found three plenty), and eight of everything else (see ENDLESS). The stopcocks fitted on what comes out of it fitted (see ToolShape.fitted) aren't these: they come with it,
  * and go back with it.
  */
 export const STOCK: Record<Stocked, number> = {
   flask: 30, scale: 8, stopcock: 16, dispenser: 8, pipette: 8, exchanger: 8, separator: 8, multiplexer: 8, sorter: 8,
-  heater: 8, tank: 8, meter: 8, dilatometer: 8, column: 8,
+  heater: 8, tank: 3, meter: 8, dilatometer: 8, column: 8,
   // drawn as this many, but endless
   thermometer: 16, thermometerWide: 16, strip: 16, testpaper: 16, bondpaper: 16,
 };
@@ -52,7 +52,7 @@ interface Compartment {
  */
 const BAYS: readonly (readonly (readonly Compartment[])[])[] = [
   [
-    [{ kind: 'tank', cols: 3, high: 3, deep: 1 }],
+    [{ kind: 'tank', cols: 3, high: 1, deep: 1 }],
     [{ kind: 'flask', cols: 10, high: 1, deep: 3 }],
     [{ kind: 'scale', cols: 3, high: 1, deep: 3 }],
   ],
