@@ -1,10 +1,9 @@
-import { type Atom } from '../chem/atoms';
 import { T_ROOM } from '../chem/params';
-import { SPECIES, TARGET, singleOf } from '../chem/species';
-import { CAP, HOME_W } from './config';
-import { plumbZ } from './bodies';
+import { SPECIES, TARGET } from '../chem/species';
 import type { Vessel } from './flask';
-import { CELL, LAMP_AREA, LAMP_Z, LIFT, ROOM, type Pose } from './space';
+import { LAMP_AREA, LAMP_Z, LIFT, ROOM, type Pose } from './space';
+import type { SaveState } from './save';
+import { START_LAB } from './start';
 import { CRYOSTABILIZER } from './supply';
 import { LAMP, STATION, type ToolKind } from './tools';
 
@@ -27,9 +26,9 @@ export interface Spot {
 }
 
 /**
- * Where the one and only spectroscope starts, unless a preset places it itself: there's always exactly one. It stands
- * over the back counter, its spout high enough for a flask under it, and over the middle of a cell (see CELL), like
- * the presets' tools.
+ * Where the one and only spectroscope goes in a lab that hasn't one (an older save, the bench's scenes, the tests'
+ * empty lab): there's always exactly one. It stands over the back counter, its spout high enough for a flask under it,
+ * and over the middle of a cell (see CELL).
  */
 export const SPECTROSCOPE_AT: Spot = { at: [1.47, 0.5] };
 
@@ -79,90 +78,31 @@ export interface HoseSpec {
   to: { tool: number; tank?: number; up?: number };
 }
 
-/** A starting layout: one entry per shelf slot (null for an empty flask), plus any tools. */
+/**
+ * A starting layout: one entry per shelf slot (null for an empty flask), plus any tools; or a whole lab (see lab). The
+ * game has only the one (DEFAULT_PRESET); the others are the bench's scenes and the tests' empty lab.
+ */
 export interface Preset {
   id: string;
   name: string;
-  /** Shown under the title bar while the preset is loaded, if given. */
-  description?: string;
   flasks: (FlaskFill | null)[];
   tools?: ToolSpec[];
   /** Top center of each scale's platform, as fractions of the home area's width and height (see HOME_W). */
   scales?: [number, number][];
   hoses?: HoseSpec[];
-  /** Whether picking the preset from the menu restores the default chemistry. Reset leaves the chemistry alone. */
-  defaultChem?: boolean;
+  /**
+   * The whole lab, laid out as a save keeps it, if the preset is one, in place of its flasks, tools, scales and hoses:
+   * everything in it is as the save has it (see GameEngine.restore) but the chemistry, the player, and the alarms,
+   * blinds and nap, which a preset leaves alone.
+   */
+  lab?: SaveState;
 }
-
-/** `atoms` atoms' worth of one species. */
-const atomsOf = (species: number, atoms: number) => ({ species, molecules: atoms / SPECIES[species].size });
 
 /**
- * How far out from the back wall the demos' tools stand: over the first island, in the middle of its second row of
- * cells, so their stands behind them have its first (the back wall's end of the counter is the equipment cabinet's).
+ * The game: the one preset there is, which a new game starts in and Reset goes back to, the lab laid out as in
+ * START_LAB (see start.ts).
  */
-const DEMO_Z = 11.5 * CELL;
-/** The middle of the cell `k` cells from x = 0, across, as a fraction of the home area's width (see Spot). */
-const cellX = (k: number) => ((k + 0.5) * CELL) / HOME_W;
-
-const SHOWCASE: [Atom, number][] = [
-  ['R', 0], ['G', 0.2], ['B', 0.5], ['K', 1], ['R', 3], ['G', 10], ['B', 30], ['K', 100],
-];
-
-export const PRESETS: readonly Preset[] = [
-  {
-    id: 'stranded',
-    name: 'Stranded',
-    // everything's in the equipment cabinet
-    flasks: [],
-  },
-  {
-    id: 'exchanger',
-    name: 'Heat exchanger demo',
-    description:
-      'Hot red and room-temperature green pass each other in a counterflow heat exchanger, trading heat but not ' +
-      'mixing: the red comes out cool and the green hot. Slower flows trade more. Look at a stopcock’s handwheel and hold Q or E to turn it, anticlockwise or clockwise: its bar along the pipe is open, across it shut.',
-    flasks: [],
-    tools: [
-      // over the exchanger's two tanks, half a cell either side of its middle; it stands as far forward as their
-      // spouts are in front of their middles (see plumbZ), so they're over its tanks' middles
-      { kind: 'dispenser', at: [cellX(5), 0.22], z: DEMO_Z, cocks: [0.25], tanks: [{ contents: [atomsOf(singleOf('R'), 4 * CAP)], T: 10 }] },
-      { kind: 'dispenser', at: [cellX(6), 0.22], z: DEMO_Z, cocks: [0.25], tanks: [{ contents: [atomsOf(singleOf('G'), 4 * CAP)], T: T_ROOM }] },
-      { kind: 'exchanger', at: [cellX(5.5), 0.48], z: DEMO_Z + plumbZ('dispenser'), cocks: [0.25, 0.25] },
-    ],
-  },
-  {
-    id: 'separator',
-    name: 'Separator demo',
-    description:
-      'A separator sorts red from black: each molecule goes out the left spout if none of its atoms is black, ' +
-      'and the right if any is. The dispensers below catch the two. Turn its sharpness down in the Chemistry ' +
-      'panel and some of each leaks out the other spout.',
-    flasks: [],
-    tools: [
-      {
-        kind: 'separator', at: [cellX(5), 0.2], z: DEMO_Z, cocks: [0.3, 0.3],
-        tanks: [{ contents: [atomsOf(singleOf('R'), 2 * CAP), atomsOf(singleOf('K'), 2 * CAP)], T: T_ROOM }],
-      },
-      // under its spouts, a cell either side of its middle, and as far forward as they are (see plumbZ)
-      { kind: 'dispenser', at: [cellX(4), 0.5], z: DEMO_Z + plumbZ('separator') },
-      { kind: 'dispenser', at: [cellX(6), 0.5], z: DEMO_Z + plumbZ('separator') },
-    ],
-  },
-  {
-    id: 'temperatures',
-    name: 'Temperature range',
-    description: 'How temperature looks: flasks from T = 0 (black) to T = 100 (blinding).',
-    flasks: SHOWCASE.map(([atom, T]) => ({ contents: [atomsOf(singleOf(atom), (2 / 3) * CAP)], T, label: `T=${T}` })),
-  },
-];
-
-export const DEFAULT_PRESET = PRESETS[0];
-
-/** Atoms a fill puts in its flask. */
-export function fillAtoms(fill: FlaskFill): number {
-  return fill.contents.reduce((t, c) => t + c.molecules * SPECIES[c.species].size, 0);
-}
+export const DEFAULT_PRESET: Preset = { id: 'stranded', name: 'Stranded', flasks: [], lab: START_LAB };
 
 /** Replace a vessel's contents with a fill (or empty it). */
 export function applyFill(f: Vessel, fill: FlaskFill | null): void {

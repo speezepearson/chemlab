@@ -77,7 +77,6 @@ details label.slider{display:flex;align-items:center;gap:6px}
 details label.slider span{width:64px;color:var(--muted)}
 details label.slider input{flex:1;min-width:0}
 details label.slider output{width:40px;text-align:right;font-variant-numeric:tabular-nums}
-.hint{width:100%;margin:0;color:var(--muted);font-size:12px}
 #stage{flex:1;position:relative;min-height:0;min-width:0;overflow:hidden}
 .main{flex:1;display:flex;min-height:0}
 /* an equipment wheel, round the middle of the view while its key's held; smaller, in a view too small for it */
