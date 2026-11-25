@@ -516,8 +516,6 @@ describe("the station's supplies and changeover", () => {
       expect(s.start / s.goal).toBeCloseTo(s.startL / s.goalL, 6);
       expect(s.cap / s.goal).toBeCloseTo(3, 0);
     }
-    // only the cryostabilizer, which takes years to make enough of, opens the airlock
-    expect(SUPPLIES.map((s) => s.airlock)).toEqual([false, true]);
   });
 
   it('stocked for a supply, holds what is on board of it, in a reservoir as big as that supply needs', () => {

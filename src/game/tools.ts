@@ -1807,8 +1807,8 @@ export class Tool {
   sinceDelivery = Infinity;
   /**
    * Sim seconds a receptacle has been delivering steadily, letting cryostabilizer into the reservoir at least every
-   * DELIVERY.gap sim seconds; 0 while it isn't. Nothing shows it; long enough, and the player can
-   * nap (see DELIVERY.nap), and the cryostabilizer's opens the airlock (see Supply.airlock).
+   * DELIVERY.gap sim seconds; 0 while it isn't. Nothing shows it; long enough, and the player is told they can
+   * nap (see DELIVERY.nap).
    */
   steady = 0;
   /**

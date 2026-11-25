@@ -18,11 +18,6 @@ export interface Supply {
   start: number;
   /** How much its reservoir holds, by volume: about three times the goal, so the goal is a third of the way up its gauge. */
   cap: number;
-  /**
-   * Whether delivering it steadily for long enough opens the airlock (see DELIVERY), to sleep in the pod until there's
-   * enough: only where that takes years.
-   */
-  airlock: boolean;
 }
 
 /** How many molecules make `l` litres of anything (see FLASK_L), whole. */
@@ -42,7 +37,6 @@ export const SUPPLIES: readonly Supply[] = [
     startL: ANTINUCLEANT.presentL,
     start: molecules(ANTINUCLEANT.presentL),
     cap: 100 * CAP,
-    airlock: false,
   },
   {
     name: 'cryostabilizer',
@@ -53,7 +47,6 @@ export const SUPPLIES: readonly Supply[] = [
     start: molecules(VOYAGE.presentL),
     // room for the goal even if everything let in is only just pure enough, and the rest of it single atoms
     cap: 540 * CAP,
-    airlock: true,
   },
 ];
 

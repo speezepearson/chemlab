@@ -33,10 +33,9 @@ export const SUSTAIN = ((VOYAGE.passengers * VOYAGE.mlPerPassengerDay) / 1000 / 
 export const GOAL_PURITY = 0.95;
 /**
  * Steady delivery: the station letting what it's fitted for into the reservoir at least once every `gap` sim seconds.
- * `nap` sim seconds of it on end, and the player is told they can nap (see GameEngine.nap), as they always could;
- * `streak` sim seconds of cryostabilizer, and the airlock opens (see Wake).
+ * `nap` sim seconds of it on end, and the player is told they can nap (see GameEngine.nap), as they always could.
  */
-export const DELIVERY = { gap: 3, streak: 60, nap: 10 };
+export const DELIVERY = { gap: 3, nap: 10 };
 /** Amounts of fluid below this many atoms count as nothing: too little to see or pour. */
 export const TRACE = CAP * 1e-6;
 /**

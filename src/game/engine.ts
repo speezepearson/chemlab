@@ -801,7 +801,7 @@ export class GameEngine {
   }
 
   private afterLoad(): void {
-    // a lab loads with the airlock shut, until its station has been delivering steadily again, and anyone in it or
+    // a lab loads with the airlock shut, until its station's reservoir is seen to hold enough, and anyone in it or
     // asleep in the pod wakes in the lab
     if (this.wake === 'open' || this.wake === 'settling' || this.wake === 'boarding' || this.wake === 'asleep' || this.arrival) {
       this.arrival = false;
@@ -3412,7 +3412,7 @@ export class GameEngine {
 
     this.clearStation();
     const gateFrom = this.tools.map((t) => t.gate);
-    const steadyFrom = this.station().steady;
+    const enoughFrom = this.enough();
     const vessels = this.vessels();
     // how exposed each one's fluid is to the room, from how it stands now; it hardly changes in a frame
     const exposures = simDt > 0 ? this.exposures() : [];
@@ -3549,9 +3549,8 @@ export class GameEngine {
     this.tools.forEach((t, j) => {
       if (t.broken && whole[j]) shatter(this.hear(footAt(t)));
     });
-    // and it chimes as it's been delivering steadily for long enough to open the airlock
-    const st = this.station();
-    if (st.supply.airlock && steadyFrom < DELIVERY.streak && st.steady >= DELIVERY.streak) chime(this.hear(this.machineAt(st)));
+    // and it chimes as its reservoir comes to hold enough cryostabilizer, and the airlock opens
+    if (!enoughFrom && this.enough()) chime(this.hear(this.machineAt(this.station())));
 
     // fluid's sounds, each heard from where it lands: a stream from the mouth it runs into
     const streams = new Map<Vessel, { flow: number; full: number; at: Placement }>();
@@ -4300,8 +4299,9 @@ export class GameEngine {
 
   /**
    * The player has fallen asleep: the lab's sounds fall silent (the ship's ambience plays on), and the lab runs on
-   * (see sleep.ts) as fast as it can, a slice at a time (see pump), until the goal's reached (when they stay asleep,
-   * and have won) or the station stops delivering (when they wake).
+   * (see sleep.ts) as fast as it can, a slice at a time (see pump), until the goal's reached (when they wake at Mu
+   * Ceti, and have won; since the airlock opens only once it is, that's at once) or the station stops delivering
+   * (when they wake to the message they woke to at first).
    */
   private fallAsleep(): void {
     this.water.update(0.1, [], new Map());
@@ -4438,12 +4438,13 @@ export class GameEngine {
 
   /**
    * Once arrived at Mu Ceti (see Wake's arrived), carry on in the lab as it was when there was enough cryostabilizer:
-   * the player stands just out of the airlock, facing the lab, with its doors shut.
+   * the player stands just out of the airlock, facing the lab, its doors standing open behind her, as they do while
+   * there's enough.
    */
   continueTinkering(): void {
     if (this.wake !== 'arrived') return;
     this.arrival = false;
-    this.wake = 'closed';
+    this.wake = 'open';
     this.wakeT = Infinity;
     Object.assign(this.player, { x: AIRLOCK.x, z: ROOM.z1 - 150, yaw: 0, pitch: 0 });
   }
@@ -4468,9 +4469,16 @@ export class GameEngine {
     else if (this.wake === 'arriving' && t >= WAKE_S.arrive) next('arrived');
     else if (this.wake === 'boarding' && t >= WAKE_S.open + WAKE_S.fade) next('asleep');
     else if (this.wake === 'out' && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
-    // steady delivery of cryostabilizer opens the doors again, and once it stops they close, when she's out in the lab
-    else if (this.wake === 'closed' && this.station().supply.airlock && this.station().steady >= DELIVERY.streak) next('open');
-    else if (this.wake === 'open' && this.station().steady === 0 && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
+    // enough cryostabilizer for the voyage opens the doors again (and should there no longer be, as god mode can
+    // make it, they close, once she's out in the lab)
+    else if (this.wake === 'closed' && this.enough()) next('open');
+    else if (this.wake === 'open' && !this.enough() && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
+  }
+
+  /** Whether the station's reservoir holds enough cryostabilizer for the rest of the voyage: the goal. */
+  private enough(): boolean {
+    const st = this.station();
+    return st.supply === CRYOSTABILIZER && st.tanks[1].n[st.supply.species] >= st.supply.goal;
   }
 
   /** How the airlock looks just now, for the view. */
