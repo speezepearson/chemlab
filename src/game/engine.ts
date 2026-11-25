@@ -1667,7 +1667,7 @@ export class GameEngine {
         this.openWheel(wheel);
         e.preventDefault();
       }
-      if (e.code === 'Backspace' || e.code === 'Delete') {
+      if (e.code === 'KeyX') {
         this.putAway();
         e.preventDefault();
       }
@@ -4038,8 +4038,8 @@ export class GameEngine {
       } else if (h.kind !== 'flask' && h.kind !== 'cock') add(['R'], 'turn it');
       add(['Wheel'], 'hold it nearer or further');
       if (h.kind !== 'cock') add(['Alt'], 'hold to set it down just as it’s held');
-      if (h.kind === 'hose') add(['Backspace'], 'roll the hose back up');
-      else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it back in the cabinet');
+      if (h.kind === 'hose') add(['X'], 'roll the hose back up');
+      else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['X'], 'put it back in the cabinet');
       add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it back in the cabinet') : h.ghost ? 'leave it where it is' : 'put it back');
     } else {
       const v = this.turning ?? this.aimedValve();
