@@ -3,10 +3,10 @@
  * vite.bench.config.ts). Builds a handful of scenes, from an idle lab to a busy one, and reports per scene:
  *   - wall time per substep and per sim second, uninstrumented (mode "time")
  *   - an exclusive-time breakdown by function, from wrapping methods (mode "breakdown")
- *   - chemistry stats: how often each vessel is stepped versus put off, active reactions per step (mode "stats")
+ *   - chemistry stats: steps on vessels holding something, active reactions per step (mode "stats")
  *
  *   - mode "tight": the sim alone in a tight loop, no frames, as while the player sleeps (sim s per wall s)
- *   - mode "micro": ReactionNetwork.step and tick alone on single fluids, and the bench/stepFast.ts prototype
+ *   - mode "micro": ReactionNetwork.step alone on single fluids, and the bench/stepFast.ts prototype
  *   - mode "sleep": the player asleep in the cryopod (src/game/sleep.ts) from `--warm` sim s in, until they wake,
  *     against the lab run as ever for `--sim` sim s: how fast, and how much target each puts in the reservoir
  *
@@ -16,7 +16,7 @@
  * Scenes: idle quiet8 room8 fresh8 hot8 busy prod (see SCENES). Tight-loop options: --chunk (sim s per simulate
  * call, 1), --warm (30), --sim (120), --reps (3, best and median reported), --tightstats (chem stats, step time by
  * vessel kind, Tool.step by tool kind).
- * Experiments: --substep=X (try another substep length), --nochem (tick does nothing), --slab (Vessels' counts as
+ * Experiments: --substep=X (try another substep length), --nochem (the chemistry does nothing), --slab (Vessels' counts as
  * views into a shared buffer instead of their own Float64Array), --faststep (bench/stepFast.ts). --save=DIR writes each scene's SaveState for the
  * browser bench (bench/browser.cjs); --load=FILE starts from one.
  * For a CPU profile:  node --cpu-prof --cpu-prof-dir=bench/prof bench/dist/sim.js busy --mode=time
@@ -27,7 +27,7 @@
 import { ATOMS, type Atom } from '../src/chem/atoms';
 import { equilibrium } from '../src/chem/equilibrium';
 import { T_ROOM, defaultChemParams } from '../src/chem/params';
-import { Lag, ReactionNetwork, heatAt, type Fluid } from '../src/chem/reactions';
+import { ReactionNetwork, heatAt, type Fluid } from '../src/chem/reactions';
 import { NS, SPECIES, TARGET, singleOf, speciesEnergies } from '../src/chem/species';
 import { flaskMouth, tankMouth, NOZZLE_REACH } from '../src/game/bodies';
 import { CAP, GOAL_TARGET } from '../src/game/config';
@@ -230,36 +230,20 @@ function unwrapAll(): void {
 /* ---------------- chemistry stats ---------------- */
 
 interface ChemStats {
-  ticks: number;
-  tickNonEmpty: number;
-  tickStepped: number;
-  movedCalls: number;
-  movedTrue: number;
+  /** Steps on vessels with something in them, and all told. */
   steps: number;
+  calls: number;
   active: number;
   stepDt: number;
 }
 function chemStats(net: ReactionNetwork): { stats: ChemStats; undo: () => void } {
-  const stats: ChemStats = { ticks: 0, tickNonEmpty: 0, tickStepped: 0, movedCalls: 0, movedTrue: 0, steps: 0, active: 0, stepDt: 0 };
+  const stats: ChemStats = { steps: 0, calls: 0, active: 0, stepDt: 0 };
   const P = ReactionNetwork.prototype as any;
-  const { tick, step, moved } = P;
+  const { step } = P;
   const N = net as any;
-  let stepped = 0;
-  P.tick = function (f: Fluid, h: number, lag: Lag) {
-    stats.ticks++;
-    if (f.N > 0) stats.tickNonEmpty++;
-    stepped = 0;
-    tick.call(this, f, h, lag);
-    if (stepped) stats.tickStepped++;
-  };
-  P.moved = function (f: Fluid, lag: Lag) {
-    stats.movedCalls++;
-    const r = moved.call(this, f, lag);
-    if (r) stats.movedTrue++;
-    return r;
-  };
   P.step = function (f: Fluid, dt: number) {
-    stepped++;
+    stats.calls++;
+    if (f.N <= 0) return step.call(this, f, dt);
     stats.steps++;
     stats.stepDt += dt;
     // count the reactions that can happen (as step's own loop does)
@@ -270,7 +254,7 @@ function chemStats(net: ReactionNetwork): { stats: ChemStats; undo: () => void }
     }
     return step.call(this, f, dt);
   };
-  return { stats, undo: () => Object.assign(P, { tick, step, moved }) };
+  return { stats, undo: () => Object.assign(P, { step }) };
 }
 
 /* ---------------- running ---------------- */
@@ -286,9 +270,9 @@ const quiet = args.includes('--quiet');
 /** Substep length to try (the engine's is 0.02), via the hook vite.bench.config.ts puts in simulate. */
 const SUBSTEP = Number(opt('substep', '0.02'));
 (globalThis as any).__SUBSTEP = SUBSTEP;
-/** --nochem: the chemistry does nothing (tick is a no-op), to see what the rest of the sim costs. */
+/** --nochem: the chemistry does nothing (step is a no-op), to see what the rest of the sim costs. */
 const NOCHEM = args.includes('--nochem');
-if (NOCHEM) (ReactionNetwork.prototype as any).tick = () => {};
+if (NOCHEM) (ReactionNetwork.prototype as any).step = () => {};
 /** --slab: Vessels' counts are views into big shared buffers (see vite.bench.config.ts), as pooling would make them cheap. */
 if (args.includes('--slab')) {
   let buf = new Float64Array(0);
@@ -378,9 +362,7 @@ function runScene(name: string, scene: Scene, speed: number): void {
     e.speed = speed;
     const EP = Object.getPrototypeOf(e);
     wrap(e, 'simulate', 'simulate (own: loop, closures, drops, drip, cool, faucet setup)');
-    wrap(net, 'tick', 'chem.tick (own: owed bookkeeping, lag.x copy)');
     wrap(net, 'step', 'chem.step');
-    wrap(net, 'moved', 'chem.moved');
     wrap(Tool.prototype, 'step', 'Tool.step (incl. transfer/divide/smooth)');
     wrap(e, 'overflow', 'engine.overflow');
     wrap(e, 'fill', 'engine.fill (addFrom)');
@@ -415,18 +397,14 @@ function runScene(name: string, scene: Scene, speed: number): void {
     undo();
     const sim = FRAMES * simPerFrame;
     console.log(
-      `  chem: ${s.ticks} ticks (${s.tickNonEmpty} on non-empty vessels, ${fmt((100 * s.tickStepped) / Math.max(1, s.tickNonEmpty), 1)}% of those stepped); ` +
-        `${s.steps} steps = ${fmt(s.steps / sim, 1)} per sim s; mean step dt ${fmt(s.stepDt / Math.max(1, s.steps), 4)} sim s; ` +
-        `mean active reactions/step ${fmt(s.active / Math.max(1, s.steps), 1)} (of ${net.count}); moved() calls ${s.movedCalls}, true ${s.movedTrue}`,
+      `  chem: ${s.calls} steps (${s.steps} on non-empty vessels) = ${fmt(s.steps / sim, 1)} per sim s; ` +
+        `mean step dt ${fmt(s.stepDt / Math.max(1, s.steps), 4)} sim s; ` +
+        `mean active reactions/step ${fmt(s.active / Math.max(1, s.steps), 1)} (of ${net.count})`,
     );
     // per vessel: steps per sim second
     const vs = (e.vessels() as Vessel[]).filter((v) => v.N > 0);
     if (!quiet && vs.length <= 60) {
-      const lags = e.lags as WeakMap<Vessel, Lag>;
-      const desc = vs.map((v) => {
-        const lag = lags.get(v);
-        return `${fmt(v.N / CAP, 2)}F T=${fmt(v.Q / (3 * v.N), 2)} slack=${lag ? fmt(lag.slack, 3) : '-'}`;
-      });
+      const desc = vs.map((v) => `${fmt(v.N / CAP, 2)}F T=${fmt(v.Q / (3 * v.N), 2)}`);
       console.log(`  vessels at end: ${desc.join(' | ')}`);
     }
     RESULTS_STATS.push({ scene: name, speed, ...s, sim });
@@ -510,22 +488,7 @@ function microStep(): void {
       if (Math.abs(da) > 1e3) worstRel = Math.max(worstRel, Math.abs(da - db) / Math.abs(da));
     }
     console.log(`    stepFast ${fmt(usFast, 2)} us (${fmt(us / usFast, 2)}x); worst relative gap in mean change vs step: ${fmt(worstRel, 4)}`);
-    // tick on a lag that's been stepped: the cost of a deferred tick (moved() only)
-    const lag = new Lag();
-    v.n.set(snap);
-    v.Q = Q;
-    net.tick(v, 0.02, lag);
-    const t1 = performance.now();
-    let steps = 0;
-    const orig = net.step.bind(net);
-    (net as any).step = (f: Fluid, dt: number) => (steps++, orig(f, dt));
-    for (let i = 0; i < N; i++) net.tick(v, 0.02, lag);
-    const usTick = ((performance.now() - t1) * 1000) / N;
-    delete (net as any).step;
-    console.log(
-      `  ${label.padEnd(44)} species ${String(present).padStart(2)}  step ${fmt(us, 2).padStart(6)} us   ` +
-        `tick ${fmt(usTick, 2).padStart(6)} us (stepped ${fmt((100 * steps) / N, 1)}% of ticks, slack ${fmt(lag.slack, 4)})`,
-    );
+    console.log(`  ${label.padEnd(44)} species ${String(present).padStart(2)}  step ${fmt(us, 2).padStart(6)} us`);
   }
 }
 
@@ -665,9 +628,8 @@ function tight(name: string, scene: Scene): void {
         .join(', '),
   );
   console.log(
-    `    chem: ${fmt((100 * s.tickStepped) / Math.max(1, s.tickNonEmpty), 1)}% of non-empty ticks stepped; ${fmt(s.steps / simS, 1)} steps per sim s; ` +
-      `mean step dt ${fmt(s.stepDt / Math.max(1, s.steps), 4)}; mean active reactions/step ${fmt(s.active / Math.max(1, s.steps), 1)}; ` +
-      `moved() true ${s.movedTrue} of ${s.movedCalls}`,
+    `    chem: ${fmt(s.steps / simS, 1)} steps on non-empty vessels per sim s; ` +
+      `mean step dt ${fmt(s.stepDt / Math.max(1, s.steps), 4)}; mean active reactions/step ${fmt(s.active / Math.max(1, s.steps), 1)}`,
   );
   for (const [k, b] of [...byKind.entries()].sort((a, b) => b[1].t - a[1].t))
     console.log(

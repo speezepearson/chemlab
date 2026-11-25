@@ -64,7 +64,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     (every connected graph on a set of distinct colors) and their names, which saves store.
   - `params.ts` holds the bond parameters.
   - `shape.ts` is what follows from a molecule's shape alone: each atom's bonds, its loose ends, and whether it has a ring.
-  - `reactions.ts` is Arrhenius kinetics on whole molecules. The engine steps vessels through `tick`, never `step`.
+  - `reactions.ts` is Arrhenius kinetics on whole molecules. The engine steps every vessel with `step`, every substep.
   - `equilibrium.ts` is the exact full-equilibrium solver, for the editor's Equilibrate button and the bench's settled mixes. Faucets
     don't use it: they settle by the kinetics (`ReactionNetwork.settle`), so frozen bonds stay frozen.
 - `src/game/`: everything else in the game.
@@ -169,9 +169,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   "volume counts molecules" toggle is off. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
 - **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
   chemistry, cooling, the instruments' readings, the supply station's diverter, display and needle, and its changeover (block, door, lamp and alarm), a thermometer's bulb and its crack as it shatters, the shadow lamp's screen coming up and fading (`Tool.fluoresce`), what a sheet of test paper or bond paper shows coming up (`Tool.showing`, over about 2 sim s, `PAPER_TAU`), and the drip and stream sounds. All of it
-  runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. The one exception to the
-  substep length is a quiet vessel's chemistry (`ReactionNetwork.tick`), which can be put off for some substeps and
-  caught up in one longer step, but only while that step is far too short to overshoot (see README). The exceptions, at the
+  runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. Every vessel's chemistry is stepped every substep too: it was once put off
+  while a vessel was quiet and caught up a few substeps at a time, and the user had that taken out, since it made
+  brimming tanks spill in bursts. Don't batch or defer the sim's work between substeps. The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
   notice; the player themselves (walking, looking, carrying, tipping a flask, turning a handwheel or a dial with Q and E, their eyes closing for a nap, their head leaning in to a vessel's rim to sniff it and coming back), which is input, not the sim; and what
   isn't in the world (the HUD, the guides' flashing). While the player sleeps in the cryopod, or naps, the lab is run as ever in

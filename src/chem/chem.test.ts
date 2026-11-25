@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { testChemParams } from './testChem';
-import { Lag, QUIET, ReactionNetwork, atomCounts, heatAt, temperature, type Fluid } from './reactions';
+import { ReactionNetwork, atomCounts, heatAt, temperature, type Fluid } from './reactions';
 import { NS, SOLVENT_SPECIES, SPECIES, TARGET, bondMask, pairOf, singleOf, speciesIndex } from './species';
 import { ATOMS, ATOM_WEIGHT, BONDS, SOLVENT_INDEX, type Atom } from './atoms';
 import { equilibrate, equilibrium } from './equilibrium';
@@ -213,118 +213,6 @@ describe('reactions', () => {
     // two molecules never trade bound atoms, only join
     const two = net.netRates(fluid([[RK, 10], [pairOf('G', 'B'), 10]], 30)).filter((r) => r.from.length === 2);
     for (const r of two) expect(r.to).toHaveLength(1);
-  });
-});
-
-describe('quiet stepping', () => {
-  /** A network that notes the length of every step it takes. */
-  class Counting extends ReactionNetwork {
-    dts: number[] = [];
-    step(f: Fluid, dt: number): number {
-      this.dts.push(dt);
-      return super.step(f, dt);
-    }
-  }
-  const clone = (f: Fluid): Fluid => ({ n: f.n.slice(), N: f.N, Q: f.Q });
-  const h = 0.02;
-
-  it('follows the kinetics as closely as stepping every substep, in fewer steps', () => {
-    // G and K bind slowly, far slower than a substep
-    const start = fluid([single('G', 500), single('K', 500)]);
-    const every = clone(start);
-    run(new ReactionNetwork(testChemParams()), every, 30);
-    const net = new Counting(testChemParams());
-    const lazy = clone(start);
-    const lag = new Lag();
-    for (let t = 0; t < 30; t += h) net.tick(lazy, h, lag);
-    const steps = net.dts.length;
-    net.step(lazy, lag.owed); // what it's still owed
-    expect(steps).toBeLessThan(30 / h / 5);
-    for (let s = 0; s < NS; s++) {
-      const want = every.n[s];
-      // within a percent of how far it's gone
-      if (want > M) expect(Math.abs(lazy.n[s] - want)).toBeLessThan(0.01 * Math.abs(want - start.n[s]) + 1e-4 * want);
-    }
-    expect(Math.abs(temperature(lazy) - temperature(every))).toBeLessThan(0.005);
-  });
-
-  it('says what a fluid is owed between steps, so its molecules counted with that go as if stepped every substep', () => {
-    // G and K bind slowly, far slower than a substep: each step uses molecules up, two for each pair made
-    const start = fluid([single('G', 500), single('K', 500)]);
-    const count = (f: Fluid) => f.n.reduce((m, n) => m + n, 0);
-    const every = clone(start);
-    const plain = new ReactionNetwork(testChemParams());
-    const net = new Counting(testChemParams());
-    const lazy = clone(start);
-    const lag = new Lag();
-    expect(lag.owing()).toBe(0);
-    let [raw, owed, waits] = [0, 0, 0];
-    for (let t = 0; t < 30; t += h) {
-      plain.step(every, h);
-      const steps = net.dts.length;
-      net.tick(lazy, h, lag);
-      // put off, it's owed more the longer it waits; just stepped, nothing
-      if (net.dts.length > steps) expect(lag.owing()).toBeCloseTo(0, 15);
-      else if (lag.grow) {
-        expect(lag.owing()).toBeLessThan(0);
-        waits++;
-      }
-      // (once it's been stepped twice, so how fast it's going is known)
-      if (net.dts.length < 2) continue;
-      raw += Math.abs(count(lazy) - count(every));
-      owed += Math.abs(count(lazy) * (1 + lag.owing()) - count(every));
-    }
-    expect(waits).toBeGreaterThan(100);
-    expect(lag.grow).toBeLessThan(0);
-    // counted with what it's owed, it's several times nearer the fluid stepped every substep
-    expect(owed).toBeLessThan(raw / 4);
-  });
-
-  it('steps every substep a fluid that changes faster than that', () => {
-    const f = fluid([single('R', 50), single('G', 50)], 3);
-    const tau = new ReactionNetwork(testChemParams()).step(clone(f), 1e-9);
-    const net = new Counting(testChemParams());
-    const lag = new Lag();
-    const sub = 2 * QUIET.share * tau;
-    for (let i = 0; i < 3; i++) net.tick(f, sub, lag);
-    expect(net.dts).toEqual([sub, sub, sub]);
-  });
-
-  it('steps at once when something runs in, and loses no time', () => {
-    const net = new Counting(testChemParams());
-    const f = fluid([single('R', 500)]); // nothing to react with
-    const lag = new Lag();
-    for (let i = 0; i < 5; i++) net.tick(f, h, lag);
-    expect(net.dts).toHaveLength(1);
-    // G arrives, which binds R
-    f.n[singleOf('G')] += 500 * M;
-    f.N += 500 * M;
-    f.Q = heatAt(1, f.N);
-    net.tick(f, h, lag);
-    // its first step is a substep long, whatever the fluid was owed
-    expect(net.dts.length).toBeGreaterThan(1);
-    expect(net.dts[1]).toBe(h);
-    expect(net.dts.reduce((t, dt) => t + dt, 0) + lag.owed).toBeCloseTo(6 * h, 12);
-  });
-
-  it('waits no longer than it may, even with nothing reacting', () => {
-    const net = new Counting(testChemParams());
-    const f = fluid([single('R', 500)]);
-    const lag = new Lag();
-    for (let i = 0; i < 100; i++) net.tick(f, h, lag);
-    expect(Math.max(...net.dts)).toBeLessThanOrEqual(QUIET.most + h);
-  });
-
-  it('steps at once when the chemistry is edited', () => {
-    const net = new Counting(testChemParams());
-    const f = fluid([single('R', 500)]);
-    const lag = new Lag();
-    net.tick(f, h, lag);
-    net.tick(f, h, lag);
-    expect(net.dts).toHaveLength(1);
-    net.rebuild();
-    net.tick(f, h, lag);
-    expect(net.dts.length).toBeGreaterThan(1);
   });
 });
 

@@ -1,5 +1,5 @@
 import { equilibrate } from '../chem/equilibrium';
-import { Lag, temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
+import { temperature, type Fluid, type NetReaction, type ReactionNetwork } from '../chem/reactions';
 import { NS, SPECIES, TARGET } from '../chem/species';
 import { AIRLOCK, BLINDED_S, POD, RISE_S, SETTLE_S, WAKE_S, airlockBoxes, ease, inPod, outOfAirlock, type Wake } from './airlock';
 import { hushAlarms } from './ambience';
@@ -17,7 +17,7 @@ import { CAP, DELIVERY, HOME_H, HOME_W, POUR_RATE, TRACE } from './config';
 import { cool, exposure, taper } from './cooling';
 import { FAUCETS, WALL_FAUCETS, faucetIndex, faucetOutput, faucetRate, faucetTarget, faucetValvePose, FAUCET_VALVE } from './faucets';
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
-import { Flask, VOLUME, Vessel, roomFor, sustenance, transfer, volume, volumeUnit } from './flask';
+import { Flask, Vessel, roomFor, sustenance, transfer, volume, volumeUnit } from './flask';
 import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
@@ -559,8 +559,6 @@ export class GameEngine {
   private inflow = new Map<Vessel, number>();
   /** Where each drop that landed in a vessel this frame landed, for its sound. */
   private landed: Vec3[] = [];
-  /** Each vessel's chemistry, put off while it's quiet (see ReactionNetwork.tick). */
-  private lags = new WeakMap<Vessel, Lag>();
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -3100,11 +3098,7 @@ export class GameEngine {
   private overflow(v: Vessel): void {
     // a fluid's volume is never more than its atoms, so most vessels needn't be measured
     if (v.N <= v.cap) return;
-    // by molecules, how much of it fits counts what its chemistry owes it, put off as that may be (see Lag.owing):
-    // a fluid whose bonds are forming is as much smaller as the step it's waiting for will make it, so what it
-    // spills is even from substep to substep, not held back and then let go as its chemistry is caught up
-    const owing = VOLUME.molecules ? Math.max(-0.5, this.lags.get(v)?.owing() ?? 0) : 0;
-    const over = volume(v) - v.cap / (1 + owing);
+    const over = volume(v) - v.cap;
     if (over <= 0) return;
     const out = new Vessel(Infinity);
     transfer(v, out, over);
@@ -3391,9 +3385,7 @@ export class GameEngine {
           return !lands && d.y > groundAt(d.x, d.z);
         });
         for (const v of vessels) {
-          let lag = this.lags.get(v);
-          if (!lag) this.lags.set(v, (lag = new Lag()));
-          this.chem.tick(v, step, lag);
+          this.chem.step(v, step);
           // by molecules, breaking bonds swells a fluid, and whatever no longer fits spills
           this.overflow(v);
         }
@@ -4249,12 +4241,6 @@ export class GameEngine {
       station: this.station(),
       clock: () => this.clock,
       advance: (dt) => this.simulate(dt, true),
-      settle: () => {
-        for (const v of this.vessels()) {
-          const lag = this.lags.get(v);
-          if (lag) this.chem.flush(v, 0.02, lag);
-        }
-      },
       skip: (dt) => {
         this.clock += dt;
         this.spin = (this.spin + SPIN * dt) % (2 * Math.PI);

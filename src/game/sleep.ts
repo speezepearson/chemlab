@@ -17,7 +17,7 @@ import type { Tool } from './tools';
  * impure, does so in a window, and wakes the sleeper.
  *
  * Each vessel's state is its molecule counts n[s] and its heat Q. Over a window of W sim seconds it's sampled K + 1
- * times (each time with its chemistry caught up, see Sleeper.settle), giving K increments per component, from which come its rate (their mean) and that rate's standard error
+ * times, giving K increments per component, from which come its rate (their mean) and that rate's standard error
  * (drops and random rounding make the increments noisy).
  *
  * A vessel that something drains (a tank with a spout open, a funnel, the heater's tube) feeds what's downstream,
@@ -108,12 +108,6 @@ export interface Sleeper {
   clock(): number;
   /** Run the lab for dt sim seconds, as ever, with nothing drawn or heard. */
   advance(dt: number): void;
-  /**
-   * Catch every vessel's chemistry up with what it's owed (see ReactionNetwork.flush), so that a sample of it isn't
-   * part way through a wait: sampled as it comes, a vessel whose chemistry is stepped every few substeps shows a
-   * sawtooth that isn't there, in its species and its heat.
-   */
-  settle(): void;
   /** Move the lab's clocks on by dt sim seconds, after a jump. */
   skip(dt: number): void;
 }
@@ -469,12 +463,10 @@ export function* sleep(lab: Sleeper, stats: SleepStats = { plain: 0, jumped: 0, 
   }
   let seen = new Map<Vessel, Seen>();
   for (;;) {
-    lab.settle();
     const tracks: Track[] = lab.vessels().map((t) => ({ ...t, xs: [sample(t.v)] }));
     for (let k = 0; k < K; k++) {
       const why = yield* run(W / K);
       if (why) return why;
-      lab.settle();
       tracks.forEach((tr) => tr.xs.push(sample(tr.v)));
     }
     const p = plan(tracks, W, seen, lab.clock() - W / 2, reservoir, { species, goal, sustain: !nap });

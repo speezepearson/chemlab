@@ -35,8 +35,6 @@ function lab(supply: number, drain: (n: number, dt: number) => number, reservoir
     skip(dt) {
       clock += dt;
     },
-    // (the stand-in has no chemistry to catch up)
-    settle() {},
   };
   return { l, tank, station, now: () => clock };
 }
