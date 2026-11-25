@@ -150,7 +150,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `faucets.ts` is the faucets: what each pours, and its valve (`FAUCET_VALVE`), a handwheel on its neck, drawn and turned just as a tool's is (the engine's
     `turning` and `valveAimed` take either; `valveAt`, `sweep` and `settleAngle` in `bodies.ts` are the law they share), letting out
     `faucetRate` through the same `drip` as a spout.
-  - Also here: `presets.ts`, `save.ts` and `scale.ts`.
+  - Also here: `presets.ts`, `save.ts` and `scale.ts`, and `start.ts`, the lab a new game starts in (`lab` of Stranded, `DEFAULT_PRESET`, the only preset the game has; the bench's scenes are presets too): a save, laid out by the engine's `lay` as a loaded one is. It's in flux, so tests use an empty preset (`EMPTY` in `engine.test.ts`) and never its contents.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
     `volumes.ts`); `diverter.ts` is the supply station's diverter, `changeover.ts` its changeover, `ambience.ts` the ship, `water.ts` drips and streams, `shatter.ts` a thermometer
     shattering.

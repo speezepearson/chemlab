@@ -1,78 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { temperature } from '../chem/reactions';
-import { NS, TARGET } from '../chem/species';
-import { CAP, N_FLASKS } from './config';
-import { Flask, roomFor } from './flask';
+import { TARGET } from '../chem/species';
+import { CAP } from './config';
+import { Flask } from './flask';
 import { CRYOSTABILIZER } from './supply';
-import { SHAPES, TANK_CAP, Tool, mouthBelow } from './tools';
-import { LINED_UP, spoutAt, tankMouth, toolBox } from './bodies';
-import { onCell, toolAnchor } from './testLayout';
-import { boxesOverlap } from './physics';
-import { fromFrac } from './space';
-import { DEFAULT_PRESET, PRESETS, REFERENCE_FILL, applyFill, fillAtoms, type FlaskFill } from './presets';
-
-/** How much room a fill takes, by volume. */
-const fillVolume = (fill: FlaskFill) => fill.contents.reduce((t, c) => t + c.molecules * roomFor(c.species), 0);
+import { Tool } from './tools';
+import { REFERENCE_FILL, applyFill } from './presets';
 
 describe('presets', () => {
-  it('have unique ids', () => {
-    expect(new Set(PRESETS.map((p) => p.id)).size).toBe(PRESETS.length);
-  });
-
-  for (const p of PRESETS) {
-    it(`${p.name} fits on the shelf`, () => {
-      expect(p.flasks.length).toBeLessThanOrEqual(N_FLASKS);
-      for (const fill of p.flasks) {
-        if (!fill) continue;
-        expect(fillAtoms(fill)).toBeGreaterThan(0);
-        expect(fillVolume(fill)).toBeLessThanOrEqual(CAP);
-        expect(fill.T).toBeGreaterThanOrEqual(0);
-        for (const c of fill.contents) {
-          expect(Number.isInteger(c.species) && c.species >= 0 && c.species < NS).toBe(true);
-          expect(c.molecules).toBeGreaterThan(0);
-        }
-      }
-    });
-  }
-
-  for (const p of PRESETS) {
-    it(`${p.name} has sensible tools`, () => {
-      for (const t of p.tools ?? []) {
-        for (const c of t.at) expect(c >= 0 && c <= 1).toBe(true);
-        for (const v of t.valves ?? []) expect(v >= 0 && v <= 1).toBe(true);
-        expect((t.valves ?? []).length).toBeLessThanOrEqual(SHAPES[t.kind].tanks.length);
-        expect((t.tanks ?? []).length).toBeLessThanOrEqual(SHAPES[t.kind].tanks.length);
-        for (const fill of t.tanks ?? []) if (fill) expect(fillVolume(fill)).toBeLessThanOrEqual(SHAPES[t.kind].tankCap ?? TANK_CAP);
-      }
-    });
-  }
-
-  for (const p of PRESETS) {
-    it(`${p.name} lays its tools out across in whole cells, each spout over the middle of what it pours into, clear of each other`, () => {
-      const tools = (p.tools ?? []).map((spec, i) => {
-        const t = new Tool(spec.kind, i, { ...fromFrac({ x: spec.at[0], y: spec.at[1] }, spec.z), yaw: spec.yaw ?? 0 });
-        expect(onCell(t.pose, toolAnchor(t)).x).toBeCloseTo(t.pose.x, 6);
-        return t;
-      });
-      // (front to back they needn't be on cells: a spout can be in front of its tool's middle, see plumbZ)
-      const mouths = tools.flatMap((t) => t.tanks.map((_, k) => tankMouth(t, k)));
-      for (const t of tools)
-        t.shape.spouts.forEach((_, j) => {
-          const s = spoutAt(t, j);
-          const m = mouthBelow(mouths, s);
-          if (m) expect(Math.hypot(s.x - m.x, s.z - m.z)).toBeLessThanOrEqual(LINED_UP);
-        });
-      for (const a of tools) for (const b of tools) if (a !== b) expect(boxesOverlap(toolBox(a), toolBox(b))).toBe(false);
-    });
-  }
-
-  it("fills the ship's reservoir with what's left on board, and starts the default game with no supply flask", () => {
+  it("fills the ship's reservoir with what's left on board", () => {
     const ref = new Tool('receptacle', 0).tanks[1];
     applyFill(ref, REFERENCE_FILL);
     // a hundred flasks of triangles
     expect(ref.n[TARGET]).toBe(CRYOSTABILIZER.start);
     expect(ref.N).toBe(3 * CRYOSTABILIZER.start);
-    expect(DEFAULT_PRESET.flasks.filter(Boolean)).toHaveLength(0);
   });
 
   it('applyFill replaces whatever was in the flask', () => {

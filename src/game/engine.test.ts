@@ -12,7 +12,7 @@ import type { GameEngine } from './engine';
 import { Vessel, volume, type Flask } from './flask';
 import type { Scale } from './scale';
 import { FLASK_H } from './flaskShape';
-import { DEFAULT_PRESET, LAMP_POSE, PRESETS } from './presets';
+import { DEFAULT_PRESET, LAMP_POSE, type Preset } from './presets';
 import { FAUCETS, faucetRate, faucetTarget, faucetValveAt } from './faucets';
 import { FILL_RATE } from './config';
 import type { SaveState } from './save';
@@ -115,12 +115,15 @@ afterEach(() => {
   for (const e of engines.splice(0)) e.destroy();
 });
 
+/** A lab with nothing out but what every lab has (the game's own starting lab is in flux, see start.ts). */
+const EMPTY: Preset = { id: DEFAULT_PRESET.id, name: 'Empty', flasks: [] };
+
 /** A lab with nothing drawn, and what's inside it. */
 function lab(): { e: GameEngine; in: Inside } {
   const canvas = { addEventListener() {}, removeEventListener() {} } as unknown as HTMLCanvasElement;
   const stage = { clientWidth: 1280, clientHeight: 720 } as unknown as HTMLElement;
   const cb = { onInspect() {}, onEdit() {}, onLabel() {}, onHud() {}, onAwake() {} };
-  const e = new Engine(canvas, stage, new ReactionNetwork(testChemParams()), cb);
+  const e = new Engine(canvas, stage, new ReactionNetwork(testChemParams()), cb, EMPTY);
   engines.push(e);
   return { e, in: e as unknown as Inside };
 }
@@ -204,6 +207,41 @@ function lookAt(l: Lab, p: { x: number; y: number; z: number }, d = 200): void {
 const run = (l: Lab, s: number) => {
   for (let i = 0; i < Math.round(s / 0.05); i++) l.in.simulate(0.05);
 };
+
+describe('a preset that is a whole lab', () => {
+  it('lays the lab out as its save has it, nothing moved, dropped or added, and Reset lays it out again', () => {
+    const l = lab();
+    const s = DEFAULT_PRESET.lab;
+    expect(s).toBeDefined();
+    const close = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+    const check = () => {
+      const got = l.e.snapshot();
+      expect(got.tools.map((t) => [t.id, t.kind])).toEqual(s!.tools.map((t) => [t.id, t.kind]));
+      got.tools.forEach((t, i) => {
+        const want = s!.tools[i];
+        expect([t.fx, t.fy, t.z!, t.yaw!].every((v, k) => close(v, [want.fx, want.fy, want.z!, want.yaw!][k])), `${t.kind} ${t.id}`).toBe(true);
+        expect(t.valves).toEqual(want.valves);
+        expect(t.cocks).toEqual(want.cocks);
+        expect(t.tanks.map((v) => v.n)).toEqual(want.tanks.map((v) => v.n));
+        expect(t.memory).toEqual(want.memory);
+        expect(t.bed?.map((v) => v.n)).toEqual(want.bed?.map((v) => v.n));
+        expect(t.paper?.map((v) => v.n)).toEqual(want.paper?.map((v) => v.n));
+      });
+      expect(got.flasks.map((f) => [f.n, f.Q])).toEqual(s!.flasks.map((f) => [f.n, f.Q]));
+      got.flasks.forEach((f, i) => expect(close(f.x, s!.flasks[i].x) && close(f.up, s!.flasks[i].up) && close(f.z!, s!.flasks[i].z!)).toBe(true));
+      expect(got.hoses.map((h) => h.on)).toEqual(s!.hoses.map((h) => h.on));
+      expect(got.faucets!.map((fa) => fa.valve)).toEqual(s!.faucets!.map((fa) => fa.valve));
+      expect(got.cabinet).toEqual(s!.cabinet);
+    };
+    // (the chemistry, and where the player is, are left alone)
+    const chem = l.e.snapshot().chem;
+    l.e.load(DEFAULT_PRESET);
+    check();
+    expect(l.e.snapshot().chem).toEqual(chem);
+    l.e.reset();
+    check();
+  });
+});
 
 describe('test paper', () => {
   const R = singleOf('R');
@@ -2083,7 +2121,7 @@ describe('faucets’ valves', () => {
     return f;
   }
 
-  it('are all shut in a new lab, after Reset and in every preset, and a shut one lets out nothing', () => {
+  it('are all shut in a new lab, after Reset and in the game’s start, and a shut one lets out nothing', () => {
     const l = lab();
     expect(taps(l).faucets.length).toBe(FAUCETS.length);
     expect(taps(l).faucets.every((fa) => fa.valve === 0)).toBe(true);
@@ -2091,11 +2129,9 @@ describe('faucets’ valves', () => {
     run(l, 2);
     expect(f.N).toBe(0);
     expect(taps(l).faucets.every((fa) => !fa.out && fa.drop.N === 0)).toBe(true);
-    for (const p of PRESETS) {
-      for (const fa of taps(l).faucets) fa.valve = 1;
-      l.e.load(p);
-      expect(taps(l).faucets.every((fa) => fa.valve === 0), p.id).toBe(true);
-    }
+    for (const fa of taps(l).faucets) fa.valve = 1;
+    l.e.load(DEFAULT_PRESET);
+    expect(taps(l).faucets.every((fa) => fa.valve === 0)).toBe(true);
     for (const fa of taps(l).faucets) fa.valve = 0.5;
     l.e.reset();
     expect(taps(l).faucets.every((fa) => fa.valve === 0)).toBe(true);
@@ -2913,13 +2949,6 @@ describe('stopcocks', () => {
     expect(by(952).valves).toEqual([0.8]);
     expect(by(953).cocks).toEqual([null]);
     expect(by(pip.id).cocks).toEqual([{ valve: 0.3 }]);
-  });
-
-  it('are fitted by the demos where their valves used to be set', () => {
-    const l = lab();
-    l.e.load(PRESETS.find((p) => p.id === 'exchanger')!);
-    const ts = l.in.tools.filter((t) => t.kind === 'dispenser' || t.kind === 'exchanger');
-    expect(ts.flatMap((t) => t.cocks.map((c) => c?.valve))).toEqual([0.25, 0.25, 0.25, 0.25]);
   });
 
   it('go on the end of a hose, under its nozzle, which then lets out at their foot, and up to the spout as it rolls up', () => {
