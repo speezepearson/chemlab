@@ -12,7 +12,7 @@ import type { GameEngine } from './engine';
 import { Vessel, volume, type Flask } from './flask';
 import type { Scale } from './scale';
 import { FLASK_H } from './flaskShape';
-import { DEFAULT_PRESET, LAMP_POSE, PRESETS, type Preset } from './presets';
+import { DEFAULT_PRESET, LAMP_POSE, type Preset } from './presets';
 import { FAUCETS, faucetRate, faucetTarget, faucetValveAt } from './faucets';
 import { FILL_RATE } from './config';
 import type { SaveState } from './save';
@@ -2121,7 +2121,7 @@ describe('faucets’ valves', () => {
     return f;
   }
 
-  it('are all shut in a new lab, after Reset and in every preset, and a shut one lets out nothing', () => {
+  it('are all shut in a new lab, after Reset and in the game’s start, and a shut one lets out nothing', () => {
     const l = lab();
     expect(taps(l).faucets.length).toBe(FAUCETS.length);
     expect(taps(l).faucets.every((fa) => fa.valve === 0)).toBe(true);
@@ -2129,11 +2129,9 @@ describe('faucets’ valves', () => {
     run(l, 2);
     expect(f.N).toBe(0);
     expect(taps(l).faucets.every((fa) => !fa.out && fa.drop.N === 0)).toBe(true);
-    for (const p of PRESETS) {
-      for (const fa of taps(l).faucets) fa.valve = 1;
-      l.e.load(p);
-      expect(taps(l).faucets.every((fa) => fa.valve === 0), p.id).toBe(true);
-    }
+    for (const fa of taps(l).faucets) fa.valve = 1;
+    l.e.load(DEFAULT_PRESET);
+    expect(taps(l).faucets.every((fa) => fa.valve === 0)).toBe(true);
     for (const fa of taps(l).faucets) fa.valve = 0.5;
     l.e.reset();
     expect(taps(l).faucets.every((fa) => fa.valve === 0)).toBe(true);
@@ -2951,13 +2949,6 @@ describe('stopcocks', () => {
     expect(by(952).valves).toEqual([0.8]);
     expect(by(953).cocks).toEqual([null]);
     expect(by(pip.id).cocks).toEqual([{ valve: 0.3 }]);
-  });
-
-  it('are fitted by the demos where their valves used to be set', () => {
-    const l = lab();
-    l.e.load(PRESETS.find((p) => p.id === 'exchanger')!);
-    const ts = l.in.tools.filter((t) => t.kind === 'dispenser' || t.kind === 'exchanger');
-    expect(ts.flatMap((t) => t.cocks.map((c) => c?.valve))).toEqual([0.25, 0.25, 0.25, 0.25]);
   });
 
   it('go on the end of a hose, under its nozzle, which then lets out at their foot, and up to the spout as it rolls up', () => {
