@@ -1347,6 +1347,29 @@ describe('E’s hint', () => {
   });
 });
 
+describe('the left button’s hint', () => {
+  it('shows for picking something up, but not for setting down what’s in hand', () => {
+    const l = lab();
+    const I = l.in as unknown as { leftWouldDo(): boolean; leftHint(): boolean; placed: unknown; placement(h: unknown): unknown };
+    holdAt(l, 'flask', { x: SPOT.x, y: LIFT + 160, z: SPOT.z, yaw: 0 });
+    const f = hands(l).held!.f!;
+    l.in.target = null;
+    // (where it would be set down, as each frame works out)
+    I.placed = I.placement(l.in.held);
+    // in hand, with somewhere to rest: the left button would set it down, and its hint doesn't say so
+    expect(I.leftWouldDo()).toBe(true);
+    expect(I.leftHint()).toBe(false);
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    // with empty hands and the crosshair on it, it would pick it up, and says so
+    l.in.target = { kind: 'flask', f };
+    expect(I.leftWouldDo()).toBe(true);
+    expect(I.leftHint()).toBe(true);
+    l.in.target = null;
+    expect(I.leftHint()).toBe(false);
+  });
+});
+
 describe('setting things down', () => {
   /** More of the engine's own things: the faucets, the scales, and where things are made to face. */
   interface More {

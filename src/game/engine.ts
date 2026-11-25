@@ -72,8 +72,9 @@ export interface Hud {
   /** Whether the left button would set down what's held: whether there's somewhere for it to rest (see placement). */
   drop: boolean;
   /**
-   * Whether the left button would do something: press the key or button the crosshair is on, do something with a hose,
-   * or set down what's held or pick up what's looked at.
+   * Whether the left button's hint shows by the crosshair: when it would press the key or button the crosshair is on,
+   * take a stopcock off, pick up what's looked at, or put what's held in the cabinet; not for setting down what's
+   * held (see GameEngine.leftHint).
    */
   press: boolean;
   /** Whether Q and E, held, would turn a handwheel or dial near the crosshair (see GameEngine.aimedValve). */
@@ -4189,6 +4190,16 @@ export class GameEngine {
     return (
       (p?.kind === 'scale' && p.part === 'tare') ||
       (p?.kind === 'tool' && p.part === 'button') ||
+  /**
+   * Whether the left button's hint shows by the crosshair (see Hud.press): when it would do something (see
+   * leftWouldDo), but for setting down what's in hand, which needs no telling (it's what the left button does with
+   * anything in hand, and where it would go is drawn in the lab). With something in hand, that leaves pressing a key
+   * or button, and putting it in the cabinet.
+   */
+  private leftHint(): boolean {
+    return this.leftWouldDo() && (!this.held || this.onButton() || this.intoCabinet());
+  }
+
       p?.kind === 'alarm' ||
       p?.kind === 'blinds' ||
       p?.kind === 'wake'
@@ -4572,7 +4583,7 @@ export class GameEngine {
       inPod: inPod(this.wake),
       holding: !!this.held,
       drop: !!this.placed && 'rest' in this.placed,
-      press: !this.sniffing && this.leftWouldDo(),
+      press: !this.sniffing && this.leftHint(),
       turn: this.turnWouldDo() || !!this.turning,
       use: !this.sniffing && this.useWouldDo(),
       pouring: !!this.pourHintAt(),
