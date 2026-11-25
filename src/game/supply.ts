@@ -1,12 +1,20 @@
 import { TARGET, pairOf } from '../chem/species';
-import { ANTINUCLEANT, ANTINUCLEANT_L, CAP, FLASK_L, GOAL_L, GOAL_TARGET, VOYAGE } from './config';
+import { ANTINUCLEANT, ANTINUCLEANT_L, CAP, FLASK_L, GOAL_L, GOAL_TARGET, IJ_BUFFER, IJ_BUFFER_L, VOYAGE } from './config';
 
 /**
  * Something the ship is short of, which the station's block of the wall is fitted for (see STATION in tools.ts): a
  * reservoir of it, short of what the voyage needs, to be topped up through the block's funnel.
  */
 export interface Supply {
-  /** What it's called, in lower case: printed on its block's plate over its reservoir, and said in the pod's notice. */
+  /**
+   * What a save calls it (see Tool.memory), which never changes, wherever it comes in SUPPLIES: 0 and 1 were the
+   * antinucleant's and the cryostabilizer's places in it before there was an IJ-buffer.
+   */
+  id: number;
+  /**
+   * What it's called, in lower case but for a proper name's capitals: printed on its block's plate over its reservoir,
+   * and said in the pod's notice.
+   */
   name: string;
   /** The species it is. */
   species: number;
@@ -24,12 +32,24 @@ export interface Supply {
 const molecules = (l: number) => Math.round((l / FLASK_L) * CAP);
 
 /**
- * What the ship is short of, in the order the station is fitted for them: a little antinucleant, R–B, which is soon
- * made; and then the cryostabilizer, the R–G–B triangle, which is the game. Once the reservoir holds
- * enough of one, the station's block is changed for the next one's (see CHANGEOVER in tools.ts).
+ * What the ship is short of, in the order the station is fitted for them: the IJ-buffer, R–G, the easiest to make,
+ * though a good deal of it; a little antinucleant, R–B, which is soon made; and then the cryostabilizer, the R–G–B
+ * triangle, which is the game. Once the reservoir holds enough of one, the station's block is changed for the next
+ * one's (see CHANGEOVER in tools.ts).
  */
 export const SUPPLIES: readonly Supply[] = [
   {
+    id: 2,
+    name: 'IJ-buffer',
+    species: pairOf('R', 'G'),
+    goalL: IJ_BUFFER_L,
+    goal: molecules(IJ_BUFFER_L),
+    startL: IJ_BUFFER.presentL,
+    start: molecules(IJ_BUFFER.presentL),
+    cap: 450 * CAP,
+  },
+  {
+    id: 0,
     name: 'antinucleant',
     species: pairOf('R', 'B'),
     goalL: ANTINUCLEANT_L,
@@ -39,6 +59,7 @@ export const SUPPLIES: readonly Supply[] = [
     cap: 100 * CAP,
   },
   {
+    id: 1,
     name: 'cryostabilizer',
     species: TARGET,
     goalL: GOAL_L,
@@ -50,7 +71,7 @@ export const SUPPLIES: readonly Supply[] = [
   },
 ];
 
-/** The first thing the station is fitted for, in a new lab: the antinucleant. */
+/** The first thing the station is fitted for, in a new lab: the IJ-buffer. */
 export const FIRST_SUPPLY = SUPPLIES[0];
 /** The last, and the one the game is won by: the cryostabilizer. Labs saved before there was any other are on it. */
 export const CRYOSTABILIZER = SUPPLIES[SUPPLIES.length - 1];

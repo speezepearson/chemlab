@@ -316,7 +316,7 @@ function makeEngine(scene: Scene, seed: number): { e: Engine; net: ReactionNetwo
   const net = new ReactionNetwork(params);
   const e = new GameEngine(canvas as any, stage as any, net, callbacks as any, scene.preset) as unknown as Engine;
   e.wake = 'closed';
-  // the scenes are of the cryostabilizer's making: a new lab's station is fitted for the antinucleant first
+  // the scenes are of the cryostabilizer's making: a new lab's station is fitted for the IJ-buffer first
   e.station().stock(CRYOSTABILIZER);
   if (LOADED) e.restore(LOADED, DEFAULT_PRESET);
   else scene.after?.(e);

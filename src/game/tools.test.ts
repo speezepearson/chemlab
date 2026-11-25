@@ -489,7 +489,9 @@ describe('supply station', () => {
 });
 
 describe("the station's supplies and changeover", () => {
-  const RB = pairOf('R', 'B');
+  /** What a new lab's station is fitted for, and what it's changed for next. */
+  const P = FIRST_SUPPLY.species;
+  const NEXT = nextSupply(FIRST_SUPPLY)!;
   /** A station fitted for the first supply, as a new lab's is. */
   const first = () => {
     const r = new Tool('receptacle', 0);
@@ -501,21 +503,27 @@ describe("the station's supplies and changeover", () => {
     for (let s = 0; s < t - 1e-9; s += 0.02) r.step(0.02);
   };
 
-  it('is fitted first for a little antinucleant, R–B, and then for the cryostabilizer, which is the last', () => {
-    expect(SUPPLIES.map((s) => s.name)).toEqual(['antinucleant', 'cryostabilizer']);
-    expect(FIRST_SUPPLY.species).toBe(RB);
-    expect(nextSupply(FIRST_SUPPLY)).toBe(CRYOSTABILIZER);
+  it('is fitted first for the IJ-buffer, R–G, then for a little antinucleant, R–B, then for the cryostabilizer, the last', () => {
+    expect(SUPPLIES.map((s) => s.name)).toEqual(['IJ-buffer', 'antinucleant', 'cryostabilizer']);
+    expect(SUPPLIES.map((s) => s.species)).toEqual([pairOf('R', 'G'), pairOf('R', 'B'), TARGET]);
+    expect(FIRST_SUPPLY).toBe(SUPPLIES[0]);
+    expect(nextSupply(FIRST_SUPPLY)).toBe(SUPPLIES[1]);
+    expect(nextSupply(SUPPLIES[1])).toBe(CRYOSTABILIZER);
     expect(nextSupply(CRYOSTABILIZER)).toBeNull();
-    expect(CRYOSTABILIZER.species).toBe(TARGET);
-    // 8.30 L of the 9.20 L needed; a reservoir about three times the goal, as the cryostabilizer's is
-    expect(FIRST_SUPPLY.startL.toFixed(2)).toBe('8.30');
-    expect(FIRST_SUPPLY.goalL.toFixed(2)).toBe('9.20');
+    // 10.30 L of the 41.52 L of IJ-buffer needed, and 8.30 L of the 9.20 L of antinucleant
+    expect(SUPPLIES.slice(0, 2).map((s) => [s.startL, s.goalL].map((l) => l.toFixed(2)))).toEqual([
+      ['10.30', '41.52'],
+      ['8.30', '9.20'],
+    ]);
+    // each with a reservoir about three times the goal, as the cryostabilizer's is
     for (const s of SUPPLIES) {
       expect(Number.isInteger(s.start)).toBe(true);
       expect(s.start).toBeLessThan(s.goal);
       expect(s.start / s.goal).toBeCloseTo(s.startL / s.goalL, 6);
       expect(s.cap / s.goal).toBeCloseTo(3, 0);
     }
+    // and each called something of its own in a save
+    expect(new Set(SUPPLIES.map((s) => s.id)).size).toBe(SUPPLIES.length);
   });
 
   it('stocked for a supply, holds what is on board of it, in a reservoir as big as that supply needs', () => {
@@ -523,7 +531,7 @@ describe("the station's supplies and changeover", () => {
     const [funnel, ref] = r.tanks;
     expect(r.supply).toBe(FIRST_SUPPLY);
     expect(ref.cap).toBe(FIRST_SUPPLY.cap);
-    expect(ref.n[RB]).toBe(FIRST_SUPPLY.start);
+    expect(ref.n[P]).toBe(FIRST_SUPPLY.start);
     expect(ref.N).toBe(2 * FIRST_SUPPLY.start);
     expect(temperature(ref)).toBeCloseTo(1, 6);
     expect(funnel.N).toBe(0);
@@ -533,10 +541,10 @@ describe("the station's supplies and changeover", () => {
   it('takes only what it is fitted for', () => {
     const r = first();
     const [funnel, ref] = r.tanks;
-    funnel.setMolecules(RB, 1000);
+    funnel.setMolecules(P, 1000);
     run(r, 0.1);
     expect(r.gate).toBe('reservoir');
-    expect(ref.n[RB]).toBe(FIRST_SUPPLY.start + 1000);
+    expect(ref.n[P]).toBe(FIRST_SUPPLY.start + 1000);
     expect(r.purity).toBeCloseTo(1, 6);
     // the cryostabilizer is no good to it
     funnel.setMolecules(TARGET, 1000);
@@ -550,7 +558,7 @@ describe("the station's supplies and changeover", () => {
   it('counts steady delivery whatever it is fitted for', () => {
     const r = first();
     for (let t = 0; t < 10; t++) {
-      r.tanks[0].setMolecules(RB, 1000);
+      r.tanks[0].setMolecules(P, 1000);
       run(r, 1);
     }
     expect(r.steady).toBeCloseTo(10, 6);
@@ -559,46 +567,46 @@ describe("the station's supplies and changeover", () => {
   it('is changed for the next once its reservoir holds enough, and not before', () => {
     const r = first();
     const [funnel, ref] = r.tanks;
-    ref.setMolecules(RB, FIRST_SUPPLY.goal - 1e6);
+    ref.setMolecules(P, FIRST_SUPPLY.goal - 1e6);
     run(r, 1);
     expect(r.swap).toBeNull();
     // a little more than its open faucet lets out
     r.valves[0] = 0.5;
-    funnel.setMolecules(RB, 1e7);
+    funnel.setMolecules(P, 1e7);
     r.step(0.02);
     // it starts at once, and shuts its faucet
     expect(r.swap).toBe(0);
     expect(r.valves[0]).toBe(0);
     expect(r.away).toBe(false);
     // it still works through the warning
-    funnel.setMolecules(RB, 1000);
-    const held = ref.n[RB];
+    funnel.setMolecules(P, 1000);
+    const held = ref.n[P];
     run(r, CHANGEOVER.warn - 0.1);
-    expect(ref.n[RB]).toBe(held + 1000);
+    expect(ref.n[P]).toBe(held + 1000);
     // then its block is away: nothing in its funnel moves, and nothing leaves its spouts, even with its valve open
     run(r, 0.2);
     expect(r.away).toBe(true);
-    funnel.setMolecules(RB, 1000);
+    funnel.setMolecules(P, 1000);
     r.valves[0] = 1;
     expect(r.step(0.02)).toEqual([null, null]);
-    expect(funnel.n[RB]).toBe(1000);
+    expect(funnel.n[P]).toBe(1000);
     expect(r.supply).toBe(FIRST_SUPPLY);
     // halfway through its time away it's the next supply's, as new
     run(r, CHANGEOVER.retract + CHANGEOVER.shut + CHANGEOVER.away / 2);
-    expect(r.supply).toBe(CRYOSTABILIZER);
-    expect(ref.cap).toBe(CRYOSTABILIZER.cap);
-    expect(ref.n[TARGET]).toBe(CRYOSTABILIZER.start);
-    expect(ref.n[RB]).toBe(0);
+    expect(r.supply).toBe(NEXT);
+    expect(ref.cap).toBe(NEXT.cap);
+    expect(ref.n[NEXT.species]).toBe(NEXT.start);
+    expect(ref.n[P]).toBe(0);
     expect(funnel.N).toBe(0);
     expect(r.away).toBe(true);
     // and once it's out again it works, the changeover over a moment later
     run(r, CHANGEOVER.away / 2 + CHANGEOVER.open + CHANGEOVER.extend);
     expect(r.away).toBe(false);
     expect(r.swap).not.toBeNull();
-    funnel.setMolecules(TARGET, 1000);
+    funnel.setMolecules(NEXT.species, 1000);
     run(r, CHANGEOVER.clear + 0.1);
     expect(r.swap).toBeNull();
-    expect(ref.n[TARGET]).toBe(CRYOSTABILIZER.start + 1000);
+    expect(ref.n[NEXT.species]).toBe(NEXT.start + 1000);
   });
 
   it('has nothing to be changed for once it has enough cryostabilizer', () => {
@@ -630,7 +638,7 @@ describe("the station's supplies and changeover", () => {
 
   it('keeps what it is fitted for, and how far through a changeover it is, in a save', () => {
     const r = first();
-    expect(r.memory).toEqual([0, -1]);
+    expect(r.memory).toEqual([FIRST_SUPPLY.id, -1]);
     const back = new Tool('receptacle', 1);
     back.remember(r.memory);
     expect(back.supply).toBe(FIRST_SUPPLY);
@@ -639,11 +647,17 @@ describe("the station's supplies and changeover", () => {
     // mid-changeover, before and after it's the next supply's
     for (const [supply, swap] of [[0, 3], [1, CHANGEOVER_S - 2]]) {
       const t = new Tool('receptacle', 2);
-      t.remember([supply, swap]);
+      t.remember([SUPPLIES[supply].id, swap]);
       expect(t.supply).toBe(SUPPLIES[supply]);
       expect(t.swap).toBe(swap);
-      expect(t.memory).toEqual([supply, swap]);
+      expect(t.memory).toEqual([SUPPLIES[supply].id, swap]);
     }
+    // a save from before the IJ-buffer called the antinucleant 0 and the cryostabilizer 1, as they still are
+    const antinucleant = new Tool('receptacle', 4);
+    antinucleant.remember([0, -1]);
+    expect(antinucleant.supply.name).toBe('antinucleant');
+    antinucleant.remember([1, -1]);
+    expect(antinucleant.supply).toBe(CRYOSTABILIZER);
     // a save from before there was any supply but the cryostabilizer has no memory, and nonsense is ignored
     const old = new Tool('receptacle', 3);
     old.remember(undefined);

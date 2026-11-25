@@ -13,7 +13,14 @@ export const FLASK_L = VOYAGE.presentL / 100;
 /** The cryostabilizer needed to reach Mu Ceti, in litres: the intro's sum, about 50.22 L. */
 export const GOAL_L = (VOYAGE.passengers * VOYAGE.mlPerPassengerDay * VOYAGE.days) / 1000;
 /**
- * The same sum for the antinucleant, the little that's made first (see SUPPLIES): a trace of it a day for each
+ * The same sum for the IJ-buffer, the first thing made (see SUPPLIES): 41.52 L in all, of which 10.30 L are left on
+ * board.
+ */
+export const IJ_BUFFER = { mlPerPassengerDay: 0.0002893, presentL: 10.3 };
+/** The IJ-buffer needed to reach Mu Ceti, in litres: about 41.52 L. */
+export const IJ_BUFFER_L = (VOYAGE.passengers * IJ_BUFFER.mlPerPassengerDay * VOYAGE.days) / 1000;
+/**
+ * The same sum for the antinucleant, the little that's made next (see SUPPLIES): a trace of it a day for each
  * passenger, 9.20 L in all, of which 8.30 L are left on board.
  */
 export const ANTINUCLEANT = { mlPerPassengerDay: 0.0000641, presentL: 8.3 };
