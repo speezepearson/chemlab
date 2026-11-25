@@ -204,6 +204,20 @@ function lookAt(l: Lab, p: { x: number; y: number; z: number }, d = 200): void {
   l.e.debug({ x: p.x, z: p.z + d, yaw: 0, pitch: Math.atan2(p.y - 620, d), locked: true });
 }
 
+/** C pressed, as the keyboard's handler does it. */
+const pressC = (l: Lab) => (l.in as unknown as { keyC(): void }).keyC();
+/** Q or E pressed (`down`) or let go, as the keyboard's handlers do it. */
+function key(l: Lab, code: 'KeyQ' | 'KeyE', down: boolean): void {
+  const I = l.in as unknown as { keys: Set<string>; keyDown(code: string): void; keyUp(code: string): void };
+  if (down) {
+    I.keys.add(code);
+    I.keyDown(code);
+  } else {
+    I.keys.delete(code);
+    I.keyUp(code);
+  }
+}
+
 /** Run the lab for `s` sim seconds. */
 const run = (l: Lab, s: number) => {
   for (let i = 0; i < Math.round(s / 0.05); i++) l.in.simulate(0.05);
@@ -1276,8 +1290,8 @@ describe('E', () => {
     // still in hand, tipping to pour
     expect(use(l).held?.f).toBe(f);
     expect(f.tilt).toBeGreaterThan(0);
-    // let go of (the touch screen's stand-in, as the key's keyup does), it rights itself
-    l.e.touchKey('KeyE', false);
+    // let go of, it rights itself
+    key(l, 'KeyE', false);
     expect(use(l).using).toBe(false);
     for (let i = 0; i < 20; i++) l.in.move(0.05);
     expect(f.tilt).toBe(0);
@@ -1328,7 +1342,7 @@ describe('E', () => {
     hands(l).placeHeld(l.in.held, was);
     l.in.move(0.05);
     expect(use(l).using).toBe(false);
-    l.e.touchKey('KeyE', false);
+    key(l, 'KeyE', false);
     expect(under.N).toBe(0);
     expect(f.N).toBe(had);
   });
@@ -1353,7 +1367,7 @@ describe('E’s hint', () => {
     expect(I.pourHintAt()).toEqual(expect.objectContaining({ x: expect.closeTo(SPOT.x, 6), z: expect.closeTo(SPOT.z, 6) }));
     I.useDown();
     expect(I.pourHintAt()).toBeNull();
-    l.e.touchKey('KeyE', false);
+    key(l, 'KeyE', false);
     expect(I.pourHintAt()).not.toBeNull();
     // aimed at nothing in particular, none
     l.in.target = null;
@@ -1380,7 +1394,7 @@ describe('E’s hint', () => {
       expect(I.pourHintAt()).toBeNull();
       I.useDown();
       expect(I.dipHintAt()).toBeNull();
-      l.e.touchKey('KeyE', false);
+      key(l, 'KeyE', false);
       l.in.putAway();
       expect(l.in.held).toBeNull();
     }
@@ -1851,7 +1865,7 @@ describe('ghost moves', () => {
     const h = new Hose({ faucet: 0 }, { x: SPOT.x, y: LIFT + 150, z: SPOT.z }, NOZZLE_REACH.min);
     (g(l).hoses as unknown as Hose[]).push(h);
     lookAt(l, h.outlet);
-    l.e.touchHose();
+    pressC(l);
     expect(g(l).held!.kind).toBe('hose');
     expect(g(l).held!.ghost).toBeUndefined();
   });
@@ -2299,9 +2313,9 @@ describe('faucets’ valves', () => {
 
   /** Hold Q or E down for `s` real seconds, a frame every `step`, as a press of the key does, and let it go. */
   function hold(l: Lab, code: 'KeyQ' | 'KeyE', s: number, step = 0.02): void {
-    l.e.touchKey(code, true);
+    key(l, code, true);
     for (let i = 0; i < Math.round(s / step); i++) l.in.move(step);
-    l.e.touchKey(code, false);
+    key(l, code, false);
   }
   /** What the engine knows of a valve being turned. */
   const turning = (l: Lab) => (l.in as unknown as { turning: unknown }).turning;
@@ -2371,7 +2385,7 @@ describe('faucets’ valves', () => {
     // looking well away from it, E does nothing
     l.e.debug({ x: SPOT.x, z: SPOT.z + 300, yaw: 1, pitch: 0, locked: true });
     l.in.target = null;
-    l.e.touchKey('KeyE', true);
+    key(l, 'KeyE', true);
     l.in.move(0.1);
     expect(turning(l)).toBeNull();
     // E already down as the crosshair comes onto it turns nothing
@@ -2379,16 +2393,16 @@ describe('faucets’ valves', () => {
     l.in.target = { kind: 'tool', t, part: 'valve', k: 0, point: tap } as never;
     l.in.move(0.1);
     expect(t.valves[0]).toBe(1);
-    l.e.touchKey('KeyE', false);
+    key(l, 'KeyE', false);
     // pressed afresh, it does; with Q down too, it stops
-    l.e.touchKey('KeyE', true);
+    key(l, 'KeyE', true);
     l.in.move(0.2);
     const a = t.angles[0]!;
     expect(a).toBeGreaterThan(0);
-    l.e.touchKey('KeyQ', true);
+    key(l, 'KeyQ', true);
     l.in.move(0.2);
     expect(t.angles[0]).toBe(a);
-    l.e.touchKey('KeyE', false);
+    key(l, 'KeyE', false);
     l.in.move(0.2);
     expect(t.angles[0]).toBeLessThan(a);
     // looking away past the aim, it's let go of, Q still down
@@ -2396,7 +2410,7 @@ describe('faucets’ valves', () => {
     lookAbove(l, tap, AIM.deg + 1);
     l.in.move(0.1);
     expect(turning(l)).toBeNull();
-    l.e.touchKey('KeyQ', false);
+    key(l, 'KeyQ', false);
   });
 
   it('turns clockwise with E as it’s seen, even from behind, and a dial only to its stops', () => {
@@ -2489,13 +2503,13 @@ describe('faucets’ valves', () => {
     // being turned, it's let go of once it's hidden and the crosshair isn't on it
     view.blocked = () => false;
     l.in.target = null;
-    l.e.touchKey('KeyE', true);
+    key(l, 'KeyE', true);
     l.in.move(0.1);
     expect(turning(l)).not.toBeNull();
     view.blocked = () => true;
     l.in.move(0.1);
     expect(turning(l)).toBeNull();
-    l.e.touchKey('KeyE', false);
+    key(l, 'KeyE', false);
   });
 
   it('turns the one fewest degrees off, but the one the crosshair is on first; and keeps turning it till it leaves the aim', () => {
@@ -2519,7 +2533,7 @@ describe('faucets’ valves', () => {
     // turning the tap, it goes on turning it as the dial comes nearer
     l.in.target = null;
     lookAt(l, between(0.3));
-    l.e.touchKey('KeyE', true);
+    key(l, 'KeyE', true);
     l.in.move(0.2);
     const a = t.angles[0]!;
     const dialWas = t.valves[d];
@@ -2532,7 +2546,7 @@ describe('faucets’ valves', () => {
     lookAbove(l, tap, AIM.deg + 1, 300);
     l.in.move(0.1);
     expect(turning(l)).toBeNull();
-    l.e.touchKey('KeyE', false);
+    key(l, 'KeyE', false);
   });
 });
 
@@ -2589,7 +2603,7 @@ describe('C', () => {
     l.in.putBack();
     // pulled out, its nozzle's in hand, one step to undo
     expect(pulls(l).history.canUndo).toBe(false);
-    l.e.touchHose();
+    pressC(l);
     expect(pulls(l).held?.kind).toBe('hose');
     expect(pulls(l).hoses.map((h) => h.on)).toEqual([{ tool: t, spout: 0 }]);
     hands(l).placeHeld(l.in.held, { ...a, x: a.x - 2 * CELL, y: a.y - 40, yaw: 0 });
@@ -2626,7 +2640,7 @@ describe('C', () => {
     AIM.deg = was;
     // C at the spout brings the nozzle to hand from where it was; Q puts it back there, leaving nothing to undo
     lookAt(l, a);
-    l.e.touchHose();
+    pressC(l);
     expect(pulls(l).held?.h).toBe(hose);
     expect(pulls(l).hoses).toHaveLength(1);
     l.in.putBack();
@@ -2635,7 +2649,7 @@ describe('C', () => {
     expect(pulls(l).history.canUndo).toBe(false);
     // C at the nozzle takes hold of it there, and set down again, it's a step to undo
     lookAt(l, nozzle);
-    l.e.touchHose();
+    pressC(l);
     expect(pulls(l).held?.h).toBe(hose);
     hands(l).placeHeld(l.in.held, { ...nozzle, x: nozzle.x - CELL, yaw: 0 });
     l.in.release();
@@ -2650,7 +2664,7 @@ describe('C', () => {
     const t = separator(l);
     const a = spoutAt(t, 0);
     lookAt(l, a);
-    l.e.touchHose();
+    pressC(l);
     expect(pulls(l).held?.kind).toBe('hose');
     const there = { ...a, x: a.x - 2 * CELL, y: a.y - 40, yaw: 0 };
     hands(l).placeHeld(l.in.held, there);
@@ -2660,7 +2674,7 @@ describe('C', () => {
     expect(pulls(l).held?.kind).toBe('hose');
     // C does, where the left button used to
     hands(l).placeHeld(l.in.held, there);
-    l.e.touchHose();
+    pressC(l);
     expect(l.in.held).toBeNull();
     expect(pulls(l).hoses).toHaveLength(1);
     expect([pulls(l).hoses[0].outlet.x, pulls(l).hoses[0].outlet.z]).toEqual([there.x, there.z]);
@@ -2685,7 +2699,7 @@ describe('C', () => {
     // both hidden, none
     view.blocked = () => true;
     expect(aimed(l)).toBeNull();
-    l.e.touchHose();
+    pressC(l);
     expect(l.in.held).toBeNull();
     AIM.deg = was;
   });
@@ -2695,9 +2709,9 @@ describe('C', () => {
     const t = separator(l);
     const a = spoutAt(t, 0);
     lookAt(l, a);
-    l.e.touchHose();
+    pressC(l);
     hands(l).placeHeld(l.in.held, { ...a, x: a.x - 2 * CELL, y: a.y - 40, yaw: 0 });
-    l.e.touchHose();
+    pressC(l);
     const tip = pulls(l).hoses[0].outlet;
     const view = (l.in as unknown as { view: { blocked(from: unknown, to: { y: number }): boolean } }).view;
     lookAt(l, tip);
@@ -2721,13 +2735,13 @@ describe('C', () => {
     lookAt(l, a);
     expect(I.hoseHintAt()).toEqual({ at: a, stand: false });
     // with the nozzle in hand, where it would be set down (as each frame works out)
-    l.e.touchHose();
+    pressC(l);
     hands(l).placeHeld(l.in.held, { ...a, x: a.x - 2 * CELL, y: a.y - 40, yaw: 0 });
     const pl = (I.placed = I.placement(l.in.held)) as { rest: { pose: { x: number; y: number; z: number } } };
     const { x, y, z } = pl.rest.pose;
     expect(I.hoseHintAt()).toEqual({ at: { x, y, z }, stand: true });
     // set down, from where the nozzle lets out: its tip, or the foot of a stopcock on its end
-    l.e.touchHose();
+    pressC(l);
     const hose = pulls(l).hoses[0];
     lookAt(l, hose.outlet);
     expect(I.hoseHintAt()).toEqual({ at: hose.outlet, stand: false });
@@ -2757,9 +2771,9 @@ describe('C', () => {
     hands(l).placeHeld(l.in.held, { ...over, yaw: 0 });
     expect(I.useWouldDo()).toBe(false);
     run(l, 0.5);
-    l.e.touchKey('KeyE', true);
+    key(l, 'KeyE', true);
     run(l, 0.5);
-    l.e.touchKey('KeyE', false);
+    key(l, 'KeyE', false);
     expect(f.N).toBe(had);
     // set down again, it runs on
     l.in.release();
@@ -2773,7 +2787,7 @@ describe('C', () => {
     const at = pulls(l).mountAt({ faucet: 0 });
     l.e.debug({ x: at.x - 200, z: at.z, yaw: -Math.PI / 2, pitch: Math.atan2(at.y - 620, 200), locked: true });
     expect(aimed(l)).toEqual({ faucet: 0 });
-    l.e.touchHose();
+    pressC(l);
     expect(pulls(l).held?.kind).toBe('hose');
     expect(pulls(l).held?.h?.on).toEqual({ faucet: 0 });
   });
@@ -2959,7 +2973,7 @@ describe('stopcocks', () => {
     // a spout's stopcock stays at its tip as the hose is pulled out, and the hose runs from its foot
     pip.cocks[0] = { valve: 1 };
     lookAt(l, spoutAt(pip, 0));
-    l.e.touchHose();
+    pressC(l);
     expect(cocks(l).held?.kind).toBe('hose');
     const hose = cocks(l).hoses[0];
     const I = l.in as unknown as { mountAt(m: unknown): unknown; outletAt(t: Tool, j: number): { x: number; y: number; z: number } };
@@ -2994,7 +3008,7 @@ describe('stopcocks', () => {
     // the hose rolled up, the stopcock goes up to the spout's tip, which has none
     l.in.target = null;
     lookAt(l, nozzle.outlet);
-    l.e.touchHose();
+    pressC(l);
     expect(cocks(l).held?.kind).toBe('hose');
     l.in.putAway();
     expect(cocks(l).hoses).toHaveLength(0);
@@ -3082,7 +3096,7 @@ describe('stopcocks', () => {
     l.in.stock.stopcock.fill(false, 8);
     l.in.target = null;
     lookAt(l, nozzle.outlet);
-    l.e.touchHose();
+    pressC(l);
     expect(cocks(l).held?.kind).toBe('hose');
     l.in.putAway();
     expect(cocks(l).hoses).toHaveLength(0);
@@ -3148,7 +3162,7 @@ describe('stopcocks', () => {
     pip.ends[0] = { valve: 0.5 };
     l.in.target = null;
     lookAt(l, nozzle.outlet);
-    l.e.touchHose();
+    pressC(l);
     expect(cocks(l).held?.kind).toBe('hose');
     const I = l.in as unknown as { snapped(h: unknown, p: unknown): { y: number }; setDown(h: unknown, r: unknown): void };
     const over = { x: top.x, y: top.y + 40, z: top.z, yaw: 0 };

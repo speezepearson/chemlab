@@ -1,7 +1,5 @@
 :root{
   box-sizing:border-box;
-  padding-top:env(safe-area-inset-top,0px);
-  padding-bottom:env(safe-area-inset-bottom,0px);
   --bg:#dfe3dc; --panel:#eef0eb; --ink:#1b2320; --muted:#5c6862; --line:#b9c1ba;
   --accent:#2f6a56; --bench:#c7ccc3; --glass:rgba(27,35,32,.62); --glasshi:rgba(255,255,255,.35);
   --pipe:#8a938d; --shadow:rgba(20,30,26,.18);
@@ -18,7 +16,7 @@
   --accent:#8ccbb0; --bench:#2b3230; --glass:rgba(227,232,227,.62); --glasshi:rgba(255,255,255,.07);
   --pipe:#5b665f; --shadow:rgba(0,0,0,.45);
 }
-html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
+html{height:100%}
 body{
   margin:0;height:100%;background:var(--bg);color:var(--ink);
   font-family:"Schibsted Grotesk",-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
@@ -63,7 +61,7 @@ details td{padding:0 6px;text-align:right;white-space:nowrap}
 details tr.sep td{padding-top:8px}
 .num{
   display:inline-block;min-width:44px;padding:1px 5px;border-radius:4px;cursor:ew-resize;
-  user-select:none;-webkit-user-select:none;touch-action:none;border:1px solid transparent;
+  user-select:none;-webkit-user-select:none;border:1px solid transparent;
 }
 .num:hover,.num.live{border-color:var(--accent)}
 details p{margin:8px 0 0;color:var(--muted);font-size:11px}
@@ -81,11 +79,6 @@ details label.slider input{flex:1;min-width:0}
 details label.slider output{width:40px;text-align:right;font-variant-numeric:tabular-nums}
 #stage{flex:1;position:relative;min-height:0;min-width:0;overflow:hidden}
 .main{flex:1;display:flex;min-height:0}
-@media (max-width:560px){
-  /* panels span the screen, rather than hanging left off it from their names */
-  details{position:static}
-  details > div{left:16px;right:16px;top:auto;margin-top:6px}
-}
 /* an equipment wheel, round the middle of the view while its key's held; smaller, in a view too small for it */
 .wheel{
   position:absolute;left:50%;top:50%;width:468px;height:468px;max-width:calc(100% - 16px);max-height:calc(100% - 16px);
@@ -159,27 +152,7 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
   color:#eef0eb;background:rgba(8,12,11,.55);padding:6px 14px;border-radius:8px;font-size:15px;font-weight:600;
 }
-.stick{
-  position:absolute;bottom:24px;width:112px;height:112px;border-radius:50%;z-index:3;touch-action:none;
-  background:rgba(20,26,24,.28);border:2px solid rgba(255,255,255,.35);
-  display:flex;align-items:center;justify-content:center;user-select:none;-webkit-user-select:none;
-}
-.stick.move{left:20px}
-.stick.look{right:20px}
-.stick i{width:44px;height:44px;border-radius:50%;background:rgba(238,240,235,.55);pointer-events:none}
-.touch-buttons{
-  position:absolute;bottom:148px;display:flex;flex-direction:column;align-items:center;gap:10px;z-index:3;
-}
-.touch-buttons.left{left:48px}
-.touch-buttons.right{right:48px}
-button.touch{
-  width:58px;height:58px;border-radius:50%;padding:0;touch-action:none;user-select:none;-webkit-user-select:none;
-  background:rgba(238,240,235,.6);border:2px solid rgba(255,255,255,.5);color:#1b2320;font-size:12px;font-weight:600;
-}
-button.touch.small{width:46px;height:46px;font-size:10px}
-button.touch.pad{width:78px;height:58px;border-radius:14px}
-button.touch.dim{opacity:.45}
-canvas{display:block;width:100%;height:100%;touch-action:none}
+canvas{display:block;width:100%;height:100%}
 #info{
   position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);
   border-radius:8px;padding:8px 10px;width:220px;font-size:12px;

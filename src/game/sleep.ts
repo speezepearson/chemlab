@@ -53,7 +53,7 @@ import type { Tool } from './tools';
  *    slower than the passengers use it up.
  * After a jump, the lab runs `settle` sim seconds unmeasured, for whatever the jump knocked out of balance (fast
  * reactions and their reverses) to settle, so the next window doesn't mistake its relaxing for a drift. Anything
- * significant but unconfirmed means no jump yet.
+ * significant but unconfirmed means no jump yet. A drift too slow to matter (see SLEEP.matter) isn't followed at all.
  */
 export const SLEEP = {
   /** The window, in sim seconds, and how many increments it's measured in. */
@@ -72,6 +72,12 @@ export const SLEEP = {
   zConfirm: 3,
   /** A component smaller than this share of its vessel's molecules is a trace: limited only by this share. */
   floor: 1e-3,
+  /**
+   * A drift slower than this share of a component (or of its floor) a window isn't followed, however clear of the
+   * noise: left as it is, it's out by 3% at the most over a sleep of fifteen hours, and such drifts are mostly the
+   * tail of something settling, which following in a straight line would overshoot.
+   */
+  matter: 1e-5,
   /**
    * For a vessel nothing drains, a share of its makeup smaller than this is limited only by this: its contents feed
    * nothing back, so a trace's share drifting from 0.1% to 1% in a jump matters no more than one drifting by 1%.
@@ -259,6 +265,9 @@ function plan(
     const M = molecules(last);
     const N = atoms(last);
     const scaleOf = (c: number) => Math.max(last[c], c === HEAT ? floor * THERMO.heatCap * N : floor * M, 1000);
+    // a drift worth following: clear of the noise, and fast enough to move the component by `matter` of itself (or of
+    // its floor) in a window (see SLEEP.matter)
+    const drifting = (c: number, q: { r: number; se: number }) => significant(q, z) && Math.abs(q.r) * W > SLEEP.matter * scaleOf(c);
     // a drift seen in this window, confirmed by the one before (its own, or all of them pooled), the same way
     const confirmed = (c: number) =>
       !!was &&
@@ -281,10 +290,10 @@ function plan(
       // drained: whole, if its atoms or heat are drifting
       let whole = false;
       for (let c = HEAT; c < COMPONENTS && !whole; c++) {
-        if (significant(stats[c], z)) {
+        if (drifting(c, stats[c])) {
           if (!confirmed(c)) limit(0);
           else whole = true;
-        } else if (now.n[c] >= 2 * K && significant(pooled(now, c, w), z)) whole = true;
+        } else if (now.n[c] >= 2 * K && drifting(c, pooled(now, c, w))) whole = true;
       }
       if (whole) {
         for (let c = 0; c <= HEAT; c++) {
@@ -296,12 +305,12 @@ function plan(
         }
         for (let c = HEAT; c < COMPONENTS; c++) {
           const p = pooled(now, c, w);
-          if (significant(p, z)) steadyRate(c, p.r);
+          if (drifting(c, p)) steadyRate(c, p.r);
         }
       } else
         // or species by species, where it's clear: internal chemistry
         for (let c = 0; c < NS; c++) {
-          if (!significant(stats[c], z)) continue;
+          if (!drifting(c, stats[c])) continue;
           if (!confirmed(c)) {
             limit(0);
             continue;
@@ -315,7 +324,8 @@ function plan(
       // nothing drains it: each component on its own, limited by its share of the makeup
       const shares = tr.xs.every((x) => molecules(x) > 0);
       for (let c = 0; c <= HEAT; c++) {
-        if (!significant(stats[c], z)) continue;
+        // (what the station's fitted for, coming into the reservoir, is followed however slowly it comes)
+        if (tr.v === reservoir && c === species ? !significant(stats[c], z) : !drifting(c, stats[c])) continue;
         if (!confirmed(c)) {
           limit(0);
           continue;

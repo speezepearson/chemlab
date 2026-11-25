@@ -1,140 +1,6 @@
-import { useLayoutEffect, useRef, useState } from 'react';
-import { SMELL_FADE_MS, TOUCH, type Action, type GameEngine, type Hud as HudState } from '../game/engine';
+import { useLayoutEffect, useRef } from 'react';
+import { SMELL_FADE_MS, type Action, type GameEngine, type Hud as HudState } from '../game/engine';
 import { WHEEL, wheelSpan } from '../game/wheel';
-
-/** How far a stick's knob can go from its middle, in CSS pixels. */
-const STICK_R = 44;
-
-/**
- * An on-screen stick, for a touch screen: a ring with a knob that follows the finger, as far as the ring's edge, and
- * springs back to the middle when it lets go. It tells the engine how far it's pushed each way, from −1 to 1.
- */
-function Stick({ engine, which }: { engine: GameEngine; which: 'move' | 'look' }) {
-  const [knob, setKnob] = useState({ x: 0, y: 0 });
-  const center = useRef<{ x: number; y: number } | null>(null);
-  const push = (e: React.PointerEvent<HTMLDivElement>) => {
-    const c = center.current;
-    if (!c) return;
-    let x = e.clientX - c.x;
-    let y = e.clientY - c.y;
-    const d = Math.hypot(x, y);
-    if (d > STICK_R) {
-      x *= STICK_R / d;
-      y *= STICK_R / d;
-    }
-    setKnob({ x, y });
-    engine.stick(which, x / STICK_R, y / STICK_R);
-  };
-  const release = () => {
-    center.current = null;
-    setKnob({ x: 0, y: 0 });
-    engine.stick(which, 0, 0);
-  };
-  return (
-    <div
-      className={`stick ${which}`}
-      aria-label={which === 'move' ? 'walk' : 'look'}
-      onPointerDown={(e) => {
-        const r = e.currentTarget.getBoundingClientRect();
-        center.current = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-        e.currentTarget.setPointerCapture(e.pointerId);
-        push(e);
-      }}
-      onPointerMove={push}
-      onPointerUp={release}
-      onPointerCancel={release}
-    >
-      <i style={{ transform: `translate(${knob.x}px, ${knob.y}px)` }} />
-    </div>
-  );
-}
-
-/**
- * A round button for a touch screen. `down` and `up` fire as a finger lands and lifts, and `drag` with how far it
- * moved, in CSS pixels, while it's held; the finger stays the button's until it lifts, wherever it goes.
- */
-function TouchButton({
-  label,
-  className = '',
-  lit = true,
-  down,
-  up,
-  drag,
-}: {
-  label: string;
-  className?: string;
-  lit?: boolean;
-  down?(): void;
-  up?(): void;
-  drag?(dx: number, dy: number): void;
-}) {
-  const last = useRef<{ x: number; y: number } | null>(null);
-  const lift = () => {
-    if (!last.current) return;
-    last.current = null;
-    up?.();
-  };
-  return (
-    <button
-      className={`touch ${className}${lit ? '' : ' dim'}`}
-      onPointerDown={(e) => {
-        e.preventDefault();
-        e.currentTarget.setPointerCapture(e.pointerId);
-        last.current = { x: e.clientX, y: e.clientY };
-        down?.();
-      }}
-      onPointerMove={(e) => {
-        const l = last.current;
-        if (!l) return;
-        drag?.(e.clientX - l.x, e.clientY - l.y);
-        last.current = { x: e.clientX, y: e.clientY };
-      }}
-      onPointerUp={lift}
-      onPointerCancel={lift}
-    >
-      {label}
-    </button>
-  );
-}
-
-/**
- * On a touch screen, while playing: the stick that walks, bottom left, and the one that looks, bottom right; and
- * buttons standing in for the keys and the mouse's left button. Over the look stick, Grab (the left button) and, with
- * a flask or a dipper in hand, E, named for what it'll do, or with empty hands near a handwheel or a dial, Q and E, each turning
- * it while it's held, as the keys do; and Note (Enter) when there's something to write a note about, Nap (N) when a nap can be had, and Hose (C) when
- * there's a spout or nozzle near the crosshair to take a hose by. Over the move stick, while something's held, a pad to drag (across to turn it,
- * up and down to hold it further or nearer, or for a hose's nozzle, to slide its stand out or in) and Put away
- * (Backspace).
- */
-export function TouchControls({ engine, hud }: { engine: GameEngine; hud: HudState }) {
-  if (!TOUCH || !hud.locked) return null;
-  return (
-    <>
-      <Stick engine={engine} which="move" />
-      <Stick engine={engine} which="look" />
-      <div className="touch-buttons right">
-        {hud.label && <TouchButton label="Note" className="small" down={() => engine.touchNote()} />}
-        {hud.nap && <TouchButton label="Nap" className="small" down={() => engine.touchNap()} />}
-        {hud.hose && <TouchButton label="Hose" className="small" down={() => engine.touchHose()} />}
-        {hud.holding ? (
-          hud.hand && <TouchButton label={hud.hand} lit={hud.use} down={() => engine.touchKey('KeyE', true)} up={() => engine.touchKey('KeyE', false)} />
-        ) : (
-          hud.turn && (
-            <>
-              <TouchButton label="Q ↺" lit down={() => engine.touchKey('KeyQ', true)} up={() => engine.touchKey('KeyQ', false)} />
-              <TouchButton label="E ↻" lit down={() => engine.touchKey('KeyE', true)} up={() => engine.touchKey('KeyE', false)} />
-            </>
-          )
-        )}
-        <TouchButton label={hud.holding ? 'Drop' : 'Grab'} lit={hud.grab || hud.drop} down={() => engine.touchGrab()} />
-      </div>
-      <div className="touch-buttons left">
-        {hud.holding && <TouchButton label="Put away" className="small" down={() => engine.touchPutAway()} />}
-        {hud.holding && <TouchButton label="Turn" className="pad" drag={(dx, dy) => engine.turnHeld(dx, dy)} />}
-      </div>
-    </>
-  );
-}
 
 /** A little mouse with its left button lit: that button would do something. */
 function MouseHint() {
@@ -260,8 +126,8 @@ function Smell({ smell }: { smell: NonNullable<HudState['smell']> }) {
 /**
  * The crosshair, with hints by it for what the left button (on its left) and E (on its right) would do, or an equipment
  * wheel while it's held open; under
- * the crosshair, what the last sniff smelled of, coming up a piece at a time and then fading out; and, on a
- * screen with a mouse and keys, everything else that can be done just now, in a corner, unless `/` has hidden it.
+ * the crosshair, what the last sniff smelled of, coming up a piece at a time and then fading out; and everything
+ * else that can be done just now, in a corner, unless `/` has hidden it.
  */
 export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; help: boolean }) {
   if (!hud.locked) return null;
@@ -292,7 +158,7 @@ export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; 
       {hud.note && <div className={hud.tip ? 'note tip' : 'note'}>{hud.note}</div>}
       {/* what the last sniff smelled of: a new one comes up afresh, even if it reads the same */}
       {hud.smell && <Smell key={hud.smell.n} smell={hud.smell} />}
-      {!TOUCH && help && <Actions actions={hud.actions} />}
+      {help && <Actions actions={hud.actions} />}
     </>
   );
 }
@@ -302,5 +168,5 @@ export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; 
  * there reaches the view, and the menus above stay usable.
  */
 export function StartHint() {
-  return <div className="start-hint">{TOUCH ? 'Tap to start' : 'Click to look around'}</div>;
+  return <div className="start-hint">Click to look around</div>;
 }

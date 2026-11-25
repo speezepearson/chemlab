@@ -5,16 +5,16 @@ import { sleptFor } from '../game/sleep';
 /**
  * The screen fading to black as Nadia falls asleep in the cryopod (or in from it as she wakes), or her eyes closing
  * for a nap (see Eyelids); and while she's asleep, how long she's slept and what's in the ship's reservoir, of what's
- * needed. A nap also says how to wake, and on a touch screen a tap does it.
+ * needed. A nap also says how to wake.
  */
-export function SleepScreen({ hud, onWake }: { hud: Hud; onWake: () => void }) {
+export function SleepScreen({ hud }: { hud: Hud }) {
   // all black once her eyes are shut, as when she's asleep in the pod
   const black = Math.max(hud.black, hud.lids >= 1 ? 1 : 0);
   if (black <= 0 && hud.lids <= 0) return null;
   return (
     <>
       {hud.lids > 0 && <Eyelids shut={hud.lids} />}
-      <div className="sleep" style={{ opacity: black, pointerEvents: black > 0 ? 'auto' : 'none' }} onPointerDown={hud.napping ? onWake : undefined}>
+      <div className="sleep" style={{ opacity: black, pointerEvents: black > 0 ? 'auto' : 'none' }}>
         {hud.slept !== null && (
           <div className="sleep-time">
             {hud.napping ? 'napping' : 'asleep'} · {sleptFor(hud.slept)}
