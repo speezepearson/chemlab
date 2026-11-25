@@ -80,7 +80,7 @@ export interface Hud {
   /** Whether Q and E, held, would turn a handwheel or dial near the crosshair (see GameEngine.aimedValve). */
   turn: boolean;
   /**
-   * Whether E would use what's in hand: held, pour a flask, let fluid out of a hose's nozzle, or dip a wicking strip or
+   * Whether E would use what's in hand: held, pour a flask, or dip a wicking strip or
    * a thermometer into what's looked at; or, pressed, empty a flask that's over nothing (see `empty`).
    */
   use: boolean;
@@ -95,8 +95,11 @@ export interface Hud {
   hose: boolean;
   /** Whether Enter would write a note about what the crosshair is on (see GameEngine.note). */
   label: boolean;
-  /** What E does now with what's in hand, in a word, for the touch screen's button that stands in for it. */
-  hand: 'Pour' | 'Empty' | 'Flow' | 'Dip';
+  /**
+   * What E does now with what's in hand, in a word, for the touch screen's button that stands in for it; null for a
+   * hose's nozzle, which E does nothing with.
+   */
+  hand: 'Pour' | 'Empty' | 'Dip' | null;
   /** A brief note, like there being no room for something. */
   note: string | null;
   /** Whether the note is a tip, something the player can now do, not something they can't. */
@@ -452,7 +455,7 @@ export class GameEngine {
   private sticks = { move: { x: 0, y: 0 }, look: { x: 0, y: 0 } };
   private held: Held | null = null;
   /**
-   * Whether what's in hand is being used, with E held down: a held flask tips and pours, a held hose lets fluid out,
+   * Whether what's in hand is being used, with E held down: a held flask tips and pours,
    * and a held dipper dips, only while it is (see useDown).
    */
   private using = false;
@@ -2708,7 +2711,7 @@ export class GameEngine {
     this.sniffing = { v, lean: 0, to: m ? this.rimGaze(m) : hand!.gaze, hand: hand && hand.flask, until: null, leaving: false };
   }
 
-  /** Whether what's held is being poured, let flow or dipped, with E: there's no sniffing meanwhile. */
+  /** Whether what's held is being poured or dipped, with E: there's no sniffing meanwhile. */
   private handBusy(): boolean {
     return !!this.held && this.using;
   }
@@ -2817,14 +2820,15 @@ export class GameEngine {
 
   /**
    * E pressed, with something in hand: use it while E's held (see using). A flask tips to pour (over the flask or tank
-   * looked at, if any), a hose's nozzle lets fluid out, and a strip or a thermometer dips into the open top looked at.
+   * looked at, if any), and a strip or a thermometer dips into the open top looked at.
    * But a flask that would pour into nothing is emptied instead, at the press (see wouldEmpty and emptying).
    */
   private useDown(): void {
     if (this.dozing()) return;
     if (inPod(this.wake)) return;
     const h = this.held;
-    if (!h || this.emptying) return;
+    // (a hose's nozzle has no use for it: it lets nothing out till it's set down)
+    if (!h || h.kind === 'hose' || this.emptying) return;
     // a flask over nothing is emptied, at a press
     if (this.wouldEmpty()) {
       this.emptying = true;
@@ -3396,10 +3400,10 @@ export class GameEngine {
       this.pour = { from, into: mouthBelow(mouths, from) };
     }
 
-    // a hose's nozzle in hand lets nothing out without E: the tool or faucet it's pulled out of stops
+    // a hose's nozzle in hand lets nothing out: the tool or faucet it's pulled out of stops until it's set down
     let stillTool: Tool | null = null;
     let stillFaucet: number | null = null;
-    if (!this.using && h?.kind === 'hose') {
+    if (h?.kind === 'hose') {
       if ('tool' in h.h.on) stillTool = h.h.on.tool;
       else stillFaucet = h.h.on.faucet;
     }
@@ -4127,7 +4131,6 @@ export class GameEngine {
         add(
           ['E'],
           h.kind === 'tool' ? (h.t.kind === 'strip' ? 'tap to dip it, hold to soak it' : 'hold to dip it in')
-          : h.kind !== 'flask' ? 'hold to let it flow'
           : this.mouthAimed() ? 'hold to pour into it'
           : this.mouthAimed(true) ? 'hold to pour onto it'
           : this.wouldEmpty() ? 'empty it'
@@ -4534,11 +4537,8 @@ export class GameEngine {
     if (h?.kind === 'flask') return h.f.N > TRACE;
     // a strip or a thermometer dips into the open top looked at
     if (h?.kind === 'tool' && isDipper(h.t.kind)) return !!this.mouthAimed();
-    // nothing else held in hand (a sheet of blotting paper, a stopcock) has a use for it, and what's moved by a ghost
-    // runs anyway
-    if (h?.kind === 'tool' || h?.kind === 'scale' || h?.kind === 'cock') return false;
-    // a faucet runs if its valve's open
-    if (h?.kind === 'hose') return 'tool' in h.h.on ? this.wouldFlow(h.h.on.tool) : this.faucetOpen(this.faucets[h.h.on.faucet]) > 0;
+    // nothing else held in hand (a sheet of blotting paper, a stopcock, a hose's nozzle, which lets nothing out till
+    // it's set down) has a use for it, and what's moved by a ghost runs anyway
     return false;
   }
 
@@ -4569,16 +4569,6 @@ export class GameEngine {
     if (this.dip >= 1) this.tapping = false;
   }
 
-  /** Whether fluid would leave a tool's spouts if it ran. */
-  private wouldFlow(t: Tool): boolean {
-    // the station's reservoir through its faucet, or its funnel through the diverter, unless its block is away
-    if (t.kind === 'receptacle') return !t.away && t.tanks.some((v, k) => v.N > TRACE && drains(t, k));
-    // a column's dry bed drinks what's in its funnel, and lets nothing out
-    if (t.kind === 'column') return t.soaked >= 1 && t.open(0) > 0 && t.tanks[0].N > TRACE;
-    // a heater's tube runs whatever its valves say
-    return (t.shape.spouts.length > 0 && t.tanks.some((v, k) => v.N > TRACE && drains(t, k))) || t.tube.some((v) => v.N > TRACE);
-  }
-
   /** What the station's reservoir is of, and the litres of it there, to two places, of the litres needed (see Hud.reservoir). */
   private reservoirHud(): NonNullable<Hud['reservoir']> {
     const { supply, tanks } = this.station();
@@ -4603,7 +4593,7 @@ export class GameEngine {
       empty: !this.sniffing && this.wouldEmpty(),
       label: !inPod(this.wake) && !!this.targetNote(),
       hose: !!this.hoseAim(),
-      hand: h?.kind === 'flask' ? (this.wouldEmpty() ? 'Empty' : 'Pour') : h?.kind === 'hose' ? 'Flow' : 'Dip',
+      hand: h?.kind === 'flask' ? (this.wouldEmpty() ? 'Empty' : 'Pour') : h?.kind === 'hose' ? null : 'Dip',
       note: this.flash?.text ?? null,
       tip: !!this.flash?.tip,
       actions: this.actions(),

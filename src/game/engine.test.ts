@@ -2724,6 +2724,38 @@ describe('C', () => {
     expect(I.hoseHintAt()).toEqual({ at: I.nozzleOut(hose), stand: false });
   });
 
+  it('lets nothing out of a nozzle in hand, whether or not E is held, until it’s set down again', () => {
+    const l = lab();
+    const I = l.in as unknown as { faucets: { valve: number }[]; flasks: Flask[]; useWouldDo(): boolean; holdHose(h: Hose): void };
+    // a flask on the counter, and a faucet's hose set down with its nozzle over it, running
+    holdAt(l, 'flask', { x: SPOT.x, y: LIFT + 160, z: SPOT.z, yaw: 0 });
+    const f = hands(l).held!.f!;
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    const m = flaskMouth(f);
+    const over = { x: m.x, y: m.y + 24, z: m.z };
+    const hose = new Hose({ faucet: 0 }, over, NOZZLE_REACH.min);
+    pulls(l).hoses.push(hose);
+    I.faucets[0].valve = 1;
+    run(l, 0.5);
+    const had = f.N;
+    expect(had).toBeGreaterThan(0);
+    // in hand, held just there, it stops: E has no use for it, and holding it lets nothing out
+    I.holdHose(hose);
+    hands(l).placeHeld(l.in.held, { ...over, yaw: 0 });
+    expect(I.useWouldDo()).toBe(false);
+    run(l, 0.5);
+    l.e.touchKey('KeyE', true);
+    run(l, 0.5);
+    l.e.touchKey('KeyE', false);
+    expect(f.N).toBe(had);
+    // set down again, it runs on
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    run(l, 0.5);
+    expect(f.N).toBeGreaterThan(had);
+  });
+
   it('pulls out a faucet’s hose', () => {
     const l = lab();
     const at = pulls(l).mountAt({ faucet: 0 });
