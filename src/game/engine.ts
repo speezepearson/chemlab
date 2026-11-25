@@ -22,7 +22,7 @@ import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
 import { DEFAULT_PRESET, LAMP_POSE, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
-import { CRYOSTABILIZER, FIRST_SUPPLY, litresOf, type Supply } from './supply';
+import { CRYOSTABILIZER, FIRST_SUPPLY, SUPPLIES, litresOf, type Supply } from './supply';
 import { shatter } from './shatter';
 import { WHEELS, wheelMove, wheelPick, type WheelAim } from './wheel';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
@@ -538,11 +538,8 @@ export class GameEngine {
    * Mu Ceti, and what follows is the end (see Wake's arriving).
    */
   private arrival = false;
-  /**
-   * What the pod's message says is on board, as of when they were put in it: the litres of cryostabilizer, and while
-   * the station is still fitted for something before it (see SUPPLIES), the litres of that; else null.
-   */
-  private podNotice: { litres: number; first: number | null } = { litres: 0, first: null };
+  /** What the pod's message says is on board, as of when they were put in it: the litres of each of SUPPLIES. */
+  private podNotice: readonly number[] = [];
   /**
    * A nap under way (see nap): how far shut the player's eyes are, 0 to 1, and whether they're waking, their eyes
    * opening again. With their eyes shut, the lab runs on as it does while they sleep in the pod (see sleeping).
@@ -550,9 +547,9 @@ export class GameEngine {
   private napping: { lids: number; waking: boolean } | null = null;
   /**
    * Whether the player has been told they can nap: the station has delivered steadily for DELIVERY.nap sim seconds on
-   * end, once. From then on N naps. It's saved with the lab.
+   * end, once (N naps whether or not they have). It's saved with the lab, so they're told only once.
    */
-  private napKnown = false;
+  private napTold = false;
   /**
    * While previewing the end's white void (see previewArrival), how the player stood before, to put them back; null
    * otherwise.
@@ -733,7 +730,7 @@ export class GameEngine {
   load(preset: Preset): void {
     this.preset = preset;
     if (preset.lab) {
-      this.napKnown = false;
+      this.napTold = false;
       this.lay(preset.lab);
       return;
     }
@@ -756,9 +753,9 @@ export class GameEngine {
       return t;
     });
     this.uniqueTools();
-    // a new lab's station is fitted for the first thing the ship is short of, and nobody has napped in it
+    // a new lab's station is fitted for the first thing the ship is short of, and nobody's been told they can nap in it
     this.station().stock(FIRST_SUPPLY);
-    this.napKnown = false;
+    this.napTold = false;
     this.hoses = (preset.hoses ?? []).map(({ from, to }) => {
       const m = tankMouth(this.tools[to.tool], to.tank ?? 0);
       return new Hose({ tool: this.tools[from.tool], spout: from.spout }, { x: m.x, y: m.y + (to.up ?? 24), z: m.z }, NOZZLE_REACH.min);
@@ -806,7 +803,7 @@ export class GameEngine {
   }
 
   private afterLoad(): void {
-    // a lab loads with the airlock shut, until its station has been delivering steadily again, and anyone in it or
+    // a lab loads with the airlock shut, until its station's reservoir is seen to hold enough, and anyone in it or
     // asleep in the pod wakes in the lab
     if (this.wake === 'open' || this.wake === 'settling' || this.wake === 'boarding' || this.wake === 'asleep' || this.arrival) {
       this.arrival = false;
@@ -938,7 +935,7 @@ export class GameEngine {
       ),
       ...(this.alarmsOff ? { alarmsOff: true } : {}),
       ...(this.blindsShut ? { blindsShut: true } : {}),
-      ...(this.napKnown ? { nap: true } : {}),
+      ...(this.napTold ? { nap: true } : {}),
       player: { x: this.player.x, z: this.player.z, yaw: this.player.yaw, pitch: this.player.pitch },
       chem: saveChem(this.chem.params),
     };
@@ -967,7 +964,7 @@ export class GameEngine {
     this.chem.rebuild();
     this.setAlarmsOff(!!s.alarmsOff);
     this.blindsShut = !!s.blindsShut;
-    this.napKnown = !!s.nap;
+    this.napTold = !!s.nap;
     const pl = s.player;
     if (pl && [pl.x, pl.z, pl.yaw, pl.pitch].every(Number.isFinite)) {
       const p = this.inRoom({ x: pl.x, y: 0, z: pl.z, yaw: pl.yaw });
@@ -3425,7 +3422,7 @@ export class GameEngine {
 
     this.clearStation();
     const gateFrom = this.tools.map((t) => t.gate);
-    const steadyFrom = this.station().steady;
+    const enoughFrom = this.enough();
     const vessels = this.vessels();
     // how exposed each one's fluid is to the room, from how it stands now; it hardly changes in a frame
     const exposures = simDt > 0 ? this.exposures() : [];
@@ -3562,9 +3559,8 @@ export class GameEngine {
     this.tools.forEach((t, j) => {
       if (t.broken && whole[j]) shatter(this.hear(footAt(t)));
     });
-    // and it chimes as it's been delivering steadily for long enough to open the airlock
-    const st = this.station();
-    if (st.supply.airlock && steadyFrom < DELIVERY.streak && st.steady >= DELIVERY.streak) chime(this.hear(this.machineAt(st)));
+    // and it chimes as its reservoir comes to hold enough cryostabilizer, and the airlock opens
+    if (!enoughFrom && this.enough()) chime(this.hear(this.machineAt(this.station())));
 
     // fluid's sounds, each heard from where it lands: a stream from the mouth it runs into
     const streams = new Map<Vessel, { flow: number; full: number; at: Placement }>();
@@ -3579,13 +3575,13 @@ export class GameEngine {
 
   /**
    * The first time the station has delivered steadily for DELIVERY.nap, whatever it's fitted for, a note says the
-   * player can nap, as they can from then on (see nap).
+   * player can nap (see nap), as they always could.
    */
   private napHint(): void {
     const st = this.station();
-    if (!this.napKnown && st.steady >= DELIVERY.nap) {
-      this.napKnown = true;
-      const text = 'Steady delivery. Press N to nap while it runs.';
+    if (!this.napTold && st.steady >= DELIVERY.nap) {
+      this.napTold = true;
+      const text = 'Press N to nap while it runs.';
       this.flash = { text, until: performance.now() + NAP_HINT_MS, tip: true };
     }
   }
@@ -4259,14 +4255,14 @@ export class GameEngine {
   }
 
   /**
-   * What's on board, for the pod's message: the litres of cryostabilizer (what the station's reservoir holds, once
-   * it's fitted for it; till then, what was left after the incident), and while the station is fitted for something
-   * before it, the litres of that in its reservoir.
+   * What's on board, for the pod's message: the litres of each of SUPPLIES, in order. Of what the station's fitted for,
+   * what its reservoir holds; of each before it, its goal, as there was enough of it; of each after it, what was left
+   * after the incident.
    */
-  private onBoard(): { litres: number; first: number | null } {
+  private onBoard(): number[] {
     const st = this.station();
-    const held = litresOf(st.tanks[1].n[st.supply.species]);
-    return st.supply === CRYOSTABILIZER ? { litres: held, first: null } : { litres: CRYOSTABILIZER.startL, first: held };
+    const at = SUPPLIES.indexOf(st.supply);
+    return SUPPLIES.map((s, i) => (i < at ? s.goalL : i > at ? s.startL : litresOf(st.tanks[1].n[s.species])));
   }
 
   /** Put the player in the pod, facing the lab, empty-handed (see emptyHanded). */
@@ -4313,8 +4309,9 @@ export class GameEngine {
 
   /**
    * The player has fallen asleep: the lab's sounds fall silent (the ship's ambience plays on), and the lab runs on
-   * (see sleep.ts) as fast as it can, a slice at a time (see pump), until the goal's reached (when they stay asleep,
-   * and have won) or the station stops delivering (when they wake).
+   * (see sleep.ts) as fast as it can, a slice at a time (see pump), until the goal's reached (when they wake at Mu
+   * Ceti, and have won; since the airlock opens only once it is, that's at once) or the station stops delivering
+   * (when they wake to the message they woke to at first).
    */
   private fallAsleep(): void {
     this.water.update(0.1, [], new Map());
@@ -4391,12 +4388,12 @@ export class GameEngine {
   }
 
   /**
-   * Whether N would start a nap: once the player's been told they can (see napKnown), out in the lab, with empty
-   * hands, and the station not in the middle of its changeover, whose alarm nobody could nap through.
+   * Whether N would start a nap: out in the lab, with empty hands, and the station not in the middle of its
+   * changeover, whose alarm nobody could nap through.
    */
   private canNap(): boolean {
     return (
-      this.napKnown && !this.napping && !inPod(this.wake) && !this.previewing && !this.held && !this.turning &&
+      !this.napping && !inPod(this.wake) && !this.previewing && !this.held && !this.turning &&
       this.station().swap === null
     );
   }
@@ -4409,7 +4406,7 @@ export class GameEngine {
    */
   private nap(): void {
     if (!this.canNap()) {
-      if (this.napKnown && this.held && !inPod(this.wake)) this.say('Hands full');
+      if (this.held && !inPod(this.wake)) this.say('Hands full');
       return;
     }
     this.using = false;
@@ -4451,12 +4448,13 @@ export class GameEngine {
 
   /**
    * Once arrived at Mu Ceti (see Wake's arrived), carry on in the lab as it was when there was enough cryostabilizer:
-   * the player stands just out of the airlock, facing the lab, with its doors shut.
+   * the player stands just out of the airlock, facing the lab, its doors standing open behind her, as they do while
+   * there's enough.
    */
   continueTinkering(): void {
     if (this.wake !== 'arrived') return;
     this.arrival = false;
-    this.wake = 'closed';
+    this.wake = 'open';
     this.wakeT = Infinity;
     Object.assign(this.player, { x: AIRLOCK.x, z: ROOM.z1 - 150, yaw: 0, pitch: 0 });
   }
@@ -4481,9 +4479,16 @@ export class GameEngine {
     else if (this.wake === 'arriving' && t >= WAKE_S.arrive) next('arrived');
     else if (this.wake === 'boarding' && t >= WAKE_S.open + WAKE_S.fade) next('asleep');
     else if (this.wake === 'out' && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
-    // steady delivery of cryostabilizer opens the doors again, and once it stops they close, when she's out in the lab
-    else if (this.wake === 'closed' && this.station().supply.airlock && this.station().steady >= DELIVERY.streak) next('open');
-    else if (this.wake === 'open' && this.station().steady === 0 && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
+    // enough cryostabilizer for the voyage opens the doors again (and should there no longer be, as god mode can
+    // make it, they close, once she's out in the lab)
+    else if (this.wake === 'closed' && this.enough()) next('open');
+    else if (this.wake === 'open' && !this.enough() && outOfAirlock(this.player.z, PLAYER_R)) next('closed');
+  }
+
+  /** Whether the station's reservoir holds enough cryostabilizer for the rest of the voyage: the goal. */
+  private enough(): boolean {
+    const st = this.station();
+    return st.supply === CRYOSTABILIZER && st.tanks[1].n[st.supply.species] >= st.supply.goal;
   }
 
   /** How the airlock looks just now, for the view. */
@@ -4510,7 +4515,7 @@ export class GameEngine {
       // the room's light floods in as the front slides up, and is shut out as it slides down
       dark: 1 - up,
       message: w === 'pod' || flick,
-      notice: this.arrival ? { arrival: true } : { arrival: false, ...this.podNotice },
+      notice: this.arrival ? { arrival: true } : { arrival: false, litres: this.podNotice },
       okHot: w === 'pod' && this.target?.kind === 'wake',
       // flashing while the doors stand open to sleep, a second on and half a second off, on sim time
       lamp: w === 'open' && this.clock % 1.5 < 1,

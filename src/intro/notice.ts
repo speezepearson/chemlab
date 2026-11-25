@@ -1,4 +1,4 @@
-import { ANTINUCLEANT, ANTINUCLEANT_L, GOAL_L, VOYAGE } from '../game/config';
+import { SUPPLIES } from '../game/supply';
 import { PLAYER } from './log';
 
 /**
@@ -11,41 +11,33 @@ export type Block =
   | { kind: 'list' }
   | { kind: 'hr' };
 
-const num = (x: number, digits = 0) => x.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+/** Litres, to the hundredth. */
+const L = (l: number) => `${l.toFixed(2)} L`;
 
 /**
- * The figures for one thing the ship is short of, as the system's template prints them for anything: its name; the
- * litres the voyage needs, set out as the sum they come from, a line to each factor; the litres present; and the
- * deficit, never less than nothing. The litres are right-aligned together.
+ * The figures for everything the ship is short of, in the order of SUPPLIES, a line to each, as the system's template
+ * prints them: its name, the litres present over the litres the voyage needs, and the deficit, never less than
+ * nothing. Each column is lined up, the litres right-aligned.
  */
-function figures(name: string, mlPerPassengerDay: number, goalL: number, presentL: number): Block {
-  const ls = [goalL, presentL, Math.max(0, goalL - presentL)].map((l) => `${num(l, 2)} L`);
-  const w = Math.max(...ls.map((l) => l.length));
-  const [needed, present, short] = ls.map((l) => l.padStart(w));
-  const required = `Required: ${needed}`;
-  // each factor after the first on a line of its own, its x under the gap after the =
-  const by = `\n${' '.repeat(required.length + 4)}x `;
-  // microlitres, to the digits the rate is given in
-  const ul = Number((mlPerPassengerDay * 1000).toPrecision(6));
-  return {
-    kind: 'pre',
-    text:
-      `${name}:\n\n` +
-      `${required}  =   ${num(VOYAGE.passengers)} passengers${by}${ul} uL/pass/day${by}${num(VOYAGE.days)} days\n` +
-      `Present:  ${present}\n\nDEFICIT:  ${short}`,
-  };
+function figures(present: readonly number[]): Block {
+  const rows = SUPPLIES.map((s, i) => {
+    const has = present[i] ?? s.startL;
+    return [`${s.name[0].toUpperCase()}${s.name.slice(1)}:`, L(has), L(s.goalL), L(Math.max(0, s.goalL - has))];
+  });
+  const w = rows[0].map((_, c) => Math.max(...rows.map((r) => r[c].length)));
+  const line = ([name, has, needs, short]: string[]) =>
+    `${name.padEnd(w[0])} ${has.padStart(w[1])} / ${needs.padStart(w[2])}      DEFICIT: ${short.padStart(w[3])}`;
+  return { kind: 'pre', text: rows.map(line).join('\n') };
 }
 
 /**
- * The notice, with `presentL` litres of cryostabilizer on board: at first what's left after the incident, and when
- * the player wakes from a sleep that ended with the station no longer delivering, what the reservoir holds then.
- * While the antinucleant is still to be made (see SUPPLIES), `firstL` is the litres of it on board, and its figures
- * come first, in the same template as the cryostabilizer's; with enough of it (null), only the cryostabilizer's.
+ * The notice, with `present` litres on board of each thing the ship is short of, in the order of SUPPLIES: at first
+ * what's left after the incident; later (on a replay of the intro, or waking from a sleep that ended with the station
+ * no longer delivering), what the station's reservoir holds of what it's fitted for, and the goal of each before it.
  * The notice was written for the happy path: nothing in it is worded for what it's reporting, and it says
  * "problem(s)" however many there are.
  */
-export function notice(presentL: number = VOYAGE.presentL, firstL: number | null = ANTINUCLEANT.presentL): Block[] {
-  const first: Block[] = firstL === null ? [] : [figures('Antinucleant', ANTINUCLEANT.mlPerPassengerDay, ANTINUCLEANT_L, firstL)];
+export function notice(present: readonly number[] = SUPPLIES.map((s) => s.startL)): Block[] {
   return [
     { kind: 'brand', text: '✦ Celestia Starlines' },
     { kind: 'h', text: `Good morning, passenger ${PLAYER}!` },
@@ -64,8 +56,7 @@ export function notice(presentL: number = VOYAGE.presentL, firstL: number | null
         'In the absence of any more capable crew members or passengers, you have been selected (per Passenger Agreement ' +
         'Sec. 041 - Understaffing) to be proactively depreserved to assist in solving the following problem(s):',
     },
-    ...first,
-    figures('Cryostabilizer', VOYAGE.mlPerPassengerDay, GOAL_L, presentL),
+    figures(present),
     { kind: 'p', text: "If this sounds intimidating, please don't worry! You will have guidance from the following highly experienced crew members:" },
     { kind: 'list' },
     { kind: 'hr' },
