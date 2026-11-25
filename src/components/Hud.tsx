@@ -284,8 +284,6 @@ export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; 
             {hud.use && !hud.hinted && (
               <span className="right">
                 <kbd>E</kbd>
-                {/* (its E is the word's own: "Empty") */}
-                {hud.empty && <b>mpty</b>}
               </span>
             )}
           </div>
