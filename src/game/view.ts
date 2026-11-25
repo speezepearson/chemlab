@@ -259,9 +259,9 @@ const NOTE_Y = 13;
  * would take a wall seen at a slant for being behind its fluid, and hide a band of it whose edge jitters as the view
  * turns.
  */
-function makeGlass(lie: -1 | 0 | 1): THREE.MeshStandardMaterial {
+function makeGlass(lie: -1 | 0 | 1, side: THREE.Side = THREE.FrontSide): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({
-    color: 0xd6ecf2, transparent: true, opacity: 0.1, roughness: 0.04, metalness: 0, depthWrite: false, side: THREE.DoubleSide,
+    color: 0xd6ecf2, transparent: true, opacity: 0.1, roughness: 0.04, metalness: 0, depthWrite: false, side,
     envMapIntensity: 1.4, premultipliedAlpha: true,
     ...(lie ? { polygonOffset: true, polygonOffsetFactor: lie, polygonOffsetUnits: 4 * lie } : {}),
   });
@@ -278,8 +278,43 @@ const glassMat = makeGlass(0);
 const floorGlassMat = makeGlass(1);
 /** Glass lying right on something else (see makeGlass). */
 const baseGlassMat = makeGlass(-1);
+/**
+ * The far side of each glass (see splitGlass): the same glass, but only its faces turned away from the eye, which on
+ * a vessel are its far walls.
+ */
+const FAR_GLASS = new Map<THREE.Material, THREE.MeshStandardMaterial>(
+  ([[glassMat, 0], [floorGlassMat, 1], [baseGlassMat, -1]] as const).map(([m, lie]) => [m, makeGlass(lie, THREE.BackSide)]),
+);
 /** Every glass material, for whatever's done to all glass alike. */
-const GLASSES = [glassMat, floorGlassMat, baseGlassMat];
+const GLASSES = [glassMat, floorGlassMat, baseGlassMat, ...FAR_GLASS.values()];
+
+/**
+ * Draw the glass under `root` in two, its far side before any fluid and its near side after: each glass mesh is drawn
+ * in its near side's glass (the glass materials are made front-sided), and gets a twin as a child, in its far side's
+ * (see FAR_GLASS), drawn before everything else see-through (renderOrder −2, under a fluid's −1). So fluid in a vessel
+ * is seen over the vessel's far wall and under its near one, however clear it is. Drawn the other way, the far wall,
+ * whose reflections glass adds in full (see makeGlass), was laid over every see-through fluid, and washed out a fluid
+ * only a hair see-through, which an opaque one, drawn with what's solid, hid. The twin is picked as its original is
+ * (see `pickables`), so the crosshair and the outline find glass from either side, as before.
+ */
+function splitGlass(root: THREE.Object3D, pickables?: Map<THREE.Object3D, Pick>): void {
+  const glassy: THREE.Mesh[] = [];
+  root.traverse((o) => {
+    if (!(o instanceof THREE.Mesh) || o.userData.farGlass) return;
+    const mats: THREE.Material[] = Array.isArray(o.material) ? o.material : [o.material];
+    if (mats.some((m) => FAR_GLASS.has(m))) glassy.push(o);
+  });
+  for (const m of glassy) {
+    const far = (x: THREE.Material) => FAR_GLASS.get(x) ?? hidden;
+    const twin = new THREE.Mesh(m.geometry, Array.isArray(m.material) ? m.material.map(far) : far(m.material));
+    twin.renderOrder = -2;
+    twin.userData.farGlass = true;
+    twin.layers.mask = m.layers.mask;
+    m.add(twin);
+    const pick = pickables?.get(m);
+    if (pick) pickables!.set(twin, pick);
+  }
+}
 
 /**
  * Geometry `g` with its triangles within `near` over height `y` (a floor, and the foot of any wall curving into it)
@@ -1675,6 +1710,7 @@ class FlaskView {
     this.label = new Label(this.root, new THREE.Vector3(0, NOTE_Y, 0));
     scene.add(this.root);
     pickables.set(glass, { kind: 'flask', f });
+    splitGlass(glass, pickables);
   }
 
   /** Draw it as it is now, flashing if it's in `targets` (see Frame.guides). */
@@ -2002,6 +2038,7 @@ class ToolView {
     this.body.traverse((m) => {
       if (m instanceof THREE.Mesh && !pickables.has(m) && !m.userData.bent) pick(m, 'body');
     });
+    splitGlass(this.body, pickables);
     scene.add(this.root);
   }
 
