@@ -550,9 +550,9 @@ export class GameEngine {
   private napping: { lids: number; waking: boolean } | null = null;
   /**
    * Whether the player has been told they can nap: the station has delivered steadily for DELIVERY.nap sim seconds on
-   * end, once. From then on N naps. It's saved with the lab.
+   * end, once (N naps whether or not they have). It's saved with the lab, so they're told only once.
    */
-  private napKnown = false;
+  private napTold = false;
   /**
    * While previewing the end's white void (see previewArrival), how the player stood before, to put them back; null
    * otherwise.
@@ -751,9 +751,9 @@ export class GameEngine {
       return t;
     });
     this.uniqueTools();
-    // a new lab's station is fitted for the first thing the ship is short of, and nobody has napped in it
+    // a new lab's station is fitted for the first thing the ship is short of, and nobody's been told they can nap in it
     this.station().stock(FIRST_SUPPLY);
-    this.napKnown = false;
+    this.napTold = false;
     this.hoses = (preset.hoses ?? []).map(({ from, to }) => {
       const m = tankMouth(this.tools[to.tool], to.tank ?? 0);
       return new Hose({ tool: this.tools[from.tool], spout: from.spout }, { x: m.x, y: m.y + (to.up ?? 24), z: m.z }, NOZZLE_REACH.min);
@@ -933,7 +933,7 @@ export class GameEngine {
       ),
       ...(this.alarmsOff ? { alarmsOff: true } : {}),
       ...(this.blindsShut ? { blindsShut: true } : {}),
-      ...(this.napKnown ? { nap: true } : {}),
+      ...(this.napTold ? { nap: true } : {}),
       player: { x: this.player.x, z: this.player.z, yaw: this.player.yaw, pitch: this.player.pitch },
       chem: saveChem(this.chem.params),
     };
@@ -1049,7 +1049,7 @@ export class GameEngine {
     });
     this.setAlarmsOff(!!s.alarmsOff);
     this.blindsShut = !!s.blindsShut;
-    this.napKnown = !!s.nap;
+    this.napTold = !!s.nap;
     const pl = s.player;
     if (pl && [pl.x, pl.z, pl.yaw, pl.pitch].every(Number.isFinite)) {
       const p = this.inRoom({ x: pl.x, y: 0, z: pl.z, yaw: pl.yaw });
@@ -3566,13 +3566,13 @@ export class GameEngine {
 
   /**
    * The first time the station has delivered steadily for DELIVERY.nap, whatever it's fitted for, a note says the
-   * player can nap, as they can from then on (see nap).
+   * player can nap (see nap), as they always could.
    */
   private napHint(): void {
     const st = this.station();
-    if (!this.napKnown && st.steady >= DELIVERY.nap) {
-      this.napKnown = true;
-      const text = 'Steady delivery. Press N to nap while it runs.';
+    if (!this.napTold && st.steady >= DELIVERY.nap) {
+      this.napTold = true;
+      const text = 'Press N to nap while it runs.';
       this.flash = { text, until: performance.now() + NAP_HINT_MS, tip: true };
     }
   }
@@ -4378,12 +4378,12 @@ export class GameEngine {
   }
 
   /**
-   * Whether N would start a nap: once the player's been told they can (see napKnown), out in the lab, with empty
-   * hands, and the station not in the middle of its changeover, whose alarm nobody could nap through.
+   * Whether N would start a nap: out in the lab, with empty hands, and the station not in the middle of its
+   * changeover, whose alarm nobody could nap through.
    */
   private canNap(): boolean {
     return (
-      this.napKnown && !this.napping && !inPod(this.wake) && !this.previewing && !this.held && !this.turning &&
+      !this.napping && !inPod(this.wake) && !this.previewing && !this.held && !this.turning &&
       this.station().swap === null
     );
   }
@@ -4396,7 +4396,7 @@ export class GameEngine {
    */
   private nap(): void {
     if (!this.canNap()) {
-      if (this.napKnown && this.held && !inPod(this.wake)) this.say('Hands full');
+      if (this.held && !inPod(this.wake)) this.say('Hands full');
       return;
     }
     this.using = false;
