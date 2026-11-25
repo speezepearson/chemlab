@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { defaultChemParams, restoreDefaultChem } from './chem/params';
+import { defaultChemParams } from './chem/params';
 import { ReactionNetwork } from './chem/reactions';
 import { AppearancePanel } from './components/AppearancePanel';
 import { ArrivalPanel } from './components/ArrivalPanel';
@@ -14,7 +14,7 @@ import { InfoPanel } from './components/InfoPanel';
 import { SpeedControl } from './components/SpeedControl';
 import { ambience } from './game/ambience';
 import { GameEngine, type Hud as HudState, type Inspection } from './game/engine';
-import { DEFAULT_PRESET, PRESETS } from './game/presets';
+import { DEFAULT_PRESET } from './game/presets';
 import { typingIn } from './game/typing';
 import { decodeSave, encodeSave, storeGod, storeSave, storedGod, storedSave, type SaveState } from './game/save';
 
@@ -50,7 +50,6 @@ const storeHelp = (on: boolean) => {
   }
 };
 
-const presetOf = (s: SaveState | null) => PRESETS.find((p) => p.id === s?.preset) ?? DEFAULT_PRESET;
 /** How often the bench is saved to local storage, in ms (and on leaving the page). */
 const AUTOSAVE_MS = 2000;
 
@@ -62,7 +61,6 @@ export function App() {
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [hud, setHud] = useState<HudState | null>(null);
   const [saved] = useState(storedSave);
-  const [preset, setPreset] = useState(() => presetOf(saved));
   const [chemVersion, setChemVersion] = useState(0);
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -99,8 +97,6 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
   useEffect(() => storeHelp(help), [help]);
-  const presetRef = useRef(preset);
-  presetRef.current = preset;
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -111,8 +107,8 @@ export function App() {
       onLabel: setLabeling,
       onHud: setHud,
       onAwake: markIntroSeen,
-    }, presetRef.current);
-    if (saved) e.restore(saved, presetRef.current);
+    });
+    if (saved) e.restore(saved, DEFAULT_PRESET);
     setEngine(e);
     // for checks in a browser (see CLAUDE.md)
     if (import.meta.env.DEV) (window as unknown as { lab?: GameEngine }).lab = e;
@@ -142,17 +138,6 @@ export function App() {
     engine?.reset();
   };
 
-  const loadPreset = (id: string) => {
-    const p = PRESETS.find((x) => x.id === id)!;
-    if (p.defaultChem) {
-      restoreDefaultChem(network.params);
-      network.rebuild();
-      setChemVersion((v) => v + 1);
-    }
-    setPreset(p);
-    engine?.load(p);
-  };
-
   const exportSave = async () => {
     if (!engine) return;
     const text = encodeSave(engine.snapshot());
@@ -176,9 +161,7 @@ export function App() {
       window.alert("That doesn't look like a Slurry Lab save string.");
       return;
     }
-    const p = presetOf(s);
-    setPreset(p);
-    engine.restore(s, p);
+    engine.restore(s, DEFAULT_PRESET);
     storeSave(engine.snapshot());
     setChemVersion((v) => v + 1);
   };
@@ -193,16 +176,6 @@ export function App() {
           <label className="tog">
             <input type="checkbox" checked={god} onChange={(e) => setGod(e.target.checked)} /> god mode
           </label>
-          {/* switching scenarios is for god mode; Reset still restarts the current one */}
-          {god && (
-            <select aria-label="preset" value={preset.id} onChange={(e) => loadPreset(e.target.value)}>
-              {PRESETS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          )}
           <button onClick={reset}>Reset</button>
           <button onClick={exportSave} title="Copy a string holding this whole setup">
             {copied ? 'Copied!' : 'Export'}
@@ -224,7 +197,6 @@ export function App() {
             Replay intro
           </button>
         </div>
-        {preset.description && <p className="hint">{preset.description}</p>}
       </header>
       <div className="main">
         <div id="stage" ref={stageRef}>
