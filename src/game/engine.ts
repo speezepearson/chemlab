@@ -732,6 +732,11 @@ export class GameEngine {
 
   load(preset: Preset): void {
     this.preset = preset;
+    if (preset.lab) {
+      this.napKnown = false;
+      this.lay(preset.lab);
+      return;
+    }
     // a preset's flasks along the front of the first island
     const island = COUNTERS.find((c) => c.island)!;
     this.flasks = preset.flasks.map((fill, i) => {
@@ -960,6 +965,22 @@ export class GameEngine {
     this.preset = preset;
     loadChem(this.chem.params, s.chem);
     this.chem.rebuild();
+    this.setAlarmsOff(!!s.alarmsOff);
+    this.blindsShut = !!s.blindsShut;
+    this.napKnown = !!s.nap;
+    const pl = s.player;
+    if (pl && [pl.x, pl.z, pl.yaw, pl.pitch].every(Number.isFinite)) {
+      const p = this.inRoom({ x: pl.x, y: 0, z: pl.z, yaw: pl.yaw });
+      Object.assign(this.player, { x: p.x, z: p.z, yaw: pl.yaw, pitch: pl.pitch });
+    }
+    this.lay(s);
+  }
+
+  /**
+   * Lay the lab out as a save has it: everything in it, the faucets and the cabinet, but not the chemistry, the player,
+   * or the alarms, blinds and nap (see restore).
+   */
+  private lay(s: SaveState): void {
     const num = (x: unknown, d: number) => (Number.isFinite(x) ? (x as number) : d);
     const pose = (p: Vec3, saved: { z?: number; yaw?: number }): Pose => this.inRoom({ ...p, z: num(saved.z, Z_HOME), yaw: num(saved.yaw, 0) });
     this.flasks = s.flasks.map((sf, i) => {
@@ -1047,14 +1068,6 @@ export class GameEngine {
       const e = f?.end;
       if (e && typeof e === 'object') this.faucets[j].end = { valve: unit(e.valve) };
     });
-    this.setAlarmsOff(!!s.alarmsOff);
-    this.blindsShut = !!s.blindsShut;
-    this.napKnown = !!s.nap;
-    const pl = s.player;
-    if (pl && [pl.x, pl.z, pl.yaw, pl.pitch].every(Number.isFinite)) {
-      const p = this.inRoom({ x: pl.x, y: 0, z: pl.z, yaw: pl.yaw });
-      Object.assign(this.player, { x: p.x, z: p.z, yaw: pl.yaw, pitch: pl.pitch });
-    }
     const back = this.clearCabinet();
     this.restAll();
     // the cabinet as saved, with whatever was just put back in it; or for a save from before it, full but for what's out

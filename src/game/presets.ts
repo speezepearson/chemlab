@@ -5,6 +5,8 @@ import { CAP, HOME_W } from './config';
 import { plumbZ } from './bodies';
 import type { Vessel } from './flask';
 import { CELL, LAMP_AREA, LAMP_Z, LIFT, ROOM, type Pose } from './space';
+import type { SaveState } from './save';
+import { START_LAB } from './start';
 import { CRYOSTABILIZER } from './supply';
 import { LAMP, STATION, type ToolKind } from './tools';
 
@@ -92,6 +94,12 @@ export interface Preset {
   hoses?: HoseSpec[];
   /** Whether picking the preset from the menu restores the default chemistry. Reset leaves the chemistry alone. */
   defaultChem?: boolean;
+  /**
+   * The whole lab, laid out as a save keeps it, if the preset is one, in place of its flasks, tools, scales and hoses:
+   * everything in it is as the save has it (see GameEngine.restore) but the chemistry, the player, and the alarms,
+   * blinds and nap, which a preset leaves alone.
+   */
+  lab?: SaveState;
 }
 
 /** `atoms` atoms' worth of one species. */
@@ -113,8 +121,9 @@ export const PRESETS: readonly Preset[] = [
   {
     id: 'stranded',
     name: 'Stranded',
-    // everything's in the equipment cabinet
+    // the lab as the game starts it (see start.ts)
     flasks: [],
+    lab: START_LAB,
   },
   {
     id: 'exchanger',
