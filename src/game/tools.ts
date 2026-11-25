@@ -341,8 +341,6 @@ export const STATION = {
   labelY: -31,
   gauge: { x0: 2 * CELL + 20, x1: 2 * CELL + 30, segments: 26 },
   screen: { x0: 2 * CELL - 50, x1: 2 * CELL + 50, y0: -19, y1: -4 },
-  /** The screen showing how long it's been delivering steadily (see Tool.steady), left of the reservoir's. */
-  steadyScreen: { x0: 2 * CELL - 160, x1: 2 * CELL - 60, y0: -19, y1: -4 },
   /** The purity needle's dial (see needleAt), on the plate left of the diverter's LCD. */
   needle: { x0: CELL - 90, x1: CELL - 38, y0: 222, y1: 262 },
   recess: STATION_OUT + STATION_MOUTH.w + 20,
@@ -448,14 +446,6 @@ export const REFERENCE_FLOW = 0.2 * MAX_FLOW;
 export const RESERVOIR_FILTER = 0.05;
 /** The species with a black atom in them, which the reservoir's filter takes out. */
 const BLACK = SPECIES.filter((s) => s.atoms.includes('K')).map((s) => s.i);
-
-/** A length of time on a screen, as a clock does: "0:42", "12:05", "1:02:03". */
-export function clockText(seconds: number): string {
-  const s = Math.max(0, Math.floor(seconds));
-  const two = (n: number) => String(n).padStart(2, '0');
-  const [h, m] = [Math.floor(s / 3600), Math.floor(s / 60) % 60];
-  return h > 0 ? `${h}:${two(m)}:${two(s % 60)}` : `${m}:${two(s % 60)}`;
-}
 
 /**
  * The reservoir's filter over h sim seconds: RESERVOIR_FILTER of each species with a black atom in it each sim
@@ -1802,7 +1792,7 @@ export class Tool {
   sinceDelivery = Infinity;
   /**
    * Sim seconds a receptacle has been delivering steadily, letting cryostabilizer into the reservoir at least every
-   * DELIVERY.gap sim seconds; 0 while it isn't. Shown on its screen (see clockText); long enough, and the player can
+   * DELIVERY.gap sim seconds; 0 while it isn't. Nothing shows it; long enough, and the player can
    * nap (see DELIVERY.nap), and the cryostabilizer's opens the airlock (see Supply.airlock).
    */
   steady = 0;

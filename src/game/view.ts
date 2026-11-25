@@ -13,7 +13,7 @@ import {
   NOZZLE_H, STAND_BASE, STAND_ROD, STOPCOCK, TOOL_DEPTH, onScale, onTool, openingOf, plumbZ, tankNoteY, tankRect, valveLocal, valveZ, dialZ, DIAL_REACH, settleAngle, valveAngle, VALVE_WHEEL, type Stand,
 } from './bodies';
 import { SPECIES } from '../chem/species';
-import { CAP, DELIVERY, GOAL_PURITY, TRACE } from './config';
+import { CAP, GOAL_PURITY, TRACE } from './config';
 import { Flask, Vessel, fluidAlpha, fluidRGB, volume } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, Scale } from './scale';
@@ -28,7 +28,7 @@ import { FINISH } from './finish';
 import { applyShine, boxUV, metal, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
-  clockText, LAMP, SCREEN, TANK_SECTION, ringShare, atomSector, BOND_ENDS, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS,
+  LAMP, SCREEN, TANK_SECTION, ringShare, atomSector, BOND_ENDS, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS,
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, TEST_PAPER, paperTriangles, sectorInset, BOND_PAPER, bondDots, isBlotter, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Cock, type Hose, type Piece, Tool,
 } from './tools';
@@ -1749,7 +1749,6 @@ class ToolView {
   private note: Label;
   private screen?: Screen;
   /** The station's screen showing how long it's been delivering steadily. */
-  private steadyScreen?: Screen;
   /** The supply station's diverter's LCD (see drawDiverter). */
   private diverter?: Screen;
   /** The supply station's purity needle's dial (see drawNeedle). */
@@ -2612,13 +2611,12 @@ class ToolView {
     valve.position.copy(v3(sh.spouts[0], STATION.paneH + 24, 0));
     art.add(valve);
     pick(valve, 'spout', 0);
-    // the readout of the litres in the reservoir, under its label, and beside it, how long it's been delivering steadily
+    // the readout of the litres in the reservoir, under its label
     const screen = (sc: { x0: number; x1: number; y0: number; y1: number }) => {
       block(art, darkMat, sc.x0 - 1.5, sc.x1 + 1.5, sc.y0 - 1.5, sc.y1 + 1.5, face, face + 0.5);
       return new Screen(art, sc.x0, sc.x1, sc.y0, sc.y1, face + 0.6, 8);
     };
     this.screen = screen(STATION.screen);
-    this.steadyScreen = screen(STATION.steadyScreen);
   }
 
   /**
@@ -2876,11 +2874,8 @@ class ToolView {
     });
     drawDiverter(this.diverter!, t.gate, t.sinceFlow < DIVERTER_HOLD);
     drawNeedle(this.needle!, t.needle);
-    // the screens: the cryostabilizer in the reservoir / what's needed, in litres; and how long it's been delivering
-    // steadily
+    // the screen: the cryostabilizer in the reservoir / what's needed, in litres
     phosphor(this.screen!, STATION.screen, `${litresOf(held).toFixed(2)} L / ${supply.goalL.toFixed(2)} L`);
-    const open = supply.airlock && t.steady >= DELIVERY.streak;
-    phosphor(this.steadyScreen!, STATION.steadyScreen, open ? 'AIRLOCK OPEN' : `STEADY ${clockText(t.steady)}`);
   }
 
   dispose(): void {
@@ -2888,7 +2883,6 @@ class ToolView {
     disposeGeometry(this.root);
     for (const { fm } of this.fluids) fm.dispose();
     this.screen?.tex.dispose();
-    this.steadyScreen?.tex.dispose();
     this.needle?.tex.dispose();
     this.changeover?.lamp.dispose();
     this.changeover?.glow.material.dispose();
