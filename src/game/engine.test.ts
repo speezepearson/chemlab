@@ -2695,6 +2695,35 @@ describe('C', () => {
     expect(pulls(l).hoseAim()).toBeNull();
   });
 
+  it('hints C hanging from an outlet, a spout’s or a set-down nozzle’s, and standing where a nozzle in hand would go', () => {
+    const l = lab();
+    const t = separator(l);
+    const I = l.in as unknown as {
+      hoseHintAt(): { at: { x: number; y: number; z: number }; stand: boolean } | null;
+      placed: unknown;
+      placement(h: unknown): { rest?: { pose: { x: number; y: number; z: number } } };
+      nozzleOut(h: Hose): { x: number; y: number; z: number };
+    };
+    const a = spoutAt(t, 0);
+    // at a spout, from its outlet
+    lookAt(l, a);
+    expect(I.hoseHintAt()).toEqual({ at: a, stand: false });
+    // with the nozzle in hand, where it would be set down (as each frame works out)
+    l.e.touchHose();
+    hands(l).placeHeld(l.in.held, { ...a, x: a.x - 2 * CELL, y: a.y - 40, yaw: 0 });
+    const pl = (I.placed = I.placement(l.in.held)) as { rest: { pose: { x: number; y: number; z: number } } };
+    const { x, y, z } = pl.rest.pose;
+    expect(I.hoseHintAt()).toEqual({ at: { x, y, z }, stand: true });
+    // set down, from where the nozzle lets out: its tip, or the foot of a stopcock on its end
+    l.e.touchHose();
+    const hose = pulls(l).hoses[0];
+    lookAt(l, hose.outlet);
+    expect(I.hoseHintAt()).toEqual({ at: hose.outlet, stand: false });
+    t.ends[0] = { valve: 0 };
+    expect(I.nozzleOut(hose)).toEqual({ ...hose.outlet, y: hose.outlet.y - STOPCOCK.drop });
+    expect(I.hoseHintAt()).toEqual({ at: I.nozzleOut(hose), stand: false });
+  });
+
   it('pulls out a faucet’s hose', () => {
     const l = lab();
     const at = pulls(l).mountAt({ faucet: 0 });

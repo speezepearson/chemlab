@@ -2333,7 +2333,8 @@ export class GameEngine {
   /**
    * Where C's hint goes (see Frame.hoseHint): with a nozzle in hand, where C would set it down (see placement), if
    * there's anywhere; otherwise the point that C would take hold of a hose by (see hoseAim). And whether it's a
-   * nozzle, and whether a stopcock's on that nozzle.
+   * nozzle in hand (`stand`), on whose place the hint stands. By a nozzle that's set down, it's where that lets out,
+   * the foot of a stopcock on its end if there's one (see nozzleOut), which the hint hangs from as from a spout.
    */
   private hoseHintAt(): Frame['hoseHint'] {
     // a nozzle in hand: where C would set it down, if it can be
@@ -2342,10 +2343,10 @@ export class GameEngine {
       const pl = this.placed;
       if (this.sniffing || !pl || !('rest' in pl)) return null;
       const p = pl.rest.pose;
-      return { at: { x: p.x, y: p.y, z: p.z }, nozzle: true, cock: !!this.endOn(h.h.on) };
+      return { at: { x: p.x, y: p.y, z: p.z }, stand: true };
     }
     const a = this.hoseAim();
-    return a && { at: a.at, nozzle: a.nozzle, cock: a.nozzle && !!this.endOn(a.m) };
+    return a && { at: a.nozzle ? this.nozzleOut(a.hose!) : a.at, stand: false };
   }
 
   /**

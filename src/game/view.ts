@@ -143,10 +143,10 @@ export interface Frame {
    */
   turnHint: { at: Vec3; yaw: number; r: number; lit: number } | null;
   /**
-   * Where C would take hold of a hose, for its hint there (see hoseHint): a spout's outlet, or a nozzle (`nozzle`),
-   * with a stopcock on it or not (`cock`).
+   * Where C's hint goes (see hoseHint): the outlet C would take hold of a hose by, a spout's or a set-down nozzle's,
+   * which its picture hangs from; or (`stand`) where C would set down the nozzle in hand, which its picture stands on.
    */
-  hoseHint: { at: Vec3; nozzle: boolean; cock: boolean } | null;
+  hoseHint: { at: Vec3; stand: boolean } | null;
   /** The middle of the mouth E would pour the flask in hand into, for its hint over it (see pourHint). */
   pourHint: Vec3 | null;
   /**
@@ -5270,16 +5270,19 @@ class KeyHint {
 
   /**
    * Put it at `at`, facing `yaw`, `size` world units to a unit of its picture (or bigger, far off), drawn for `state`;
-   * raised by `lift` units of its picture, so that it grows away from the point of it that's at `at`.
+   * raised by `lift` units of its picture, and moved `shift` of them to its right, so that it's the point of it
+   * (−shift, −lift) that's at `at`, which it grows away from.
    */
-  show(at: Vec3, yaw: number, size: number, state: number, camera: THREE.PerspectiveCamera, cssH: number, lift = 0): void {
+  show(at: Vec3, yaw: number, size: number, state: number, camera: THREE.PerspectiveCamera, cssH: number, lift = 0, shift = 0): void {
     if (state !== this.state) this.draw(state);
     const p = new THREE.Vector3(at.x, at.y, at.z);
     // how many CSS pixels a unit is there, and how big it must be drawn for its letters to be tall enough
     const px = cssH / (2 * camera.position.distanceTo(p) * Math.tan((camera.fov * Math.PI) / 360));
     const grow = Math.max(1, KEY_HINT.minPx / (this.box.cap * size * px));
     this.mesh.visible = true;
-    this.mesh.position.copy(p).add(new THREE.Vector3(0, lift * size * grow, 0));
+    // (its right, turned to face `yaw`, is (cos yaw, 0, −sin yaw))
+    const k = size * grow;
+    this.mesh.position.copy(p).add(new THREE.Vector3(shift * k * Math.cos(yaw), lift * k, -shift * k * Math.sin(yaw)));
     this.mesh.rotation.set(0, yaw, 0);
     this.mesh.scale.setScalar(size * grow);
   }
@@ -5363,8 +5366,9 @@ function turnHint(scene: THREE.Scene): KeyHint {
 }
 
 /**
- * C's hint where it would take hold of a hose (see Frame.hoseHint), as a KeyHint, in world units from the outlet of
- * a spout, hanging from it; or, at a nozzle, standing on it, its banded end there: on the right, a little hose hanging from it as if fitted there (`hose`: its collar `collar` wide at
+ * C's hint (see Frame.hoseHint), as a KeyHint, in world units from the outlet C would take hold of a hose by (a
+ * spout's, or a set-down nozzle's), hanging from it; or, where a nozzle in hand would be set down, standing on it, the
+ * middle of its banded end there: on the right, a little hose hanging from the outlet as if fitted there (`hose`: its collar `collar` wide at
  * the top, a tube `tube` wide coming down, bending in an S `bend` to the right and down again, `drop` long in all,
  * with a band round it `band` from its end, for the nozzle), drawn light with a dark edge, as the arrow of Q and E
  * is; on its left, a key cap (`cap`: `w` by `h`, its corners rounded `r`, `gap` clear of the hose) with a C on it,
@@ -5373,8 +5377,6 @@ function turnHint(scene: THREE.Scene): KeyHint {
 const HOSE_HINT = {
   hose: { collar: 6, tube: 3.4, bend: 8, drop: 28, band: 3.5, edge: 0.8 },
   cap: { w: 13, h: 16, r: 2.5, gap: 4, letter: 7.5, border: 1.1 },
-  /** How much higher it stands over a nozzle with a stopcock on it, to clear the arrow of Q and E over its handwheel. */
-  overCock: 8,
 };
 
 function hoseHint(scene: THREE.Scene): KeyHint {
@@ -5853,10 +5855,10 @@ export class View {
     const h = fr.hoseHint;
     const eye = this.camera.position;
     if (h) {
-      // at a spout, the picture hangs from it; at a nozzle, it stands on it, its banded end there, and over a stopcock
-      // on the nozzle, clear of the arrow of Q and E over its handwheel
-      const up = h.nozzle ? HOSE_HINT.hose.drop + (h.cock ? HOSE_HINT.overCock : 0) : 0;
-      this.hoseHint.show(h.at, Math.atan2(eye.x - h.at.x, eye.z - h.at.z), 1, 0, this.camera, cssH, up);
+      // at an outlet, the picture hangs from it, its collar's top there; where a nozzle in hand would be set down, it
+      // stands on it, the middle of its banded end there (which is `bend` to the right of its collar)
+      const { drop, bend } = HOSE_HINT.hose;
+      this.hoseHint.show(h.at, Math.atan2(eye.x - h.at.x, eye.z - h.at.z), 1, 0, this.camera, cssH, h.stand ? drop : 0, h.stand ? -bend : 0);
     } else this.hoseHint.hide();
     const m = fr.pourHint;
     // (far off, it grows up and away from the mouth, its stream still ending just over it)
