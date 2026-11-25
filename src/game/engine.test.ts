@@ -1118,26 +1118,6 @@ describe('the bond visualizer, which is gone', () => {
   });
 });
 
-describe('the splitter, which is gone', () => {
-  const kinds = (l: Inside) => l.tools.map((t) => t.kind as string);
-  it('is dropped as a save loads, with the hoses on its spouts and the stopcocks on them', () => {
-    const l = lab();
-    const s = bare();
-    const none = { n: {}, Q: 0 };
-    s.tools.push({
-      kind: 'splitter', id: 0, fx: 0.5, fy: 0.5, z: 750, valves: [0.3], tanks: [none], drops: [none, none],
-      cocks: [{ valve: 0.5 }, null], ends: [null, { valve: 1 }],
-    } as unknown as SaveState['tools'][number]);
-    s.hoses.push({ outlet: { x: 0.25, y: 0.6, z: 750, yaw: 0, reach: 50 }, on: { tool: 0, spout: 1 } });
-    l.e.restore(s, DEFAULT_PRESET);
-    expect(Object.keys(SHAPES)).not.toContain('splitter');
-    expect(kinds(l.in).sort()).toEqual(['receptacle', 'shadowlamp', 'spectroscope']);
-    expect((l.in as unknown as { hoses: unknown[] }).hoses).toEqual([]);
-    expect(l.in.tools.every((t) => t.id > 0)).toBe(true);
-    expect(JSON.stringify(l.e.snapshot())).not.toContain('splitter');
-  });
-});
-
 describe('the dish, which is gone', () => {
   /** A lab's save with a dish in it, set down on the front counter with solvent in it, and a pipette beside it. */
   function withDish(l: { e: GameEngine; in: Inside }): SaveState {
@@ -2921,7 +2901,7 @@ describe('stopcocks', () => {
     // from before stopcocks: a separator's one valve on both its spouts, swell bulbs' each on its own, their dial kept
     const old = (kind: Tool['kind'], id: number, valves: number[]) =>
       ({ kind, id, fx: 0.5, fy: 0.3, z: 750, valves, tanks: [], drops: [] }) as SaveState['tools'][number];
-    s.tools.push(old('separator', 950, [0.3]), old('dilatometer', 951, [0.2, 0.7, 0.4]), old('multiplexer', 952, [0.8]), old('meter', 953, []));
+    s.tools.push(old('separator', 950, [0.3]), old('dilatometer', 951, [0.2, 0.7, 0.4]), old('splitter', 952, [0.8]), old('meter', 953, []));
     for (const t of s.tools) if (t.id === pip.id) Object.assign(t, { valves: [0.3], cocks: undefined });
     l.e.restore(s, DEFAULT_PRESET);
     const by = (id: number) => l.in.tools.find((t) => t.id === id)!;
@@ -2929,7 +2909,7 @@ describe('stopcocks', () => {
     expect(by(950).valves).toEqual([]);
     expect(by(951).cocks).toEqual([{ valve: 0.2 }, { valve: 0.7 }]);
     expect(by(951).valves).toEqual([0.4]);
-    expect(by(952).cocks).toEqual([null]);
+    expect(by(952).cocks).toEqual([null, null]);
     expect(by(952).valves).toEqual([0.8]);
     expect(by(953).cocks).toEqual([null]);
     expect(by(pip.id).cocks).toEqual([{ valve: 0.3 }]);

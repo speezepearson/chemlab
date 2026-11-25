@@ -781,7 +781,7 @@ const wheelDisk = new THREE.ExtrudeGeometry(wheelShape(WHEEL_BEVEL), {
 /** How far out from its middle a handwheel's painted face reaches, inside its rim. */
 const WHEEL_FACE = VALVE_WHEEL.r - VALVE_WHEEL.notch - 1.1;
 const wheelFace = new THREE.CircleGeometry(WHEEL_FACE, 40).translate(0, 0, VALVE_WHEEL.thick + 0.02);
-/** A plain valve's bar, across a whole diameter of its face; and a multiplexer's pointer, from its middle to its rim, and the round boss it turns from. */
+/** A plain valve's bar, across a whole diameter of its face; and a splitter's pointer, from its middle to its rim, and the round boss it turns from. */
 const wheelBar = new THREE.BoxGeometry(VALVE_WHEEL.bar, 2 * WHEEL_FACE + 0.6, 0.9).translate(0, 0, VALVE_WHEEL.thick + 0.45);
 const wheelPointer = new THREE.BoxGeometry(VALVE_WHEEL.bar, WHEEL_FACE + 0.3, 0.9).translate(0, (WHEEL_FACE + 0.3) / 2, VALVE_WHEEL.thick + 0.45);
 const wheelBoss = new THREE.CylinderGeometry(1.7, 1.7, 0.9, 20).rotateX(Math.PI / 2).translate(0, 0, VALVE_WHEEL.thick + 0.45);
@@ -1828,8 +1828,13 @@ class ToolView {
         arm.rotation.z = -dir * slope;
         outlet(k, [[x, mid + Math.abs(x - peak) * Math.tan(slope)], [x, sh.spoutY - 4]]);
       });
+    } else if (t.kind === 'splitter') {
+      // far enough under its selector to clear its handwheel
+      const fork = sh.valves![0].y + VALVE_WHEEL.r + 4;
+      pipes(art, [[0, TH], [0, fork]]);
+      sh.spouts.forEach((x, k) => outlet(k, [[0, fork], [x, fork + 16], [x, sh.spoutY - 4]]));
     } else if (t.kind === 'multiplexer') {
-      // each funnel's stem in to where they join, over its selector, far enough above it to clear its handwheel
+      // the splitter's fork upside down: each funnel's stem in to where they join, over its selector
       const join = sh.valves![0].y - VALVE_WHEEL.r - 4;
       for (const tk of sh.tanks) pipes(art, [[tankX(tk), TH], [tankX(tk), join - 16], [0, join]]);
       outlet(0, [[0, join], [0, sh.spoutY - 4]]);
@@ -1983,7 +1988,7 @@ class ToolView {
       const back = valveZ(t) - VALVE_WHEEL.thick / 2;
       const hub = rod(art, darkMat, v3(vc.x, vc.y, pz), v3(vc.x, vc.y, back + 0.2), 2.2);
       pick(hub, 'valve', k);
-      const pivot = handwheel(leverMat, wheelFaceMat, leverMat, t.kind === 'multiplexer');
+      const pivot = handwheel(leverMat, wheelFaceMat, leverMat, t.kind === 'splitter' || t.kind === 'multiplexer');
       pivot.position.copy(v3(vc.x, vc.y, back));
       art.add(pivot);
       pivot.traverse((m) => m instanceof THREE.Mesh && pick(m, 'valve', k));
