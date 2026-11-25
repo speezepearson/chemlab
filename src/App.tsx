@@ -5,7 +5,7 @@ import { AppearancePanel } from './components/AppearancePanel';
 import { ArrivalPanel } from './components/ArrivalPanel';
 import { ChemistryPanel } from './components/ChemistryPanel';
 import { FlaskEditor } from './components/FlaskEditor';
-import { Hud, StartHint, TouchControls } from './components/Hud';
+import { Hud, StartHint } from './components/Hud';
 import { LabelEditor } from './components/LabelEditor';
 import { Ending, SleepScreen } from './components/Sleep';
 import { SoundPanel } from './components/SoundPanel';
@@ -230,7 +230,6 @@ export function App() {
         <div id="stage" ref={stageRef}>
           <canvas ref={canvasRef} />
           {engine && hud && <Hud engine={engine} hud={hud} help={help} />}
-          {engine && hud && <TouchControls engine={engine} hud={hud} />}
           {inspection && <InfoPanel info={inspection} />}
           {hud && !hud.locked && !hud.inPod && !hud.preview && !intro && editing === null && labeling === null && (
             <StartHint />
@@ -239,7 +238,7 @@ export function App() {
           {engine && labeling !== null && (
             <LabelEditor key={labeling} engine={engine} id={labeling} onClose={() => setLabeling(null)} />
           )}
-          {hud && <SleepScreen hud={hud} onWake={() => engine?.touchNap()} />}
+          {hud && <SleepScreen hud={hud} />}
           {hud?.preview && <ArrivalPanel />}
           {engine && hud && (
             <Ending

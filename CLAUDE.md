@@ -326,6 +326,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 
 ## Design preferences
 
+- The game is desktop-only, played with a mouse and a keyboard. The user had everything for touch screens and small
+  screens taken out: don't add on-screen controls, touch handling or narrow-screen layouts.
+
 - Don't give away the chemistry. The player is meant to work it out. A sheet of bond paper has nothing written on it: its four dots are in the four colors' own colors, at the user's request, and the lines between them are
   unlabeled, the size sorter's screens look plain (the separator's arm for what has a black atom is dark gray, at the user's request), nothing is written on the shadow lamp or its screen (and nothing says what dims its light), the equipment wheels have no names, and the faucets aren't labeled (they're the five pure
   atoms, the four colors and the solvent, which the user chose). A sheet of test paper has no text either, but its four sectors are outlined in black, at the user's request. The spectroscope's axes are labeled E (uB) and f (in S, with an SI prefix to suit the range, as mS), at the user's request: both on log scales with

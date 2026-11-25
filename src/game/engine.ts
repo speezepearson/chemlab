@@ -65,20 +65,12 @@ export interface Hud {
   locked: boolean;
   /** Whether the player is still shut in the cryopod, waking (see Wake), where the message inside it says what to do. */
   inPod: boolean;
-  /** Whether E would pick up what the crosshair is on. */
-  grab: boolean;
-  /** Whether something is being held. */
-  holding: boolean;
-  /** Whether the left button would set down what's held: whether there's somewhere for it to rest (see placement). */
-  drop: boolean;
   /**
    * Whether the left button's hint shows by the crosshair: when it would press the key or button the crosshair is on,
    * take a stopcock off, pick up what's looked at, or put what's held in the cabinet; not for setting down what's
    * held (see GameEngine.leftHint).
    */
   press: boolean;
-  /** Whether Q and E, held, would turn a handwheel or dial near the crosshair (see GameEngine.aimedValve). */
-  turn: boolean;
   /**
    * Whether E, held, would use what's in hand: pour a flask that has somewhere to pour (see GameEngine.canPour), or
    * dip a wicking strip or a thermometer into what's looked at.
@@ -89,15 +81,6 @@ export interface Hud {
    * so it needs none by the crosshair.
    */
   hinted: boolean;
-  /** Whether C would take hold of a hose, by a spout, faucet or nozzle near the crosshair (see GameEngine.hoseAim). */
-  hose: boolean;
-  /** Whether Enter would write a note about what the crosshair is on (see GameEngine.note). */
-  label: boolean;
-  /**
-   * What E does now with what's in hand, in a word, for the touch screen's button that stands in for it; null for a
-   * hose's nozzle, which E does nothing with.
-   */
-  hand: 'Pour' | 'Dip' | null;
   /** A brief note, like there being no room for something. */
   note: string | null;
   /** Whether the note is a tip, something the player can now do, not something they can't. */
@@ -128,8 +111,6 @@ export interface Hud {
   lids: number;
   /** Whether they're napping, their eyes shut: N wakes them. */
   napping: boolean;
-  /** Whether N would start a nap just now. */
-  nap: boolean;
   /**
    * What the last sniff smelled of (see script in smell.ts), until SMELL_MS after the last of it came up: its lines,
    * each the pieces it's said in; how many of those pieces, counted through the lines in order, have come up so far;
@@ -334,7 +315,6 @@ const FOV = 90;
  * back, in real seconds (it's the player's own doing, like walking).
  */
 const ZOOM = { fov: 30, s: 0.12 };
-const TURN_SENS = 0.008;
 /**
  * How fast Q and E turn a handwheel or a dial (see stepTurn), in radians per real second (it's the player's own doing,
  * like walking): slowly at first, `from`, so a tap moves it only a few degrees and it can be set finely, then faster,
@@ -345,13 +325,8 @@ const TURN_RATE = { from: (40 * Math.PI) / 180, to: (240 * Math.PI) / 180, ramp:
 const TURN_HINT_GAP = 3;
 /** How far a held nozzle's stand slides out per pixel the mouse moves up with Shift. */
 const REACH_SENS = 0.5;
-/** How fast the look stick turns the view when pushed all the way, in radians per real second: across, and up or down. */
-const STICK_TURN = 2.4;
-const STICK_TILT = 1.6;
 /** The key held for undo and redo: Command on a Mac, Control elsewhere. */
-const MOD = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl';
-/** Whether the screen is mainly touched, rather than pointed at with a mouse: then the on-screen sticks walk and look. */
-export const TOUCH = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+const MOD = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent) ? '⌘' : 'Ctrl';
 /**
  * Where the faucets are: along the right wall over its counter (see SINK_D), a cell apart, each spout FAUCET_OUT
  * out from the wall, in line with the station's (see STATION.out), so a flask under one clears the manifold. Their spouts are a little under eye level, high enough over the
@@ -447,8 +422,6 @@ export class GameEngine {
   /** Where the player stands, and which way they look (yaw about the vertical, pitch up). */
   private player = { x: 480, z: 380, yaw: 0, pitch: -0.08 };
   private keys = new Set<string>();
-  /** Where the on-screen sticks are pushed (see stick). */
-  private sticks = { move: { x: 0, y: 0 }, look: { x: 0, y: 0 } };
   private held: Held | null = null;
   /**
    * Whether what's in hand is being used, with E held down: a held flask tips and pours,
@@ -1564,62 +1537,7 @@ export class GameEngine {
 
   /** Capture the mouse to look around (the browser lets go of it on Escape). */
   lock(): void {
-    if (TOUCH) {
-      // a touch screen has no mouse to capture: the sticks walk and look
-      this.locked = true;
-      return;
-    }
     if (document.pointerLockElement !== this.canvas) this.canvas.requestPointerLock?.()?.catch?.(() => {});
-  }
-
-  /**
-   * Push one of the on-screen sticks (on a touch screen) to (x, y), each from −1 to 1, x right and y down; (0, 0)
-   * lets go of it. The move stick walks as far as it's pushed (up is forward); the look stick turns the view.
-   */
-  stick(which: 'move' | 'look', x: number, y: number): void {
-    this.sticks[which] = { x, y };
-  }
-
-  /* On a touch screen, the on-screen buttons stand in for the keys and the mouse's buttons (see TouchControls). */
-
-  /** The left button: pick up what the crosshair is on, or let go of what's held. */
-  touchGrab(): void {
-    if (this.locked) this.grabOrRelease(false);
-  }
-
-  /** Enter: write a note about what the crosshair is on. */
-  touchNote(): void {
-    if (this.locked) this.writeNote();
-  }
-
-  /** N: nap, or wake from one. */
-  touchNap(): void {
-    if (this.dozing()) this.wakeNap();
-    else if (this.locked) this.nap();
-  }
-
-  /** Backspace: put away what's held. */
-  touchPutAway(): void {
-    if (this.locked) this.putAway();
-  }
-
-  /** C: take hold of the hose nearest the crosshair (see hoseAim). */
-  touchHose(): void {
-    if (this.locked) this.keyC();
-  }
-
-  /**
-   * Q or E, pressed or let go, as the keys are (see keyDown): with something in hand, E uses it and Q puts it back;
-   * with empty hands, each turns the handwheel or dial looked at, while it's held.
-   */
-  touchKey(code: 'KeyQ' | 'KeyE', down: boolean): void {
-    if (!down) {
-      this.keys.delete(code);
-      this.keyUp(code);
-    } else if (this.locked) {
-      this.keys.add(code);
-      this.keyDown(code);
-    }
   }
 
   /**
@@ -1631,20 +1549,7 @@ export class GameEngine {
     if (h && h.kind !== 'flask') h.relYaw = wrapAngle(h.relYaw + Math.PI / 2);
   }
 
-  /**
-   * The touch screen's stand-in for R, Shift and the mouse, and the wheel: a drag across turns what's held, and up holds it
-   * further, down nearer; but for a hose's nozzle, up slides its stand out and down in (see slideReach).
-   */
-  turnHeld(dx: number, dy: number): void {
-    const h = this.held;
-    if (!h) return;
-    // a flask is round, so turning it does nothing (see faceFlask)
-    if (h.kind !== 'flask') h.relYaw = wrapAngle(h.relYaw - dx * TURN_SENS);
-    if (h.kind === 'hose') this.slideReach(h, dy);
-    else h.dist = this.clampDist(h, h.dist * Math.exp(-dy * 0.004));
-  }
-
-  /** The mouse or a finger moved `dy` pixels down: slide a held nozzle's stand in, or up, out, within NOZZLE_REACH. */
+  /** The mouse moved `dy` pixels down: slide a held nozzle's stand in, or up, out, within NOZZLE_REACH. */
   private slideReach(h: Held & { kind: 'hose' }, dy: number): void {
     h.reach = Math.min(NOZZLE_REACH.max, Math.max(NOZZLE_REACH.min, h.reach - dy * REACH_SENS));
   }
@@ -1816,11 +1721,6 @@ export class GameEngine {
   private keyUp(code: 'KeyQ' | 'KeyE'): void {
     if (code === 'KeyE') this.using = false;
     if (this.turning && !this.keys.has('KeyQ') && !this.keys.has('KeyE')) this.endTurn();
-  }
-
-  /** Whether Q and E would turn something now: with empty hands, a handwheel or a dial near the crosshair (see aimedValve). */
-  private turnWouldDo(): boolean {
-    return !!this.aimedValve();
   }
 
   /**
@@ -3260,24 +3160,17 @@ export class GameEngine {
   private move(dt: number): void {
     const p = this.player;
     const k = this.keys;
-    const { move, look } = this.sticks;
-    const fwd = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - move.y;
-    const side = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0) + move.x;
-    // sniffing, she stands as she is and looks nowhere else, but what's in her hand is still held (see sniff)
+    const fwd = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
+    const side = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
+    // sniffing, she stands as she is, but what's in her hand is still held (see sniff)
     const still = !!this.sniffing;
-    // the look stick turns the view at a rate, gently near its middle so small turns can be aimed
-    if (!still && (look.x || look.y)) {
-      p.yaw = wrapAngle(p.yaw - look.x * Math.abs(look.x) * STICK_TURN * dt);
-      p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch - look.y * Math.abs(look.y) * STICK_TILT * dt));
-    }
     // shut in the pod, or in the preview of the end, they can only look
     if (inPod(this.wake) || this.previewing) return;
     this.stepTurn(dt);
     const h = this.held;
     if (!still && (fwd || side)) {
-      // keys walk at full speed whichever way; the move stick as far as it's pushed
-      const len = Math.hypot(fwd, side);
-      const sp = (WALK * dt * Math.min(1, len)) / len;
+      // at full speed whichever way
+      const sp = (WALK * dt) / Math.hypot(fwd, side);
       const dx = (-Math.sin(p.yaw) * fwd + Math.cos(p.yaw) * side) * sp;
       const dz = (-Math.cos(p.yaw) * fwd - Math.sin(p.yaw) * side) * sp;
       const body = { x: p.x, z: p.z, r: PLAYER_R, y0: 0, y1: EYE + 20 };
@@ -3677,10 +3570,10 @@ export class GameEngine {
 
   /**
    * Whether Alt is held: then what's held is set down exactly where and as it's held, turned as it's held (see
-   * facing) and with no magnet (see magnet). Not on a touch screen, which has no Alt.
+   * facing) and with no magnet (see magnet).
    */
   private free(): boolean {
-    return !TOUCH && (this.keys.has('AltLeft') || this.keys.has('AltRight'));
+    return this.keys.has('AltLeft') || this.keys.has('AltRight');
   }
 
   /**
@@ -4139,7 +4032,7 @@ export class GameEngine {
         add(['Shift', '↑↓'], 'slide its stand out or in');
       } else if (h.kind !== 'flask' && h.kind !== 'cock') add(['R'], 'turn it');
       add(['Wheel'], 'hold it nearer or further');
-      if (!TOUCH && h.kind !== 'cock') add(['Alt'], 'hold to set it down just as it’s held');
+      if (h.kind !== 'cock') add(['Alt'], 'hold to set it down just as it’s held');
       if (h.kind === 'hose') add(['Backspace'], 'roll the hose back up');
       else if (!(h.kind === 'tool' && UNIQUE_TOOLS.includes(h.t.kind))) add(['Backspace'], 'put it back in the cabinet');
       add(['Q'], !h.from ? (h.kind === 'hose' ? 'roll the hose back up' : 'put it back in the cabinet') : h.ghost ? 'leave it where it is' : 'put it back');
@@ -4572,21 +4465,12 @@ export class GameEngine {
   private hud(now: number): void {
     if (this.flash && now > this.flash.until) this.flash = null;
     if (this.smelled && now > this.smelled.until) this.smelled = null;
-    const p = this.target;
-    const h = this.held;
     const hud: Hud = {
       locked: this.locked,
-      grab: !this.held && !!p && this.grabbable(p),
       inPod: inPod(this.wake),
-      holding: !!this.held,
-      drop: !!this.placed && 'rest' in this.placed,
       press: !this.sniffing && this.leftHint(),
-      turn: this.turnWouldDo() || !!this.turning,
       use: !this.sniffing && this.useWouldDo(),
       hinted: !!this.pourHintAt() || !!this.dipHintAt(),
-      label: !inPod(this.wake) && !!this.targetNote(),
-      hose: !!this.hoseAim(),
-      hand: h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? null : 'Dip',
       note: this.flash?.text ?? null,
       tip: !!this.flash?.tip,
       actions: this.actions(),
@@ -4609,7 +4493,6 @@ export class GameEngine {
       reservoir: this.sleeping ? this.reservoirHud() : null,
       lids: this.napping ? ease(this.napping.lids) : 0,
       napping: this.dozing(),
-      nap: this.canNap(),
       smell: this.smelled && {
         n: this.smelled.n,
         lines: this.smelled.script.reduce<string[][]>((ls, f) => (f.line || !ls.length ? [...ls, [f.text]] : [...ls.slice(0, -1), [...ls[ls.length - 1], f.text]]), []),

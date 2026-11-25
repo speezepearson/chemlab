@@ -1,7 +1,5 @@
 :root{
   box-sizing:border-box;
-  padding-top:env(safe-area-inset-top,0px);
-  padding-bottom:env(safe-area-inset-bottom,0px);
   --bg:#dfe3dc; --panel:#eef0eb; --ink:#1b2320; --muted:#5c6862; --line:#b9c1ba;
   --accent:#2f6a56; --bench:#c7ccc3; --glass:rgba(27,35,32,.62); --glasshi:rgba(255,255,255,.35);
   --pipe:#8a938d; --shadow:rgba(20,30,26,.18);
@@ -18,7 +16,7 @@
   --accent:#8ccbb0; --bench:#2b3230; --glass:rgba(227,232,227,.62); --glasshi:rgba(255,255,255,.07);
   --pipe:#5b665f; --shadow:rgba(0,0,0,.45);
 }
-html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
+html{height:100%}
 body{
   margin:0;height:100%;background:var(--bg);color:var(--ink);
   font-family:"Schibsted Grotesk",-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
@@ -63,7 +61,7 @@ details td{padding:0 6px;text-align:right;white-space:nowrap}
 details tr.sep td{padding-top:8px}
 .num{
   display:inline-block;min-width:44px;padding:1px 5px;border-radius:4px;cursor:ew-resize;
-  user-select:none;-webkit-user-select:none;touch-action:none;border:1px solid transparent;
+  user-select:none;-webkit-user-select:none;border:1px solid transparent;
 }
 .num:hover,.num.live{border-color:var(--accent)}
 details p{margin:8px 0 0;color:var(--muted);font-size:11px}
@@ -82,11 +80,6 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .hint{width:100%;margin:0;color:var(--muted);font-size:12px}
 #stage{flex:1;position:relative;min-height:0;min-width:0;overflow:hidden}
 .main{flex:1;display:flex;min-height:0}
-@media (max-width:560px){
-  /* panels span the screen, rather than hanging left off it from their names */
-  details{position:static}
-  details > div{left:16px;right:16px;top:auto;margin-top:6px}
-}
 /* an equipment wheel, round the middle of the view while its key's held; smaller, in a view too small for it */
 .wheel{
   position:absolute;left:50%;top:50%;width:468px;height:468px;max-width:calc(100% - 16px);max-height:calc(100% - 16px);
@@ -95,6 +88,72 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .wheel .sector{fill:rgba(20,26,24,.76);stroke:rgba(255,255,255,.22);stroke-width:1.2}
 .wheel .picked .sector{fill:rgba(47,106,86,.85);stroke:rgba(255,255,255,.5)}
 .wheel .icon canvas{display:block;width:100%;height:100%}
+.wheel .none .icon{opacity:.25}
+.wheel .pointer{fill:#fff;stroke:rgba(0,0,0,.6);stroke-width:1.2}
+.crosshair{
+  position:absolute;left:50%;top:50%;width:6px;height:6px;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
+  border-radius:50%;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.35);opacity:.6;
+}
+.crosshair.dim{opacity:.25}
+/* the hints: at the crosshair's own height, the left button's due left of it and E's due right */
+.hints{position:absolute;left:50%;top:50%;pointer-events:none;z-index:2}
+.hints span{position:absolute;top:0;transform:translateY(-50%);display:flex}
+.hints .left{right:16px}
+.hints .right{left:16px}
+.hints .mouse rect{fill:rgba(238,240,235,.85);stroke:#1b2320;stroke-width:1.2}
+.hints .mouse path{fill:none;stroke:#1b2320;stroke-width:1.2}
+.hints .mouse path.lit{fill:#2f6a56;stroke:none}
+.hints .mouse{width:24px;height:34px;opacity:.85}
+.hints kbd{
+  font:600 15px "Schibsted Grotesk",sans-serif;color:#1b2320;background:rgba(238,240,235,.85);
+  border:1.2px solid #1b2320;border-radius:5px;padding:2px 7px;opacity:.85;
+}
+.doable .mouse{width:12px;height:17px;opacity:.85}
+.doable{
+  position:absolute;left:12px;bottom:12px;z-index:2;pointer-events:none;display:flex;flex-direction:column;gap:3px;
+  padding:7px 9px;border-radius:7px;background:rgba(12,17,15,.55);color:#dfe6e2;font-size:12px;line-height:1.2;
+  max-width:min(340px,calc(100% - 24px));box-sizing:border-box;
+}
+.can{display:flex;align-items:center;gap:8px}
+.can.off{opacity:.45}
+.doable .keys{display:flex;align-items:center;gap:3px;flex:none;min-width:76px}
+.doable .plus{margin:0 2px;opacity:.7}
+.doable kbd{
+  font:600 11px "Schibsted Grotesk",sans-serif;color:#1b2320;background:rgba(238,240,235,.85);
+  border-radius:4px;padding:1px 5px;
+}
+.doable .mouse rect{fill:rgba(238,240,235,.85);stroke:#1b2320;stroke-width:1.2}
+.doable .mouse path{fill:none;stroke:#1b2320;stroke-width:1.2}
+.doable .mouse path.lit{fill:#2f6a56;stroke:none}
+.note{
+  position:absolute;left:50%;top:calc(50% + 40px);transform:translateX(-50%);pointer-events:none;z-index:2;
+  color:#f3d9d4;background:rgba(40,14,10,.6);padding:3px 10px;border-radius:6px;font-size:13px;
+}
+.note.tip{top:22%;color:#e9f1ec;background:rgba(14,30,24,.72);padding:6px 14px;font-size:14px}
+/*
+  what a sniff smelled of: under the crosshair, clear of a note, a strip to each line, and fading out at the end. Its
+  top is fixed, and it's as wide from the start as the whole of it will be (.whole, unseen, under .said in the same
+  grid cell), up to the view's width (not half of it, as it would shrink to from left:50%), so what's been said never
+  moves as more comes up: each strip grows rightward from its left end, and new ones come under it. It's over the
+  corner's list, which a long line reaches in a small window
+*/
+.smell{
+  position:absolute;left:50%;top:calc(50% + 74px);transform:translateX(-50%);pointer-events:none;z-index:3;
+  display:grid;width:max-content;max-width:calc(100% - 32px);box-sizing:border-box;
+  color:#eef0eb;font-size:14px;font-style:italic;transition:opacity 1.1s linear;
+}
+.smell.out{opacity:0}
+.smell>div{grid-area:1/1;min-width:0}
+.smell .whole{visibility:hidden}
+.smell p{margin:0 0 3px;padding:5px 12px;border-radius:6px;width:max-content;max-width:100%;box-sizing:border-box}
+.smell .said p{background:rgba(12,17,15,.8);animation:said .2s ease-out both}
+.smell .said span{animation:said .25s ease-out both}
+@keyframes said{from{opacity:0}}
+.start-hint{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
+  color:#eef0eb;background:rgba(8,12,11,.55);padding:6px 14px;border-radius:8px;font-size:15px;font-weight:600;
+}
+canvas{display:block;width:100%;height:100%}
 .wheel .none .icon{opacity:.25}
 .wheel .pointer{fill:#fff;stroke:rgba(0,0,0,.6);stroke-width:1.2}
 .crosshair{
@@ -180,7 +239,7 @@ button.touch{
 button.touch.small{width:46px;height:46px;font-size:10px}
 button.touch.pad{width:78px;height:58px;border-radius:14px}
 button.touch.dim{opacity:.45}
-canvas{display:block;width:100%;height:100%;touch-action:none}
+canvas{display:block;width:100%;height:100%}
 #info{
   position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);
   border-radius:8px;padding:8px 10px;width:220px;font-size:12px;
