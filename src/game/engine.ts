@@ -4215,16 +4215,6 @@ export class GameEngine {
     return (
       (p?.kind === 'scale' && p.part === 'tare') ||
       (p?.kind === 'tool' && p.part === 'button') ||
-  /**
-   * Whether the left button's hint shows by the crosshair (see Hud.press): when it would do something (see
-   * leftWouldDo), but for setting down what's in hand, which needs no telling (it's what the left button does with
-   * anything in hand, and where it would go is drawn in the lab). With something in hand, that leaves pressing a key
-   * or button, and putting it in the cabinet.
-   */
-  private leftHint(): boolean {
-    return this.leftWouldDo() && (!this.held || this.onButton() || this.intoCabinet());
-  }
-
       p?.kind === 'alarm' ||
       p?.kind === 'blinds' ||
       p?.kind === 'wake'
