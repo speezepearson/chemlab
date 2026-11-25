@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { flaskBox, scaleBox, toolBox } from './bodies';
-import { CABINET, CABINET_BUILD, ENDLESS, STOCK, endless, putIn, stockWith, takeFrom, takeSlot, type Stocked } from './cabinet';
+import { cockBox, flaskBox, scaleBox, toolBox } from './bodies';
+import { CABINET, CABINET_BUILD, ENDLESS, SHELF_REACH, STAND_OFF, STOCK, endless, putIn, stockWith, takeFrom, takeSlot, type Stocked } from './cabinet';
 import { Flask } from './flask';
-import { boxesOverlap, solids, type Box } from './physics';
+import { boxesOverlap, type Box } from './physics';
 import { Scale } from './scale';
-import { CABINET_AREA, COUNTERS, ROOM, type Pose } from './space';
+import { CABINET_AREA, COUNTERS, EYE, REACH, ROOM, type Pose } from './space';
 import { Tool } from './tools';
 
 const KINDS = Object.keys(STOCK) as Stocked[];
@@ -16,6 +16,7 @@ function boxAt(k: Stocked, pose: Pose): Box {
     f.pose = pose;
     return flaskBox(f);
   }
+  if (k === 'stopcock') return cockBox(pose, pose.yaw);
   return k === 'scale' ? scaleBox(new Scale(pose)) : toolBox(new Tool(k, 0, pose));
 }
 
@@ -41,29 +42,37 @@ describe('the equipment cabinet', () => {
       expect(b.x + b.hx).toBeLessThan(CABINET.x1 - B.side + 1e-6);
       expect(b.z - b.hz).toBeGreaterThan(CABINET.z0 + B.back - 1e-6);
       expect(b.z + b.hz).toBeLessThan(CABINET.z1 + 1e-6);
-      expect(b.y - b.hy).toBeGreaterThan(B.base - 1e-6);
+      expect(b.y - b.hy).toBeGreaterThan(CABINET.base - 1e-6);
       expect(b.y + b.hy).toBeLessThan(CABINET.y1 - B.top + 1e-6);
       // each in one bay
       expect(CABINET.bays.some((bay) => b.x - b.hx >= bay.x0 - 1e-6 && b.x + b.hx <= bay.x1 + 1e-6)).toBe(true);
     }
+    // and each under any shelf over it, clear of the board
+    for (const { k, b } of all)
+      for (const sh of CABINET.shelves)
+        if (sh.x0 <= b.x && b.x <= sh.x1 && sh.y > b.y - b.hy + 1e-6) expect(b.y + b.hy, k).toBeLessThanOrEqual(sh.y - B.board - B.clear + 1e-6);
     // shrunk a hair, so things just touching (stacked) don't count
     const shrink = (b: Box): Box => ({ ...b, hx: b.hx - 0.01, hy: b.hy - 0.01, hz: b.hz - 0.01, parts: undefined });
     for (let i = 0; i < all.length; i++)
       for (let j = i + 1; j < all.length; j++) expect(boxesOverlap(shrink(all[i].b), shrink(all[j].b))).toBe(false);
   });
 
-  it("puts the front one of each kind in reach of someone standing at it", () => {
-    // the player's eyes, 620 up, as close as they can stand (45 round) to the front one
+  it('has nothing lower or higher than can be reached from a stride out, and no shelf on the plinth', () => {
+    expect(CABINET.base).toBeGreaterThanOrEqual(SHELF_REACH.lo);
+    for (const sh of CABINET.shelves) expect(sh.y).toBeGreaterThanOrEqual(CABINET.base);
+    for (const k of KINDS)
+      for (const p of CABINET.slots[k]) {
+        const b = boxAt(k, p);
+        expect(b.y - b.hy, k).toBeGreaterThanOrEqual(SHELF_REACH.lo);
+        expect(b.y + b.hy, k).toBeLessThanOrEqual(SHELF_REACH.hi);
+      }
+  });
+
+  it('puts the whole front of the front one of each kind in reach of someone standing a stride out', () => {
     for (const k of KINDS) {
-      const p = CABINET.slots[k][STOCK[k] - 1];
-      const near = Math.min(
-        ...solids(boxAt(k, p)).map((b) => {
-          const eye = { x: b.x, y: 620, z: CABINET.z1 + 45 };
-          const dy = Math.max(0, Math.abs(eye.y - b.y) - b.hy);
-          return Math.hypot(dy, eye.z - (b.z + b.hz));
-        }),
-      );
-      expect(near, k).toBeLessThan(460);
+      const b = boxAt(k, CABINET.slots[k][STOCK[k] - 1]);
+      const out = CABINET.z1 + STAND_OFF - (b.z + b.hz);
+      for (const y of [b.y - b.hy, b.y + b.hy]) expect(Math.hypot(EYE - y, out), k).toBeLessThanOrEqual(REACH);
     }
   });
 });

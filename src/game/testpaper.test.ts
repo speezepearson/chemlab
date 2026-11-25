@@ -338,7 +338,7 @@ describe('test paper in the room', () => {
 
   it("is clear of the base of every stand that holds a tool's spout over its middle", () => {
     const sheet = lying(150, 950);
-    const kinds = (Object.keys(STOCK) as Stocked[]).filter((k) => k !== 'flask' && k !== 'scale' && SHAPES[k].spouts.length > 0);
+    const kinds = (Object.keys(STOCK) as Stocked[]).filter((k) => k !== 'flask' && k !== 'scale' && k !== 'stopcock' && SHAPES[k].spouts.length > 0);
     expect(kinds.length).toBeGreaterThan(5);
     for (const kind of kinds)
       for (const yaw of [0, Math.PI / 2, Math.PI, -Math.PI / 2])

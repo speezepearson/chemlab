@@ -127,33 +127,30 @@ const SCENES: Record<string, Scene> = {
   },
   busy: {
     about:
-      'hot8 + 4 faucets running through hoses into a heater -> separator (no K looped) -> splitter -> exchanger, ' +
+      'hot8 + 4 faucets running through hoses into a heater -> separator (no K looped) -> exchanger, ' +
       'sorter, meter, dispenser -> pipette, big tank',
     preset: {
       ...base(COLORS.map(() => mixFill(EVEN, 2 / 3, 1, 4)), 'busy'),
       tools: [
         { kind: 'heater', at: [0.25, 0.3], valves: [0.1, 0.6] },
-        { kind: 'separator', at: [0.75, 0.3], valves: [0.3], tanks: [mixFill(EVEN, 2, 1, 3)] },
-        { kind: 'splitter', at: [1.0, 0.25], valves: [0.5] },
+        { kind: 'separator', at: [0.75, 0.3], cocks: [0.3, 0.3], tanks: [mixFill(EVEN, 2, 1, 3)] },
         { kind: 'sorter', at: [1.3, 0.25] },
-        { kind: 'exchanger', at: [0.45, 0.6], valves: [0.3, 0.3], tanks: [mixFill(EVEN, 0.5, 1, 2), mixFill(EVEN, 0.5, 1, 1)] },
-        { kind: 'dispenser', at: [0.7, 0.6], valves: [0.05], tanks: [mixFill(EVEN, 4, 1, 5)] },
-        { kind: 'pipette', at: [0.9, 0.6], valves: [0.5] },
-        { kind: 'tank', at: [1.2, 0.6], valves: [0.02], tanks: [mixFill(EVEN, 10, 1, 1.5)] },
+        { kind: 'exchanger', at: [0.45, 0.6], cocks: [0.3, 0.3], tanks: [mixFill(EVEN, 0.5, 1, 2), mixFill(EVEN, 0.5, 1, 1)] },
+        { kind: 'dispenser', at: [0.7, 0.6], cocks: [0.05], tanks: [mixFill(EVEN, 4, 1, 5)] },
+        { kind: 'pipette', at: [0.9, 0.6], cocks: [0.5] },
+        { kind: 'tank', at: [1.2, 0.6], cocks: [0.02], tanks: [mixFill(EVEN, 10, 1, 1.5)] },
         { kind: 'meter', at: [1.5, 0.6] },
       ],
     },
     after(e) {
       const T = (k: string) => e.tools.find((t: Tool) => t.kind === k) as Tool;
-      const [heater, sep, split, sorter, exch, disp, pip, , meter] = e.tools as Tool[];
+      const [heater, sep, sorter, exch, disp, pip, , meter] = e.tools as Tool[];
       const spectro = T('spectroscope');
       hose(e, { faucet: 0 }, tankMouth(heater, 0));
       hose(e, { faucet: 1 }, tankMouth(heater, 0), 44);
       hose(e, { tool: heater, spout: 1 }, tankMouth(sep, 0), 64);
       hose(e, { tool: sep, spout: 0 }, tankMouth(sep, 0));
-      hose(e, { tool: sep, spout: 1 }, tankMouth(split, 0));
-      hose(e, { tool: split, spout: 0 }, tankMouth(exch, 0));
-      hose(e, { tool: split, spout: 1 }, tankMouth(exch, 1));
+      hose(e, { tool: sep, spout: 1 }, tankMouth(exch, 0));
       hose(e, { faucet: 3 }, tankMouth(sorter, 0));
       hose(e, { faucet: 2 }, tankMouth(meter, 0));
       hose(e, { tool: disp, spout: 0 }, tankMouth(pip, 0));
@@ -168,12 +165,12 @@ const SCENES: Record<string, Scene> = {
       ...base([...COLORS.slice(0, 4).map(() => mixFill(EVEN, 2 / 3, 1, 3)), null, null, null, null], 'prod'),
       tools: [
         { kind: 'heater', at: [0.25, 0.25], valves: [0, 0.7] },
-        { kind: 'dispenser', at: [0.45, 0.6], valves: [0.1], tanks: [mixFill({ R: 0.5, G: 0.5 }, 2, 1, 6)] },
-        { kind: 'separator', at: [0.75, 0.3], valves: [0.05], tanks: [mixFill(EVEN, 2, 1, 10)] },
+        { kind: 'dispenser', at: [0.45, 0.6], cocks: [0.1], tanks: [mixFill({ R: 0.5, G: 0.5 }, 2, 1, 6)] },
+        { kind: 'separator', at: [0.75, 0.3], cocks: [0.05, 0.05], tanks: [mixFill(EVEN, 2, 1, 10)] },
         { kind: 'heater', at: [0.25, 0.6], valves: [0, 0.9] },
         { kind: 'sorter', at: [1.0, 0.25] },
-        { kind: 'exchanger', at: [1.3, 0.6], valves: [0.5, 0.5] },
-        { kind: 'tank', at: [1.6, 0.25], valves: [0.02], tanks: [mixFill(EVEN, 10, 1, 1)] },
+        { kind: 'exchanger', at: [1.3, 0.6], cocks: [0.5, 0.5] },
+        { kind: 'tank', at: [1.6, 0.25], cocks: [0.02], tanks: [mixFill(EVEN, 10, 1, 1)] },
       ],
     },
     after(e) {

@@ -19,9 +19,10 @@ export interface SaveState {
   /**
    * Each faucet's note and how far its valve is open (0 shut to 1 fully open), with where it was on the old flat bench.
    * The lab's faucets are fixed, so where is ignored; it's kept so saves still load on the old bench. A save from
-   * before faucets had valves, when they ran all the time, has none: its faucets load fully open.
+   * before faucets had valves, when they ran all the time, has none: its faucets load fully open. And the stopcock on
+   * each, if there is one (see Cock): how it's set, and whether it's on the end of its hose.
    */
-  faucets?: { x: number; y: number; note?: string; valve?: number }[];
+  faucets?: { x: number; y: number; note?: string; valve?: number; cock?: { valve: number; nozzle?: boolean } | null; end?: { valve: number } | null }[];
   chem?: { bonds: ChemParams['bonds']; swapA: number; heatCap: number };
   /** The target the receptacle has taken so far, by volume, toward the goal; none if left out. */
   delivered?: number;
@@ -67,7 +68,18 @@ export interface SavedTool extends SavedDepth {
   id: number;
   fx: number;
   fy: number;
+  /**
+   * Its built-in valves' settings (see ToolShape.valves). From before there were stopcocks, a tool's flow valves were
+   * here too, a tank's each: a save with no `cocks` fits stopcocks set as those were (see GameEngine.loadCocks).
+   */
   valves: number[];
+  /**
+   * Per spout, the stopcock fitted at its tip (see Cock), or null for none: its setting. A save from before there were
+   * stopcocks has none; one from when a spout had only one, on either end, says `nozzle` of one on its hose's end.
+   */
+  cocks?: ({ valve: number; nozzle?: boolean } | null)[];
+  /** Per spout, the stopcock on the end of its hose (see Tool.ends), or null for none. */
+  ends?: ({ valve: number } | null)[];
   tanks: SavedVessel[];
   /** Per spout, the drop hanging there, if any. */
   drops?: SavedVessel[];
@@ -100,8 +112,11 @@ export interface SavedScale extends SavedDepth {
   fx: number;
   fy: number;
   tare: number;
-  /** Flasks standing on it, by index into `flasks`. */
-  load: { f: number; dx: number }[];
+  /**
+   * Flasks standing on it, by index into `flasks`, and where on its platform: `dx` along it and `dz` across it, from
+   * its middle (a save from when a flask stood in one of two places along it has no `dz`: it stood across its middle).
+   */
+  load: { f: number; dx: number; dz?: number }[];
   /** The player's note about it, if any. */
   note?: string;
 }

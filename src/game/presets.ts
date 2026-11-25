@@ -2,6 +2,7 @@ import { type Atom } from '../chem/atoms';
 import { T_ROOM } from '../chem/params';
 import { SPECIES, TARGET, singleOf } from '../chem/species';
 import { CAP, HOME_W } from './config';
+import { plumbZ } from './bodies';
 import type { Vessel } from './flask';
 import { CELL, LAMP_AREA, LAMP_Z, LIFT, ROOM, type Pose } from './space';
 import { CRYOSTABILIZER } from './supply';
@@ -57,8 +58,13 @@ export const REFERENCE_FILL: FlaskFill = { contents: [{ species: TARGET, molecul
 /** A tool on the bench at the start. */
 export interface ToolSpec extends Spot {
   kind: ToolKind;
-  /** Per tank, 0 (closed) to 1 (fully open); closed if left out. */
+  /** Its built-in valves (see ToolShape.valves), from 0 to 1; each at 0, or a selector at half, if left out. */
   valves?: number[];
+  /**
+   * Per spout, the stopcock fitted at its tip, set from 0 (shut) to 1 (fully open), or null for none; as it comes out
+   * of the cabinet (see ToolShape.fitted), if left out.
+   */
+  cocks?: (number | null)[];
   /** Starting contents of each tank, in the order the tool's shape lists them. */
   tanks?: (FlaskFill | null)[];
 }
@@ -115,13 +121,14 @@ export const PRESETS: readonly Preset[] = [
     name: 'Heat exchanger demo',
     description:
       'Hot red and room-temperature green pass each other in a counterflow heat exchanger, trading heat but not ' +
-      'mixing: the red comes out cool and the green hot. Slower flows trade more. Look at a valve and hold the right button: point up to open it, right to close it.',
+      'mixing: the red comes out cool and the green hot. Slower flows trade more. Look at a stopcock’s handwheel and hold Q or E to turn it, anticlockwise or clockwise: its bar along the pipe is open, across it shut.',
     flasks: [],
     tools: [
-      // over the exchanger's two tanks, half a cell either side of its middle
-      { kind: 'dispenser', at: [cellX(5), 0.22], z: DEMO_Z, valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('R'), 4 * CAP)], T: 10 }] },
-      { kind: 'dispenser', at: [cellX(6), 0.22], z: DEMO_Z, valves: [0.25], tanks: [{ contents: [atomsOf(singleOf('G'), 4 * CAP)], T: T_ROOM }] },
-      { kind: 'exchanger', at: [cellX(5.5), 0.48], z: DEMO_Z, valves: [0.25, 0.25] },
+      // over the exchanger's two tanks, half a cell either side of its middle; it stands as far forward as their
+      // spouts are in front of their middles (see plumbZ), so they're over its tanks' middles
+      { kind: 'dispenser', at: [cellX(5), 0.22], z: DEMO_Z, cocks: [0.25], tanks: [{ contents: [atomsOf(singleOf('R'), 4 * CAP)], T: 10 }] },
+      { kind: 'dispenser', at: [cellX(6), 0.22], z: DEMO_Z, cocks: [0.25], tanks: [{ contents: [atomsOf(singleOf('G'), 4 * CAP)], T: T_ROOM }] },
+      { kind: 'exchanger', at: [cellX(5.5), 0.48], z: DEMO_Z + plumbZ('dispenser'), cocks: [0.25, 0.25] },
     ],
   },
   {
@@ -134,12 +141,12 @@ export const PRESETS: readonly Preset[] = [
     flasks: [],
     tools: [
       {
-        kind: 'separator', at: [cellX(5), 0.2], z: DEMO_Z, valves: [0.3],
+        kind: 'separator', at: [cellX(5), 0.2], z: DEMO_Z, cocks: [0.3, 0.3],
         tanks: [{ contents: [atomsOf(singleOf('R'), 2 * CAP), atomsOf(singleOf('K'), 2 * CAP)], T: T_ROOM }],
       },
-      // under its spouts, a cell either side of its middle
-      { kind: 'dispenser', at: [cellX(4), 0.5], z: DEMO_Z },
-      { kind: 'dispenser', at: [cellX(6), 0.5], z: DEMO_Z },
+      // under its spouts, a cell either side of its middle, and as far forward as they are (see plumbZ)
+      { kind: 'dispenser', at: [cellX(4), 0.5], z: DEMO_Z + plumbZ('separator') },
+      { kind: 'dispenser', at: [cellX(6), 0.5], z: DEMO_Z + plumbZ('separator') },
     ],
   },
   {

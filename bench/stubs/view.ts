@@ -10,6 +10,9 @@ export class View {
   pick(): null {
     return null;
   }
+  blocked(): boolean {
+    return false;
+  }
   ray(): { origin: { x: number; y: number; z: number }; dir: { x: number; y: number; z: number } } {
     return { origin: { x: 0, y: 0, z: 0 }, dir: { x: 0, y: 0, z: -1 } };
   }

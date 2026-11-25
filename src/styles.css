@@ -98,22 +98,27 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .wheel .none .icon{opacity:.25}
 .wheel .pointer{fill:#fff;stroke:rgba(0,0,0,.6);stroke-width:1.2}
 .crosshair{
-  position:absolute;left:50%;top:50%;width:14px;height:14px;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
-  background:
-    linear-gradient(#fff,#fff) center/2px 14px no-repeat,
-    linear-gradient(#fff,#fff) center/14px 2px no-repeat;
-  opacity:.75;mix-blend-mode:difference;
+  position:absolute;left:50%;top:50%;width:6px;height:6px;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
+  border-radius:50%;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.35);opacity:.6;
 }
 .crosshair.dim{opacity:.25}
-/* the mouse hints: at the crosshair's own height, the left button's due left of it and the right button's due right */
+/* the hints: at the crosshair's own height, the left button's due left of it and E's due right */
 .hints{position:absolute;left:50%;top:50%;pointer-events:none;z-index:2}
 .hints span{position:absolute;top:0;transform:translateY(-50%);display:flex}
 .hints .left{right:16px}
-.hints .right{left:16px}
+.hints .right{left:16px;align-items:center}
+.hints b{
+  font:600 15px "Schibsted Grotesk",sans-serif;color:#eef0eb;margin-left:2px;opacity:.9;
+  text-shadow:0 0 2px #1b2320,0 0 2px #1b2320,0 1px 2px #1b2320;
+}
 .hints .mouse rect{fill:rgba(238,240,235,.85);stroke:#1b2320;stroke-width:1.2}
 .hints .mouse path{fill:none;stroke:#1b2320;stroke-width:1.2}
 .hints .mouse path.lit{fill:#2f6a56;stroke:none}
 .hints .mouse{width:24px;height:34px;opacity:.85}
+.hints kbd{
+  font:600 15px "Schibsted Grotesk",sans-serif;color:#1b2320;background:rgba(238,240,235,.85);
+  border:1.2px solid #1b2320;border-radius:5px;padding:2px 7px;opacity:.85;
+}
 .doable .mouse{width:12px;height:17px;opacity:.85}
 .doable{
   position:absolute;left:12px;bottom:12px;z-index:2;pointer-events:none;display:flex;flex-direction:column;gap:3px;
@@ -131,10 +136,6 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .doable .mouse rect{fill:rgba(238,240,235,.85);stroke:#1b2320;stroke-width:1.2}
 .doable .mouse path{fill:none;stroke:#1b2320;stroke-width:1.2}
 .doable .mouse path.lit{fill:#2f6a56;stroke:none}
-.aim{
-  position:absolute;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;pointer-events:none;z-index:2;
-  border:2px solid #fff;mix-blend-mode:difference;
-}
 .note{
   position:absolute;left:50%;top:calc(50% + 40px);transform:translateX(-50%);pointer-events:none;z-index:2;
   color:#f3d9d4;background:rgba(40,14,10,.6);padding:3px 10px;border-radius:6px;font-size:13px;
@@ -206,6 +207,7 @@ canvas{display:block;width:100%;height:100%;touch-action:none}
 #editor .hd b{font-weight:500}
 #editor .line{display:flex;gap:8px;align-items:center;margin:6px 0}
 #editor .muted{color:var(--muted)}
+#editor .total .num{min-width:0}
 #editor .line input{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:0 4px;flex:1;min-width:0}
 .label-edit{
   position:absolute;transform:translate(-50%,-75%);width:170px;z-index:6;text-align:center;

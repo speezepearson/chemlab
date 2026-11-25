@@ -1,4 +1,3 @@
-import { SCALE_SLOTS } from './bodies';
 import { CELL, toCardinal, toWorld, type Pose, type Vec3 } from './space';
 import { tankX, type Tool } from './tools';
 
@@ -23,5 +22,5 @@ export function onCell(p: Pose, anchor: Vec3 = { x: 0, y: 0, z: 0 }): Pose {
 /** A tool's first tank's opening's middle, or for a tool with no tanks, its middle: the point onCell puts on a cell. */
 export const toolAnchor = (t: Tool): Vec3 => ({ x: t.shape.tanks.length ? tankX(t.shape.tanks[0]) : 0, y: 0, z: 0 });
 
-/** One of a scale's places for a flask: the point onCell puts on a cell, so both are. */
-export const SCALE_ANCHOR: Vec3 = { x: SCALE_SLOTS[1], y: 0, z: 0 };
+/** Half a cell along a scale from its middle, where a flask can stand on it: the point onCell puts on a cell. */
+export const SCALE_ANCHOR: Vec3 = { x: CELL / 2, y: 0, z: 0 };

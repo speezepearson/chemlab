@@ -37,7 +37,7 @@ export function flaskGrams(f: Flask): number {
 
 /**
  * Scale geometry in local units, origin at the top center of the platform, y down as on the old flat bench. It's two
- * cells long and one deep (see CELL), a little inside them, its places for a flask over the two (see SCALE_SLOTS):
+ * cells long and one deep (see CELL), a little inside them, so two flasks stand on it side by side, anywhere along it:
  * the display just wide enough for six seven-segment cells (a reading below −SCALE_MAX's five digits), and the tare key
  * beside it.
  */
@@ -52,10 +52,16 @@ export const SCALE_SHAPE = {
   box: { x0: -58, x1: 58, y0: -74, y1: 42 },
 };
 
-/** A bench scale with gram resolution. Flasks stand anywhere along its platform. */
+/**
+ * A bench scale with gram resolution. Flasks stand anywhere on its platform, as on a counter, their bases wholly on it
+ * (see platformSpot in bodies.ts).
+ */
 export class Scale {
-  /** What's standing on the platform, and where: dx is the flask's offset from its center, in local units. */
-  readonly load: { f: Flask; dx: number }[] = [];
+  /**
+   * What's standing on the platform, and where: each flask's offset from its middle, in the scale's own frame, `dx`
+   * along it and `dz` across it, toward its front.
+   */
+  readonly load: { f: Flask; dx: number; dz: number }[] = [];
   /** Subtracted from the reading, in whole grams. */
   tare = 0;
   /** The player's note, written above it; empty for none. */
@@ -85,10 +91,10 @@ export class Scale {
     if (g <= SCALE_MAX) this.tare = Math.round(g);
   }
 
-  /** Stand a flask on the platform, dx local units from its center. */
-  put(f: Flask, dx: number): void {
+  /** Stand a flask on the platform, dx along it and dz across it from its center, in local units. */
+  put(f: Flask, dx: number, dz = 0): void {
     this.remove(f);
-    this.load.push({ f, dx });
+    this.load.push({ f, dx, dz });
   }
 
   /** Take a flask off, if it's on. */

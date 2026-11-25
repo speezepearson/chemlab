@@ -1,5 +1,7 @@
 import { Fragment, useReducer, useState } from 'react';
 import { LOOK, resetLook, type ColorModel, type Look } from '../game/appearance';
+import { DEFAULT_FINISH, FINISH, setFinish } from '../game/finish';
+import { DEFAULT_AIM, AIM, AIM_DEG, setAim } from '../game/aim';
 import { DEFAULT_OUTLINE, MAX_OUTLINE_WIDTH, OUTLINE, setOutline } from '../game/outline';
 import { DragNumber } from './DragNumber';
 
@@ -29,7 +31,8 @@ const GROUPS: Group[] = [
 
 /**
  * Debug panel: live-tune the temperature appearance curves and how composition looks (see game/appearance.ts), and
- * the outline round what the crosshair is on (see game/outline.ts).
+ * the outline round what the crosshair is on (see game/outline.ts), how shiny the lab's metal is (see game/finish.ts),
+ * and how far off the crosshair what C, Q and E act on may be (see game/aim.ts).
  */
 export function AppearancePanel() {
   const [, rerender] = useReducer((x: number) => x + 1, 0);
@@ -121,7 +124,7 @@ export function AppearancePanel() {
             )}
             <tr className="group">
               <td colSpan={2}>
-                <b>Outline</b> <span>round what the crosshair is on; thickness in pixels, 0 for none</span>
+                <b>Outline</b> <span>round the part the crosshair is on, and faintly round the whole thing; thickness in pixels, faint as a share of full strength, 0 for none</span>
               </td>
             </tr>
             <tr>
@@ -158,6 +161,76 @@ export function AppearancePanel() {
                 </label>
               </td>
             </tr>
+            <tr>
+              <td>faint</td>
+              <td>
+                <label className="slider">
+                  <input
+                    type="range"
+                    aria-label="faint outline opacity"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={OUTLINE.faint}
+                    onChange={(e) => {
+                      setOutline({ faint: +e.target.value });
+                      rerender();
+                    }}
+                  />
+                  <output>{OUTLINE.faint}</output>
+                </label>
+              </td>
+            </tr>
+            <tr className="group">
+              <td colSpan={2}>
+                <b>Finish</b> <span>how the lab's metal is finished: 0 matte, 1 mirror-smooth, 0.5 as built</span>
+              </td>
+            </tr>
+            <tr>
+              <td>metal</td>
+              <td>
+                <label className="slider">
+                  <input
+                    type="range"
+                    aria-label="metal shine"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={FINISH.shine}
+                    onChange={(e) => {
+                      setFinish({ shine: +e.target.value });
+                      rerender();
+                    }}
+                  />
+                  <output>{FINISH.shine}</output>
+                </label>
+              </td>
+            </tr>
+            <tr className="group">
+              <td colSpan={2}>
+                <b>Aim</b> <span>how far off the crosshair a spout, a hose's end, a handwheel or a dial may be for C, Q and E to act on it, in degrees</span>
+              </td>
+            </tr>
+            <tr>
+              <td>degrees</td>
+              <td>
+                <label className="slider">
+                  <input
+                    type="range"
+                    aria-label="aim"
+                    min={AIM_DEG.min}
+                    max={AIM_DEG.max}
+                    step={AIM_DEG.step}
+                    value={AIM.deg}
+                    onChange={(e) => {
+                      setAim({ deg: +e.target.value });
+                      rerender();
+                    }}
+                  />
+                  <output>{AIM.deg}</output>
+                </label>
+              </td>
+            </tr>
           </tbody>
         </table>
         <p>
@@ -168,6 +241,8 @@ export function AppearancePanel() {
             onClick={() => {
               resetLook();
               setOutline({ ...DEFAULT_OUTLINE });
+              setFinish({ ...DEFAULT_FINISH });
+              setAim({ ...DEFAULT_AIM });
               rerender();
             }}
           >

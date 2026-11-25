@@ -1,7 +1,7 @@
-import { FLASK_CENTER, FLASK_R, scaleBox, toolBox } from './bodies';
+import { COCK_EXTENT, FLASK_CENTER, FLASK_R, scaleBox, toolBox } from './bodies';
 import { FLASK_H } from './flaskShape';
 import { Scale } from './scale';
-import { CABINET_AREA, type Pose, type Vec3 } from './space';
+import { CABINET_AREA, CELL, EYE, PLAYER_R, REACH, type Pose, type Vec3 } from './space';
 import { Tool, type ToolKind } from './tools';
 
 /**
@@ -11,8 +11,11 @@ import { Tool, type ToolKind } from './tools';
  * putting one away puts it back. The consumables (ENDLESS) are stacked deep, and never run out.
  */
 
-/** What the cabinet stocks: every kind of thing the equipment wheels make. */
-export type Stocked = 'flask' | 'scale' | Exclude<ToolKind, 'receptacle' | 'spectroscope' | 'shadowlamp'>;
+/**
+ * What the cabinet stocks: every kind of thing the equipment wheels make, a stopcock (see Cock in tools.ts) among
+ * them.
+ */
+export type Stocked = 'flask' | 'scale' | 'stopcock' | Exclude<ToolKind, 'receptacle' | 'spectroscope' | 'shadowlamp'>;
 
 /** The consumables: stacked deep in the cabinet, more than anyone could use, so taking one never empties it. */
 export const ENDLESS: readonly Stocked[] = ['thermometer', 'thermometerWide', 'strip', 'testpaper', 'bondpaper'];
@@ -20,10 +23,14 @@ export const ENDLESS: readonly Stocked[] = ['thermometer', 'thermometerWide', 's
 /** Whether the cabinet's supply of a kind never runs out. */
 export const endless = (k: Stocked) => ENDLESS.includes(k);
 
-/** How many of each kind the cabinet holds, full: thirty flasks, and eight of everything else (see ENDLESS). */
+/**
+ * How many of each kind the cabinet holds, full: thirty flasks, sixteen stopcocks, three big tanks (each holds a great
+ * deal, and the user found three plenty), and eight of everything else (see ENDLESS). The stopcocks fitted on what comes out of it fitted (see ToolShape.fitted) aren't these: they come with it,
+ * and go back with it.
+ */
 export const STOCK: Record<Stocked, number> = {
-  flask: 30, scale: 8, dispenser: 8, pipette: 8, exchanger: 8, separator: 8, splitter: 8, multiplexer: 8, sorter: 8,
-  heater: 8, tank: 8, meter: 8, dilatometer: 8, column: 8,
+  flask: 30, scale: 8, stopcock: 16, dispenser: 8, pipette: 8, exchanger: 8, separator: 8, multiplexer: 8, sorter: 8,
+  heater: 8, tank: 3, meter: 8, dilatometer: 8, column: 8,
   // drawn as this many, but endless
   thermometer: 16, thermometerWide: 16, strip: 16, testpaper: 16, bondpaper: 16,
 };
@@ -45,7 +52,7 @@ interface Compartment {
  */
 const BAYS: readonly (readonly (readonly Compartment[])[])[] = [
   [
-    [{ kind: 'tank', cols: 3, high: 3, deep: 1 }],
+    [{ kind: 'tank', cols: 3, high: 1, deep: 1 }],
     [{ kind: 'flask', cols: 10, high: 1, deep: 3 }],
     [{ kind: 'scale', cols: 3, high: 1, deep: 3 }],
   ],
@@ -57,7 +64,7 @@ const BAYS: readonly (readonly (readonly Compartment[])[])[] = [
   ],
   [
     [{ kind: 'exchanger', cols: 2, high: 1, deep: 4 }],
-    [{ kind: 'splitter', cols: 1, high: 2, deep: 4 }, { kind: 'pipette', cols: 2, high: 1, deep: 4 }],
+    [{ kind: 'pipette', cols: 2, high: 1, deep: 4 }],
     [{ kind: 'dilatometer', cols: 2, high: 1, deep: 4 }],
     [{ kind: 'column', cols: 1, high: 1, deep: 8 }, { kind: 'meter', cols: 1, high: 1, deep: 8 }],
   ],
@@ -66,23 +73,46 @@ const BAYS: readonly (readonly (readonly Compartment[])[])[] = [
     // (the sheets of test paper in one stack, lying flat on the shelf, and the sheets of bond paper in another)
     [
       { kind: 'strip', cols: 8, high: 1, deep: 2 }, { kind: 'testpaper', cols: 1, high: 16, deep: 1 },
-      { kind: 'bondpaper', cols: 1, high: 16, deep: 1 },
+      { kind: 'bondpaper', cols: 1, high: 16, deep: 1 }, { kind: 'stopcock', cols: 4, high: 1, deep: 4 },
     ],
     [{ kind: 'thermometer', cols: 8, high: 1, deep: 2 }, { kind: 'thermometerWide', cols: 8, high: 1, deep: 2 }],
   ],
 ];
 
 /**
- * The cabinet's build, in world units: a plinth `base` high under the shelves; uprights `side` thick between the bays
- * and at the ends; shelves `board` thick, each `clear` above the tallest thing on the one below; a back panel `back`
- * thick; a `gap` between things side by side and one behind another; and a top `board` thick, `top` above the highest
- * shelf's things.
+ * The cabinet's build, in world units: uprights `side` thick between the bays and at the ends; shelves `board` thick,
+ * each `clear` above the tallest thing on the one below; a back panel `back` thick; a `gap` between things side by side
+ * and one behind another; and a top `board` thick, `top` above the highest shelf's things. Under the shelves is a
+ * solid plinth, as high as SHELF_REACH puts the lowest of them (see CabinetLayout.base).
  */
-export const CABINET_BUILD = { base: 120, side: 8, board: 4, clear: 10, back: 4, gap: 2, top: 16 };
+export const CABINET_BUILD = { side: 8, board: 4, clear: 10, back: 4, gap: 2, top: 16 };
+
+/**
+ * How far out from the cabinet's front someone is taken to stand to take things from it: a stride (a cell) out, past
+ * their own girth (PLAYER_R), not pressed up against it.
+ */
+export const STAND_OFF = PLAYER_R + CELL;
+
+/**
+ * How low and how high what's on the cabinet's shelves can be, at the front, and still be picked up from STAND_OFF out:
+ * within REACH of the eyes, EYE up, so from about 173 to about 1067. Nothing in the cabinet stands lower or reaches
+ * higher. The user couldn't reach all the way down to its old bottom shelves, on a plinth 120 high, whose things'
+ * feet, and all of a low thing like the heater, were out of reach from there; so the shelves now start well above this
+ * (see layout).
+ */
+export const SHELF_REACH = (() => {
+  const r = Math.sqrt(REACH ** 2 - (STAND_OFF + CABINET_BUILD.gap) ** 2);
+  return { lo: EYE - r, hi: EYE + r };
+})();
 
 /** A kind's size, as its box is drawn (w across, h tall, d deep), and where that box's middle is from its pose. */
 function sizeOf(k: Stocked): { w: number; h: number; d: number; c: Vec3 } {
   if (k === 'flask') return { w: 2 * FLASK_R, h: FLASK_H, d: 2 * FLASK_R, c: FLASK_CENTER };
+  if (k === 'stopcock') {
+    // hanging from where it's held (see STOPCOCK), as it would from a spout
+    const { hx, y0, y1, z0, z1 } = COCK_EXTENT;
+    return { w: 2 * hx, h: y1 - y0, d: z1 - z0, c: { x: 0, y: -(y0 + y1) / 2, z: (z0 + z1) / 2 } };
+  }
   const b = k === 'scale' ? scaleBox(new Scale()) : toolBox(new Tool(k, 0));
   return { w: 2 * b.hx, h: 2 * b.hy, d: 2 * b.hz, c: { x: b.x, y: b.y, z: b.z } };
 }
@@ -107,6 +137,8 @@ export interface CabinetLayout {
   x1: number;
   z0: number;
   z1: number;
+  /** The top of its plinth, where its lowest shelves are. */
+  base: number;
   y1: number;
   bays: { x0: number; x1: number }[];
   shelves: Shelf[];
@@ -116,10 +148,18 @@ export interface CabinetLayout {
   need: { w: number; h: number; d: number };
 }
 
-/** Lay the cabinet out (see CabinetLayout), filling CABINET_AREA across, with whatever room is left shared among its bays. */
+/**
+ * Lay the cabinet out (see CabinetLayout), filling CABINET_AREA across, with whatever room is left shared among its
+ * bays. Its tallest bay's things are in the middle of SHELF_REACH, as much room in reach under them as over them, and
+ * every bay's shelves start as high: as far off the floor as they can be, with the tallest bay still in reach.
+ */
 function layout(): CabinetLayout {
   const B = CABINET_BUILD;
   const { x0, x1, z0, z1 } = CABINET_AREA;
+  const shelfH = (shelf: readonly Compartment[]) => Math.max(...shelf.map((cp) => compartmentSize(cp).h));
+  const tallest = Math.max(...BAYS.map((bay) => bay.reduce((h, sh) => h + shelfH(sh), 0) + (bay.length - 1) * (B.clear + B.board)));
+  const { lo, hi } = SHELF_REACH;
+  const base = Math.round(lo + Math.max(0, (hi - lo - tallest) / 2));
   const widths = BAYS.map((bay) => Math.max(...bay.map((sh) => sh.reduce((w, cp) => w + compartmentSize(cp).w, 0))));
   const needW = widths.reduce((a, b) => a + b, 0) + (BAYS.length + 1) * B.side;
   const spare = (x1 - x0 - needW) / BAYS.length;
@@ -133,7 +173,7 @@ function layout(): CabinetLayout {
   BAYS.forEach((bay, i) => {
     const bw = widths[i] + spare;
     bays.push({ x0: bx, x1: bx + bw });
-    let y = B.base;
+    let y = base;
     for (const shelf of bay) {
       shelves.push({ x0: bx, x1: bx + bw, y });
       // its compartments spread evenly across the bay
@@ -166,7 +206,7 @@ function layout(): CabinetLayout {
     needH = Math.max(needH, y);
     bx += bw + B.side;
   });
-  return { x0, x1, z0, z1, y1: needH + B.top, bays, shelves, slots, need: { w: needW, h: needH, d: needD + B.back + B.gap } };
+  return { x0, x1, z0, z1, base, y1: needH + B.top, bays, shelves, slots, need: { w: needW, h: needH, d: needD + B.back + B.gap } };
 }
 
 export const CABINET: CabinetLayout = layout();

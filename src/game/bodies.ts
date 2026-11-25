@@ -4,7 +4,7 @@ import { placeBox, type Box, type Part } from './physics';
 import { SCALE_SHAPE, type Scale } from './scale';
 import { CELL, groundAt, toLocal, toWorld, wrapAngle, type Pose, type Vec3 } from './space';
 import {
-  HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, LAMP, METER_BODY, SHAPES, STATION, STRIP, TANK_H, TEST_PAPER, THERMOMETER_ROD, dipUnder, footY, isThermometer, levelIn,
+  HELIX, INLINE_DOCK, INLINE_TOOLS, INSTRUMENT, LAMP, METER_BODY, SHAPES, STATION, STRIP, SUMP_TIP, TANK_H, TEST_PAPER, THERMOMETER_ROD, dipUnder, footY, isThermometer, levelIn,
   tankDepth, tankPieces, tankX, mouthBelow, overMouth, type Hose, type Mouth, type Piece, type Tool, type ToolKind,
 } from './tools';
 
@@ -99,20 +99,33 @@ export function onTool(t: Tool, x: number, y: number, z = 0): Vec3 {
   return toWorld(t.pose, { x, y: -y, z });
 }
 
-/** The tip of spout j, where fluid leaves the tool. */
-export function spoutAt(t: Tool, j: number): Vec3 {
-  return onTool(t, t.shape.spouts[j], t.shape.spoutY);
+/**
+ * How far in front of a tool's middle its plumbing is: the pipes under its tanks, its spouts and their stopcocks. For
+ * a tool whose tanks drain at their front (see ToolShape.front), the tip of their hoppers, the pipe just inside their
+ * front walls; for every other, its middle.
+ */
+export function plumbZ(t: Tool | ToolKind): number {
+  const kind = typeof t === 'string' ? t : t.kind;
+  return SHAPES[kind].front ? TOOL_DEPTH[kind].tank / 2 - SUMP_TIP / 2 : 0;
+}
+
+/** The tip of spout j itself, in the room: where a stopcock fitted on it hangs from (see STOPCOCK). */
+export function spoutTip(t: Tool, j: number): Vec3 {
+  return onTool(t, t.shape.spouts[j], t.shape.spoutY, plumbZ(t));
 }
 
 /**
- * How far in front of the tool's middle its valves sit: on its front face, where they're easy to see and reach; for a
- * round tank, out in front of the tank on a stem from the pipe under it, so the tank's lower edge doesn't hide it.
+ * Where fluid leaves spout j, in the room: its tip, or the foot of the stopcock fitted there, if there is one (see
+ * Tool.cocks); one on the end of its hose doesn't change where the hose runs from.
  */
-export const valveZ = (t: Tool) => (t.shape.wall ? 7 : TOOL_DEPTH[t.kind].body / 2 + 3);
+export function spoutAt(t: Tool, j: number): Vec3 {
+  const tip = spoutTip(t, j);
+  return t.cocks[j] ? { ...tip, y: tip.y - STOPCOCK.drop } : tip;
+}
 
-/** A valve's center, in the tool's flat frame: as its shape places it, or under tank k. */
+/** A built-in valve's center, in the tool's flat frame (see ToolShape.valves). */
 export function valveLocal(t: Tool, k: number): { x: number; y: number } {
-  const v = t.shape.valves?.[k] ?? { x: tankX(t.shape.tanks[k]), y: t.shape.valveY };
+  const v = t.shape.valves![k];
   return { x: v.x, y: v.y };
 }
 
@@ -175,7 +188,27 @@ export function tankNoteY(t: Tool, k: number): number {
  * lamp's are its enclosure, its channel's two side walls, its end wall and the channel's floor (see LAMP): the
  * channel between them is clear, for things to stand in its light on its floor, and so is the bench round the trough.
  */
-export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean }[] {
+export function toolParts(t: Tool): ToolPart[] {
+  return [...shapeParts(t), ...cockParts(t)];
+}
+
+/** One of a tool's solid parts, in its flat frame (see toolParts). */
+export type ToolPart = { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean };
+
+/** Each stopcock fitted at the tip of a tool's spouts (see Tool.cocks), as a solid part of it, in its flat frame. */
+export function cockParts(t: Tool): ToolPart[] {
+  const out: ToolPart[] = [];
+  t.cocks.forEach((c, j) => {
+    if (!c) return;
+    const x = t.shape.spouts[j];
+    const { y0, y1, hx, z0, z1 } = COCK_EXTENT;
+    out.push({ x0: x - hx, x1: x + hx, y0: t.shape.spoutY + y0, y1: t.shape.spoutY + y1, hz: (z1 - z0) / 2, z: plumbZ(t) + (z0 + z1) / 2 });
+  });
+  return out;
+}
+
+/** A tool's own parts, as its shape has them, without its stopcocks (see toolParts). */
+function shapeParts(t: Tool): ToolPart[] {
   const sh = t.shape;
   const b = sh.box;
   if (sh.wall) {
@@ -191,8 +224,9 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
     ];
   }
   if (t.kind === 'shadowlamp') {
-    const { h, wall, floor, box, channel: ch } = LAMP;
-    const side = { x0: ch.x0, x1: ch.x1, y0: 0, y1: h, hz: wall / 2 };
+    const { h, sides, wall, floor, box, channel: ch } = LAMP;
+    // (the side walls are lower than the enclosure and the end wall: see LAMP.sides)
+    const side = { x0: ch.x0, x1: ch.x1, y0: h - sides, y1: h, hz: wall / 2 };
     return [
       { x0: box.x0, x1: box.x1, y0: 0, y1: h, hz: ch.z + wall },
       { ...side, z: ch.z + wall / 2 },
@@ -236,7 +270,7 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
   // tanks with necks: each bulb on its own, round, where it is; the necks together above them; and each one's inlet,
   // above its neck (the thin tubes leaning in from them are too slight to bump into)
   const neck = sh.neck;
-  const upper: { x0: number; x1: number; y0: number; y1: number; hz: number; z?: number; round?: boolean }[] = neck
+  const upper: ToolPart[] = neck
     ? [
         ...neck.bodies.map((x) => ({ x0: x - neck.body / 2 - 2, x1: x + neck.body / 2 + 2, y0: -2, y1: bottom, hz: neck.body / 2 + 2, round: true })),
         { x0: Math.min(...neck.necks) - neck.w / 2 - 1, x1: Math.max(...neck.necks) + neck.w / 2 + 1, y0: -neck.h - 2, y1: -2, hz: neck.w / 2 + 1 },
@@ -244,7 +278,7 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
       ]
     : [tanks];
   if (bottom >= b.y1) return upper;
-  const valves = sh.noValve ? [] : (sh.valves ?? sh.tanks.map((k) => ({ x: tankX(k), y: sh.valveY })));
+  const valves = sh.valves ?? [];
   const xs = [...sh.spouts, ...valves.map((v) => v.x), ...sh.tanks.map(tankX)];
   if (t.kind === 'exchanger') xs.push(HELIX.x0, HELIX.x1);
   const below = {
@@ -254,9 +288,24 @@ export function toolParts(t: Tool): { x0: number; x1: number; y0: number; y1: nu
   return [...upper, below];
 }
 
-/** A tool's box in the room, for collisions: its bounding box, solid only in its parts (see toolParts). */
+/**
+ * A tool's bounding box in its flat frame: its shape's (see ToolShape.box), and as far as the stopcocks fitted at its
+ * spouts' tips reach, if they reach further (see cockParts).
+ */
+export function toolBounds(t: Tool): { x0: number; x1: number; y0: number; y1: number } {
+  const b = { ...t.shape.box };
+  for (const p of cockParts(t)) {
+    b.x0 = Math.min(b.x0, p.x0);
+    b.x1 = Math.max(b.x1, p.x1);
+    b.y0 = Math.min(b.y0, p.y0);
+    b.y1 = Math.max(b.y1, p.y1);
+  }
+  return b;
+}
+
+/** A tool's box in the room, for collisions: its bounding box (see toolBounds), solid only in its parts (see toolParts). */
 export function toolBox(t: Tool): Box {
-  const b = t.shape.box;
+  const b = toolBounds(t);
   const c = { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 };
   const parts: Part[] = toolParts(t).map((p) => ({
     x: (p.x0 + p.x1) / 2 - c.x, y: -((p.y0 + p.y1) / 2 - c.y), z: p.z ?? 0,
@@ -268,21 +317,25 @@ export function toolBox(t: Tool): Box {
 
 /** The middle of a tool's bounding box, in its own frame (y up), as it stands: where it's held from. */
 export function toolCenter(t: Tool): Vec3 {
-  const b = t.shape.box;
+  const b = toolBounds(t);
   return { x: (b.x0 + b.x1) / 2, y: -(b.y0 + b.y1) / 2, z: 0 };
 }
 
 /**
  * Tank k's inside as it's drawn (see tankPieces): its pieces, bottom up from `bottom` in the tool's flat frame (y
- * down), and the middle across of each (a swell bulb's neck isn't over its bulb, see ToolShape.neck).
+ * down), the middle across of each (a swell bulb's neck isn't over its bulb, see ToolShape.neck), and how far in front
+ * of the tool's middle each one's bottom is centred (a hopper's at the front, see ToolShape.front), its top always
+ * being on the middle.
  */
-export function tankInside(t: Tool, k: number): { pieces: Piece[]; bottom: number; xs: number[] } {
+export function tankInside(t: Tool, k: number): { pieces: Piece[]; bottom: number; xs: number[]; zs: number[] } {
   const sh = t.shape;
   const pieces = tankPieces(sh, k, TOOL_DEPTH[t.kind].tank);
   const bottom = (sh.tankH ?? TANK_H) + (sh.cup || sh.funnel ? 0 : (sh.sump?.h ?? 0));
   const n = sh.neck;
   const xs = pieces.map((_, i) => (!n ? tankX(sh.tanks[k]) : i === pieces.length - 1 ? n.necks[k] : n.bodies[k]));
-  return { pieces, bottom, xs };
+  // a hopper that leans forward to its tip (see ToolShape.front) has its bottom's middle at the tip
+  const zs = pieces.map((_, i) => (i === 0 && sh.front && sh.sump ? plumbZ(t) : 0));
+  return { pieces, bottom, xs, zs };
 }
 
 /** How full a vessel is, by volume, from 0 to 1. */
@@ -303,7 +356,7 @@ export function tankFluid(t: Tool, k: number): { floor: number; surface: number 
 function inTank(t: Tool, k: number, p: Vec3): number | null {
   const v = t.tanks[k];
   if (v.N <= 0) return null;
-  const { pieces, bottom, xs } = tankInside(t, k);
+  const { pieces, bottom, xs, zs } = tankInside(t, k);
   const l = toLocal(t.pose, p);
   const up = bottom + l.y;
   const level = levelIn(pieces, fullness(v));
@@ -316,7 +369,8 @@ function inTank(t: Tool, k: number, p: Vec3): number | null {
       const w = pc.w0 + (pc.w1 - pc.w0) * f;
       const d = pc.d0 + (pc.d1 - pc.d0) * f;
       const dx = l.x - xs[i];
-      return (pc.round ? Math.hypot(dx, l.z) <= w / 2 : Math.abs(dx) <= w / 2 && Math.abs(l.z) <= d / 2) ? level - up : null;
+      const dz = l.z - zs[i] * (1 - f);
+      return (pc.round ? Math.hypot(dx, dz) <= w / 2 : Math.abs(dx) <= w / 2 && Math.abs(dz) <= d / 2) ? level - up : null;
     }
     base += pc.h;
   }
@@ -443,13 +497,18 @@ export function flaskBox(f: Flask): Box {
 
 /* ---------------- scales ---------------- */
 
-/** Where a flask standing on a scale `dx` along its platform has its mouth, facing the way the scale does. */
-export function onScale(sc: Scale, dx: number): Pose {
-  return { ...toWorld(sc.pose, { x: dx, y: FLASK_H, z: 0 }), yaw: sc.pose.yaw };
+/**
+ * Where a flask standing on a scale `dx` along its platform and `dz` across it has its mouth, facing the way the scale
+ * does.
+ */
+export function onScale(sc: Scale, dx: number, dz = 0): Pose {
+  return { ...toWorld(sc.pose, { x: dx, y: FLASK_H, z: dz }), yaw: sc.pose.yaw };
 }
 
-/** Where along its platform a scale stands flasks: half a cell (see CELL) either side of its middle, a cell apart. */
-export const SCALE_SLOTS = [-CELL / 2, CELL / 2];
+/**
+ * How far a flask can stand from the middle of a scale's platform, along it and across it, with its base wholly on it.
+ */
+export const PLATFORM_REACH = { x: SCALE_SHAPE.platform.x1 - FLASK_R, z: SCALE_SHAPE.depth - FLASK_R };
 
 /**
  * A scale's body and platform in the room; with `load`, reaching up over whatever's standing on it too (as it's
@@ -471,21 +530,15 @@ export function scaleCenter(sc: Scale): Vec3 {
 }
 
 /**
- * Where a flask let go of with its mouth at `p` would stand on a scale: `dx` along the platform, at the nearer of its
- * places for a flask (see SCALE_SLOTS), if it's over the platform, above it but no more than `reach` above it. Null if
- * it isn't.
+ * Where on a scale's platform a flask let go of with its mouth at `p` would stand, as on a counter: just there, `dx`
+ * along it and `dz` across it in the scale's frame, if its base is wholly on the platform (see PLATFORM_REACH), and
+ * it's no lower than a little under the platform's top. Null if not.
  */
-export function scaleSpot(sc: Scale, p: Vec3, reach = 60): number | null {
-  const { platform: pl, depth } = SCALE_SHAPE;
-  const c = Math.cos(sc.pose.yaw);
-  const s = Math.sin(sc.pose.yaw);
-  const dx = p.x - sc.pose.x;
-  const dz = p.z - sc.pose.z;
-  const lx = dx * c - dz * s;
-  const lz = dx * s + dz * c;
-  const above = p.y - FLASK_H - sc.pose.y;
-  if (lx < pl.x0 || lx > pl.x1 || Math.abs(lz) > depth || above < -10 || above > reach) return null;
-  return lx < 0 ? SCALE_SLOTS[0] : SCALE_SLOTS[1];
+export function platformSpot(sc: Scale, p: Vec3): { dx: number; dz: number } | null {
+  const l = toLocal(sc.pose, p);
+  const r = PLATFORM_REACH;
+  if (Math.abs(l.x) > r.x + 1e-9 || Math.abs(l.z) > r.z + 1e-9 || p.y - FLASK_H - sc.pose.y < -10) return null;
+  return { dx: l.x, dz: l.z };
 }
 
 /* ---------------- hoses ---------------- */
@@ -507,28 +560,15 @@ export function docked(p: Pose, tools: readonly Tool[]): Pose {
 export const NOZZLE_H = 10;
 export const NOZZLE_R = 5;
 
-/** A hose's nozzle's box: a little upright cylinder up from its tip. */
-export function nozzleBox(h: Hose): Box {
-  const box = placeBox({ ...h.outlet, yaw: 0 }, { x: 0, y: NOZZLE_H / 2, z: 0 }, { x: NOZZLE_R, y: NOZZLE_H / 2, z: NOZZLE_R });
-  return { ...box, round: true };
-}
-
 /**
- * How near a spout's tip, across and up, in a tool's flat frame, the crosshair can be on the tool and still be on
- * the spout: its tip, and the pipe just above it.
+ * A hose's nozzle's box: a little upright cylinder up from its tip; or with a stopcock on it (`cocked`, see Cock), a
+ * cylinder as wide as the stopcock's handwheel, from the stopcock's foot up to the nozzle's top.
  */
-export const SPOUT_REACH = { x: 12, up: 30, down: 4 };
-
-/** The spout of a tool nearest (x, y) in its flat frame as it stands, if that's within SPOUT_REACH of its tip; null if none is. */
-export function spoutNear(t: Tool, x: number, y: number): number | null {
-  let best: number | null = null;
-  let reach = SPOUT_REACH.x;
-  t.shape.spouts.forEach((sx, j) => {
-    const dx = Math.abs(x - sx);
-    const dy = t.shape.spoutY - y;
-    if (dx <= reach && dy <= SPOUT_REACH.up && dy >= -SPOUT_REACH.down) [best, reach] = [j, dx];
-  });
-  return best;
+export function nozzleBox(h: Hose, cocked = false): Box {
+  const down = cocked ? STOPCOCK.drop : 0;
+  const r = cocked ? VALVE_WHEEL.r : NOZZLE_R;
+  const box = placeBox({ ...h.outlet, yaw: 0 }, { x: 0, y: (NOZZLE_H - down) / 2, z: 0 }, { x: r, y: (NOZZLE_H + down) / 2, z: r });
+  return { ...box, round: true };
 }
 
 /* ---------------- stands ---------------- */
@@ -556,7 +596,7 @@ export const STAND_MAX = STAND_ROD - 10;
 const TWO_STANDS = 240;
 /**
  * How far behind the middle of what it holds a stand's rod is: far enough that its base clears a flask standing
- * under what it holds (or under the tool's spouts, which are along its middle), by this much.
+ * under what it holds (or under the tool's spouts, which are along its middle or in front of it), by this much.
  */
 const STAND_CLEAR = 6;
 const rodBack = (body: number) => Math.max(body / 2, FLASK_R) + STAND_CLEAR + STAND_BASE.hz;
@@ -629,57 +669,129 @@ export function standBase(s: Stand, y = groundAt(s.x, s.z)): Box {
 
 /* ---------------- valves ---------------- */
 
-/** How close to a valve, in a tool's local units, the aim can be before the lever stops following it: its round core. */
-export const VALVE_DEADZONE = 6;
-/** How near a valve's center, in a tool's local units, the right button grabs it: the reach of its lever, or a dial's ticks. */
-export const VALVE_REACH = 15;
-
-/** The valve nearest (x, y) in a tool's flat frame as it stands, within VALVE_REACH of its center; null if none is. */
-export function valveNear(t: Tool, x: number, y: number): number | null {
-  if (t.shape.noValve) return null;
-  let best: number | null = null;
-  let reach = VALVE_REACH;
-  t.valves.forEach((_, k) => {
-    const v = valveLocal(t, k);
-    const d = Math.hypot(x - v.x, y - v.y);
-    if (d < reach) [best, reach] = [k, d];
-  });
-  return best;
-}
-
-/** How a lever turns (see leverAt): a valve's, a splitter's or a multiplexer's, or a dial. */
-export type LeverKind = 'valve' | 'split' | 'dial';
+/**
+ * A valve's handwheel (see the view's handwheel): a disk `r` in radius and `thick` through, facing the tool's front, its
+ * middle on the pipe's axis as seen from in front, standing `gap` proud of the pipe on a short hub; `lobes` rounded
+ * lobes round its rim for grip, the notches between them `notch` deep; and a raised bar `bar` wide across its face.
+ */
+export const VALVE_WHEEL = { r: 9, thick: 3, gap: 1.5, lobes: 10, notch: 0.9, bar: 1.8 };
 
 /**
- * The setting a lever pointed at (dx, dy) from its valve's center, on the face it lies on (x right, y down), comes to:
- * a valve's straight up is fully open (1), straight right closed (0), and partly open in between, so its lever stands at
- * its setting times a quarter turn up from right. Below the valve it closes, and left of it (past the down-left
- * diagonal) it opens, so a wild swing lands at the nearer end. A splitter's lever instead sweeps the upper half:
- * straight left sends everything left, straight right everything right, and below the valve it goes to the nearer
- * side; a multiplexer's the same, taking everything from the left or the right. A dial points at (dx, dy), turning
- * clockwise from down-left (0) to down-right (1), and straight below it goes to the nearer end. Within VALVE_DEADZONE
- * of the center the angle is too jumpy to mean anything, so the lever stays put: null.
+ * A stopcock (see Cock in tools.ts), in its own frame: y down from the tip of the spout or nozzle it hangs from, x
+ * across, and z toward its front. A square collar sleeves that tip, from `collar.top` above it to `collar.bottom`
+ * below, `collar.r` either side of its axis; under it, a barrel of pipe `barrel` in radius down to its foot, a tip
+ * block like a tool's spout's, `foot` tall and `tip` either side of its axis, whose bottom, `drop` below the tip it
+ * hangs from, is where what it lets out leaves it. On the barrel's front is a plain valve's handwheel (see
+ * VALVE_WHEEL), on a short hub, its middle `wheelY` down, halfway along the barrel, which is as long as the handwheel
+ * is across, at least.
  */
-export function leverAt(kind: LeverKind, dx: number, dy: number): number | null {
-  if (Math.hypot(dx, dy) < VALVE_DEADZONE) return null;
-  if (kind === 'dial') {
-    const cw = Math.atan2(dx, -dy); // clockwise from straight up
-    return Math.max(0, Math.min(1, (cw + 0.75 * Math.PI) / (1.5 * Math.PI)));
+export const STOPCOCK = { drop: 26, collar: { top: 6.5, bottom: 1.5, r: 5.5 }, barrel: 2, foot: 6, tip: 4, wheelY: 10.75 };
+
+/** How far in front of a stopcock's axis its handwheel's middle is: just proud of its barrel, as a tool's is of its pipe. */
+export const COCK_WHEEL_Z = STOPCOCK.barrel + VALVE_WHEEL.gap + VALVE_WHEEL.thick / 2;
+
+/**
+ * How far a stopcock reaches, in its own frame (see STOPCOCK), for bumping into things: across as far as its
+ * handwheel, from its collar's top down to its foot, and from its collar's back to its handwheel's face.
+ */
+export const COCK_EXTENT = {
+  hx: VALVE_WHEEL.r, y0: -STOPCOCK.collar.top, y1: STOPCOCK.drop, z0: -STOPCOCK.collar.r, z1: COCK_WHEEL_Z + VALVE_WHEEL.thick / 2,
+};
+
+/** A stopcock's box in the room, hanging from the tip `at`, facing `yaw` (see STOPCOCK). */
+export function cockBox(at: Vec3, yaw: number): Box {
+  const { hx, y0, y1, z0, z1 } = COCK_EXTENT;
+  return placeBox({ ...at, yaw }, { x: 0, y: -(y0 + y1) / 2, z: (z0 + z1) / 2 }, { x: hx, y: (y1 - y0) / 2, z: (z1 - z0) / 2 });
+}
+
+/**
+ * How far in front of the tool's middle its built-in valves' handwheels are, at their middles: just proud of the pipe they're
+ * on (see VALVE_WHEEL), which is in front of the middle if it drains at its front (see plumbZ). The supply station's
+ * pipes are a little thicker.
+ */
+export const valveZ = (t: Tool) => plumbZ(t) + (t.shape.wall ? 2.5 : 2) + VALVE_WHEEL.gap + VALVE_WHEEL.thick / 2;
+
+/** How far in front of the tool's middle a dial is (see ToolShape.dial): on the front face of the box it's set in. */
+export const dialZ = (t: Tool) => TOOL_DEPTH[t.kind].body / 2 + 3;
+
+/** How far out from a dial's middle its tick marks reach, round its knob (see the view's buildDial). */
+export const DIAL_REACH = 13;
+
+/** How far in front of the tool's middle valve k is, at its middle: a handwheel's or a dial's. */
+export const valveFaceZ = (t: Tool, k: number) => (k === t.shape.dial ? dialZ(t) : valveZ(t));
+
+/** How a valve turns (see valveAt): a plain valve's handwheel, a multiplexer's selector, or a dial. */
+export type LeverKind = 'valve' | 'join' | 'dial';
+
+/**
+ * How far either way from square to its pipe a plain valve's bar can be and the valve still be shut: 10°. So it
+ * needn't be turned exactly square to stop every last drop, and beyond that it opens evenly to fully open, along the
+ * pipe (see valveAt).
+ */
+export const VALVE_SHUT = Math.PI / 18;
+
+/** How far either way from straight up a dial turns, to its stops (see valveAt). */
+export const DIAL_STOP = 0.75 * Math.PI;
+
+/**
+ * What a valve at angle `a` (radians clockwise from straight up, as seen from in front) is set to. A plain valve's bar
+ * runs across its handwheel: along the pipe (upright) it's fully open (1), square to it, or within VALVE_SHUT of that,
+ * shut (0), and partly open in between, evenly from where it stops being shut, so it opens and shuts twice a turn. A multiplexer's handwheel has a pointer instead: straight
+ * left takes only from the left (0), straight up half from each, straight right only from the right (1), straight
+ * down half from each again, and on round to the left. Both turn all the way round. A dial turns clockwise from down-left (0) to
+ * down-right (1), and no further (see sweep).
+ */
+export function valveAt(kind: LeverKind, a: number): number {
+  const turn = 2 * Math.PI;
+  if (kind === 'dial') return Math.max(0, Math.min(1, (a + DIAL_STOP) / (2 * DIAL_STOP)));
+  if (kind === 'valve') {
+    // how far its bar is from square to the pipe, up to a quarter turn
+    const off = Math.abs(Math.PI / 2 - (((a % Math.PI) + Math.PI) % Math.PI));
+    return Math.max(0, (off - VALVE_SHUT) / (Math.PI / 2 - VALVE_SHUT));
   }
-  const a = Math.atan2(-dy, dx); // counterclockwise from right
-  if (kind === 'split') return a >= 0 ? 1 - a / Math.PI : a > -Math.PI / 2 ? 1 : 0;
-  const open = a < -0.75 * Math.PI ? 1 : a / (Math.PI / 2);
-  return Math.max(0, Math.min(1, open));
+  return 1 - Math.abs((((a + Math.PI / 2) % turn) + turn) % turn - Math.PI) / Math.PI;
 }
 
-/** How valve k of tool t turns (see leverAt). */
+/**
+ * Where a valve set to `v` is drawn, when nothing says otherwise (see valveAngle): a plain valve's bar a quarter turn
+ * clockwise from upright when shut, square to its pipe, and as far short of that as says `v` when it isn't (see
+ * VALVE_SHUT); a multiplexer's pointer on the upper half (left for 0, right for 1), toward the funnels joining over it;
+ * a dial on its arc.
+ */
+export function angleOf(kind: LeverKind, v: number): number {
+  if (kind === 'dial') return -DIAL_STOP + 2 * DIAL_STOP * v;
+  if (kind === 'join') return (v - 0.5) * Math.PI;
+  return v > 0 ? (1 - v) * (Math.PI / 2 - VALVE_SHUT) : Math.PI / 2;
+}
+
+/**
+ * A valve's angle, given the one it was last drawn and turned at (if any) and what it's set to now: that one, if it
+ * still says what it's set to, or else, if it's been set some other way (loaded, undone, a preset), where that's drawn
+ * (see angleOf). This is the one place an angle is worked out from a setting.
+ */
+export function settleAngle(kind: LeverKind, a: number | undefined, v: number): number {
+  return a !== undefined && Math.abs(valveAt(kind, a) - v) < 1e-9 ? a : angleOf(kind, v);
+}
+
+/** A valve at angle `a` turned by `d` (clockwise): as far as that, all the way round, but a dial only to its stops. */
+export function sweep(kind: LeverKind, a: number, d: number): number {
+  return kind === 'dial' ? Math.max(-DIAL_STOP, Math.min(DIAL_STOP, a + d)) : a + d;
+}
+
+/** How valve k of tool t turns (see valveAt). */
 export function leverKind(t: Tool, k: number): LeverKind {
-  return k === t.shape.dial ? 'dial' : t.kind === 'splitter' || t.kind === 'multiplexer' ? 'split' : 'valve';
+  return k === t.shape.dial ? 'dial' : t.kind === 'multiplexer' ? 'join' : 'valve';
 }
 
-/** Point valve k's lever at (x, y) in the tool's flat frame as it stands (y down); see leverAt. */
-export function aimValve(t: Tool, k: number, x: number, y: number): void {
-  const vc = valveLocal(t, k);
-  const v = leverAt(leverKind(t, k), x - vc.x, y - vc.y);
-  if (v !== null) t.valves[k] = v;
+/** Valve k's angle as it's drawn and turned (see settleAngle), kept with the tool (Tool.angles). */
+export function valveAngle(t: Tool, k: number): number {
+  return (t.angles[k] = settleAngle(leverKind(t, k), t.angles[k], t.valves[k]));
+}
+
+/** Turn valve k by `d` (radians clockwise, see sweep), and set it to what it comes to. */
+export function turnValve(t: Tool, k: number, d: number): void {
+  const kind = leverKind(t, k);
+  const a = sweep(kind, valveAngle(t, k), d);
+  t.angles[k] = a;
+  t.valves[k] = valveAt(kind, a);
 }

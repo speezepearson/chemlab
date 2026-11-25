@@ -13,7 +13,7 @@ function lab(): Things {
   const t = new Tool('dispenser', 0, { x: 250, y: 800, z: 150, yaw: 0 });
   const sc = new Scale({ x: 450, y: 420, z: 150, yaw: 0 });
   const h = new Hose({ tool: t, spout: 0 }, { x: 250, y: 600, z: 150 }, 50);
-  return { flasks: [f], tools: [t], scales: [sc], hoses: [h], faucets: [{ note: '', valve: 0 }], stock: stockWith({}) };
+  return { flasks: [f], tools: [t], scales: [sc], hoses: [h], faucets: [{ note: '', valve: 0, cock: null, end: null }], stock: stockWith({}) };
 }
 
 describe('arrangement', () => {
@@ -24,12 +24,12 @@ describe('arrangement', () => {
     const a = arrangement(l, sw);
     f.pose = { x: 950, y: 490, z: 150, yaw: 1 };
     f.label = 'acid';
-    t.valves[0] = 0.7;
+    t.cocks[0]!.valve = 0.7;
     f.N = 5;
     arrange(l, a);
     expect(f.pose).toEqual({ x: 50, y: 490, z: 150, yaw: 0 });
     expect(f.label).toBe('');
-    expect(t.valves[0]).toBe(0);
+    expect(t.cocks[0]!.valve).toBe(0);
     expect(f.N).toBe(5);
   });
 
@@ -78,13 +78,13 @@ describe('arrangement', () => {
     const [f] = l.flasks;
     const [sc] = l.scales;
     const [h] = l.hoses;
-    sc.put(f, 50);
+    sc.put(f, 25, 1);
     const a = arrangement(l, sw);
     sc.remove(f);
     h.outlet = { x: 0, y: 0, z: 0 };
     h.turn = 2;
     arrange(l, a);
-    expect(sc.load).toEqual([{ f, dx: 50 }]);
+    expect(sc.load).toEqual([{ f, dx: 25, dz: 1 }]);
     expect(h.outlet).toEqual({ x: 250, y: 600, z: 150 });
     expect(h.turn).toBe(0);
   });
@@ -96,9 +96,24 @@ describe('arrangement', () => {
     // what's in the vessels doesn't count
     l.flasks[0].N = 9;
     expect(sameArrangement(a, arrangement(l, sw))).toBe(true);
-    l.tools[0].valves[0] = 0.5;
+    l.tools[0].cocks[0]!.valve = 0.5;
     expect(sameArrangement(a, arrangement(l, sw))).toBe(false);
-    l.tools[0].valves[0] = 0;
+    l.tools[0].cocks[0]!.valve = 0;
+    expect(sameArrangement(a, arrangement(l, sw))).toBe(true);
+    // nor does a stopcock taken off, or put on the end of the hose
+    const c = l.tools[0].cocks[0];
+    l.tools[0].cocks[0] = null;
+    expect(sameArrangement(a, arrangement(l, sw))).toBe(false);
+    l.tools[0].ends[0] = { ...c! };
+    expect(sameArrangement(a, arrangement(l, sw))).toBe(false);
+    l.tools[0].cocks[0] = c;
+    expect(sameArrangement(a, arrangement(l, sw))).toBe(false);
+    // and one on the end of the hose is put back as it was too
+    const b = arrangement(l, sw);
+    l.tools[0].ends[0] = null;
+    arrange(l, b);
+    expect(l.tools[0].ends[0]).toEqual({ valve: 0 });
+    l.tools[0].ends[0] = null;
     expect(sameArrangement(a, arrangement(l, { ...sw, blindsShut: true }))).toBe(false);
     l.flasks.push(new Flask(100));
     expect(sameArrangement(a, arrangement(l, sw))).toBe(false);

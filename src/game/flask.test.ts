@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { SPECIES, TARGET, pairOf, singleOf } from '../chem/species';
+import { NS, SPECIES, TARGET, pairOf, singleOf } from '../chem/species';
+import { temperature } from '../chem/reactions';
+import { CAP, GOAL_PURITY } from './config';
 import { Flask, VOLUME, Vessel, sustenance, transfer, volume } from './flask';
 import { separate } from './tools';
-import { GOAL_PURITY } from './config';
 
-const atomTotal = (f: Flask) => SPECIES.reduce((t, s) => t + f.n[s.i] * s.size, 0);
+const atomTotal = (f: Vessel) => SPECIES.reduce((t, s) => t + f.n[s.i] * s.size, 0);
 
 describe('sustenance', () => {
   it('counts the target only in vessels more than GOAL_PURITY pure', () => {
@@ -45,6 +46,82 @@ describe('Flask.setMolecules', () => {
     f.setMolecules(TARGET, 5);
     expect(f.setMolecules(TARGET, -3)).toBe(0);
     expect(f.N).toBe(0);
+  });
+});
+
+describe('Vessel.setVolume', () => {
+  const R = singleOf('R');
+  const RG = pairOf('R', 'G');
+  const mix = () => {
+    const v = new Vessel(CAP);
+    v.setMolecules(R, 3e6);
+    v.setMolecules(RG, 2e6);
+    v.setMolecules(TARGET, 1e6);
+    v.setTemperature(1.7);
+    return v;
+  };
+  afterEach(() => {
+    VOLUME.molecules = true;
+  });
+
+  it('scales every species by the same factor, keeping N the atom total', () => {
+    const v = mix();
+    v.setVolume(12e6);
+    expect(volume(v)).toBe(12e6);
+    expect([v.n[R], v.n[RG], v.n[TARGET]]).toEqual([6e6, 4e6, 2e6]);
+    expect(v.N).toBe(atomTotal(v));
+  });
+
+  it('keeps the temperature', () => {
+    const v = mix();
+    const T = temperature(v);
+    v.setVolume(1.5e6);
+    expect(temperature(v)).toBeCloseTo(T, 6);
+  });
+
+  it('goes by volume when volume counts atoms', () => {
+    VOLUME.molecules = false;
+    const v = mix();
+    // 3e6 + 4e6 + 3e6 atoms, halved
+    v.setVolume(5e6);
+    expect(volume(v)).toBe(5e6);
+    expect([v.n[R], v.n[RG], v.n[TARGET]]).toEqual([1.5e6, 1e6, 0.5e6]);
+  });
+
+  it('clamps to the capacity, in whole counts', () => {
+    const v = new Vessel(1000);
+    v.setMolecules(R, 30);
+    v.setMolecules(RG, 20);
+    v.setMolecules(TARGET, 7);
+    v.setVolume(1e9);
+    // a factor of 1000/57: each count rounds to the nearest whole, 526 + 351 + 123
+    expect([v.n[R], v.n[RG], v.n[TARGET]]).toEqual([526, 351, 123]);
+    for (let s = 0; s < NS; s++) expect(Number.isInteger(v.n[s])).toBe(true);
+    expect(v.N).toBe(atomTotal(v));
+  });
+
+  it('floors every count rather than overfill', () => {
+    const v = new Vessel(7);
+    v.setMolecules(R, 2);
+    v.setMolecules(RG, 2);
+    // each comes to 3.5, and rounding both up would make 8
+    v.setVolume(7);
+    expect([v.n[R], v.n[RG]]).toEqual([3, 3]);
+    expect(v.N).toBe(atomTotal(v));
+  });
+
+  it('empties it at 0, and leaves an empty vessel as it is', () => {
+    const v = mix();
+    v.setVolume(0);
+    expect(volume(v)).toBe(0);
+    expect(v.N).toBe(0);
+    expect(v.Q).toBe(0);
+    const e = new Vessel(CAP);
+    e.setTemperature(2);
+    const Q = e.Q;
+    e.setVolume(1000);
+    expect(volume(e)).toBe(0);
+    expect(e.Q).toBe(Q);
   });
 });
 

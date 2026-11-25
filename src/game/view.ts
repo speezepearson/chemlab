@@ -10,7 +10,7 @@ import type { Fluid } from '../chem/reactions';
 import { OUTLINE } from './outline';
 import { glowFalloff } from './appearance';
 import {
-  NOZZLE_H, STAND_BASE, STAND_ROD, TOOL_DEPTH, onScale, onTool, openingOf, tankNoteY, tankRect, valveLocal, valveZ, type Stand,
+  NOZZLE_H, STAND_BASE, STAND_ROD, STOPCOCK, TOOL_DEPTH, onScale, onTool, openingOf, plumbZ, tankNoteY, tankRect, valveLocal, valveZ, dialZ, DIAL_REACH, settleAngle, valveAngle, VALVE_WHEEL, type Stand,
 } from './bodies';
 import { SPECIES } from '../chem/species';
 import { CAP, DELIVERY, GOAL_PURITY, TRACE } from './config';
@@ -18,34 +18,42 @@ import { Flask, Vessel, fluidAlpha, fluidRGB, volume } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, Scale } from './scale';
 import { COUNTERS, LIFT, ROOM, groundAt, toWorld, type Pose, type Vec3 } from './space';
-import { KNOB, knobPose } from './faucets';
+import { FAUCET_VALVE, faucetValvePose } from './faucets';
 import { PORT_FRAC, PORT_WALL, porthole, type Porthole } from './porthole';
 import { AIRLOCK, POD } from './airlock';
 import { arrival, notice, type Block } from '../intro/notice';
 import { STATION_POSE } from './presets';
 import { litresOf, type Supply } from './supply';
-import { boxUV, planeUV, surfaceMat, whenSurfaced } from './textures';
+import { FINISH } from './finish';
+import { applyShine, boxUV, metal, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
   clockText, LAMP, SCREEN, TANK_SECTION, ringShare, atomSector, BOND_ENDS, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS,
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, TEST_PAPER, paperTriangles, sectorInset, BOND_PAPER, bondDots, isBlotter, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
-  type Hose, type Piece, Tool,
+  type Cock, type Hose, type Piece, Tool,
 } from './tools';
 import { CABINET, CABINET_BUILD, STOCK, type Stock, type Stocked } from './cabinet';
 
 /** What the crosshair is on. */
 export type Pick =
   | { kind: 'flask'; f: Flask }
-  /** A tool: its body, or one of its tanks, valves or spouts; or the shadow lamp's button. */
-  | { kind: 'tool'; t: Tool; part: 'body' | 'tank' | 'valve' | 'spout' | 'button'; k: number }
-  | { kind: 'scale'; sc: Scale; part: 'body' | 'tare' }
-  /** A hose's nozzle. */
-  | { kind: 'hose'; h: Hose }
   /**
-   * A faucet: its spout, or the pipe down to it, if `spout`; its knob, or the hub and lever on it, if `valve` (see
-   * KNOB); else the pipe from the wall.
+   * A tool: its body, or one of its tanks, built-in valves or spouts; or the stopcock on spout k (see Cock), its
+   * handwheel and the hub it's on if `turns`, but for its foot, which is the spout's; or the shadow lamp's button.
    */
-  | { kind: 'faucet'; i: number; spout?: boolean; valve?: boolean }
+  | { kind: 'tool'; t: Tool; part: 'body' | 'tank' | 'valve' | 'spout' | 'button' | 'cock'; k: number; turns?: boolean }
+  | { kind: 'scale'; sc: Scale; part: 'body' | 'tare' }
+  /**
+   * A hose's nozzle; or the stopcock on its end (see Cock), its handwheel and the hub it's on if `turns`, but for its
+   * foot, which is the nozzle's.
+   */
+  | { kind: 'hose'; h: Hose; cock?: boolean; turns?: boolean }
+  /**
+   * A faucet: its spout, or the pipe down to it, if `spout` (or the foot of a stopcock at its tip); its valve's
+   * handwheel, or the hub it's on, if `valve` (see FAUCET_VALVE); the stopcock at its tip, if `cock` (its handwheel and
+   * hub if `turns`); else the pipe from the wall, and the elbow.
+   */
+  | { kind: 'faucet'; i: number; spout?: boolean; valve?: boolean; cock?: boolean; turns?: boolean }
   /** The button under the beacon that silences the alarms. */
   | { kind: 'alarm' }
   /** The button by the porthole that shuts its blinds, or opens them. */
@@ -69,10 +77,16 @@ export interface FaucetSpot {
   wall: Vec3;
   base?: Vec3;
   output: Fluid;
-  /** The player's note, written above its knob; empty for none. */
+  /** The player's note, written above its elbow; empty for none. */
   note: string;
   /** How far its valve is open: 0 (shut) to 1 (fully open, FILL_RATE), as a tool's valve is (see faucetRate). */
   valve: number;
+  /** The angle its valve is drawn and turned at, as a tool's (see settleAngle in bodies.ts): never saved. */
+  angle?: number;
+  /** The stopcock fitted at its tip, if there is one (see Cock). */
+  cock: Cock | null;
+  /** The stopcock on the end of its hose, under the nozzle, if the hose is out and there is one. */
+  end: Cock | null;
 }
 
 /** Everything the view needs to draw one frame. */
@@ -83,8 +97,11 @@ export interface Frame {
   flasks: readonly Flask[];
   tools: readonly Tool[];
   scales: readonly Scale[];
-  /** Each hose, from the spout or faucet it's pulled out of, with what's running through it. */
-  hoses: readonly { h: Hose; from: Vec3; fluid: Fluid | null }[];
+  /**
+   * Each hose, from the spout or faucet it's pulled out of, with what's running through it, and the stopcock on its
+   * end, if there is one (see Cock).
+   */
+  hoses: readonly { h: Hose; from: Vec3; fluid: Fluid | null; cock: Cock | null }[];
   faucets: readonly FaucetSpot[];
   /** What's in the equipment cabinet. */
   stock: Stock;
@@ -106,14 +123,37 @@ export interface Frame {
    * flask's), unless it's `square` (a sheet of test paper's, as is its face as a guide's mouth).
    */
   footprints: readonly (Vec3 & { hx: number; hz: number; yaw: number; ok: boolean; square?: boolean })[];
-  /** Every clamp stand, each with what it holds up, to grab that by it. */
-  stands: readonly { s: Stand; of: Pick }[];
+  /** Every clamp stand. */
+  stands: readonly Stand[];
   /**
    * What's being moved by a ghost (see Held.ghost in engine.ts), drawn as one where it would come to rest if let go,
    * with its stands, their bases `y` high; or, `ok` false, where it's held, red, since it can't be set down. The tool
-   * or scale itself is only for what it is (its kind, its valves, how many flasks ride on it): the ghost is a copy.
+   * or scale itself is only for what it is (its kind, its valves and stopcocks, how many flasks ride on it): the ghost is a copy.
    */
   ghost: { tool?: Tool; scale?: Scale; pose: Pose; ok: boolean; stands: readonly { s: Stand; y: number }[] } | null;
+  /**
+   * A stopcock in hand (see Cock), hanging from `pose`: where it would go on if let go of, outlined there, or in red
+   * if there's no room for it (`ok` false); or with nowhere to go, just in hand (`ok` null), not outlined.
+   */
+  loose: { cock: Cock; pose: Pose; ok: boolean | null } | null;
+  /**
+   * The arrow of Q and E over the top of the handwheel or dial they'd turn (see turnHint): its valve's middle, just in
+   * front of its face; the way it faces, toward the eyes; how far out from the middle its arc runs; and whether Q's
+   * side (−1) or E's (1) is lit, for the key held, or neither (0).
+   */
+  turnHint: { at: Vec3; yaw: number; r: number; lit: number } | null;
+  /**
+   * Where C would take hold of a hose, for its hint there (see hoseHint): a spout's outlet, or a nozzle (`nozzle`),
+   * with a stopcock on it or not (`cock`).
+   */
+  hoseHint: { at: Vec3; nozzle: boolean; cock: boolean } | null;
+  /** The middle of the mouth E would pour the flask in hand into, for its hint over it (see pourHint). */
+  pourHint: Vec3 | null;
+  /**
+   * The middle of the open top E would dip the strip (`strip`) or thermometer in hand into, for its hint beside it
+   * (see dipHint).
+   */
+  dipHint: { at: Vec3; strip: boolean } | null;
   drops: readonly { at: Vec3; v: Vessel; hanging: boolean }[];
   /** The scale whose tare key is held down. */
   tarePress: Scale | null;
@@ -196,9 +236,9 @@ const DROP_R_ATOMS = 1.5e6;
 /** A CRT's phosphor green. */
 const PHOSPHOR = '64, 255, 110';
 /**
- * The separator's manifold, below its valve, in local units (y down): two arms sloping down from a peak under its
+ * The separator's manifold, below its tank, in local units (y down): two arms sloping down from a peak under its
  * tank, midway between its spouts, each `slope` (radians) below level, `thick` through and `deep` front to back,
- * reaching `over` past its spout; `top` is how far down the peak's top is, just under its valve.
+ * reaching `over` past its spout; `top` is how far down the peak's top is, a short drop under its hopper's tip.
  */
 const SEP_ARMS = { top: TANK_SECTION.h + 18, slope: Math.PI / 12, thick: 12, deep: 20, over: 10 };
 /** Height of each line of a label, in world units. */
@@ -262,8 +302,8 @@ function floorFirst(g: THREE.BufferGeometry, y: number, near: number): THREE.Buf
 const edgeMat = new THREE.LineBasicMaterial({ color: 0xbfd4da, transparent: true, opacity: 0.3 });
 // stainless pipework, dark anodized fittings, light powder-coated cabinets and black plastic levers, all of them
 // reflecting the room (see View's environment)
-const pipeMat = new THREE.MeshStandardMaterial({ color: 0xa4adac, metalness: 0.9, roughness: 0.28 });
-const darkMat = new THREE.MeshStandardMaterial({ color: 0x30373a, metalness: 0.6, roughness: 0.42 });
+const pipeMat = metal(new THREE.MeshStandardMaterial({ color: 0xa4adac, metalness: 0.9, roughness: 0.28 }));
+const darkMat = metal(new THREE.MeshStandardMaterial({ color: 0x30373a, metalness: 0.6, roughness: 0.42 }));
 /**
  * Graduations printed on glass (the pipette's and the swell bulbs' necks'): ink with no thickness, lying MARK_LIFT
  * off the glass's surface and following it, seen from both sides, as through the glass from behind.
@@ -274,6 +314,11 @@ const panelMat = new THREE.MeshPhysicalMaterial({ color: 0xc4cbc7, metalness: 0.
 /** The separator's arm that molecules with a black atom leave by: the same paint, in a dark gray, at the user's request. */
 const blackSideMat = new THREE.MeshPhysicalMaterial({ color: 0x45494b, metalness: 0.1, roughness: 0.5, clearcoat: 0.4, clearcoatRoughness: 0.35 });
 const leverMat = new THREE.MeshPhysicalMaterial({ color: 0x15191a, metalness: 0, roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.2 });
+/**
+ * A handwheel's face (see handwheel): light and quite matte, with a little light of its own, so the black bar or pointer
+ * on it shows from any side and in any light, as a painted panel (which takes on what it reflects) doesn't.
+ */
+const wheelFaceMat = new THREE.MeshStandardMaterial({ color: 0xdfe4e1, metalness: 0, roughness: 0.85, emissive: 0xdfe4e1, emissiveIntensity: 0.18 });
 /** A thermometer's white enamel backing (see THERMOMETER_ROD). */
 const enamelMat = new THREE.MeshStandardMaterial({ color: 0xf1efe6, roughness: 0.4 });
 const keyMats = {
@@ -298,19 +343,26 @@ const PAPER = '#e6dfc8';
 const WET = { rgb: '96, 92, 78', alpha: 0.28 };
 const hidden = new THREE.MeshBasicMaterial({ visible: false });
 const faintMat = new THREE.MeshBasicMaterial({ color: 0xd6ecf2, transparent: true, opacity: 0.3, depthWrite: false });
-const rodMat = new THREE.MeshStandardMaterial({ color: 0xc8cfcd, metalness: 1, roughness: 0.18 });
-/** How see-through a faucet's knob is at the most, for a clear fluid's (the solvent's). */
+const rodMat = metal(new THREE.MeshStandardMaterial({ color: 0xc8cfcd, metalness: 1, roughness: 0.18 }));
+/** How see-through a faucet's handwheel is at the most, for a clear fluid's (the solvent's). */
 const KNOB_ALPHA = 0.6;
+/**
+ * How light a faucet's handwheel's color must be (its luminance, 0 to 1) for its bar to be black; on a darker one
+ * (black's), the bar is this white, so it shows on every one.
+ */
+const BAR_DARK_ABOVE = 0.3;
+const BAR_LIGHT = 0xe9ecea;
+const BAR_DARK = 0x15191a;
 /** Polished chrome, for the faucets. */
-const chromeMat = new THREE.MeshStandardMaterial({ color: 0xe2e7e8, metalness: 1, roughness: 0.08 });
+const chromeMat = metal(new THREE.MeshStandardMaterial({ color: 0xe2e7e8, metalness: 1, roughness: 0.08 }));
 /** The steel plate the supply station's panes are set in, and the lines marked on it. */
-const plateMat = new THREE.MeshStandardMaterial({ color: 0x6f7975, metalness: 0.5, roughness: 0.45 });
+const plateMat = metal(new THREE.MeshStandardMaterial({ color: 0x6f7975, metalness: 0.5, roughness: 0.45 }));
 /** The rubber seam round the supply station's block of the wall. */
 const rubberMat = new THREE.MeshStandardMaterial({ color: 0x1a1d1c, roughness: 0.95, metalness: 0 });
 /** The inside of the recess the station's block slides back into, behind its hole in the wall: dark, dull metal. */
-const recessMat = new THREE.MeshStandardMaterial({ color: 0x15181a, metalness: 0.3, roughness: 0.8, side: THREE.BackSide });
+const recessMat = metal(new THREE.MeshStandardMaterial({ color: 0x15181a, metalness: 0.3, roughness: 0.8, side: THREE.BackSide }));
 /** The door that shuts over the station's hole through a changeover: pale brushed steel, lighter than the block's plate. */
-const shutterMat = new THREE.MeshStandardMaterial({ color: 0xb4bcb9, metalness: 0.4, roughness: 0.5 });
+const shutterMat = metal(new THREE.MeshStandardMaterial({ color: 0xb4bcb9, metalness: 0.4, roughness: 0.5 }));
 /**
  * How wide the hazard tape round the station's block is, and how far apart its stripes repeat, in world units; and how
  * far its inner edge is from the block's edge, across and up, at each corner (bottom left, bottom right, top right, top
@@ -578,10 +630,10 @@ class FluidMesh {
 /* ---------------- geometry helpers ---------------- */
 
 /** A glass box with no top, edges drawn, x0..x1 by y0..y1 (flat frame, y down), `d` deep. */
-function openBox(parent: THREE.Object3D, x0: number, x1: number, y0: number, y1: number, d: number): THREE.Mesh {
+function openBox(parent: THREE.Object3D, x0: number, x1: number, y0: number, y1: number, d: number, floor = true): THREE.Mesh {
   const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, d);
-  // faces go +x, −x, +y, −y, +z, −z: no top
-  const m = new THREE.Mesh(g, [glassMat, glassMat, hidden, floorGlassMat, glassMat, glassMat]);
+  // faces go +x, −x, +y, −y, +z, −z: no top, and no floor if a hopper under it is its floor
+  const m = new THREE.Mesh(g, [glassMat, glassMat, hidden, floor ? floorGlassMat : hidden, glassMat, glassMat]);
   m.position.copy(v3((x0 + x1) / 2, (y0 + y1) / 2));
   parent.add(m);
   const e = new THREE.LineSegments(new THREE.EdgesGeometry(g), edgeMat);
@@ -608,6 +660,18 @@ function frustum(x: number, y0: number, y1: number, wTop: number, dTop: number, 
   }
   g.computeVertexNormals();
   g.translate(x, -(y0 + y1) / 2, 0);
+  return g;
+}
+
+/**
+ * Geometry `g`, drawn between depths y0 (its top) and y1 (its bottom) in a flat frame (y down), leaned forward by its
+ * depth: its top stays where it is and its bottom moves `dz` toward the front, evenly in between, so each level slice
+ * of it is as it was, only further forward. A hopper narrowing to its front (see ToolShape.front).
+ */
+function lean(g: THREE.BufferGeometry, y0: number, y1: number, dz: number): THREE.BufferGeometry {
+  const pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) pos.setZ(i, pos.getZ(i) + (dz * (-pos.getY(i) - y0)) / (y1 - y0));
+  g.computeVertexNormals();
   return g;
 }
 
@@ -681,14 +745,138 @@ function rod(parent: THREE.Object3D, mat: THREE.Material, a: THREE.Vector3, b: T
   return m;
 }
 
-/** Pipes through points in a flat frame (y down), at depth z. */
-function pipes(parent: THREE.Object3D, pts: number[][], r = 2, z = 0): void {
-  for (let i = 1; i < pts.length; i++) rod(parent, pipeMat, v3(pts[i - 1][0], pts[i - 1][1], z), v3(pts[i][0], pts[i][1], z), r);
+/** Pipes through points in a flat frame (y down), at depth z: their rods and the joints between them. */
+function pipes(parent: THREE.Object3D, pts: number[][], r = 2, z = 0): THREE.Mesh[] {
+  const meshes: THREE.Mesh[] = [];
+  for (let i = 1; i < pts.length; i++) meshes.push(rod(parent, pipeMat, v3(pts[i - 1][0], pts[i - 1][1], z), v3(pts[i][0], pts[i][1], z), r));
   for (let i = 1; i < pts.length - 1; i++) {
     const j = new THREE.Mesh(unitSphere, pipeMat);
     j.position.copy(v3(pts[i][0], pts[i][1], z));
     j.scale.setScalar(r);
     parent.add(j);
+    meshes.push(j);
+  }
+  return meshes;
+}
+
+/** A handwheel's lobed outline (see VALVE_WHEEL), less `inset`, as a shape to extrude. */
+function wheelShape(inset: number): THREE.Shape {
+  const { r, lobes, notch } = VALVE_WHEEL;
+  const pts: THREE.Vector2[] = [];
+  const n = lobes * 12;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * 2 * Math.PI;
+    const rr = r - inset - (notch * (1 - Math.cos(lobes * a))) / 2;
+    pts.push(new THREE.Vector2(rr * Math.sin(a), rr * Math.cos(a)));
+  }
+  return new THREE.Shape(pts);
+}
+
+/** How rounded a handwheel's edges are, front and back. */
+const WHEEL_BEVEL = 0.45;
+/** A handwheel's disk, its back at z = 0 and its face at VALVE_WHEEL.thick, facing +z (see handwheel). */
+const wheelDisk = new THREE.ExtrudeGeometry(wheelShape(WHEEL_BEVEL), {
+  depth: VALVE_WHEEL.thick - 2 * WHEEL_BEVEL, bevelEnabled: true, bevelThickness: WHEEL_BEVEL, bevelSize: WHEEL_BEVEL, bevelSegments: 2, curveSegments: 1,
+}).translate(0, 0, WHEEL_BEVEL);
+/** How far out from its middle a handwheel's painted face reaches, inside its rim. */
+const WHEEL_FACE = VALVE_WHEEL.r - VALVE_WHEEL.notch - 1.1;
+const wheelFace = new THREE.CircleGeometry(WHEEL_FACE, 40).translate(0, 0, VALVE_WHEEL.thick + 0.02);
+/** A plain valve's bar, across a whole diameter of its face; and a multiplexer's pointer, from its middle to its rim, and the round boss it turns from. */
+const wheelBar = new THREE.BoxGeometry(VALVE_WHEEL.bar, 2 * WHEEL_FACE + 0.6, 0.9).translate(0, 0, VALVE_WHEEL.thick + 0.45);
+const wheelPointer = new THREE.BoxGeometry(VALVE_WHEEL.bar, WHEEL_FACE + 0.3, 0.9).translate(0, (WHEEL_FACE + 0.3) / 2, VALVE_WHEEL.thick + 0.45);
+const wheelBoss = new THREE.CylinderGeometry(1.7, 1.7, 0.9, 20).rotateX(Math.PI / 2).translate(0, 0, VALVE_WHEEL.thick + 0.45);
+
+/**
+ * A valve's handwheel (see VALVE_WHEEL): a disk with a lobed, grippy rim, in `rim`, its face inside the rim in `face`,
+ * and on the face, in `bar`, a raised bar across a whole diameter, which says how it's set (along the pipe open, square
+ * to it shut); or with `pointer`, a pointer from its middle to its rim, which says which way it sends things. Its back
+ * is at z = 0 and it faces +z, its bar upright: turn it about z (clockwise as seen from in front by −rotation.z).
+ */
+function handwheel(rim: THREE.Material, face: THREE.Material, bar: THREE.Material, pointer = false): THREE.Group {
+  const g = new THREE.Group();
+  const parts: THREE.Mesh[] = [new THREE.Mesh(wheelDisk, rim), new THREE.Mesh(wheelFace, face), new THREE.Mesh(pointer ? wheelPointer : wheelBar, bar)];
+  if (pointer) parts.push(new THREE.Mesh(wheelBoss, bar));
+  for (const m of parts) {
+    m.castShadow = true;
+    g.add(m);
+  }
+  return g;
+}
+
+/** A stopcock's parts' shapes (see STOPCOCK), in its own frame, y up from the tip it hangs from, shared by them all. */
+const COCK_GEOMS = (() => {
+  const { collar: c, barrel, foot, tip, drop } = STOPCOCK;
+  const bot = drop - foot;
+  return {
+    collar: new RoundedBoxGeometry(2 * c.r, c.top + c.bottom, 2 * c.r, 2, 1).translate(0, (c.top - c.bottom) / 2, 0),
+    barrel: new THREE.CylinderGeometry(barrel, barrel, bot - c.bottom + 1, 12).translate(0, -(c.bottom + bot) / 2, 0),
+    foot: new THREE.BoxGeometry(2 * tip, foot, 2 * tip).translate(0, -(bot + foot / 2), 0),
+    hub: new THREE.CylinderGeometry(2.2, 2.2, barrel + VALVE_WHEEL.gap + 0.2, 12)
+      .rotateX(Math.PI / 2)
+      .translate(0, -STOPCOCK.wheelY, (barrel + VALVE_WHEEL.gap + 0.2) / 2),
+  };
+})();
+
+/**
+ * A stopcock (see STOPCOCK and Cock), built in a group hanging from its origin, the tip of what it's fitted on, facing
+ * +z: a dark collar sleeving that tip, a barrel of pipe down to a foot like a spout's tip, and on the barrel's front a
+ * plain valve's handwheel on a short hub. Its parts, to be hit: the collar and barrel (`body`), the hub and the
+ * handwheel (`wheel`, which turns about z), and the foot.
+ */
+function buildCock(): { group: THREE.Group; body: THREE.Mesh[]; turns: THREE.Mesh[]; foot: THREE.Mesh; wheel: THREE.Group } {
+  const group = new THREE.Group();
+  const mesh = (g: THREE.BufferGeometry, mat: THREE.Material) => {
+    const m = new THREE.Mesh(g, mat);
+    m.castShadow = true;
+    group.add(m);
+    return m;
+  };
+  const body = [mesh(COCK_GEOMS.collar, darkMat), mesh(COCK_GEOMS.barrel, pipeMat)];
+  const foot = mesh(COCK_GEOMS.foot, pipeMat);
+  const hub = mesh(COCK_GEOMS.hub, darkMat);
+  const wheel = handwheel(leverMat, wheelFaceMat, leverMat);
+  wheel.position.set(0, -STOPCOCK.wheelY, STOPCOCK.barrel + VALVE_WHEEL.gap);
+  group.add(wheel);
+  const turns = [hub, ...wheel.children.filter((m): m is THREE.Mesh => m instanceof THREE.Mesh)];
+  return { group, body, turns, foot, wheel };
+}
+
+/**
+ * A stopcock as drawn, kept turned to how it's set (see settleAngle), with its meshes registered as `cock`, `turns`
+ * and `foot` say, in `pickables` if it's given (see buildCock).
+ */
+class CockView {
+  readonly group: THREE.Group;
+  private wheel: THREE.Group;
+  private meshes: THREE.Mesh[];
+
+  constructor(
+    parent: THREE.Object3D,
+    private pickables: Map<THREE.Object3D, Pick> | null,
+    picks: { cock: Pick; turns: Pick } | null,
+  ) {
+    const b = buildCock();
+    this.group = b.group;
+    this.wheel = b.wheel;
+    this.meshes = [...b.body, ...b.turns, b.foot];
+    parent.add(this.group);
+    if (pickables && picks) {
+      for (const m of b.body) pickables.set(m, picks.cock);
+      for (const m of b.turns) pickables.set(m, picks.turns);
+      // (its foot is part of it: the left button there takes it off, as anywhere on it but its handwheel)
+      pickables.set(b.foot, picks.cock);
+    }
+  }
+
+  /** Turn its handwheel to how c is set, at the angle it was turned to (see settleAngle), and keep that angle with it. */
+  set(c: Cock): void {
+    c.angle = settleAngle('valve', c.angle, c.valve);
+    this.wheel.rotation.z = -c.angle;
+  }
+
+  dispose(): void {
+    this.group.removeFromParent();
+    if (this.pickables) for (const m of this.meshes) this.pickables.delete(m);
   }
 }
 
@@ -1551,6 +1739,8 @@ class ToolView {
    */
   private fluids: { fm: FluidMesh; level: (v: Vessel) => number; fit?: (v: Vessel) => void }[] = [];
   private levers = new Map<number, THREE.Group>();
+  /** The stopcock drawn at each spout's tip, if one's fitted there (see Tool.cocks), and the one it was drawn for. */
+  private cocks: ({ v: CockView; c: Cock } | null)[] = [];
   /** Each tank's glass's flash overlays (see flashOver). */
   private flashes: THREE.Mesh[][] = [];
   private dial?: THREE.Group;
@@ -1599,7 +1789,7 @@ class ToolView {
   constructor(
     readonly t: Tool,
     scene: THREE.Object3D,
-    pickables: Map<THREE.Object3D, Pick>,
+    private pickables: Map<THREE.Object3D, Pick>,
   ) {
     const sh = t.shape;
     const { art } = this;
@@ -1608,14 +1798,19 @@ class ToolView {
     this.body.add(art);
     this.root.add(this.body);
 
-    // drain pipes and spouts, from the bottom of the tanks (and their sumps)
+    // drain pipes and spouts, from the bottom of the tanks (and their sumps); the pipe that runs to a spout alone is
+    // part of that spout, as a faucet's is, so the crosshair on it is on the spout (and pulls its hose out)
+    // all of it at the depth of the tool's plumbing: its middle, or for a tool that drains at its front, there (see
+    // plumbZ)
+    const pz = plumbZ(t);
+    const outlet = (k: number, pts: number[][]) => pipes(art, pts, 2, pz).forEach((m) => pick(m, 'spout', k));
     const TH = sh.tankH ?? TANK_H;
     const floor = TH + (sh.sump?.h ?? 0);
     if (sh.wall) this.buildStation(pick);
     else if (t.kind === 'exchanger')
       sh.tanks.forEach((tk, k) => {
-        pipes(art, [[tankX(tk), floor], [tankX(tk), HELIX.y - HELIX.r]]);
-        pipes(art, [[sh.spouts[k], HELIX.y + HELIX.r], [sh.spouts[k], sh.spoutY - 4]]);
+        pipes(art, [[tankX(tk), floor], [tankX(tk), HELIX.y - HELIX.r]], 2, pz);
+        outlet(k, [[sh.spouts[k], HELIX.y + HELIX.r], [sh.spouts[k], sh.spoutY - 4]]);
       });
     else if (t.kind === 'separator') {
       // the manifold: the pipe from the tank runs down to a peak midway between the spouts, and from there an arm
@@ -1624,43 +1819,39 @@ class ToolView {
       const [x0, x1] = sh.spouts;
       const peak = (x0 + x1) / 2;
       const mid = top + thick / 2;
-      pipes(art, [[peak, floor], [peak, mid]]);
+      pipes(art, [[peak, floor], [peak, mid]], 2, pz);
       [x0, x1].forEach((x, k) => {
         const reach = Math.abs(x - peak) + over;
         const dir = Math.sign(x - peak);
         // (its middle, half its reach out from the peak and as far down as its slope takes it by there)
         const [cx, cy, len] = [peak + (dir * reach) / 2, mid + (reach / 2) * Math.tan(slope), reach / Math.cos(slope) + thick / 2];
-        const arm = block(art, k ? blackSideMat : panelMat, cx - len / 2, cx + len / 2, cy - thick / 2, cy + thick / 2, -deep / 2, deep / 2, 2);
+        const arm = block(art, k ? blackSideMat : panelMat, cx - len / 2, cx + len / 2, cy - thick / 2, cy + thick / 2, pz - deep / 2, pz + deep / 2, 2);
         arm.rotation.z = -dir * slope;
-        pipes(art, [[x, mid + Math.abs(x - peak) * Math.tan(slope)], [x, sh.spoutY - 4]]);
+        outlet(k, [[x, mid + Math.abs(x - peak) * Math.tan(slope)], [x, sh.spoutY - 4]]);
       });
-    } else if (t.kind === 'splitter') {
-      const fork = sh.valveY + 10;
-      pipes(art, [[0, TH], [0, fork]]);
-      for (const x of sh.spouts) pipes(art, [[0, fork], [x, fork + 16], [x, sh.spoutY - 4]]);
     } else if (t.kind === 'multiplexer') {
-      // the splitter's fork upside down: each funnel's stem in to where they join, over the valve
-      const join = sh.valveY - 12;
+      // each funnel's stem in to where they join, over its selector, far enough above it to clear its handwheel
+      const join = sh.valves![0].y - VALVE_WHEEL.r - 4;
       for (const tk of sh.tanks) pipes(art, [[tankX(tk), TH], [tankX(tk), join - 16], [0, join]]);
-      pipes(art, [[0, join], [0, sh.spoutY - 4]]);
+      outlet(0, [[0, join], [0, sh.spoutY - 4]]);
     } else if (t.kind === 'sorter') {
       const x = tankX(sh.tanks[0]);
       pipes(art, [[x, TH], [x, chuteY(x)]]);
-      sh.spouts.forEach((x, k) => pipes(art, [[x, k < sh.spouts.length - 1 ? chuteY(x) + 8 : SORTER_CHUTE.y1], [x, sh.spoutY - 4]]));
+      sh.spouts.forEach((x, k) => outlet(k, [[x, k < sh.spouts.length - 1 ? chuteY(x) + 8 : SORTER_CHUTE.y1], [x, sh.spoutY - 4]]));
     } else if (t.kind === 'heater') {
       // the funnel's stem down into the tube, and a pipe from the tube down through each tap, and from its last
       // stretch down into the last spout
       const { y, r } = HEATER_TUBE;
       pipes(art, [[tankX(sh.tanks[0]), TH], [tankX(sh.tanks[0]), y - r + 1]]);
-      for (const x of sh.spouts) pipes(art, [[x, y + r - 1], [x, sh.spoutY - 4]]);
+      sh.spouts.forEach((x, k) => outlet(k, [[x, y + r - 1], [x, sh.spoutY - 4]]));
     } else if (INLINE_TOOLS.includes(t.kind)) {
       // straight down from the tube to its spout, with a branch into the cabinet, if it has one
       const { body: b, inY } = INSTRUMENT;
-      pipes(art, [[0, TH], [0, sh.spoutY - 4]]);
+      outlet(0, [[0, TH], [0, sh.spoutY - 4]]);
       if (t.kind !== 'meter') pipes(art, [[0, inY], [b.x0, inY]], 1.3);
     } else if (sh.neck) {
       // from under each bulb, out to its spout, under its inlet
-      sh.neck.bodies.forEach((bx, k) => pipes(art, [[bx, floor], [bx, floor + 4], [sh.spouts[k], floor + 4], [sh.spouts[k], sh.spoutY - 4]]));
+      sh.neck.bodies.forEach((bx, k) => outlet(k, [[bx, floor], [bx, floor + 4], [sh.spouts[k], floor + 4], [sh.spouts[k], sh.spoutY - 4]]));
     }
     else if (t.kind === 'strip') this.buildStrip();
     else if (t.kind === 'shadowlamp') this.buildLamp(pick);
@@ -1670,10 +1861,10 @@ class ToolView {
       this.buildColumn();
       // the funnel's stem down into the tube, and from the tube's foot down through the tap to the spout
       pipes(art, [[0, TH], [0, COLUMN.tube.y0]]);
-      pipes(art, [[0, COLUMN.tube.y1], [0, sh.spoutY - 4]]);
+      outlet(0, [[0, COLUMN.tube.y1], [0, sh.spoutY - 4]]);
     }
-    else pipes(art, [[0, floor], [0, sh.spoutY - 4]]);
-    sh.spouts.forEach((x, k) => pick(block(art, pipeMat, x - 4, x + 4, sh.spoutY - 6, sh.spoutY, -4, 4), 'spout', k));
+    else outlet(0, [[0, floor], [0, sh.spoutY - 4]]);
+    sh.spouts.forEach((x, k) => pick(block(art, pipeMat, x - 4, x + 4, sh.spoutY - 6, sh.spoutY, pz - 4, pz + 4), 'spout', k));
 
     // tanks, with their fluid (the station's are built in buildStation)
     if (!sh.wall) t.tanks.forEach((_, k) => {
@@ -1702,23 +1893,28 @@ class ToolView {
         glassFrom(art, frustum(cx, r.y0, r.y1, w, d, FUNNEL_TIP, FUNNEL_TIP, true));
         geoms = [frustum(cx, r.y0 + 0.5, r.y1 - 0.5, w - 1.5, d - 1.5, FUNNEL_TIP - 1, FUNNEL_TIP - 1, false)];
       } else if (sh.round) {
-        // an upright glass cylinder with a thin metal rim, over a round sump
+        // an upright glass cylinder with a thin metal rim, over a round sump, or a shallow hopper leaning to its front
         const rr = w / 2;
         const mid = -(r.y0 + r.y1) / 2;
+        const sump = sh.sump;
         glassFrom(art, new THREE.CylinderGeometry(rr, rr, r.y1 - r.y0, 48, 1, true).translate(cx, mid, 0));
-        art.add(new THREE.Mesh(new THREE.CircleGeometry(rr, 48).rotateX(Math.PI / 2).translate(cx, -r.y1, 0), floorGlassMat));
+        if (!sh.front) art.add(new THREE.Mesh(new THREE.CircleGeometry(rr, 48).rotateX(Math.PI / 2).translate(cx, -r.y1, 0), floorGlassMat));
         geoms = [new THREE.CylinderGeometry(rr - 0.5, rr - 0.5, r.y1 - r.y0 - 0.5, 48).translate(cx, mid - 0.25, 0)];
         const rim = new THREE.Mesh(new THREE.TorusGeometry(rr + 0.6, 0.8, 6, 48).rotateX(Math.PI / 2).translate(cx, 0, 0), pipeMat);
         art.add(rim);
-        const sump = sh.sump;
         if (sump) {
           const sm = -(r.y1 + sump.h / 2);
-          glassFrom(art, new THREE.CylinderGeometry(sump.w / 2, SUMP_TIP / 2, sump.h, 24, 1, true).translate(cx, sm, 0));
-          geoms.push(new THREE.CylinderGeometry(sump.w / 2 - 0.5, SUMP_TIP / 2 - 0.3, sump.h - 0.3, 24).translate(cx, sm, 0));
+          const segs = sh.front ? 64 : 24;
+          const [ya, yb] = [r.y1, r.y1 + sump.h];
+          // leaned so its tip's middle is at the plumbing's depth, its front running straight down the tank's
+          const glass = new THREE.CylinderGeometry(sump.w / 2, SUMP_TIP / 2, sump.h, segs, 1, true).translate(cx, sm, 0);
+          const fluid = new THREE.CylinderGeometry(sump.w / 2 - 0.5, SUMP_TIP / 2 - 0.3, sump.h - 0.3, segs).translate(cx, sm, 0);
+          glassFrom(art, sh.front ? lean(glass, ya, yb, pz) : glass);
+          geoms.push(sh.front ? lean(fluid, ya, yb, pz) : fluid);
         }
         if (t.kind === 'tank') this.tankLines(r, bottom, d, pieces, rr);
       } else {
-        openBox(art, r.x0, r.x1, r.y0, r.y1, d);
+        openBox(art, r.x0, r.x1, r.y0, r.y1, d, !sh.front);
         // a thin metal rim
         const rw = 1.2;
         for (const [x0, x1, z0, z1] of [
@@ -1729,10 +1925,14 @@ class ToolView {
         geoms = [new THREE.BoxGeometry(w - 1, r.y1 - r.y0 - 0.5, d - 1).translate(cx, -(r.y0 + r.y1) / 2 - 0.25, 0)];
         const sump = sh.sump;
         if (sump) {
-          // a narrow point under the middle of the floor, which fills first
-          const sd = Math.min(d, sump.w);
-          glassFrom(art, frustum(cx, r.y1, r.y1 + sump.h, sump.w, sd, SUMP_TIP, SUMP_TIP, true));
-          geoms.push(frustum(cx, r.y1 - 0.5, r.y1 + sump.h - 0.3, sump.w - 1, sd - 1, SUMP_TIP - 0.6, SUMP_TIP - 0.6, false));
+          // a narrow point under the middle of the floor, which fills first; or a shallow hopper under all of it,
+          // leaned forward so its tip is at the middle of its front edge, its front straight down the tank's
+          const sd = sh.front ? d : Math.min(d, sump.w);
+          const [ya, yb] = [r.y1, r.y1 + sump.h];
+          const glass = frustum(cx, ya, yb, sump.w, sd, SUMP_TIP, SUMP_TIP, true);
+          const fluid = frustum(cx, ya - 0.5, yb - 0.3, sump.w - 1, sd - 1, SUMP_TIP - 0.6, SUMP_TIP - 0.6, false);
+          glassFrom(art, sh.front ? lean(glass, ya, yb, pz) : glass);
+          geoms.push(sh.front ? lean(fluid, ya, yb, pz) : fluid);
           if (t.kind === 'tank') this.tankLines(r, bottom, d, pieces);
         }
       }
@@ -1773,32 +1973,23 @@ class ToolView {
     if (t.kind === 'heater') this.buildHeater();
     if (t.kind === 'dilatometer') this.buildBulbs();
 
-    // valves: a round core on the front face, and a lever that points where it was turned; or a dial
-    if (!sh.noValve)
-      t.valves.forEach((_, k) => {
+    // its built-in valves: a handwheel on the pipe, facing the front, on a short hub out from the pipe; or a dial
+    t.valves.forEach((_, k) => {
         const vc = valveLocal(t, k);
-        const z = valveZ(t);
-        if (k === sh.dial) {
-          this.dial = this.buildDial(vc, z);
-          art.traverse((m) => m.parent === this.dial && pick(m, 'valve', k));
-          return;
-        }
-        rod(art, pipeMat, v3(vc.x, vc.y, 0), v3(vc.x, vc.y, z), 1.5);
-        const core = new THREE.Mesh(unitCylinder, panelMat);
-        core.rotation.x = Math.PI / 2;
-        core.scale.set(5, 4, 5);
-        core.position.copy(v3(vc.x, vc.y, z));
-        art.add(core);
-        pick(core, 'valve', k);
-        const pivot = new THREE.Group();
-        pivot.position.copy(v3(vc.x, vc.y, z + 2.5));
-        const lever = new THREE.Mesh(new THREE.BoxGeometry(14, 3, 2).translate(6, 0, 0), leverMat);
-        lever.castShadow = true;
-        pivot.add(lever);
-        art.add(pivot);
-        pick(lever, 'valve', k);
-        this.levers.set(k, pivot);
-      });
+      if (k === sh.dial) {
+        this.dial = this.buildDial(vc, dialZ(t));
+        art.traverse((m) => m.parent === this.dial && pick(m, 'valve', k));
+        return;
+      }
+      const back = valveZ(t) - VALVE_WHEEL.thick / 2;
+      const hub = rod(art, darkMat, v3(vc.x, vc.y, pz), v3(vc.x, vc.y, back + 0.2), 2.2);
+      pick(hub, 'valve', k);
+      const pivot = handwheel(leverMat, wheelFaceMat, leverMat, t.kind === 'multiplexer');
+      pivot.position.copy(v3(vc.x, vc.y, back));
+      art.add(pivot);
+      pivot.traverse((m) => m instanceof THREE.Mesh && pick(m, 'valve', k));
+      this.levers.set(k, pivot);
+    });
 
     // everything else that's drawn is the tool's body, to grab it by
     this.body.traverse((m) => {
@@ -1875,7 +2066,7 @@ class ToolView {
         const sg = k ? -1 : 1;
         // strand A enters at the left and B at the right
         const x = k ? x1 + (x0 - x1) * u : x0 + (x1 - x0) * u;
-        pts.push(v3(x, y - sg * r * Math.cos(th), sg * r * Math.sin(th)));
+        pts.push(v3(x, y - sg * r * Math.cos(th), plumbZ(this.t) + sg * r * Math.sin(th)));
       }
       const curve = new THREE.CatmullRomCurve3(pts);
       const glass = new THREE.TubeGeometry(curve, halfTwists * 16, 3.4, 8);
@@ -1972,7 +2163,7 @@ class ToolView {
       pts.push(v3(x, y + 2.6 * Math.sin(ph), 2.6 * Math.cos(ph)));
     }
     pts.push(v3(lead, y - 4), v3(lead, B.y1));
-    this.wire = new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.6 });
+    this.wire = metal(new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.6 }));
     this.art.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), pts.length, 0.65, 5), this.wire));
   }
 
@@ -1986,13 +2177,15 @@ class ToolView {
    */
   private buildLamp(pick: (m: THREE.Object3D, part: 'button') => void): void {
     const { art } = this;
-    const { h, wall, floor, box, channel: ch, window: win } = LAMP;
+    const { h, sides, wall, floor, box, channel: ch, window: win } = LAMP;
     const out = ch.z + wall;
-    // the enclosure, the two side walls from its face on, and the end wall across them
+    // the enclosure, the two side walls from its face on, half as high (see LAMP.sides), and the end wall across
+    // them, full height, from side to side: each a closed block, so the enclosure's and end wall's faces show above
+    // the side walls
     block(art, panelMat, box.x0, box.x1, 0, h, -out, out, 1.5);
-    block(art, panelMat, ch.x0, ch.x1 + wall, 0, h, ch.z, out);
-    block(art, panelMat, ch.x0, ch.x1 + wall, 0, h, -out, -ch.z);
-    block(art, panelMat, ch.x1, ch.x1 + wall, 0, h, -ch.z, ch.z);
+    block(art, panelMat, ch.x0, ch.x1, h - sides, h, ch.z, out);
+    block(art, panelMat, ch.x0, ch.x1, h - sides, h, -out, -ch.z);
+    block(art, panelMat, ch.x1, ch.x1 + wall, 0, h, -out, out);
     block(art, panelMat, ch.x0, ch.x1, h - floor, h, -ch.z, ch.z);
     // the pane in the enclosure's face: dark glass, glowing with the lamp's light while it's lit, in a dark bezel
     const glass = new THREE.MeshStandardMaterial({ color: 0x6f6a86, roughness: 0.25, metalness: 0, emissive: LAMP_GLOW, emissiveIntensity: 0 });
@@ -2179,8 +2372,8 @@ class ToolView {
     const sh = t.shape;
     const neck = sh.neck!;
     const dial = valveLocal(t, sh.dial!);
-    block(this.art, panelMat, dial.x - 14, dial.x + 14, dial.y - 14, dial.y + 14, -10, valveZ(t) - 3, 2.5);
-    this.wire = new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.6 });
+    block(this.art, panelMat, dial.x - 14, dial.x + 14, dial.y - 14, dial.y + 14, -10, dialZ(t) - 3, 2.5);
+    this.wire = metal(new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.6 }));
     // round both: along the front, round the right bulb's far side, along the back, round the left bulb's, and on
     const R = neck.body / 2 + 1.3;
     const a = Math.max(...neck.bodies);
@@ -2210,7 +2403,7 @@ class ToolView {
     for (let i = 0; i <= 6; i++) {
       const a = at(i / 6);
       const tick = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2.5, 0.6), darkMat);
-      tick.position.copy(v3(vc.x + 11.75 * Math.sin(a), vc.y - 11.75 * Math.cos(a), z - 2.5));
+      tick.position.copy(v3(vc.x + (DIAL_REACH - 1.25) * Math.sin(a), vc.y - (DIAL_REACH - 1.25) * Math.cos(a), z - 2.5));
       tick.rotation.z = -a;
       this.art.add(tick);
     }
@@ -2416,7 +2609,7 @@ class ToolView {
     const valve = new THREE.Mesh(unitCylinder, panelMat);
     valve.rotation.x = Math.PI / 2;
     valve.scale.set(4.5, 8, 4.5);
-    valve.position.copy(v3(sh.spouts[0], sh.valveY, 0));
+    valve.position.copy(v3(sh.spouts[0], STATION.paneH + 24, 0));
     art.add(valve);
     pick(valve, 'spout', 0);
     // the readout of the litres in the reservoir, under its label, and beside it, how long it's been delivering steadily
@@ -2517,14 +2710,10 @@ class ToolView {
       this.labels[k].set(v.label);
     });
     this.note.set(t.note);
-    for (const [k, pv] of this.levers)
-      // closed points right, open straight up; a splitter's points to the side that gets more, and a multiplexer's to
-      // the side it takes more from
-      pv.rotation.z = t.kind === 'splitter' || t.kind === 'multiplexer' ? Math.PI * (1 - t.valves[k]) : (t.valves[k] * Math.PI) / 2;
-    if (this.dial) {
-      const d = t.valves[t.shape.dial!];
-      this.dial.children[1].rotation.z = -(-0.75 * Math.PI + 1.5 * Math.PI * d);
-    }
+    // each handwheel and dial at the angle it's been turned to (see valveAngle), clockwise from upright
+    for (const [k, pv] of this.levers) pv.rotation.z = -valveAngle(t, k);
+    if (this.dial) this.dial.children[1].rotation.z = -valveAngle(t, t.shape.dial!);
+    this.updateCocks();
     if (this.helix)
       for (const { geom, colors, k } of this.helix) {
         const out = t.out[k];
@@ -2632,6 +2821,34 @@ class ToolView {
     if (t.kind === 'receptacle') this.updateStation(clock);
   }
 
+  /**
+   * Draw a stopcock at the tip of each spout that has one fitted there (see Tool.cocks), and none at the others: its
+   * foot is the spout's, for the crosshair, since it hides most of the spout's own tip, and the rest of it a part of
+   * its own.
+   */
+  private updateCocks(): void {
+    const { t } = this;
+    const sh = t.shape;
+    t.cocks.forEach((c, j) => {
+      const want = c;
+      const was = this.cocks[j];
+      if (was && was.c !== want) {
+        was.v.dispose();
+        this.cocks[j] = null;
+      }
+      if (want && !this.cocks[j]) {
+        const picks = {
+          cock: { kind: 'tool', t, part: 'cock', k: j } as const,
+          turns: { kind: 'tool', t, part: 'cock', k: j, turns: true } as const,
+        };
+        const v = new CockView(this.art, this.pickables, picks);
+        v.group.position.copy(v3(sh.spouts[j], sh.spoutY, plumbZ(t)));
+        this.cocks[j] = { v, c: want };
+      }
+      if (want) this.cocks[j]!.v.set(want);
+    });
+  }
+
   private updateStation(clock: number): void {
     const { t } = this;
     const { supply } = t;
@@ -2679,6 +2896,8 @@ class ToolView {
     this.lamp?.cap.material.dispose();
     this.lamp?.tex.dispose();
     this.lamp?.screen.dispose();
+    // its own, and metal (see metal in textures.ts), which lets it go
+    this.wire?.dispose();
   }
 }
 
@@ -2765,11 +2984,16 @@ const nozzleGeom = new THREE.CylinderGeometry(4, 3, NOZZLE_H, 12).translate(0, N
 
 /**
  * A hose pulled out of a spout or a faucet: a translucent tube drooping from the spout down to its nozzle, showing
- * what's running through it.
+ * what's running through it. Neither is hit, like a clamp stand, so the crosshair goes through them to what's behind,
+ * and neither is outlined (C takes a hose by its spout or nozzle, by nearness, see GameEngine.hoseAim); only a
+ * stopcock on its end is. Its nozzle is in the way of a sniff, though (see View.clearance).
  */
 class HoseView {
   private outlet = new THREE.Group();
-  private tube: THREE.Mesh;
+  /** The stopcock drawn under its nozzle, if one's on its end, and the one it was drawn for. */
+  private cock: { v: CockView; c: Cock } | null = null;
+  readonly tube: THREE.Mesh;
+  readonly nozzle: THREE.Mesh;
   private core: THREE.Mesh;
   private coreMat = new THREE.MeshBasicMaterial();
   private key = '';
@@ -2777,20 +3001,32 @@ class HoseView {
   constructor(
     readonly h: Hose,
     scene: THREE.Object3D,
-    pickables: Map<THREE.Object3D, Pick>,
+    private pickables: Map<THREE.Object3D, Pick>,
   ) {
-    const nozzle = new THREE.Mesh(nozzleGeom, pipeMat);
+    const nozzle = (this.nozzle = new THREE.Mesh(nozzleGeom, pipeMat));
     nozzle.castShadow = true;
     this.outlet.add(nozzle);
-    pickables.set(nozzle, { kind: 'hose', h });
     this.tube = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshStandardMaterial({ color: 0x7c8883, transparent: true, opacity: 0.45, roughness: 0.3, depthWrite: false }));
     this.core = new THREE.Mesh(new THREE.BufferGeometry(), this.coreMat);
     scene.add(this.outlet, this.tube, this.core);
   }
 
-  update(from: Vec3, fluid: Fluid | null): void {
+  update(from: Vec3, fluid: Fluid | null, cock: Cock | null): void {
     const { h } = this;
     this.outlet.position.set(h.outlet.x, h.outlet.y, h.outlet.z);
+    // a stopcock on its end hangs under the nozzle, facing the way the nozzle does; its foot is the nozzle's
+    if (this.cock && this.cock.c !== cock) {
+      this.cock.v.dispose();
+      this.cock = null;
+    }
+    if (cock && !this.cock) {
+      const picks = { cock: { kind: 'hose', h, cock: true } as const, turns: { kind: 'hose', h, cock: true, turns: true } as const };
+      this.cock = { v: new CockView(this.outlet, this.pickables, picks), c: cock };
+    }
+    if (this.cock) {
+      this.cock.v.group.rotation.y = h.turn;
+      this.cock.v.set(this.cock.c);
+    }
     const key = [from.x, from.y, from.z, h.outlet.x, h.outlet.y, h.outlet.z].map((x) => x.toFixed(1)).join();
     if (key !== this.key) {
       this.key = key;
@@ -2813,6 +3049,7 @@ class HoseView {
   }
 
   dispose(): void {
+    this.cock?.v.dispose();
     for (const o of [this.outlet, this.tube, this.core]) o.removeFromParent();
     this.tube.geometry.dispose();
     this.core.geometry.dispose();
@@ -2821,7 +3058,10 @@ class HoseView {
 
 /* ---------------- stands ---------------- */
 
-/** A clamp stand (see Stand): a base plate, a steel rod up from it, and a clamp out to what it holds. */
+/**
+ * A clamp stand (see Stand): a base plate, a steel rod up from it, and a clamp out to what it holds. It isn't hit (see
+ * View.pick), so the crosshair goes through it to what's behind, but it's in the way of a sniff (see View.clearance).
+ */
 class StandView {
   readonly group = new THREE.Group();
   readonly parts: THREE.Mesh[];
@@ -2907,7 +3147,7 @@ class GhostView {
   }
 
   update(g: Frame['ghost'], clock: number, energies: readonly number[]): void {
-    const key = (!g ? '' : g.tool ? `tool ${g.tool.kind}` : `scale ${g.scale!.load.map((l) => l.dx).join(',')}`) + ` ${JSON.stringify(GHOST)}`;
+    const key = (!g ? '' : g.tool ? `tool ${g.tool.kind}` : `scale ${g.scale!.load.length}`) + ` ${JSON.stringify(GHOST)}`;
     if (key !== this.key) this.build(g, key);
     this.holder.visible = !!g;
     if (!g) return;
@@ -2916,6 +3156,13 @@ class GhostView {
       const { t, v } = this.tool;
       t.pose = g.pose;
       t.valves.splice(0, t.valves.length, ...g.tool!.valves);
+      // with the stopcocks it has at its spouts' tips (and so none it doesn't), as they're set
+      g.tool!.cocks.forEach((c, j) => {
+        const mine = t.cocks[j];
+        if (!c) t.cocks[j] = null;
+        else if (mine) Object.assign(mine, { valve: c.valve, angle: c.angle });
+        else t.cocks[j] = { valve: c.valve, angle: c.angle };
+      });
       v.update(clock, energies, none);
     }
     if (this.scale) {
@@ -2923,7 +3170,7 @@ class GhostView {
       sc.pose = g.pose;
       v.update(false, null);
       flasks.forEach((fv, i) => {
-        fv.f.pose = onScale(sc, g.scale!.load[i].dx);
+        fv.f.pose = onScale(sc, g.scale!.load[i].dx, g.scale!.load[i].dz);
         fv.update(none);
       });
     }
@@ -2964,6 +3211,8 @@ class GhostView {
   private ghostly(): void {
     const copy = (m: THREE.Material, red: boolean): THREE.Material => {
       const c = m.clone();
+      // a metal's ghost keeps up with the shine setting too (see metal in textures.ts), till it's disposed
+      if (m.userData.metal) metal(c as THREE.MeshStandardMaterial);
       c.transparent = true;
       c.opacity = Math.max(GHOST.least, m.opacity * GHOST.opacity);
       c.depthWrite = false;
@@ -3206,7 +3455,7 @@ function buildPort(frac: number): THREE.Group {
     g.add(m);
   };
   band(-6, 10, 6, -3, darkMat, true);
-  band(0, 4, PORT_DEPTH, -PORT_DEPTH - 1, new THREE.MeshStandardMaterial({ color: 0x2a302e, metalness: 0.5, roughness: 0.6 }), false);
+  band(0, 4, PORT_DEPTH, -PORT_DEPTH - 1, metal(new THREE.MeshStandardMaterial({ color: 0x2a302e, metalness: 0.5, roughness: 0.6 })), false);
   return g;
 }
 
@@ -3291,7 +3540,7 @@ function buildRoom(scene: THREE.Scene): { beacon: THREE.PointLight; lamp: THREE.
   right.rotation.y = -Math.PI / 2;
   scene.add(right);
   // ceiling light fixtures: a dark frame round a glowing diffuser behind louvers
-  const frameMat = new THREE.MeshStandardMaterial({ color: 0x2c3231, metalness: 0.6, roughness: 0.45 });
+  const frameMat = metal(new THREE.MeshStandardMaterial({ color: 0x2c3231, metalness: 0.6, roughness: 0.45 }));
   const diffuser = new THREE.MeshBasicMaterial({ map: diffuserTexture(), toneMapped: false });
   for (let x = ROOM.x0 + 300; x < ROOM.x1; x += 500)
     for (let z = 350; z < ROOM.z1; z += 600) {
@@ -3551,17 +3800,17 @@ class AirlockView {
     const { x, w, d, h, wall, door } = AIRLOCK;
     const z1 = ROOM.z1;
     const g = new THREE.Group();
-    const metal = new THREE.MeshStandardMaterial({ color: 0x737a78, roughness: 0.42, metalness: 0.6 });
+    const plain = metal(new THREE.MeshStandardMaterial({ color: 0x737a78, roughness: 0.42, metalness: 0.6 }));
     const hidden = new THREE.MeshBasicMaterial({ visible: false });
     // the chamber, seen from inside: plain gray metal, on the lab's deck; its front is the wall with the doorway, below
-    const [walls, floor] = [metal.clone(), surfaceMat('deck', { metalness: 0.55, side: THREE.BackSide })];
+    const [walls, floor] = [metal(plain.clone()), surfaceMat('deck', { metalness: 0.55, side: THREE.BackSide })];
     walls.side = THREE.BackSide;
     const room = new THREE.Mesh(boxUV(new THREE.BoxGeometry(w, h, d), 'walls', { z: 440 }), [walls, walls, walls, floor, walls, hidden]);
     room.position.set(x, h / 2, z1 + wall + d / 2);
     g.add(room);
     const shape = rectPath(0, h / 2, w, h, new THREE.Shape());
     shape.holes.push(rectPath(0, door.h / 2 + 0.25, door.w, door.h - 0.5));
-    const inside = new THREE.Mesh(new THREE.ShapeGeometry(shape), metal);
+    const inside = new THREE.Mesh(new THREE.ShapeGeometry(shape), plain);
     inside.position.set(x, 0, z1 + wall);
     g.add(inside);
     // red lights in its ceiling: lenses and their glow (not lights, which would cost every surface in the lab)
@@ -3579,7 +3828,7 @@ class AirlockView {
       g.add(glow);
     }
     // the doorway's sides and top, through the wall's thickness: planes only, with nothing lying in either wall's face
-    const jambMat = darkMat.clone();
+    const jambMat = metal(darkMat.clone());
     jambMat.side = THREE.DoubleSide;
     for (const side of [-1, 1]) {
       const m = new THREE.Mesh(new THREE.PlaneGeometry(wall, door.h).rotateY(Math.PI / 2), jambMat);
@@ -3598,7 +3847,7 @@ class AirlockView {
     g.add(sill);
     // the doors, each half the doorway, sliding apart into the wall, with a dark gasket down the edge where they meet;
     // and another pair, just like them, across the chamber's far end, always shut, to the outside
-    const doorMat = new THREE.MeshPhysicalMaterial({ color: 0xa3ada9, roughness: 0.45, metalness: 0.35, clearcoat: 0.3 });
+    const doorMat = metal(new THREE.MeshPhysicalMaterial({ color: 0xa3ada9, roughness: 0.45, metalness: 0.35, clearcoat: 0.3 }));
     const stripeMat = new THREE.MeshStandardMaterial({ color: 0xc9a227, roughness: 0.6 });
     const gasketMat = new THREE.MeshStandardMaterial({ color: 0x141817, roughness: 0.85 });
     const half = (side: number) => {
@@ -3638,7 +3887,7 @@ class AirlockView {
     g.add(this.lampGlow);
     // the pod: a plinth, a metal shell, its body round all but its door, under a whole dome, and its door: POD.arc of
     // the body's round, facing the lab, hinged on its edge toward +x, swinging out
-    const shell = new THREE.MeshStandardMaterial({ color: 0x8c9692, roughness: 0.45, metalness: 0.35, side: THREE.DoubleSide });
+    const shell = metal(new THREE.MeshStandardMaterial({ color: 0x8c9692, roughness: 0.45, metalness: 0.35, side: THREE.DoubleSide }));
     const pod = new THREE.Group();
     pod.position.set(POD.x, 0, POD.z);
     const plinth = new THREE.Mesh(new THREE.CylinderGeometry(POD.r + 10, POD.r + 14, POD.base, 48), darkMat);
@@ -3862,7 +4111,7 @@ class BlindsButton {
     const plate = new THREE.Mesh(new THREE.BoxGeometry(42, 56, 4).translate(0, 0, 2), [darkMat, darkMat, darkMat, darkMat, face, darkMat]);
     this.button = new THREE.Mesh(
       new THREE.CylinderGeometry(8, 8.5, 6, 24).rotateX(Math.PI / 2),
-      new THREE.MeshStandardMaterial({ color: 0x8a948f, roughness: 0.5, metalness: 0.3 }),
+      metal(new THREE.MeshStandardMaterial({ color: 0x8a948f, roughness: 0.5, metalness: 0.3 })),
     );
     this.button.position.y = 6;
     for (const m of [plate, this.button]) {
@@ -3884,15 +4133,15 @@ class BlindsButton {
 
 /**
  * The faucets: a manifold along a wall, with each of its faucets a pipe out over the counter; and on each island, a
- * chrome riser up from the counter with a pipe out over it. Each has a knob of its color (the solvent's clear, see
- * View.update), and a spout.
+ * chrome riser up from the counter with a pipe out over it. Each turns down at an elbow to its spout, with its valve
+ * on that drop: a handwheel of its color (the solvent's clear, see View.update).
  */
 function buildFaucets(
   scene: THREE.Scene,
   faucets: readonly FaucetSpot[],
   pickables: Map<THREE.Object3D, Pick>,
-): { mats: THREE.MeshPhysicalMaterial[]; notes: Label[]; levers: THREE.Group[] } {
-  if (!faucets.length) return { mats: [], notes: [], levers: [] };
+): { mats: THREE.MeshPhysicalMaterial[]; bars: THREE.MeshPhysicalMaterial[]; notes: Label[]; levers: THREE.Group[] } {
+  if (!faucets.length) return { mats: [], bars: [], notes: [], levers: [] };
   const g = new THREE.Group();
   const at = (p: Vec3) => new THREE.Vector3(p.x, p.y, p.z);
   const onWall = faucets.filter((fa) => !fa.base);
@@ -3921,6 +4170,7 @@ function buildFaucets(
   }
   const notes: Label[] = [];
   const levers: THREE.Group[] = [];
+  const bars: THREE.MeshPhysicalMaterial[] = [];
   const mats = faucets.map(({ wall, spout, base }, i) => {
     const elbow = new THREE.Vector3(spout.x, wall.y, spout.z);
     pickables.set(rod(g, chromeMat, at(wall), elbow, 3.5), { kind: 'faucet', i });
@@ -3951,68 +4201,96 @@ function buildFaucets(
     const tip = new THREE.Mesh(new THREE.CylinderGeometry(5, 4, 7, 16), chromeMat);
     tip.position.set(spout.x, spout.y + 3.5, spout.z);
     g.add(tip);
-    // a glossy knob in its fluid's color, on a chrome stem
-    const mat = new THREE.MeshPhysicalMaterial({ roughness: 0.3, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.08 });
-    const knob = new THREE.Mesh(new THREE.SphereGeometry(10, 24, 16), mat);
-    knob.position.copy(elbow);
-    knob.castShadow = true;
-    g.add(knob);
-    pickables.set(knob, { kind: 'faucet', i, valve: true });
     pickables.set(tip, { kind: 'faucet', i, spout: true });
-    // its valve on the knob's front, as a tool's is on its face: a dark hub, and a black lever on it that points
-    // where it's turned (see View.update), turning about the way the pipe reaches out
+    // the elbow, plain chrome like the rest of the pipe
+    const joint = new THREE.Mesh(unitSphere, chromeMat);
+    joint.position.copy(elbow);
+    joint.scale.setScalar(3.5);
+    g.add(joint);
+    pickables.set(joint, { kind: 'faucet', i });
+    // its valve on the drop, facing the way the pipe reaches out: a handwheel in its fluid's color (see View.update),
+    // its bar contrasting with it, on a short dark hub out from the drop
+    const mat = new THREE.MeshPhysicalMaterial({ roughness: 0.3, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.08 });
+    const bar = new THREE.MeshPhysicalMaterial({ roughness: 0.35, metalness: 0, clearcoat: 0.6, clearcoatRoughness: 0.2 });
     const valve = new THREE.Group();
-    const pose = knobPose({ spout, wall });
+    const pose = faucetValvePose({ spout, wall });
     valve.position.copy(at(pose));
     valve.rotation.y = pose.yaw;
-    const hub = new THREE.Mesh(unitCylinder, leverMat);
-    hub.rotation.x = Math.PI / 2;
-    hub.scale.set(KNOB.hub, KNOB.r + KNOB.hubH, KNOB.hub);
-    hub.position.z = (KNOB.r + KNOB.hubH) / 2;
-    valve.add(hub);
+    const stand = FAUCET_VALVE.pipe + VALVE_WHEEL.gap;
+    const hub = rod(valve, darkMat, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, stand + 0.2), 2.2);
     pickables.set(hub, { kind: 'faucet', i, valve: true });
-    const pivot = new THREE.Group();
-    pivot.position.z = KNOB.r + KNOB.hubH + 1;
-    const lever = new THREE.Mesh(new THREE.BoxGeometry(KNOB.lever + 2, 3, 2).translate(KNOB.lever / 2 - 1, 0, 0), leverMat);
-    lever.castShadow = true;
-    pivot.add(lever);
-    valve.add(pivot);
-    pickables.set(lever, { kind: 'faucet', i, valve: true });
+    const wheel = handwheel(mat, mat, bar);
+    wheel.position.z = stand;
+    valve.add(wheel);
+    wheel.traverse((m) => m instanceof THREE.Mesh && pickables.set(m, { kind: 'faucet', i, valve: true }));
     g.add(valve);
-    levers.push(pivot);
+    levers.push(wheel);
+    bars.push(bar);
     return mat;
   });
   scene.add(g);
-  return { mats, notes, levers };
+  return { mats, bars, notes, levers };
 }
 
 /* ---------------- the view ---------------- */
 
 /**
- * The thing a pick is part of, to outline all of it: a tool for any of its parts, a faucet for its knob or spout. The
- * supply station, built into the wall, is outlined a part at a time: its funnel, its reservoir's window, or one
- * of its two faucets (its spout's pipe, with its valve); its plate, nothing. Of the shadow lamp, which stays where it
- * is too, only its button is. Null for nothing.
+ * The part a pick is on, to outline just that: one of a tool's tanks, valves or spouts, the rest of a tool for its
+ * body, a flask, a scale. A spout and the hose pulled out of it are one part, nozzle too, and so are a faucet's
+ * spout and its hose; its valve (its handwheel, with the hub it's on) is a part too, and the pipe from the wall
+ * stands for the whole faucet. The supply station, built into the
+ * wall, is outlined a part at a time as ever: its funnel, its reservoir's window, or one of its two faucets (its
+ * spout's pipe, with its valve); its plate, nothing. Of the shadow lamp, which stays where it is too, only its button
+ * is. Null for nothing.
  */
-function thingOf(p: Pick): unknown {
+function partOf(p: Pick): unknown {
   switch (p.kind) {
     case 'flask': return p.f;
     case 'tool': {
       const { t } = p;
-      // (the shadow lamp, which stays where it is too: only its button)
       if (p.part === 'button') return `tool ${t.id} button`;
       if (t.kind === 'shadowlamp') return null;
-      if (!t.shape.fixed) return t;
       if (p.part === 'tank') return `tool ${t.id} tank ${p.k}`;
-      if (p.part === 'spout') return `tool ${t.id} spout ${p.k}`;
-      if (p.part === 'valve') return `tool ${t.id} spout ${t.shape.spouts.indexOf(valveLocal(t, p.k).x)}`;
-      return null;
+      // (a spout is the tool's: the left button there picks the tool up, and C pulls hoses out wherever the crosshair is)
+      if (p.part === 'spout') return t.shape.fixed ? null : t;
+      if (p.part === 'cock') return `tool ${t.id} cock ${p.k}`;
+      if (p.part === 'valve') return `tool ${t.id} valve ${p.k}`;
+      return t.shape.fixed ? null : t;
     }
     case 'scale': return p.sc;
-    case 'hose': return p.h;
+    case 'hose': {
+      const m = p.h.on;
+      // (only a stopcock on its end is hit, a part of its own, as one at the spout's tip is)
+      if (p.cock) return 'tool' in m ? `tool ${m.tool.id} end ${m.spout}` : `faucet ${m.faucet} end`;
+      return null;
+    }
+    // (its spout is just the faucet: the left button does nothing on either)
+    case 'faucet': return p.valve ? `faucet ${p.i} valve` : p.cock ? `faucet ${p.i} cock` : `faucet ${p.i}`;
+    default: return p.kind;
+  }
+}
+
+/**
+ * The whole thing a pick's mesh is part of, outlined faintly round the part: a tool for any of its parts, a faucet for
+ * its valve or spout. Nothing for the station or the shadow lamp, which are part of the room; and nothing for a hose,
+ * which isn't part of its tool's own shape, so outlining the tool doesn't take its hoses in.
+ */
+function thingOf(p: Pick): unknown {
+  switch (p.kind) {
+    case 'flask': return p.f;
+    case 'tool': return p.t.shape.fixed ? null : p.t;
+    case 'scale': return p.sc;
+    case 'hose': return null;
     case 'faucet': return `faucet ${p.i}`;
     default: return p.kind;
   }
+}
+
+/** The whole thing round what the crosshair is on: what thingOf says, but for a hose, what it runs from. */
+function wholeOf(p: Pick): unknown {
+  if (p.kind !== 'hose') return thingOf(p);
+  const m = p.h.on;
+  return 'tool' in m ? (m.tool.shape.fixed ? null : m.tool) : `faucet ${m.faucet}`;
 }
 
 const quadVertex = /* glsl */ `
@@ -4025,8 +4303,8 @@ void main() {
 /* ---------------- the equipment cabinet ---------------- */
 
 /** The cabinet's painted steel, outside and in, and its darker back panel. */
-const cabinetMat = new THREE.MeshStandardMaterial({ color: 0xb4bdb9, metalness: 0.35, roughness: 0.55 });
-const cabinetBackMat = new THREE.MeshStandardMaterial({ color: 0x4d5653, metalness: 0.3, roughness: 0.7 });
+const cabinetMat = metal(new THREE.MeshStandardMaterial({ color: 0xb4bdb9, metalness: 0.35, roughness: 0.55 }));
+const cabinetBackMat = metal(new THREE.MeshStandardMaterial({ color: 0x4d5653, metalness: 0.3, roughness: 0.7 }));
 
 /**
  * A view of a new one of a kind, empty and shut, in `scene`, where a new one starts: what the cabinet's stock and the
@@ -4043,6 +4321,11 @@ function specimen(k: Stocked, scene: THREE.Object3D): THREE.Object3D {
     const v = new ScaleView(new Scale(), scene, none);
     v.update(false, null);
     root = v.root;
+  } else if (k === 'stopcock') {
+    // shut, as it's put away
+    const v = new CockView(scene, null, null);
+    v.set({ valve: 0 });
+    root = v.group;
   } else {
     const v = new ToolView(new Tool(k, -1), scene, none);
     v.update(0, [], new Set());
@@ -4053,13 +4336,81 @@ function specimen(k: Stocked, scene: THREE.Object3D): THREE.Object3D {
 }
 
 /**
+ * What's drawn of a view of a new one of a kind, in its own frame, for the cabinet (see CabinetView): the faces of its
+ * meshes, by material, and its edges' lines, by material. A mesh with a material for each group of its faces (an open
+ * box's glass, a flask's) is split by them, leaving out those whose material isn't drawn (an open box's top). Its
+ * labels are left out, and so is what's on a layer of its own (a clear fluid's bent copy of what's behind it); nothing
+ * else drawn may be, so anything a view of it ever draws that the cabinet can't is an error here, not a gap on a shelf.
+ */
+function stockParts(k: Stocked, root: THREE.Object3D) {
+  type Parts = Map<THREE.Material, THREE.BufferGeometry[]>;
+  const faces: Parts = new Map();
+  const edges: Parts = new Map();
+  const add = (parts: Parts, mat: THREE.Material, geom: THREE.BufferGeometry) => parts.set(mat, [...(parts.get(mat) ?? []), geom]);
+  root.traverseVisible((o) => {
+    if (o instanceof THREE.Sprite || !o.layers.isEnabled(0) || o.userData.bent) return;
+    if (o instanceof THREE.LineSegments && !Array.isArray(o.material)) {
+      const geom = new THREE.BufferGeometry().setAttribute('position', o.geometry.attributes.position.clone());
+      if (o.geometry.index) geom.setIndex(o.geometry.index.clone());
+      add(edges, o.material, (geom.index ? geom.toNonIndexed() : geom).applyMatrix4(o.matrixWorld));
+      return;
+    }
+    if (!(o instanceof THREE.Mesh) || o instanceof THREE.InstancedMesh) {
+      if ((o as THREE.Mesh).isMesh || o instanceof THREE.Line || o instanceof THREE.Points)
+        throw new Error(`The cabinet can't draw a ${o.type} of a ${k}`);
+      return;
+    }
+    const geom = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(o.matrixWorld);
+    for (const name of Object.keys(geom.attributes)) if (!['position', 'normal', 'uv', 'color'].includes(name)) geom.deleteAttribute(name);
+    const mats: THREE.Material[] = Array.isArray(o.material) ? o.material : [o.material];
+    if (!Array.isArray(o.material)) {
+      geom.clearGroups();
+      if (o.material.visible) add(faces, o.material, geom);
+      return;
+    }
+    if (geom.groups.length === 0) throw new Error(`A ${k} has a mesh with a material for each group, but no groups`);
+    const n = geom.attributes.position.count;
+    for (const { start, count, materialIndex } of geom.groups) {
+      const mat = mats[materialIndex ?? 0];
+      if (!mat) throw new Error(`A ${k} has a mesh with a group for a material it hasn't`);
+      if (!mat.visible) continue;
+      const part = new THREE.BufferGeometry();
+      const end = Math.min(n, start + count);
+      for (const [name, a] of Object.entries(geom.attributes)) {
+        const at = a as THREE.BufferAttribute;
+        part.setAttribute(name, new THREE.BufferAttribute(at.array.slice(start * at.itemSize, end * at.itemSize), at.itemSize, at.normalized));
+      }
+      add(faces, mat, part);
+    }
+  });
+  return { faces, edges };
+}
+
+/** Geometries made one, for the cabinet's `k`; it throws if they can't be, rather than leave any of them out. */
+function merged(k: Stocked, set: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  if (set.length === 1) return set[0];
+  const geom = mergeGeometries(set);
+  if (!geom) throw new Error(`The cabinet can't make a ${k}'s meshes one`);
+  return geom;
+}
+
+/**
  * The equipment cabinet (see cabinet.ts): open steel shelving on a dark plinth, and what stands on its shelves. Each
  * kind is drawn from one view of a new one of it, made once, whose meshes are drawn again in each filled slot as an
  * instanced mesh: there are over a hundred things in it, and none of them changes while it's there.
  */
 class CabinetView {
   /** Each kind's meshes, as instanced meshes, with where each mesh is in the kind's own frame. */
-  private kinds = new Map<Stocked, { meshes: { im: THREE.InstancedMesh; rel: THREE.Matrix4 }[]; drawn: number[]; proxy: THREE.Group }>();
+  private kinds = new Map<
+    Stocked,
+    {
+      meshes: { im: THREE.InstancedMesh; rel: THREE.Matrix4 }[];
+      /** Its edges' lines, through every filled slot, and what they are in its own frame (see update). */
+      lines: { obj: THREE.LineSegments; src: Float32Array }[];
+      drawn: number[];
+      proxy: THREE.Group;
+    }
+  >();
   /** What the stock was when last drawn, to redraw only when it changes. */
   private key = '';
 
@@ -4078,17 +4429,17 @@ class CabinetView {
     const kick = new THREE.MeshStandardMaterial({ color: 0x1e2322, roughness: 0.8, metalness: 0.1 });
     // a plinth set in a little at the foot, under a panel to the first shelf
     box(kick, C.x0, C.x1, 0, 48, C.z0, C.z1 - 10);
-    box(cabinetMat, C.x0, C.x1, 48, B.base, C.z0, C.z1);
-    box(cabinetBackMat, C.x0, C.x1, B.base, C.y1, C.z0, C.z0 + B.back);
+    box(cabinetMat, C.x0, C.x1, 48, C.base, C.z0, C.z1);
+    box(cabinetBackMat, C.x0, C.x1, C.base, C.y1, C.z0, C.z0 + B.back);
     box(cabinetMat, C.x0, C.x1, C.y1 - B.top / 2, C.y1, C.z0, C.z1);
     // the uprights: one at each end and one between each two bays
     const ends = [C.x0, ...C.bays.map((b) => b.x1)];
-    for (const x of ends) box(cabinetMat, x, x + B.side, B.base, C.y1 - B.top / 2, C.z0, C.z1);
+    for (const x of ends) box(cabinetMat, x, x + B.side, C.base, C.y1 - B.top / 2, C.z0, C.z1);
     // the shelves, each under what stands on it (the first is the plinth's top)
-    for (const sh of C.shelves) if (sh.y > B.base) box(cabinetMat, sh.x0, sh.x1, sh.y - B.board, sh.y, C.z0 + B.back, C.z1 - 2);
+    for (const sh of C.shelves) if (sh.y > C.base) box(cabinetMat, sh.x0, sh.x1, sh.y - B.board, sh.y, C.z0 + B.back, C.z1 - 2);
     // its open front, never drawn, to aim what's held at to put it in (see View.pick)
-    const front = new THREE.Mesh(new THREE.PlaneGeometry(C.x1 - C.x0, C.y1 - B.base), new THREE.MeshBasicMaterial());
-    front.position.set((C.x0 + C.x1) / 2, (B.base + C.y1) / 2, C.z1);
+    const front = new THREE.Mesh(new THREE.PlaneGeometry(C.x1 - C.x0, C.y1 - C.base), new THREE.MeshBasicMaterial());
+    front.position.set((C.x0 + C.x1) / 2, (C.base + C.y1) / 2, C.z1);
     front.visible = false;
     g.add(front);
     pickables.set(front, { kind: 'cabinet', front: true });
@@ -4097,20 +4448,11 @@ class CabinetView {
     // what stands on the shelves, each kind drawn from a view of a new one
     const proto = new THREE.Scene();
     for (const k of Object.keys(C.slots) as Stocked[]) {
-      const root = specimen(k, proto);
+      const { faces, edges } = stockParts(k, specimen(k, proto));
       const slots = C.slots[k];
       const proxy = new THREE.Group();
       const meshes: { im: THREE.InstancedMesh; rel: THREE.Matrix4 }[] = [];
-      // its meshes in its own frame, those of each material made one where they can be, to draw fewer of them
-      const byMat = new Map<THREE.Material | THREE.Material[], THREE.BufferGeometry[]>();
-      root.traverseVisible((o) => {
-        if (!(o instanceof THREE.Mesh) || o instanceof THREE.InstancedMesh || !o.layers.isEnabled(0) || o.userData.bent) return;
-        const geom = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(o.matrixWorld);
-        for (const name of Object.keys(geom.attributes)) if (!['position', 'normal', 'uv', 'color'].includes(name)) geom.deleteAttribute(name);
-        geom.clearGroups();
-        byMat.set(o.material, [...(byMat.get(o.material) ?? []), geom]);
-      });
-      for (const [mat, geoms] of byMat) {
+      for (const [mat, geoms] of faces) {
         // geometries can be made one only if they have the same attributes
         const sets = new Map<string, THREE.BufferGeometry[]>();
         for (const geom of geoms) {
@@ -4118,7 +4460,7 @@ class CabinetView {
           sets.set(key, [...(sets.get(key) ?? []), geom]);
         }
         for (const set of sets.values()) {
-          const geom = set.length > 1 ? (mergeGeometries(set) ?? set[0]) : set[0];
+          const geom = merged(k, set);
           const im = new THREE.InstancedMesh(geom, mat, slots.length);
           im.frustumCulled = false;
           im.count = 0;
@@ -4131,8 +4473,15 @@ class CabinetView {
           proxy.add(m);
         }
       }
+      // the edges of its glass, which can't be instanced: one set of lines for each material, through every filled slot
+      const lines = [...edges].map(([mat, geoms]) => {
+        const obj = new THREE.LineSegments(new THREE.BufferGeometry(), mat);
+        obj.frustumCulled = false;
+        g.add(obj);
+        return { obj, src: merged(k, geoms).attributes.position.array as Float32Array };
+      });
       scene.add(proxy);
-      this.kinds.set(k, { meshes, drawn: [], proxy });
+      this.kinds.set(k, { meshes, lines, drawn: [], proxy });
     }
   }
 
@@ -4141,19 +4490,29 @@ class CabinetView {
     const key = JSON.stringify(stock);
     if (key === this.key) return;
     this.key = key;
-    const at = new THREE.Matrix4();
     const m = new THREE.Matrix4();
-    for (const [k, v] of this.kinds) {
-      v.drawn = stock[k].flatMap((filled, i) => (filled ? [i] : []));
-      for (const { im, rel } of v.meshes) {
-        v.drawn.forEach((slot, j) => {
-          const p = CABINET.slots[k][slot];
-          at.makeRotationY(p.yaw).setPosition(p.x, p.y, p.z);
-          im.setMatrixAt(j, m.multiplyMatrices(at, rel));
-        });
-        im.count = v.drawn.length;
+    const v = new THREE.Vector3();
+    for (const [k, kind] of this.kinds) {
+      kind.drawn = stock[k].flatMap((filled, i) => (filled ? [i] : []));
+      const places = kind.drawn.map((slot) => {
+        const p = CABINET.slots[k][slot];
+        return new THREE.Matrix4().makeRotationY(p.yaw).setPosition(p.x, p.y, p.z);
+      });
+      for (const { im, rel } of kind.meshes) {
+        places.forEach((place, j) => im.setMatrixAt(j, m.multiplyMatrices(place, rel)));
+        im.count = places.length;
         im.instanceMatrix.needsUpdate = true;
         im.computeBoundingSphere();
+      }
+      for (const { obj, src } of kind.lines) {
+        const pos = new Float32Array(src.length * places.length);
+        places.forEach((place, j) => {
+          for (let i = 0; i < src.length; i += 3) {
+            v.fromArray(src, i).applyMatrix4(place).toArray(pos, j * src.length + i);
+          }
+        });
+        obj.geometry.dispose();
+        obj.geometry = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(pos, 3));
       }
     }
   }
@@ -4368,7 +4727,7 @@ class IconStudio {
 }
 
 /**
- * The outline round whatever the crosshair is on (see OUTLINE in outline.ts), drawn over the finished frame. Its
+ * An outline round some of what the crosshair is on (see OUTLINE in outline.ts), drawn over the finished frame. Its
  * silhouette, the whole of it whatever's in front, goes into a mask; then each pixel finds how far it is from the
  * mask, along its row and then down its column (the nearest along each row first, so the second pass gets the true
  * distance), and the pixels within the outline's width of it are painted, the outermost blended for a smooth edge.
@@ -4396,11 +4755,11 @@ class Outliner {
     depthTest: false,
     depthWrite: false,
   });
-  /** Down each column: the distance to the mask, and the outline's color as far out as its width. */
+  /** Down each column: the distance to the mask, and the outline's color as far out as its width, at its opacity. */
   private down = new THREE.ShaderMaterial({
     uniforms: {
       rows: { value: null }, texel: { value: new THREE.Vector2() }, reach: { value: 1 }, width: { value: 1 },
-      color: { value: new THREE.Color() },
+      color: { value: new THREE.Color() }, opacity: { value: 1 },
     },
     vertexShader: quadVertex,
     fragmentShader: /* glsl */ `
@@ -4409,6 +4768,7 @@ class Outliner {
       uniform int reach;
       uniform float width;
       uniform vec3 color;
+      uniform float opacity;
       varying vec2 vUv;
       void main() {
         float best = 1e4;
@@ -4418,7 +4778,7 @@ class Outliner {
         }
         float a = clamp(width + 0.5 - best, 0.0, 1.0);
         if (best < 0.5 || a <= 0.0) discard;
-        gl_FragColor = vec4(color, a);
+        gl_FragColor = vec4(color, a * opacity);
         #include <colorspace_fragment>
       }`,
     transparent: true,
@@ -4435,10 +4795,10 @@ class Outliner {
     this.quad.frustumCulled = false;
   }
 
-  /** Outline `meshes` over what `renderer` last drew of `scene`. */
-  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, meshes: THREE.Object3D[], color: string = OUTLINE.color): void {
+  /** Outline `meshes` over what `renderer` last drew of `scene`, at `opacity`, in `color`. */
+  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, meshes: THREE.Object3D[], opacity = 1, color: string = OUTLINE.color): void {
     const width = OUTLINE.width * renderer.getPixelRatio();
-    if (width <= 0 || !meshes.length) return;
+    if (width <= 0 || opacity <= 0 || !meshes.length) return;
     const reach = Math.min(254, Math.ceil(width + 0.5));
     const { x: w, y: h } = renderer.getDrawingBufferSize(this.size);
     if (this.mask.width !== w || this.mask.height !== h) {
@@ -4479,6 +4839,7 @@ class Outliner {
     u.reach.value = reach;
     u.width.value = width;
     (u.color.value as THREE.Color).set(color);
+    u.opacity.value = opacity;
     this.quad.material = this.down;
     renderer.setRenderTarget(null);
     renderer.autoClear = false;
@@ -4844,6 +5205,371 @@ class Exposer {
   }
 }
 
+/** How long the shine setting must be still before what reflects the metal is drawn again (see View.refinish), in real ms. */
+const REFINISH_MS = 400;
+
+/** The keys' hints in the lab (see KeyHint): their letters are never less than `minPx` CSS pixels tall on the screen. */
+const KEY_HINT = { minPx: 12 };
+/** The hints' dark edge, and their light, as the key caps on the display; and the light of a key that's held. */
+const HINT_INK = { dark: '#1b2320', light: '#eef0eb', lit: '#ffffff' };
+
+/**
+ * A hint of what a key would do, drawn in the lab where it'd do it: a picture on a canvas, on a plane in the scene of
+ * hints (see View.hints), which is drawn over the finished frame, unlit and through everything, so nothing hides it,
+ * and which is nothing to aim at, to outline, to cast a shadow or to stop the shadow lamp's light. The picture is
+ * drawn in units of the plane (`box`, x right and y up from where it's put, `px` pixels to a unit), by `paint`, for a
+ * state (which key's held, say), again only when that changes, and again once the key caps' typeface has come. Far
+ * off it's drawn bigger, so that its letters (`cap` tall, in its units) are never less than KEY_HINT.minPx tall on
+ * the screen; never smaller than it is.
+ */
+class KeyHint {
+  private canvas = document.createElement('canvas');
+  private tex = new THREE.CanvasTexture(this.canvas);
+  private mesh: THREE.Mesh;
+  /** The state it was last drawn for. */
+  private state: number | null = null;
+
+  constructor(
+    scene: THREE.Scene,
+    private box: { x0: number; x1: number; y0: number; y1: number; px: number; cap: number },
+    private paint: (c: CanvasRenderingContext2D, state: number) => void,
+  ) {
+    const { x0, x1, y0, y1, px } = box;
+    this.canvas.width = Math.round((x1 - x0) * px);
+    this.canvas.height = Math.round((y1 - y0) * px);
+    this.tex.colorSpace = THREE.SRGBColorSpace;
+    const geom = new THREE.PlaneGeometry(x1 - x0, y1 - y0).translate((x0 + x1) / 2, (y0 + y1) / 2, 0);
+    const mat = new THREE.MeshBasicMaterial({ map: this.tex, transparent: true, depthTest: false, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
+    this.mesh = new THREE.Mesh(geom, mat);
+    this.mesh.visible = false;
+    scene.add(this.mesh);
+    document.fonts?.load(`600 ${px}px "Schibsted Grotesk"`).then(() => {
+      if (this.state !== null) this.draw(this.state);
+    }, () => {});
+  }
+
+  private draw(state: number): void {
+    this.state = state;
+    const c = this.canvas.getContext('2d');
+    if (!c) return;
+    const { x0, y1, px } = this.box;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    c.setTransform(px, 0, 0, -px, -x0 * px, y1 * px);
+    c.globalAlpha = 1;
+    c.lineJoin = 'round';
+    c.lineCap = 'round';
+    this.paint(c, state);
+    this.tex.needsUpdate = true;
+  }
+
+  /** Hide it. */
+  hide(): void {
+    this.mesh.visible = false;
+  }
+
+  /**
+   * Put it at `at`, facing `yaw`, `size` world units to a unit of its picture (or bigger, far off), drawn for `state`;
+   * raised by `lift` units of its picture, so that it grows away from the point of it that's at `at`.
+   */
+  show(at: Vec3, yaw: number, size: number, state: number, camera: THREE.PerspectiveCamera, cssH: number, lift = 0): void {
+    if (state !== this.state) this.draw(state);
+    const p = new THREE.Vector3(at.x, at.y, at.z);
+    // how many CSS pixels a unit is there, and how big it must be drawn for its letters to be tall enough
+    const px = cssH / (2 * camera.position.distanceTo(p) * Math.tan((camera.fov * Math.PI) / 360));
+    const grow = Math.max(1, KEY_HINT.minPx / (this.box.cap * size * px));
+    this.mesh.visible = true;
+    this.mesh.position.copy(p).add(new THREE.Vector3(0, lift * size * grow, 0));
+    this.mesh.rotation.set(0, yaw, 0);
+    this.mesh.scale.setScalar(size * grow);
+  }
+
+  get visible(): boolean {
+    return this.mesh.visible;
+  }
+}
+
+/** Draw a key's letter, `k`, centered at (x, y) in a picture's units (y up), its caps `cap` tall. */
+function keyLetter(c: CanvasRenderingContext2D, k: string, x: number, y: number, cap: number, ink: string, edge = 0): void {
+  c.save();
+  c.translate(x, y);
+  c.scale(1, -1);
+  c.font = `600 ${cap / 0.72}px "Schibsted Grotesk", sans-serif`;
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  if (edge) {
+    c.lineJoin = 'round';
+    c.lineWidth = 2 * edge;
+    c.strokeStyle = HINT_INK.dark;
+    c.strokeText(k, 0, 0);
+  }
+  c.fillStyle = ink;
+  c.fillText(k, 0, 0);
+  c.restore();
+}
+
+/**
+ * The arrow of Q and E over the top of the handwheel or dial they'd turn (see Frame.turnHint), as a KeyHint: a
+ * double-headed arrow curving round its rim from about 11 o'clock to 1 o'clock, a little outside it, with Q at its
+ * left end and E at its right, all in the handwheel's own face, upright as it's seen, light with a dark edge so it
+ * reads on anything (even a stopcock's collar, right over its handwheel), the side of the key held lit and the other
+ * faint. Its picture is in units of the radius its arc runs at, from the valve's middle: the arc's ends `ends` radians
+ * either side of straight up, its line `line` wide with an edge `edge` round it, its arrowheads `head` long, and its
+ * letters' middles `letter` out from the arc's ends.
+ */
+const TURN_ARROW = { ends: Math.PI / 6, line: 0.09, edge: 0.05, head: 0.22, letter: 0.33 };
+
+function turnHint(scene: THREE.Scene): KeyHint {
+  const L = TURN_ARROW;
+  const ink = (side: number, lit: number) => (lit === side ? HINT_INK.lit : HINT_INK.light);
+  return new KeyHint(scene, { x0: -1.32, x1: 1.32, y0: 0.4, y1: 1.32, px: 220, cap: 0.3 }, (c, lit) => {
+    const at = (a: number, r = 1) => [r * Math.sin(a), r * Math.cos(a)] as const;
+    const back = L.head * 0.85;
+    // the arc, short of its ends, and each end's arrowhead, its tip on the arc a little past the end
+    const shape = (side: -1 | 1) => {
+      c.beginPath();
+      c.arc(0, 0, 1, Math.PI / 2, Math.PI / 2 - side * (L.ends - back), side > 0);
+      const tip = at(side * (L.ends + 0.04));
+      const a = side * (L.ends - back);
+      const [l, r] = [at(a, 1 - L.head * 0.55), at(a, 1 + L.head * 0.55)];
+      c.moveTo(tip[0], tip[1]);
+      c.lineTo(l[0], l[1]);
+      c.lineTo(r[0], r[1]);
+      c.closePath();
+    };
+    // the faint side first, if one is, so the lit one is over it where they meet
+    const sides = lit > 0 ? ([-1, 1] as const) : ([1, -1] as const);
+    // the dark edge of the whole arrow, then its light line over it, so no edge crosses the line where the halves meet
+    for (const side of sides) {
+      c.globalAlpha = lit && lit !== side ? 0.45 : 1;
+      shape(side);
+      c.lineWidth = L.line + 2 * L.edge;
+      c.strokeStyle = c.fillStyle = HINT_INK.dark;
+      c.stroke();
+      c.fill();
+    }
+    for (const side of sides) {
+      c.globalAlpha = lit && lit !== side ? 0.45 : 1;
+      shape(side);
+      c.lineWidth = L.line;
+      c.strokeStyle = c.fillStyle = ink(side, lit);
+      c.stroke();
+      c.fill();
+      const [x, y] = at(side * L.ends);
+      keyLetter(c, side < 0 ? 'Q' : 'E', x + side * L.letter, y - 0.04, 0.3, ink(side, lit), L.edge);
+    }
+    c.globalAlpha = 1;
+  });
+}
+
+/**
+ * C's hint where it would take hold of a hose (see Frame.hoseHint), as a KeyHint, in world units from the outlet of
+ * a spout, hanging from it; or, at a nozzle, standing on it, its banded end there: on the right, a little hose hanging from it as if fitted there (`hose`: its collar `collar` wide at
+ * the top, a tube `tube` wide coming down, bending in an S `bend` to the right and down again, `drop` long in all,
+ * with a band round it `band` from its end, for the nozzle), drawn light with a dark edge, as the arrow of Q and E
+ * is; on its left, a key cap (`cap`: `w` by `h`, its corners rounded `r`, `gap` clear of the hose) with a C on it,
+ * as the display's key caps are, light with a dark border and letter. It stands upright, turned to face the eyes.
+ */
+const HOSE_HINT = {
+  hose: { collar: 6, tube: 3.4, bend: 8, drop: 28, band: 3.5, edge: 0.8 },
+  cap: { w: 13, h: 16, r: 2.5, gap: 4, letter: 7.5, border: 1.1 },
+  /** How much higher it stands over a nozzle with a stopcock on it, to clear the arrow of Q and E over its handwheel. */
+  overCock: 8,
+};
+
+function hoseHint(scene: THREE.Scene): KeyHint {
+  const { hose: H, cap: K } = HOSE_HINT;
+  const x0 = -(K.w + K.gap + H.collar / 2 + 1);
+  return new KeyHint(scene, { x0, x1: H.bend + H.collar / 2 + 1, y0: -H.drop - 1, y1: 1, px: 16, cap: K.letter }, (c) => {
+    // the tube: down from the collar, an S to the right, and down again to its end
+    const top = -3;
+    const tube = () => {
+      c.beginPath();
+      c.moveTo(0, top);
+      c.lineTo(0, top - 3);
+      c.bezierCurveTo(0, top - 9, H.bend, -10, H.bend, -16);
+      c.lineTo(H.bend, -H.drop);
+    };
+    c.lineCap = 'butt';
+    tube();
+    c.lineWidth = H.tube + 2 * H.edge;
+    c.strokeStyle = HINT_INK.dark;
+    c.stroke();
+    tube();
+    c.lineWidth = H.tube;
+    c.strokeStyle = HINT_INK.light;
+    c.stroke();
+    // its end, and the band near it where the nozzle is
+    const across = (y: number, w: number) => {
+      c.beginPath();
+      c.moveTo(H.bend - H.tube / 2 - H.edge, y);
+      c.lineTo(H.bend + H.tube / 2 + H.edge, y);
+      c.lineWidth = w;
+      c.stroke();
+    };
+    c.strokeStyle = HINT_INK.dark;
+    across(-H.drop, H.edge * 1.6);
+    across(-H.drop + H.band, H.edge * 1.2);
+    // the collar at the top, its top at the outlet
+    c.fillStyle = HINT_INK.light;
+    c.lineWidth = H.edge;
+    c.beginPath();
+    c.rect(-H.collar / 2, top, H.collar, -top);
+    c.fill();
+    c.stroke();
+    // the key cap, beside the hose's upper half
+    keyCap(c, 'C', -(H.collar / 2 + K.gap + K.w), -(H.drop / 2) - K.h / 2 + 4);
+  });
+}
+
+/** A key cap with letter `k` on it, its lower left corner at (x, y), as the display's key caps are (see HOSE_HINT.cap). */
+function keyCap(c: CanvasRenderingContext2D, k: string, x: number, y: number): void {
+  const K = HOSE_HINT.cap;
+  c.beginPath();
+  c.roundRect(x, y, K.w, K.h, K.r);
+  c.fillStyle = HINT_INK.light;
+  c.fill();
+  c.lineWidth = K.border;
+  c.strokeStyle = HINT_INK.dark;
+  c.stroke();
+  keyLetter(c, k, x + K.w / 2, y + K.h / 2, K.letter, HINT_INK.dark);
+}
+
+/**
+ * E's hint over the mouth a flask in hand would be poured into (see Frame.pourHint), as a KeyHint, in world units from
+ * the lip of a little flask tipped to pour, which is `over` above the middle of that mouth: an Erlenmeyer's outline
+ * (its neck `neck` wide and `neckH` tall, its base `base` wide, its corners rounded `r`, `h` below its mouth, with a
+ * rim `rim` proud of the mouth), tipped `tilt` radians about its lip so its body is to the right, drawn light with a
+ * dark edge as the hose of C's hint is, and what's in it gray, lying level up to the lip; from the lip a stream falls
+ * `stream`, with a drop under it, to just over the mouth. On its left, a key cap with an E on it, as C's. It stands
+ * upright, turned to face the eyes.
+ */
+const POUR_HINT = { over: 18, tilt: (75 * Math.PI) / 180, neck: 5.5, neckH: 8, base: 19, h: 24, r: 2.5, rim: 0.9, stream: 10, edge: 0.8, fluid: '#8a9a94' };
+
+function pourHint(scene: THREE.Scene): KeyHint {
+  const P = POUR_HINT;
+  const K = HOSE_HINT.cap;
+  // the flask, upright, its mouth's pouring corner at the origin and its body below
+  const flask = (c: CanvasRenderingContext2D) => {
+    const mid = P.neck / 2;
+    const [l, r] = [mid - P.base / 2, mid + P.base / 2];
+    c.beginPath();
+    c.moveTo(-P.rim, 0);
+    c.lineTo(0, -P.rim);
+    c.lineTo(0, -P.neckH);
+    c.arcTo(l, -P.h, mid, -P.h, P.r);
+    c.arcTo(r, -P.h, P.neck, -P.neckH, P.r);
+    c.lineTo(P.neck, -P.neckH);
+    c.lineTo(P.neck, -P.rim);
+    c.lineTo(P.neck + P.rim, 0);
+    c.closePath();
+  };
+  return new KeyHint(scene, { x0: -(K.w + 8), x1: 30, y0: -(P.stream + 6), y1: K.h + 2, px: 16, cap: K.letter }, (c) => {
+    // the stream, and a drop under it
+    c.beginPath();
+    c.moveTo(0, -0.5);
+    c.lineTo(0, -P.stream);
+    c.lineWidth = 1.6 + 2 * P.edge;
+    c.strokeStyle = HINT_INK.dark;
+    c.stroke();
+    c.lineWidth = 1.6;
+    c.strokeStyle = HINT_INK.light;
+    c.stroke();
+    c.beginPath();
+    c.arc(0, -P.stream - 2.8, 1.3, 0, 2 * Math.PI);
+    c.fillStyle = HINT_INK.light;
+    c.fill();
+    c.lineWidth = P.edge;
+    c.strokeStyle = HINT_INK.dark;
+    c.stroke();
+    // the flask, tipped about its lip, with what's in it lying level up to the lip
+    c.save();
+    c.rotate(P.tilt);
+    flask(c);
+    c.fillStyle = HINT_INK.light;
+    c.fill();
+    c.clip();
+    c.rotate(-P.tilt);
+    c.fillStyle = P.fluid;
+    c.fillRect(-40, -40, 80, 40);
+    c.restore();
+    c.save();
+    c.rotate(P.tilt);
+    flask(c);
+    c.lineWidth = 2 * P.edge;
+    c.strokeStyle = HINT_INK.dark;
+    c.stroke();
+    c.restore();
+    // the key cap, to the left
+    keyCap(c, 'E', -(K.w + 6), -2);
+  });
+}
+
+/**
+ * E's hint by the open top a strip or a thermometer in hand would be dipped into (see Frame.dipHint), as a KeyHint, in
+ * world units from the middle of that mouth, which the dipper itself hovers over: so it's all to the left of it,
+ * `clear` of the mouth's middle and `up` above it. On the right, a little picture of dipping: a wavy line `wave` wide
+ * for a fluid's surface, a dipper standing in it, `tall` from its foot below the line, and an arrow down beside it;
+ * the dipper is a thermometer (state 0: a stem `stem` wide on a bulb of radius `bulb`) or a strip (state 1: `strip`
+ * wide, square-ended), drawn light with a dark edge as the other hints' pictures are. On its left, a key cap with an
+ * E on it, as C's. It stands upright, turned to face the eyes.
+ */
+const DIP_HINT = { clear: 7, up: 5, wave: 19, tall: 19, stem: 2, bulb: 2.5, strip: 4.2, edge: 0.8 };
+
+function dipHint(scene: THREE.Scene): KeyHint {
+  const D = DIP_HINT;
+  const K = HOSE_HINT.cap;
+  // the picture's right and left edges, the dipper's middle, the arrow's, and the height of the fluid's surface
+  const x1 = -D.clear;
+  const x0 = x1 - D.wave;
+  const dx = x0 + 6.5;
+  const ax = x1 - 4.5;
+  const y = D.up + 5.5;
+  const top = y - 4 + D.tall;
+  /** Stroke the path just made light with a dark edge, `w` wide. */
+  const line = (c: CanvasRenderingContext2D, w: number) => {
+    c.lineWidth = w + 2 * D.edge;
+    c.strokeStyle = HINT_INK.dark;
+    c.stroke();
+    c.lineWidth = w;
+    c.strokeStyle = HINT_INK.light;
+    c.stroke();
+  };
+  return new KeyHint(scene, { x0: x0 - K.gap - K.w - 2, x1: x1 + 2, y0: D.up - 2, y1: top + 3, px: 16, cap: K.letter }, (c, state) => {
+    // the fluid's surface: two waves
+    c.beginPath();
+    c.moveTo(x0, y);
+    for (let i = 0; i < 2; i++) {
+      const a = x0 + (i * D.wave) / 2;
+      c.bezierCurveTo(a + D.wave / 8, y + 2.6, a + (3 * D.wave) / 8, y - 2.6, a + D.wave / 2, y);
+    }
+    line(c, 1.5);
+    // the dipper, its foot under the surface
+    c.beginPath();
+    if (state === 1) c.rect(dx - D.strip / 2, y - 4, D.strip, D.tall);
+    else {
+      c.roundRect(dx - D.stem / 2, y - 3, D.stem, D.tall - 1, D.stem / 2);
+      c.moveTo(dx + D.bulb, y - 4 + D.bulb);
+      c.arc(dx, y - 4 + D.bulb, D.bulb, 0, 2 * Math.PI);
+    }
+    c.lineWidth = 2 * D.edge;
+    c.strokeStyle = HINT_INK.dark;
+    c.stroke();
+    c.fillStyle = HINT_INK.light;
+    c.fill();
+    // the arrow down, to the surface
+    c.beginPath();
+    c.moveTo(ax, top - 1);
+    c.lineTo(ax, y + 4);
+    c.moveTo(ax - 3, y + 7.5);
+    c.lineTo(ax, y + 4);
+    c.lineTo(ax + 3, y + 7.5);
+    line(c, 1.5);
+    // the key cap, to the left, beside the picture's upper part
+    keyCap(c, 'E', x0 - K.gap - K.w, top - K.h);
+  });
+}
+
 /** Draws the lab with Three.js, from the player's eyes, and says what's under the crosshair. */
 export class View {
   /** The field of view is 90°, top to bottom, until the player zooms in (see look). */
@@ -4859,10 +5585,16 @@ export class View {
   private hoses = new Map<Hose, HoseView>();
   private stands: StandView[] = [];
   private ghost: GhostView;
+  /** The stopcock in hand, if there is one (see Frame.loose), and the one it was drawn for. */
+  private loose: { v: CockView; c: Cock } | null = null;
   private faucetMats: THREE.MeshStandardMaterial[] = [];
+  /** Each faucet's valve's bar, black or white to show on its handwheel's color (see BAR_DARK_ABOVE). */
+  private faucetBars: THREE.MeshStandardMaterial[] = [];
   private faucetNotes: Label[] = [];
-  /** Each faucet's valve's lever, turned to its setting (see buildFaucets). */
-  private faucetLevers: THREE.Group[] = [];
+  /** Each faucet's valve's handwheel, turned to its setting (see buildFaucets). */
+  private faucetWheels: THREE.Group[] = [];
+  /** The stopcock drawn at each faucet's tip, if one's fitted there, and the one it was drawn for. */
+  private faucetCocks: ({ v: CockView; c: Cock } | null)[] = [];
   private streams: THREE.Mesh[] = [];
   private guides: THREE.Mesh[] = [];
   private rims: { g: THREE.Group; mat: THREE.MeshBasicMaterial; sides: THREE.Mesh[]; ring: THREE.Mesh }[] = [];
@@ -4876,11 +5608,22 @@ export class View {
   private roomLights: { light: THREE.Light; base: number }[] = [];
   private raycaster = new THREE.Raycaster();
   private outliner = new Outliner();
+  /** The keys' hints in the lab (see KeyHint), in a scene of their own, drawn over the finished frame. */
+  private hints = new THREE.Scene();
+  private turnHint = turnHint(this.hints);
+  private hoseHint = hoseHint(this.hints);
+  private pourHint = pourHint(this.hints);
+  private dipHint = dipHint(this.hints);
   /** Works out where the shadow lamp's light falls (see Exposer), once it's first needed. */
   private exposer?: Exposer;
   private studio = new IconStudio(Math.min(2, window.devicePixelRatio || 1));
   /** The equipment wheels' icons (see IconStudio): drawn again, on new canvases, whenever what they reflect is. */
   private drawnIcons: Icons = {};
+  /** Draws again what metal and glass reflect, and the icons with it (see the constructor). */
+  private reflect: () => void;
+  /** The metal's shine last applied (see FINISH), and when it last changed, in real ms, while the reflections wait. */
+  private shone = FINISH.shine;
+  private shineAt: number | null = null;
   private clock = 0;
   private stars = starField();
 
@@ -4922,20 +5665,39 @@ export class View {
     this.ghost = new GhostView(this.scene);
     // what metal and glass reflect: the room itself, seen from its middle at eye height, before anything's in it, and
     // again once its surfaces have their textures (see textures.ts)
-    const reflect = () => {
+    const reflect = (this.reflect = () => {
       const pmrem = new THREE.PMREMGenerator(this.renderer);
       const was = this.scene.environment;
       this.scene.environment = pmrem.fromScene(this.scene, 0.02, 10, 8000, { size: 256, position: new THREE.Vector3(cx, eye, cz) }).texture;
       was?.dispose();
       pmrem.dispose();
       this.drawnIcons = this.studio.render(this.renderer, this.scene.environment);
-    };
+    });
+    // every metal already has the stored shine, from when it was made (see metal in textures.ts)
     reflect();
     whenSurfaced(reflect);
     const fs = buildFaucets(this.scene, faucets, this.pickables);
     this.faucetMats = fs.mats;
+    this.faucetBars = fs.bars;
     this.faucetNotes = fs.notes;
-    this.faucetLevers = fs.levers;
+    this.faucetWheels = fs.levers;
+  }
+
+  /**
+   * Bring the metal to the shine setting if it's changed (see FINISH): its roughness at once, and what reflects it, the
+   * room's reflections and the icons, once the setting's been still for REFINISH_MS of real time, not on every step of
+   * a slider being dragged, since drawing them again is slow. It's a preview of a setting, not part of the world.
+   */
+  private refinish(): void {
+    const now = performance.now();
+    if (FINISH.shine !== this.shone) {
+      this.shone = FINISH.shine;
+      applyShine(this.shone);
+      this.shineAt = now;
+    } else if (this.shineAt !== null && now - this.shineAt >= REFINISH_MS) {
+      this.shineAt = null;
+      this.reflect();
+    }
   }
 
   /** A little picture of each kind of thing the equipment wheels make (see IconStudio). */
@@ -4981,6 +5743,7 @@ export class View {
   render(fr: Frame): void {
     this.clock += fr.dt;
     const { scene, pickables } = this;
+    this.refinish();
     this.look(fr.eye, fr.yaw, fr.pitch);
     this.stars.rotation.x = fr.spin;
 
@@ -4994,27 +5757,49 @@ export class View {
     for (const v of this.flasks.values()) v.update(targets);
     for (const v of this.tools.values()) v.update(fr.clock, fr.energies, targets);
     for (const v of this.scales.values()) v.update(fr.tarePress === v.sc, fr.hot);
-    for (const { h, from, fluid } of fr.hoses) this.hoses.get(h)!.update(from, fluid);
+    for (const { h, from, fluid, cock } of fr.hoses) this.hoses.get(h)!.update(from, fluid, cock);
     fr.faucets.forEach((fa, i) => {
       const rgb = fluidRGB(fa.output);
       const mat = this.faucetMats[i];
       if (rgb && mat) {
         setRGB(mat.color, rgb);
-        // a knob for a clear fluid is clear too, like glossy acrylic, but never so clear it's hard to see
+        // a handwheel for a clear fluid is clear too, like glossy acrylic, but never so clear it's hard to see
         mat.opacity = Math.max(KNOB_ALPHA, fluidAlpha(fa.output));
         if (mat.transparent !== mat.opacity < 1) {
           mat.transparent = mat.opacity < 1;
           mat.needsUpdate = true;
         }
+        // its bar black, or white on a dark one, so it shows on every color
+        const lum = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
+        this.faucetBars[i]?.color.setHex(lum > BAR_DARK_ABOVE ? BAR_DARK : BAR_LIGHT);
       }
       this.faucetNotes[i]?.set(fa.note);
-      // shut points right, open straight up, as a tool's valve's lever does
-      const lever = this.faucetLevers[i];
-      if (lever) lever.rotation.z = (fa.valve * Math.PI) / 2;
+      // at the angle it's been turned to (see settleAngle), upright open, as a tool's plain valve
+      const wheel = this.faucetWheels[i];
+      if (wheel) wheel.rotation.z = -settleAngle('valve', fa.angle, fa.valve);
+      // a stopcock at its tip hangs from it, facing as its valve does; its foot is the faucet's spout
+      const want = fa.cock;
+      const was = this.faucetCocks[i];
+      if (was && was.c !== want) {
+        was.v.dispose();
+        this.faucetCocks[i] = null;
+      }
+      if (want && !this.faucetCocks[i]) {
+        const picks = {
+          cock: { kind: 'faucet', i, cock: true } as const, turns: { kind: 'faucet', i, cock: true, turns: true } as const,
+        };
+        const v = new CockView(scene, pickables, picks);
+        v.group.position.set(fa.spout.x, fa.spout.y, fa.spout.z);
+        v.group.rotation.y = faucetValvePose(fa).yaw;
+        this.faucetCocks[i] = { v, c: want };
+      }
+      if (want) this.faucetCocks[i]!.v.set(want);
     });
 
     this.updateStands(fr);
     this.ghost.update(fr.ghost, fr.clock, fr.energies);
+    this.updateLoose(fr);
+    this.updateHints(fr);
     this.updateStreams(fr);
     this.updateGuides(fr);
 
@@ -5046,8 +5831,66 @@ export class View {
     this.renderOutline(fr.hot);
     // what's moved by a ghost is outlined there, always, red if it can't go, its destination crisp against anything
     const ghost = this.ghost.outline();
-    if (ghost.meshes.length) this.outliner.render(this.renderer, scene, this.camera, ghost.meshes, ghost.red ? GHOST_RED : OUTLINE.color);
+    if (ghost.meshes.length) this.outliner.render(this.renderer, scene, this.camera, ghost.meshes, 1, ghost.red ? GHOST_RED : OUTLINE.color);
+    // and so is a stopcock in hand where it would go on, red if there's no room for it there
+    const loose = fr.loose && this.loose && fr.loose.ok !== null ? this.loose.v.group.children : [];
+    if (loose.length) this.outliner.render(this.renderer, scene, this.camera, loose, 1, fr.loose!.ok ? OUTLINE.color : GHOST_RED);
+    // and over it all, the keys' hints
+    this.renderHints();
     this.shine();
+  }
+
+  /**
+   * The keys' hints (see KeyHint): the arrow of Q and E over a handwheel or dial they'd turn, in its face (see
+   * Frame.turnHint), and C's at the outlet of the spout whose hose it'd pull out, turned to face the eyes (see
+   * Frame.hoseHint).
+   */
+  private updateHints(fr: Frame): void {
+    const cssH = this.renderer.domElement.clientHeight;
+    const t = fr.turnHint;
+    if (t) this.turnHint.show(t.at, t.yaw, t.r, t.lit, this.camera, cssH);
+    else this.turnHint.hide();
+    const h = fr.hoseHint;
+    const eye = this.camera.position;
+    if (h) {
+      // at a spout, the picture hangs from it; at a nozzle, it stands on it, its banded end there, and over a stopcock
+      // on the nozzle, clear of the arrow of Q and E over its handwheel
+      const up = h.nozzle ? HOSE_HINT.hose.drop + (h.cock ? HOSE_HINT.overCock : 0) : 0;
+      this.hoseHint.show(h.at, Math.atan2(eye.x - h.at.x, eye.z - h.at.z), 1, 0, this.camera, cssH, up);
+    } else this.hoseHint.hide();
+    const m = fr.pourHint;
+    // (far off, it grows up and away from the mouth, its stream still ending just over it)
+    if (m) this.pourHint.show(m, Math.atan2(eye.x - m.x, eye.z - m.z), 1, 0, this.camera, cssH, POUR_HINT.over);
+    else this.pourHint.hide();
+    const d = fr.dipHint;
+    if (d) this.dipHint.show(d.at, Math.atan2(eye.x - d.at.x, eye.z - d.at.z), 1, d.strip ? 1 : 0, this.camera, cssH);
+    else this.dipHint.hide();
+  }
+
+  /** Draw the keys' hints over the finished frame, if any are up. */
+  private renderHints(): void {
+    if (!this.turnHint.visible && !this.hoseHint.visible && !this.pourHint.visible && !this.dipHint.visible) return;
+    const { renderer } = this;
+    renderer.autoClear = false;
+    renderer.shadowMap.autoUpdate = false;
+    renderer.render(this.hints, this.camera);
+    renderer.shadowMap.autoUpdate = true;
+    renderer.autoClear = true;
+  }
+
+  /** The stopcock in hand (see Frame.loose), where it's held or would go on; nothing to aim at. */
+  private updateLoose(fr: Frame): void {
+    const l = fr.loose;
+    if (this.loose && this.loose.c !== l?.cock) {
+      this.loose.v.dispose();
+      this.loose = null;
+    }
+    if (!l) return;
+    this.loose ??= { v: new CockView(this.scene, null, null), c: l.cock };
+    const g = this.loose.v.group;
+    g.position.set(l.pose.x, l.pose.y, l.pose.z);
+    g.rotation.y = l.pose.yaw;
+    this.loose.v.set(l.cock);
   }
 
   /**
@@ -5168,30 +6011,41 @@ export class View {
     scene.background = bg;
   }
 
-  /** The outline round everything that's part of what the crosshair is on (see Outliner). */
+  /**
+   * The outlines round what the crosshair is on (see Outliner): at full strength round the part of it (see partOf),
+   * and first, faintly, round the whole thing it's part of (see thingOf) with that part, so no faint line cuts across
+   * a hose that's out. A part whose key is a whole thing (a tool's body) takes all of it in. Clamp stands, which aren't
+   * hit, are never outlined.
+   */
   private renderOutline(hot: Pick | null): void {
     if (!hot) return;
     if (hot.kind === 'stock') {
       this.outliner.render(this.renderer, this.scene, this.camera, this.cabinet.outline(hot.item, hot.slot));
       return;
     }
-    const thing = thingOf(hot);
-    if (thing === null) return;
-    const meshes = [...this.pickables].filter(([, p]) => thingOf(p) === thing).map(([o]) => o);
-    this.outliner.render(this.renderer, this.scene, this.camera, meshes);
+    const focus = partOf(hot);
+    if (focus === null) return;
+    const whole = wholeOf(hot);
+    const members = this.pickables;
+    const part: THREE.Object3D[] = [];
+    const all: THREE.Object3D[] = [];
+    for (const [o, p] of members) {
+      const thing = thingOf(p);
+      const inPart = partOf(p) === focus || thing === focus;
+      if (inPart) part.push(o);
+      if (inPart || (whole !== null && thing === whole)) all.push(o);
+    }
+    if (whole !== null && whole !== focus) this.outliner.render(this.renderer, this.scene, this.camera, all, OUTLINE.faint);
+    this.outliner.render(this.renderer, this.scene, this.camera, part);
   }
 
   /** Every stand, its base on whatever's under it: a counter, or the floor under something held out over it. */
   private updateStands(fr: Frame): void {
     while (this.stands.length < fr.stands.length) this.stands.push(new StandView(this.scene));
     this.stands.forEach((v, i) => {
-      const st = fr.stands[i];
-      v.group.visible = !!st;
-      for (const m of v.parts) {
-        if (st) this.pickables.set(m, st.of);
-        else this.pickables.delete(m);
-      }
-      if (st) v.update(st.s, groundAt(st.s.x, st.s.z));
+      const s = fr.stands[i];
+      v.group.visible = !!s;
+      if (s) v.update(s, groundAt(s.x, s.z));
     });
   }
 
@@ -5345,13 +6199,34 @@ export class View {
   }
 
   /**
+   * Whether something the crosshair could be on (see pick; not a clamp stand, nor a hose's tube or nozzle) is between
+   * `from` and `to`, nearer than `to`, but for what `own` says is the thing `to` is part of, which never hides it, see
+   * through or not.
+   */
+  blocked(from: Vec3, to: Vec3, own: (p: Pick) => boolean): boolean {
+    const d = new THREE.Vector3(to.x - from.x, to.y - from.y, to.z - from.z);
+    const len = d.length();
+    if (len < 1e-6) return false;
+    this.raycaster.set(new THREE.Vector3(from.x, from.y, from.z), d.divideScalar(len));
+    this.raycaster.far = len - 0.5;
+    for (const hit of this.raycaster.intersectObjects([...this.pickables.keys()], false)) {
+      const p = this.pickables.get(hit.object);
+      if (p && p.kind !== 'cabinet' && !own(p)) return true;
+      if (p?.kind === 'cabinet' && !p.front) return true;
+    }
+    return false;
+  }
+
+  /**
    * How far from `from`, along the unit vector `dir`, the first thing drawn that the crosshair could be on is (see
-   * pick); Infinity if there's nothing within `reach`.
+   * pick), or a clamp stand or a hose's nozzle; Infinity if there's nothing within `reach`.
    */
   clearance(from: Vec3, dir: Vec3, reach: number): number {
     this.raycaster.set(new THREE.Vector3(from.x, from.y, from.z), new THREE.Vector3(dir.x, dir.y, dir.z));
     this.raycaster.far = reach;
-    const hit = this.raycaster.intersectObjects([...this.pickables.keys()], false).find((h) => this.pickables.get(h.object));
+    const stands = this.stands.filter((v) => v.group.visible).flatMap((v) => v.parts);
+    const nozzles = [...this.hoses.values()].map((v) => v.nozzle);
+    const hit = this.raycaster.intersectObjects([...this.pickables.keys(), ...stands, ...nozzles], false)[0];
     return hit ? hit.distance : Infinity;
   }
 

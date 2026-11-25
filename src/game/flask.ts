@@ -58,6 +58,27 @@ export class Vessel implements Fluid {
     return m;
   }
 
+  /**
+   * Scale every species' count by one factor so its volume comes to about `v`, clamped to [0, cap], keeping
+   * the temperature. Each count is rounded, or floored if rounding would overfill it. An empty vessel has
+   * nothing to scale, and is left as it is.
+   */
+  setVolume(v: number): void {
+    const was = volume(this);
+    if (was <= 0) return;
+    const T = temperature(this);
+    const k = Math.max(0, Math.min(v, this.cap)) / was;
+    const scaled = Array.from(this.n, (n) => n * k);
+    let round = scaled.map(Math.round);
+    if (round.reduce((t, m, s) => t + m * roomFor(s), 0) > this.cap) round = scaled.map(Math.floor);
+    this.N = 0;
+    for (let s = 0; s < NS; s++) {
+      this.n[s] = round[s];
+      this.N += round[s] * SPECIES[s].size;
+    }
+    this.Q = heatAt(T, this.N);
+  }
+
   /** Set the temperature, by setting the heat to match. */
   setTemperature(T: number): void {
     this.Q = heatAt(Math.max(0, T), this.N);
