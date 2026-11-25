@@ -377,15 +377,32 @@ export class ReactionNetwork {
     if (f.N <= 0) {
       lag.owed = 0;
       lag.slack = 0;
+      lag.grow = 0;
       return;
     }
     lag.owed += h;
     // a fluid stepped every substep anyway needn't be watched
     const moved = lag.slack > h && this.moved(f, lag);
     if (!moved && lag.owed < lag.slack) return;
+    this.catchUp(f, h, lag, moved);
+  }
+
+  /**
+   * Step a fluid through whatever chemistry it's owed, now, however long it might still have waited (see tick): for
+   * whatever wants it as it is, not part way through a wait (the sleeper's samples of it, see sleep.ts). `h` is a sim
+   * substep, the least it's stepped by.
+   */
+  flush(f: Fluid, h: number, lag: Lag): void {
+    if (f.N > 0 && lag.owed > 0) this.catchUp(f, h, lag, lag.slack > h && this.moved(f, lag));
+  }
+
+  /** Step a fluid through all it's owed (see tick): in steps as long as it allows, the first a substep if it's `moved`. */
+  private catchUp(f: Fluid, h: number, lag: Lag, moved: boolean): void {
     let left = lag.owed;
     let most = moved ? h : left;
     let tau = Infinity;
+    const owed = lag.owed;
+    const before = molecules(f);
     lag.owed = 0;
     while (left > 0) {
       const dt = left - most < 1e-9 ? left : most;
@@ -394,6 +411,7 @@ export class ReactionNetwork {
       most = Math.max(h, QUIET.share * tau);
     }
     lag.slack = Math.min(QUIET.most, QUIET.share * tau);
+    lag.grow = before > 0 ? (molecules(f) - before) / (before * owed) : 0;
     lag.version = this.version;
     lag.invT = 1 / Math.max(temperature(f), 0.05);
     lag.bar = this.barMax;
@@ -426,11 +444,33 @@ export class Lag {
   owed = 0;
   /** How long it can go between steps, from how it was last stepped: 0 to be stepped every substep. */
   slack = 0;
+  /**
+   * How fast its molecules were being made as it was last stepped (bonds breaking), or, negative, used up (bonds
+   * forming), as a share of them per sim second: what it's taken to be owed for the time not yet stepped (see owing).
+   */
+  grow = 0;
+
+  /**
+   * The share of its molecules the fluid is owed, for the chemistry not yet stepped: what the step it's waiting for
+   * will add to them (or, negative, take from them), going by how the last one went. Whatever goes by how many
+   * molecules a fluid has between its steps (how much of it fits in its vessel) counts this in, so that putting
+   * the chemistry off doesn't show there as a sawtooth.
+   */
+  owing(): number {
+    return this.grow * this.owed;
+  }
   /** As it was last stepped: the chemistry's version, 1/T, the highest barrier reacting, each species' share. */
   version = 0;
   invT = 0;
   bar = 0;
   readonly x = new Float64Array(NS);
+}
+
+/** How many molecules a fluid has. */
+function molecules(f: Fluid): number {
+  let m = 0;
+  for (let s = 0; s < NS; s++) m += f.n[s];
+  return m;
 }
 
 /** Atom count per ATOMS entry. */

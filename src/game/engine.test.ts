@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BOND_KEYS } from '../chem/atoms';
-import { ReactionNetwork } from '../chem/reactions';
+import { Lag, ReactionNetwork } from '../chem/reactions';
 import { testChemParams } from '../chem/testChem';
 import { SOLVENT_SPECIES, pairOf, singleOf } from '../chem/species';
 import { FLASK_R, MAGNET, NEAR, NEAR_STEP, NOZZLE_REACH, PLATFORM_REACH, flaskLip, flaskMouth, onScale, plumbZ, spoutAt, spoutTip, settleAngle, DIAL_STOP, STOPCOCK, VALVE_WHEEL, tankMouth, scaleBox, standBase, toolBounds, toolBox, toolStands, type Stand } from './bodies';
@@ -1227,6 +1227,46 @@ function look(l: { e: GameEngine; in: Inside }, x: number, z: number, tx: number
 }
 
 const lampOf = (l: Inside) => l.tools.filter((t) => t.kind === 'shadowlamp');
+
+describe('a brimming vessel', () => {
+  it('spills what’s over its capacity, counting what its chemistry, put off, still owes it', () => {
+    const l = lab();
+    const I = l.in as unknown as { overflow(v: Vessel): void; lags: Map<Vessel, Lag> };
+    const G = singleOf('G');
+    const v = new Vessel(CAP);
+    /** Fill it past its brim, as what's poured into it does (see GameEngine.fill). */
+    const overfill = () => {
+      const src = new Vessel(Infinity);
+      src.setMolecules(G, 1.02 * CAP);
+      v.setMolecules(G, 0);
+      v.addFrom(src, volume(src), true);
+      expect(volume(v)).toBe(1.02 * CAP);
+    };
+    // nothing owed: down to its capacity
+    overfill();
+    I.overflow(v);
+    expect(Math.abs(volume(v) - CAP)).toBeLessThanOrEqual(1);
+    // owed a hundredth fewer molecules, by bonds its next step will form: that much more of it fits meanwhile, so
+    // what it spills doesn't wait for the step and then come all at once
+    const lag = new Lag();
+    lag.grow = -0.5;
+    lag.owed = 0.02;
+    expect(lag.owing()).toBeCloseTo(-0.01, 12);
+    I.lags.set(v, lag);
+    overfill();
+    I.overflow(v);
+    expect(Math.abs(volume(v) - CAP / 0.99)).toBeLessThanOrEqual(1);
+    // and owed more (bonds breaking), less fits
+    lag.grow = 0.5;
+    I.overflow(v);
+    expect(Math.abs(volume(v) - CAP / 1.01)).toBeLessThanOrEqual(1);
+    // once it's stepped, nothing's owed
+    lag.owed = 0;
+    overfill();
+    I.overflow(v);
+    expect(Math.abs(volume(v) - CAP)).toBeLessThanOrEqual(1);
+  });
+});
 
 describe('E', () => {
   /** How E is pressed and let go, as the engine's own things (see useDown and using). */

@@ -248,6 +248,38 @@ describe('quiet stepping', () => {
     expect(Math.abs(temperature(lazy) - temperature(every))).toBeLessThan(0.005);
   });
 
+  it('says what a fluid is owed between steps, so its molecules counted with that go as if stepped every substep', () => {
+    // G and K bind slowly, far slower than a substep: each step uses molecules up, two for each pair made
+    const start = fluid([single('G', 500), single('K', 500)]);
+    const count = (f: Fluid) => f.n.reduce((m, n) => m + n, 0);
+    const every = clone(start);
+    const plain = new ReactionNetwork(testChemParams());
+    const net = new Counting(testChemParams());
+    const lazy = clone(start);
+    const lag = new Lag();
+    expect(lag.owing()).toBe(0);
+    let [raw, owed, waits] = [0, 0, 0];
+    for (let t = 0; t < 30; t += h) {
+      plain.step(every, h);
+      const steps = net.dts.length;
+      net.tick(lazy, h, lag);
+      // put off, it's owed more the longer it waits; just stepped, nothing
+      if (net.dts.length > steps) expect(lag.owing()).toBeCloseTo(0, 15);
+      else if (lag.grow) {
+        expect(lag.owing()).toBeLessThan(0);
+        waits++;
+      }
+      // (once it's been stepped twice, so how fast it's going is known)
+      if (net.dts.length < 2) continue;
+      raw += Math.abs(count(lazy) - count(every));
+      owed += Math.abs(count(lazy) * (1 + lag.owing()) - count(every));
+    }
+    expect(waits).toBeGreaterThan(100);
+    expect(lag.grow).toBeLessThan(0);
+    // counted with what it's owed, it's several times nearer the fluid stepped every substep
+    expect(owed).toBeLessThan(raw / 4);
+  });
+
   it('steps every substep a fluid that changes faster than that', () => {
     const f = fluid([single('R', 50), single('G', 50)], 3);
     const tau = new ReactionNetwork(testChemParams()).step(clone(f), 1e-9);
