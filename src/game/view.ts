@@ -606,13 +606,8 @@ class FluidMesh {
     }
     this.plane.constant = cut;
     shade(this.mat, f, cut);
-    const key = `${rgb.map(Math.round)}:${a.toFixed(2)}`;
-    if (key === this.key) return;
-    this.key = key;
-    // mostly its own color, lit a little so its shape reads
-    const c = new THREE.Color().setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
-    this.mat.color.copy(c).multiplyScalar(0.45);
-    this.mat.emissive.copy(c).multiplyScalar(0.6);
+    // how see-through it is, every time: a key rounding it would take 0.996 for 1, and leave a fluid that was a hair
+    // see-through drawn so once it's opaque
     this.mat.opacity = a;
     if (this.mat.transparent !== a < 1) {
       // the shader only needs rebuilding when it turns see-through, or back
@@ -620,6 +615,13 @@ class FluidMesh {
       this.mat.depthWrite = a >= 1;
       this.mat.needsUpdate = true;
     }
+    const key = `${rgb.map(Math.round)}`;
+    if (key === this.key) return;
+    this.key = key;
+    // mostly its own color, lit a little so its shape reads
+    const c = new THREE.Color().setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+    this.mat.color.copy(c).multiplyScalar(0.45);
+    this.mat.emissive.copy(c).multiplyScalar(0.6);
   }
 
   dispose(): void {
