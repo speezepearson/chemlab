@@ -25,6 +25,7 @@ import { arrival, notice, type Block } from '../intro/notice';
 import { STATION_POSE } from './presets';
 import { litresOf, type Supply } from './supply';
 import { FINISH } from './finish';
+import { FITTINGS } from './fittings';
 import { applyShine, boxUV, metal, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
@@ -3176,7 +3177,7 @@ class GhostView {
     while (this.stands.length < g.stands.length) this.stands.push(new StandView(this.holder));
     this.stands.forEach((v, i) => {
       const st = g.stands[i];
-      v.group.visible = !!st;
+      v.group.visible = !!st && FITTINGS.stands;
       if (st) v.update(st.s, st.y);
     });
     this.red = !g.ok;
@@ -6040,12 +6041,15 @@ export class View {
     this.outliner.render(this.renderer, this.scene, this.camera, part);
   }
 
-  /** Every stand, its base on whatever's under it: a counter, or the floor under something held out over it. */
+  /**
+   * Every stand, its base on whatever's under it: a counter, or the floor under something held out over it; or none,
+   * if the player would rather not see them (see FITTINGS).
+   */
   private updateStands(fr: Frame): void {
     while (this.stands.length < fr.stands.length) this.stands.push(new StandView(this.scene));
     this.stands.forEach((v, i) => {
       const s = fr.stands[i];
-      v.group.visible = !!s;
+      v.group.visible = !!s && FITTINGS.stands;
       if (s) v.update(s, groundAt(s.x, s.z));
     });
   }
