@@ -1530,7 +1530,7 @@ describe('setting things down', () => {
     }
   });
 
-  it('with Alt held, sets a tool down turned just as it is held, and a flask is pulled under its spout all the same', () => {
+  it('sets a tool down turned just as it is held, and a flask is pulled under its spout all the same', () => {
     const l = lab();
     const p = more(l).player;
     l.e.debug({ x: ODD.x, z: ODD.z + 150, yaw: 0, pitch: -0.3 });
@@ -1539,11 +1539,12 @@ describe('setting things down', () => {
     const d = l.in.held!.t!;
     l.in.held!.relYaw = Math.PI / 6;
     l.in.move(0);
-    // without Alt it faces the nearest of the four ways; with it, as it's held (by its ghost)
-    expect(rests(l)!.pose.yaw).toBeCloseTo(0, 9);
+    // it faces just as it's held (by its ghost), not the nearest of the four ways along the room
+    expect(heldPose(l).yaw).toBeCloseTo(p.yaw + Math.PI / 6, 9);
+    expect(rests(l)!.pose.yaw).toBeCloseTo(p.yaw + Math.PI / 6, 9);
+    // (and with Alt held, just where it's held, with no magnet)
     l.in.keys.add('AltLeft');
     l.in.move(0);
-    expect(heldPose(l).yaw).toBeCloseTo(p.yaw + Math.PI / 6, 9);
     const pl0 = l.in.placement(l.in.held);
     expect(pl0, JSON.stringify(heldPose(l))).toHaveProperty("rest");
     const want = rests(l)!.pose;
