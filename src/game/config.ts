@@ -36,7 +36,7 @@ export const GOAL_PURITY = 0.95;
  * `nap` sim seconds of it on end, and the player is told they can nap (see GameEngine.nap), as they can from then on;
  * `streak` sim seconds of cryostabilizer, and the airlock opens (see Wake).
  */
-export const DELIVERY = { gap: 3, streak: 60, nap: 20 };
+export const DELIVERY = { gap: 3, streak: 60, nap: 10 };
 /** Amounts of fluid below this many atoms count as nothing: too little to see or pour. */
 export const TRACE = CAP * 1e-6;
 /**
