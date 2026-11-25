@@ -728,18 +728,24 @@ export type LeverKind = 'valve' | 'split' | 'join' | 'dial';
 
 /**
  * How far either way from square to its pipe a plain valve's bar can be and the valve still be shut: 10°. So it
- * needn't be turned exactly square to stop every last drop, and beyond that it opens evenly to fully open, along the
- * pipe (see valveAt).
+ * needn't be turned exactly square to stop every last drop, and beyond that it opens evenly, to fully open within
+ * VALVE_OPEN of along the pipe (see valveAt).
  */
 export const VALVE_SHUT = Math.PI / 18;
+/**
+ * How far either way from along its pipe a plain valve's bar can be and the valve still be fully open: 10°, as
+ * VALVE_SHUT is for shut, so it needn't be turned exactly upright to let everything through.
+ */
+export const VALVE_OPEN = Math.PI / 18;
 
 /** How far either way from straight up a dial turns, to its stops (see valveAt). */
 export const DIAL_STOP = 0.75 * Math.PI;
 
 /**
  * What a valve at angle `a` (radians clockwise from straight up, as seen from in front) is set to. A plain valve's bar
- * runs across its handwheel: along the pipe (upright) it's fully open (1), square to it, or within VALVE_SHUT of that,
- * shut (0), and partly open in between, evenly from where it stops being shut, so it opens and shuts twice a turn. A splitter's or multiplexer's handwheel has a pointer instead: straight
+ * runs across its handwheel: along the pipe (upright), or within VALVE_OPEN of that, it's fully open (1), square to it,
+ * or within VALVE_SHUT of that, shut (0), and partly open in between, evenly from where it stops being shut to where
+ * it's fully open, so it opens and shuts twice a turn. A splitter's or multiplexer's handwheel has a pointer instead: straight
  * left sends everything left (0), straight up half each way, straight right everything right (1), straight down half
  * each way again, and on round to the left. Both turn all the way round. A dial turns clockwise from down-left (0) to
  * down-right (1), and no further (see sweep).
@@ -750,15 +756,15 @@ export function valveAt(kind: LeverKind, a: number): number {
   if (kind === 'valve') {
     // how far its bar is from square to the pipe, up to a quarter turn
     const off = Math.abs(Math.PI / 2 - (((a % Math.PI) + Math.PI) % Math.PI));
-    return Math.max(0, (off - VALVE_SHUT) / (Math.PI / 2 - VALVE_SHUT));
+    return Math.max(0, Math.min(1, (off - VALVE_SHUT) / (Math.PI / 2 - VALVE_SHUT - VALVE_OPEN)));
   }
   return 1 - Math.abs((((a + Math.PI / 2) % turn) + turn) % turn - Math.PI) / Math.PI;
 }
 
 /**
  * Where a valve set to `v` is drawn, when nothing says otherwise (see valveAngle): a plain valve's bar a quarter turn
- * clockwise from upright when shut, square to its pipe, and as far short of that as says `v` when it isn't (see
- * VALVE_SHUT); a splitter's pointer on the lower half (left for 0, right for 1), toward the fork
+ * clockwise from upright when shut, square to its pipe, upright when fully open, and as far between as says `v` when
+ * it's partly open (see VALVE_SHUT and VALVE_OPEN); a splitter's pointer on the lower half (left for 0, right for 1), toward the fork
  * under it, so straight down for an even split; a multiplexer's on the upper half, toward the funnels joining over it;
  * a dial on its arc.
  */
@@ -766,7 +772,7 @@ export function angleOf(kind: LeverKind, v: number): number {
   if (kind === 'dial') return -DIAL_STOP + 2 * DIAL_STOP * v;
   if (kind === 'split') return (1.5 - v) * Math.PI;
   if (kind === 'join') return (v - 0.5) * Math.PI;
-  return v > 0 ? (1 - v) * (Math.PI / 2 - VALVE_SHUT) : Math.PI / 2;
+  return v <= 0 ? Math.PI / 2 : v >= 1 ? 0 : VALVE_OPEN + (1 - v) * (Math.PI / 2 - VALVE_SHUT - VALVE_OPEN);
 }
 
 /**
