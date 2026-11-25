@@ -1,3 +1,5 @@
+// first, so storage is under the game's present name before anything reads it
+import './game/renamed';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';

@@ -18,7 +18,7 @@ import { DEFAULT_PRESET } from './game/presets';
 import { typingIn } from './game/typing';
 import { decodeSave, encodeSave, storeGod, storeSave, storedGod, storedSave, type SaveState } from './game/save';
 
-const INTRO_KEY = 'slurry-lab.introSeen';
+const INTRO_KEY = 'chemlab.introSeen';
 const introSeen = () => {
   try {
     return localStorage.getItem(INTRO_KEY) === '1';
@@ -34,7 +34,7 @@ const markIntroSeen = () => {
   }
 };
 
-const HELP_KEY = 'slurry-lab.help';
+const HELP_KEY = 'chemlab.help';
 const storedHelp = () => {
   try {
     return localStorage.getItem(HELP_KEY) !== '0';
@@ -159,7 +159,7 @@ export function App() {
     try {
       s = decodeSave(text);
     } catch {
-      window.alert("That doesn't look like a Slurry Lab save string.");
+      window.alert("That doesn't look like a Chemlab save string.");
       return;
     }
     engine.restore(s, DEFAULT_PRESET);
@@ -170,7 +170,7 @@ export function App() {
   return (
     <>
       <header>
-        <h1>Slurry Lab</h1>
+        <h1>Chemlab</h1>
         <div className="spacer" />
         <div className="controls">
           {god && <SpeedControl value={speed} onChange={setSpeed} />}

@@ -65,7 +65,7 @@ export function parseVolumes(json: string | null): Volumes {
   return out;
 }
 
-const KEY = 'slurry-lab.volumes';
+const KEY = 'chemlab.volumes';
 
 export function storedVolumes(): Volumes {
   try {
