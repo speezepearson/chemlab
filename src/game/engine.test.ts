@@ -1345,6 +1345,34 @@ describe('E’s hint', () => {
     l.in.target = null;
     expect(I.pourHintAt()).toBeNull();
   });
+
+  it('shows by the open top a strip or a thermometer in hand would be dipped into, but not while it dips', () => {
+    const l = lab();
+    holdAt(l, 'flask', { x: SPOT.x, y: LIFT + 160, z: SPOT.z, yaw: 0 });
+    const f = hands(l).held!.f!;
+    f.setMolecules(singleOf('G'), 0.3 * CAP);
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    const I = l.in as unknown as { dipHintAt(): { at: { x: number; z: number }; strip: boolean } | null; pourHintAt(): unknown; useDown(): void };
+    run(l, 0.05);
+    for (const kind of ['thermometer', 'strip'] as const) {
+      expect(l.e.spawn(kind)).toBe(true);
+      // aimed at nothing in particular, none
+      l.in.target = null;
+      expect(I.dipHintAt()).toBeNull();
+      l.in.target = { kind: 'flask', f };
+      expect(I.dipHintAt()).toEqual({ at: expect.objectContaining({ x: SPOT.x, z: SPOT.z }), strip: kind === 'strip' });
+      // (and it's not the flask's hint)
+      expect(I.pourHintAt()).toBeNull();
+      I.useDown();
+      expect(I.dipHintAt()).toBeNull();
+      l.e.touchKey('KeyE', false);
+      l.in.putAway();
+      expect(l.in.held).toBeNull();
+    }
+    // with empty hands, none
+    expect(I.dipHintAt()).toBeNull();
+  });
 });
 
 describe('the left button’s hint', () => {

@@ -79,7 +79,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     drawn over the finished frame, so it's never picked, outlined, shadowed or seen by the `Exposer`): the arrow of
     Q and E over a handwheel or dial (`turnHint`, `Frame.turnHint`), and C's at the spout or nozzle it'd take a
     hose by (`hoseHint`, `Frame.hoseHint`), and E's over the mouth a flask in hand would be poured into
-    (`pourHint`, `Frame.pourHint`).
+    (`pourHint`, `Frame.pourHint`), or beside the one a strip or thermometer in hand would be dipped into
+    (`dipHint`, `Frame.dipHint`).
   - `bodies.ts` says where each thing's parts (spouts, valves, mouths, collision boxes) are in the room, what fluid a
     dipper's foot (a thermometer's bulb, a wicking strip's tip) is in (`bathAt`), which the engine hands each one every
     frame (`Tool.bath`, or for a strip `Tool.dipIn`, which also says whether it may drink), where a dipper aimed at

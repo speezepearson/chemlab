@@ -149,6 +149,11 @@ export interface Frame {
   hoseHint: { at: Vec3; nozzle: boolean; cock: boolean } | null;
   /** The middle of the mouth E would pour the flask in hand into, for its hint over it (see pourHint). */
   pourHint: Vec3 | null;
+  /**
+   * The middle of the open top E would dip the strip (`strip`) or thermometer in hand into, for its hint beside it
+   * (see dipHint).
+   */
+  dipHint: { at: Vec3; strip: boolean } | null;
   drops: readonly { at: Vec3; v: Vessel; hanging: boolean }[];
   /** The scale whose tare key is held down. */
   tarePress: Scale | null;
@@ -5500,6 +5505,71 @@ function pourHint(scene: THREE.Scene): KeyHint {
   });
 }
 
+/**
+ * E's hint by the open top a strip or a thermometer in hand would be dipped into (see Frame.dipHint), as a KeyHint, in
+ * world units from the middle of that mouth, which the dipper itself hovers over: so it's all to the left of it,
+ * `clear` of the mouth's middle and `up` above it. On the right, a little picture of dipping: a wavy line `wave` wide
+ * for a fluid's surface, a dipper standing in it, `tall` from its foot below the line, and an arrow down beside it;
+ * the dipper is a thermometer (state 0: a stem `stem` wide on a bulb of radius `bulb`) or a strip (state 1: `strip`
+ * wide, square-ended), drawn light with a dark edge as the other hints' pictures are. On its left, a key cap with an
+ * E on it, as C's. It stands upright, turned to face the eyes.
+ */
+const DIP_HINT = { clear: 7, up: 5, wave: 19, tall: 19, stem: 2, bulb: 2.5, strip: 4.2, edge: 0.8 };
+
+function dipHint(scene: THREE.Scene): KeyHint {
+  const D = DIP_HINT;
+  const K = HOSE_HINT.cap;
+  // the picture's right and left edges, the dipper's middle, the arrow's, and the height of the fluid's surface
+  const x1 = -D.clear;
+  const x0 = x1 - D.wave;
+  const dx = x0 + 6.5;
+  const ax = x1 - 4.5;
+  const y = D.up + 5.5;
+  const top = y - 4 + D.tall;
+  /** Stroke the path just made light with a dark edge, `w` wide. */
+  const line = (c: CanvasRenderingContext2D, w: number) => {
+    c.lineWidth = w + 2 * D.edge;
+    c.strokeStyle = HINT_INK.dark;
+    c.stroke();
+    c.lineWidth = w;
+    c.strokeStyle = HINT_INK.light;
+    c.stroke();
+  };
+  return new KeyHint(scene, { x0: x0 - K.gap - K.w - 2, x1: x1 + 2, y0: D.up - 2, y1: top + 3, px: 16, cap: K.letter }, (c, state) => {
+    // the fluid's surface: two waves
+    c.beginPath();
+    c.moveTo(x0, y);
+    for (let i = 0; i < 2; i++) {
+      const a = x0 + (i * D.wave) / 2;
+      c.bezierCurveTo(a + D.wave / 8, y + 2.6, a + (3 * D.wave) / 8, y - 2.6, a + D.wave / 2, y);
+    }
+    line(c, 1.5);
+    // the dipper, its foot under the surface
+    c.beginPath();
+    if (state === 1) c.rect(dx - D.strip / 2, y - 4, D.strip, D.tall);
+    else {
+      c.roundRect(dx - D.stem / 2, y - 3, D.stem, D.tall - 1, D.stem / 2);
+      c.moveTo(dx + D.bulb, y - 4 + D.bulb);
+      c.arc(dx, y - 4 + D.bulb, D.bulb, 0, 2 * Math.PI);
+    }
+    c.lineWidth = 2 * D.edge;
+    c.strokeStyle = HINT_INK.dark;
+    c.stroke();
+    c.fillStyle = HINT_INK.light;
+    c.fill();
+    // the arrow down, to the surface
+    c.beginPath();
+    c.moveTo(ax, top - 1);
+    c.lineTo(ax, y + 4);
+    c.moveTo(ax - 3, y + 7.5);
+    c.lineTo(ax, y + 4);
+    c.lineTo(ax + 3, y + 7.5);
+    line(c, 1.5);
+    // the key cap, to the left, beside the picture's upper part
+    keyCap(c, 'E', x0 - K.gap - K.w, top - K.h);
+  });
+}
+
 /** Draws the lab with Three.js, from the player's eyes, and says what's under the crosshair. */
 export class View {
   /** The field of view is 90°, top to bottom, until the player zooms in (see look). */
@@ -5543,6 +5613,7 @@ export class View {
   private turnHint = turnHint(this.hints);
   private hoseHint = hoseHint(this.hints);
   private pourHint = pourHint(this.hints);
+  private dipHint = dipHint(this.hints);
   /** Works out where the shadow lamp's light falls (see Exposer), once it's first needed. */
   private exposer?: Exposer;
   private studio = new IconStudio(Math.min(2, window.devicePixelRatio || 1));
@@ -5791,11 +5862,14 @@ export class View {
     // (far off, it grows up and away from the mouth, its stream still ending just over it)
     if (m) this.pourHint.show(m, Math.atan2(eye.x - m.x, eye.z - m.z), 1, 0, this.camera, cssH, POUR_HINT.over);
     else this.pourHint.hide();
+    const d = fr.dipHint;
+    if (d) this.dipHint.show(d.at, Math.atan2(eye.x - d.at.x, eye.z - d.at.z), 1, d.strip ? 1 : 0, this.camera, cssH);
+    else this.dipHint.hide();
   }
 
   /** Draw the keys' hints over the finished frame, if any are up. */
   private renderHints(): void {
-    if (!this.turnHint.visible && !this.hoseHint.visible && !this.pourHint.visible) return;
+    if (!this.turnHint.visible && !this.hoseHint.visible && !this.pourHint.visible && !this.dipHint.visible) return;
     const { renderer } = this;
     renderer.autoClear = false;
     renderer.shadowMap.autoUpdate = false;

@@ -84,8 +84,11 @@ export interface Hud {
    * a thermometer into what's looked at; or, pressed, empty a flask that's over nothing (see `empty`).
    */
   use: boolean;
-  /** Whether E's own hint is up in the lab, over the mouth it'd pour into (see Frame.pourHint), so it needs none by the crosshair. */
-  pouring: boolean;
+  /**
+   * Whether E's own hint is up in the lab, over the mouth it'd pour or dip into (see Frame.pourHint and Frame.dipHint),
+   * so it needs none by the crosshair.
+   */
+  hinted: boolean;
   /** Whether E would empty the flask in hand, at a press, there being nothing for it to pour into (see GameEngine.wouldEmpty). */
   empty: boolean;
   /** Whether C would take hold of a hose, by a spout, faucet or nozzle near the crosshair (see GameEngine.hoseAim). */
@@ -2355,6 +2358,18 @@ export class GameEngine {
     return m && { x: m.x, y: m.y, z: m.z };
   }
 
+  /**
+   * Where E's hint goes for a dipper in hand (see Frame.dipHint): the middle of the open top E would dip the strip or
+   * thermometer in hand into, which it hovers over (see dipAim), and whether it's a strip; if there's one and E
+   * would dip it (not while it's dipping already, nor while a tapped strip is on its way in). Null otherwise.
+   */
+  private dipHintAt(): Frame['dipHint'] {
+    const h = this.held;
+    if (h?.kind !== 'tool' || !isDipper(h.t.kind) || this.sniffing || this.tapping || !this.useWouldDo()) return null;
+    const m = this.mouthAimed();
+    return m && { at: { x: m.x, y: m.y, z: m.z }, strip: h.t.kind === 'strip' };
+  }
+
   /** C: with a hose's nozzle in hand, set it down (see release); with empty hands, take hold of a hose (see pullAimed). */
   private keyC(): void {
     if (this.held?.kind === 'hose') this.release();
@@ -4011,7 +4026,7 @@ export class GameEngine {
       energies: BOND_KEYS.map((k) => this.chem.params.bonds[k].E), alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
       airlock: this.airlockLook(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(), ghost: this.ghostFrame(pl),
-      loose: this.looseFrame(), turnHint: this.turnHint(), hoseHint: this.hoseHintAt(), pourHint: this.pourHintAt(),
+      loose: this.looseFrame(), turnHint: this.turnHint(), hoseHint: this.hoseHintAt(), pourHint: this.pourHintAt(), dipHint: this.dipHintAt(),
     });
   }
 
@@ -4173,6 +4188,16 @@ export class GameEngine {
     if (this.held) return this.held.kind !== 'hose' && (this.intoCabinet() || (!!this.placed && 'rest' in this.placed));
     const p = this.target;
     return !!this.cockAimed() || (!!p && this.grabbable(p));
+  }
+
+  /**
+   * Whether the left button's hint shows by the crosshair (see Hud.press): when it would do something (see
+   * leftWouldDo), but for setting down what's in hand, which needs no telling (it's what the left button does with
+   * anything in hand, and where it would go is drawn in the lab). With something in hand, that leaves pressing a key
+   * or button, and putting it in the cabinet.
+   */
+  private leftHint(): boolean {
+    return this.leftWouldDo() && (!this.held || this.onButton() || this.intoCabinet());
   }
 
   /** Whether the crosshair is on a key or button, which takes the left button's click even with something in hand. */
@@ -4586,7 +4611,7 @@ export class GameEngine {
       press: !this.sniffing && this.leftHint(),
       turn: this.turnWouldDo() || !!this.turning,
       use: !this.sniffing && this.useWouldDo(),
-      pouring: !!this.pourHintAt(),
+      hinted: !!this.pourHintAt() || !!this.dipHintAt(),
       empty: !this.sniffing && this.wouldEmpty(),
       label: !inPod(this.wake) && !!this.targetNote(),
       hose: !!this.hoseAim(),

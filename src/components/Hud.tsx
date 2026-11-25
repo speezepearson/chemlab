@@ -281,7 +281,7 @@ export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; 
                 <MouseHint />
               </span>
             )}
-            {hud.use && !hud.pouring && (
+            {hud.use && !hud.hinted && (
               <span className="right">
                 <kbd>E</kbd>
                 {/* (its E is the word's own: "Empty") */}
