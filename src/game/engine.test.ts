@@ -17,7 +17,7 @@ import { DEFAULT_PRESET, LAMP_POSE, type Preset } from './presets';
 import { FAUCETS, faucetRate, faucetTarget, faucetValveAt } from './faucets';
 import { FILL_RATE } from './config';
 import type { SaveState } from './save';
-import { CELL, LAMP_FLOOR, LIFT, REACH, counterUnder, toWorld } from './space';
+import { CELL, LAMP_FLOOR, LIFT, PLAYER_R, REACH, ROOM, counterUnder, toWorld } from './space';
 import { AIM, AIM_DEG } from './aim';
 import { toCell } from './testLayout';
 import {
@@ -1663,6 +1663,107 @@ describe('setting things down', () => {
   });
 });
 
+describe('carrying', () => {
+  /** More of the engine's own things: the player, and where what's held is and how far off. */
+  interface Carry {
+    player: { x: number; z: number; yaw: number; pitch: number };
+    held: { dist: number; at?: number } | null;
+    boxAt(h: unknown, p: Tool['pose']): { x: number; y: number; z: number; hx: number; hy: number; hz: number };
+    eye(): { x: number; y: number; z: number };
+    look(dx: number, dy: number, shift: boolean): void;
+  }
+  const carry = (l: Lab) => l.in as unknown as Carry;
+  const box = (l: Lab) => carry(l).boxAt(l.in.held, heldPose(l));
+  /** How far things may overlap and still not count as in each other (see boxesOverlap). */
+  const SLOP = 0.01;
+  /** Out in the aisle in front of the first island, two cells from the left wall, which has nothing against it there. */
+  const BY_WALL = { x: ROOM.x0 + 2 * CELL, z: 20 * CELL };
+
+  it('brings what’s held into a counter in out of it, along the line it’s held on, and back out once there’s room', () => {
+    const l = lab();
+    const into = { x: SPOT.x, y: LIFT - 60, z: SPOT.z };
+    lookAt(l, into, 150);
+    expect(l.e.spawn('flask')).toBe(true);
+    const h = carry(l).held!;
+    h.dist = Math.hypot(150, into.y - 620);
+    lookAt(l, into, 150);
+    l.in.move(0);
+    // it stands clear of the counter's top, nearer, but still on the line to where it'd be
+    const b = box(l);
+    expect(b.y - b.hy).toBeGreaterThanOrEqual(LIFT - SLOP);
+    expect(b.y - b.hy).toBeLessThan(LIFT + 2);
+    expect(h.at!).toBeLessThan(h.dist);
+    const e = carry(l).eye();
+    const along = Math.hypot(b.x - e.x, b.y - e.y, b.z - e.z);
+    for (const k of ['x', 'y', 'z'] as const) expect(b[k]).toBeCloseTo(e[k] + ((into[k] - e[k]) * along) / h.dist, 6);
+    // looking up, there's room again: it goes back out, not all at once, to as far off as it was held
+    const was = h.at!;
+    carry(l).player.pitch = 0;
+    l.in.move(0.02);
+    expect(h.at!).toBeGreaterThan(was);
+    expect(h.at!).toBeLessThan(h.dist);
+    for (let i = 0; i < 40; i++) l.in.move(0.05);
+    expect(h.at!).toBeCloseTo(h.dist, 6);
+  });
+
+  it('brings what’s held into a tool in out of it, to just in front of it', () => {
+    const l = lab();
+    const d = pipetteOver(l);
+    const mid = toolBox(d);
+    lookAt(l, mid, 300);
+    expect(l.e.spawn('flask')).toBe(true);
+    carry(l).held!.dist = 300;
+    lookAt(l, mid, 300);
+    l.in.move(0);
+    const b = box(l);
+    expect(boxesOverlap({ ...b, yaw: 0, round: true }, toolBox(d))).toBe(false);
+    // (only as near as it has to be)
+    expect(boxesOverlap({ ...b, z: b.z - 2, yaw: 0, round: true }, toolBox(d))).toBe(true);
+  });
+
+  it('never reaches what’s held through a wall, though there’d be room past it', () => {
+    const l = lab();
+    const facing = { x: ROOM.x0 - 400, y: 620, z: BY_WALL.z };
+    const from = { x: BY_WALL.x, z: BY_WALL.z, yaw: Math.PI / 2, pitch: 0 };
+    l.e.debug(from);
+    expect(l.e.spawn('flask')).toBe(true);
+    carry(l).held!.dist = 10_000;
+    l.e.debug(from);
+    l.in.move(0);
+    const b = box(l);
+    expect(b.x - b.hx).toBeGreaterThanOrEqual(ROOM.x0 - SLOP);
+    expect(b.x - b.hx).toBeLessThan(ROOM.x0 + 2);
+    expect(facing.x).toBeLessThan(b.x);
+  });
+
+  it('stops the player walking or turning so close to a wall that there’s no room for what they carry', () => {
+    const l = lab();
+    const walkTo = (yaw: number) => {
+      l.e.debug({ x: BY_WALL.x, z: BY_WALL.z, yaw, pitch: 0 });
+      l.in.keys.add('KeyW');
+      for (let i = 0; i < 40; i++) l.in.move(0.05);
+      l.in.keys.delete('KeyW');
+      return carry(l).player.x;
+    };
+    // with empty hands, right up to it
+    expect(walkTo(Math.PI / 2)).toBeCloseTo(ROOM.x0 + PLAYER_R, 0);
+    expect(l.e.spawn('flask')).toBe(true);
+    const x = walkTo(Math.PI / 2);
+    expect(x).toBeGreaterThan(ROOM.x0 + PLAYER_R + 10);
+    expect(box(l).x - box(l).hx).toBeGreaterThanOrEqual(ROOM.x0 - SLOP);
+    // and along it, they can turn only so far to face it; but look down all the same
+    l.e.debug({ x: ROOM.x0 + PLAYER_R + 1, z: BY_WALL.z, yaw: 0, pitch: 0 });
+    l.in.move(0);
+    for (let i = 0; i < 20; i++) carry(l).look(-60, 10, false);
+    l.in.move(0);
+    const p = carry(l).player;
+    expect(p.yaw).toBeGreaterThan(0.1);
+    expect(p.yaw).toBeLessThan(Math.PI / 2 - 0.1);
+    expect(p.pitch).toBeLessThan(-0.3);
+    expect(box(l).x - box(l).hx).toBeGreaterThanOrEqual(ROOM.x0 - SLOP);
+  });
+});
+
 describe('ghost moves', () => {
   interface Ghosting {
     held: { kind: string; t?: Tool; sc?: Scale; f?: Flask; ghost?: { pose: Tool['pose'] } } | null;
@@ -1988,8 +2089,10 @@ describe('the shadow lamp', () => {
     d.cocks.fill(null);
     // (whoever holds it is looking across the channel, the screen's end on their right)
     l.in.held!.relYaw = Math.PI / 2;
-    l.in.held!.dist = Math.hypot(160, LIFT + 40 - 620);
     look(l, mid.x - 2 * CELL, mid.z - 160, mid.x - 2 * CELL, LIFT + 40, mid.z);
+    // (put there by hand: carried, it'd be brought in out of the floor, see GameEngine.reach)
+    const grip = (l.in as unknown as { gripPose(h: unknown, d: number): Tool['pose'] }).gripPose;
+    hands(l).placeHeld(l.in.held, grip.call(l.in, l.in.held, Math.hypot(160, LIFT + 40 - 620)));
     l.in.release();
     expect(l.in.held).toBeNull();
     expect(d.pose.x).toBeCloseTo(mid.x - 2 * CELL);

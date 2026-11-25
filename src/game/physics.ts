@@ -3,9 +3,9 @@ import { toWorld, type Pose, type Vec3 } from './space';
 /**
  * Collisions in the lab. Nothing falls (whatever the player lets go of is set down on a counter, or on a stand), and
  * nothing turns except about the vertical, so every body is a box turned by some yaw, or an upright cylinder, or
- * made of several such parts, and the player is an upright cylinder. What they carry passes through everything, and is
- * only checked for room where it's set down, so the only thing that moves is the player: the physics is all about
- * stopping them short of whatever they'd run into, and letting them slide along it.
+ * made of several such parts, and the player is an upright cylinder. The only thing that moves on its own is the
+ * player: the physics is all about stopping them short of whatever they'd run into, and letting them slide along it.
+ * What they carry is kept out of everything by the engine (see GameEngine.reach), with these same tests.
  */
 
 /**
@@ -134,6 +134,18 @@ export function segmentHitsBox(a: Vec3, b: Vec3, box: Box): boolean {
     if (t0 >= t1) return false;
   }
   return true;
+}
+
+/**
+ * Whether a box could come within `r` of the straight line from a to b, by the ball round it: it may say yes for a
+ * box that doesn't, but never no for one that does. For leaving what's nowhere near out of a search, cheaply.
+ */
+export function mayMeet(box: Box, a: Vec3, b: Vec3, r: number): boolean {
+  const d = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z };
+  const len2 = d.x * d.x + d.y * d.y + d.z * d.z;
+  const v = { x: box.x - a.x, y: box.y - a.y, z: box.z - a.z };
+  const t = len2 > 0 ? Math.max(0, Math.min(1, (v.x * d.x + v.y * d.y + v.z * d.z) / len2)) : 0;
+  return Math.hypot(v.x - d.x * t, v.y - d.y * t, v.z - d.z * t) < r + Math.hypot(box.hx, box.hy, box.hz);
 }
 
 /** How finely a walk is stepped, so nothing thinner than this is passed through: in world units. */

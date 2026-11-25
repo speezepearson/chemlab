@@ -19,7 +19,7 @@ import { FAUCETS, WALL_FAUCETS, faucetIndex, faucetOutput, faucetRate, faucetTar
 import { FLASK_H, FLASK_OUTLINE, areaBelow, fillLevel } from './flaskShape';
 import { Flask, Vessel, roomFor, sustenance, transfer, volume, volumeUnit } from './flask';
 import { History, arrange, arrangement, type Arrangement } from './history';
-import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
+import { boxesOverlap, mayMeet, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
 import { DEFAULT_PRESET, LAMP_POSE, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
 import { CRYOSTABILIZER, FIRST_SUPPLY, SUPPLIES, litresOf, type Supply } from './supply';
@@ -209,11 +209,14 @@ type Held = (
   /**
    * How far it's turned from facing the player, and how far from their eyes it's held, along `dir`: which way it is
    * from them as they look (x right, y up, z ahead), so it stays where it was picked up, as seen; straight ahead if
-   * left out, as for something made in hand.
+   * left out, as for something made in hand. `dist` is how far it's held when nothing's in the way: it's remembered
+   * while it's brought in nearer (see reach), and `at` is how far it is now, left out until it's first carried, when
+   * it goes straight to where there's room.
    */
   relYaw: number;
   dist: number;
   dir?: Vec3;
+  at?: number;
   /**
    * Where it was picked up from, for Q to put it back (see putBack); none for what was made in hand, or a hose just
    * pulled out.
@@ -290,11 +293,21 @@ const OLD_HEATER = { spouts: 4, kept: [1, 3] };
 const OLD_FLOW: Partial<Record<ToolKind, number[]>> = {
   dispenser: [0], pipette: [0], tank: [0], column: [0], exchanger: [0, 1], separator: [0, 0], dilatometer: [0, 1],
 };
-/** The nearest and furthest something can be held, from the eyes to its middle, beyond its own size. */
+/**
+ * The nearest and furthest something can be held, from the eyes to its middle, beyond its own size. It isn't brought
+ * any nearer to keep it out of something: the player is stopped instead (see budge).
+ */
 const HOLD_NEAR = 40;
 /** How much further off than other things a flask is held to start with (see holdDist). */
 const FLASK_HOLD = 1.7;
 const HOLD_FAR = 520;
+/** How finely what's held is slid along the line it's held on, looking for room for it (see reach): in world units. */
+const HOLD_STEP = 4;
+/**
+ * How quickly what's held goes back out to where it's held from the eyes (Held.dist) once there's room, having been
+ * brought in nearer by something in the way (see carry): the time constant, in real seconds (it's the player's doing).
+ */
+const HOLD_EASE = 0.08;
 /** The counters, as boxes from the floor up to their tops. */
 /** The equipment cabinet, solid all through: nothing's set down in it but by putting it away. */
 const CABINET_BOX: Box = {
@@ -1438,8 +1451,7 @@ export class GameEngine {
    * along the room (see toCardinal) to how it's turned from the player, so it turns in quarter turns; but while Alt is
    * held (see free), just as it's turned from them, so it turns as they do.
    */
-  private gripPose(h: Held): Pose {
-    const eye = this.eye();
+  private gripPose(h: Held, dist = h.at ?? h.dist, eye = this.eye()): Pose {
     const { right, up, ahead } = this.viewAxes();
     const k = h.dir ?? { x: 0, y: 0, z: 1 };
     const d = {
@@ -1447,7 +1459,110 @@ export class GameEngine {
     };
     const yaw = h.kind === 'hose' ? 0 : this.facing(h);
     const off = toWorld({ x: 0, y: 0, z: 0, yaw }, this.anchor(h));
-    return { x: eye.x + d.x * h.dist - off.x, y: eye.y + d.y * h.dist - off.y, z: eye.z + d.z * h.dist - off.z, yaw };
+    return { x: eye.x + d.x * dist - off.x, y: eye.y + d.y * dist - off.y, z: eye.z + d.z * dist - off.z, yaw };
+  }
+
+  /**
+   * Where what's held can go along the line it's held on from the eyes (see gripPose) without being in anything in its
+   * way (see obstacles): `room` is as far out as it can be, up to where it's held (Held.dist), so it's brought in only
+   * as near as it has to be. But it's never reached through a wall, the floor, a counter or the cabinet (see walls): it
+   * goes no further out than it could be slid from as near as it can be held (see holdNear) before meeting one. Null if
+   * there's nowhere it'd be clear, even that near: what the player does that would leave it so is stopped (see budge).
+   * And `clear`: whether it would be in nothing at a given distance.
+   */
+  private reach(h: Held, obs = this.carryObstacles(h)): { room: number | null; clear(d: number): boolean } {
+    const eye = this.eye();
+    const near = this.holdNear(h);
+    const want = Math.max(near, h.dist);
+    const box = (d: number) => this.boxAt(h, this.gripPose(h, d, eye));
+    // (only what's anywhere near its way is looked at)
+    const a = box(near);
+    const b = box(want);
+    const r = Math.hypot(a.hx, a.hy, a.hz);
+    const walls = obs.walls.filter((o) => mayMeet(o, a, b, r));
+    const things = obs.things.filter((o) => mayMeet(o, a, b, r));
+    const hits = (list: Box[], d: number) => {
+      const at = box(d);
+      return list.some((o) => boxesOverlap(at, o));
+    };
+    const clear = (d: number) => !hits(walls, d) && !hits(things, d);
+    // the furthest out between lo, where it'd be clear of `list`, and hi, where it wouldn't, nearly
+    const edge = (list: Box[], lo: number, hi: number) => {
+      for (let i = 0; i < 6; i++) {
+        const m = (lo + hi) / 2;
+        if (hits(list, m)) hi = m;
+        else lo = m;
+      }
+      return lo;
+    };
+    if (hits(walls, near)) return { room: null, clear };
+    let far = want;
+    for (let d = near; d < want; ) {
+      const e = Math.min(want, d + HOLD_STEP);
+      if (hits(walls, e)) {
+        far = edge(walls, d, e);
+        break;
+      }
+      d = e;
+    }
+    if (!hits(things, far)) return { room: far, clear };
+    for (let d = far; d > near; ) {
+      const e = Math.max(near, d - HOLD_STEP);
+      if (!hits(things, e)) return { room: edge(things, e, d), clear };
+      d = e;
+    }
+    return { room: null, clear };
+  }
+
+  /** What what's held is kept out of (see reach): the walls (see walls), and everything else in its way (see obstacles). */
+  private carryObstacles(h: Held): { walls: Box[]; things: Box[] } {
+    const walls = this.walls();
+    return { walls, things: this.obstacles(h).slice(walls.length) };
+  }
+
+  /**
+   * Bring what's held in as near as it has to be to be in nothing (see reach), at once; or let it back out toward where
+   * it's held from the eyes as there's room again, quickly (HOLD_EASE) but not at once, so it isn't seen to jump,
+   * unless it'd be in something on its way out: then straight to where there's room. With nowhere it'd be clear, it
+   * stays as far off as it was.
+   */
+  private carry(h: Held, dt: number): void {
+    const { room, clear } = this.reach(h);
+    if (room === null) return;
+    const at = h.at;
+    if (at === undefined || room <= at) h.at = room;
+    else {
+      const e = room - (room - at) * Math.exp(-dt / HOLD_EASE);
+      h.at = clear(e) ? e : room;
+    }
+  }
+
+  /**
+   * Have the player stand or look as the first of `tries` says, unless what they carry has room (see reach) and then
+   * wouldn't, as if it were pushed into their face: then as the first of the rest that leaves it room (less of the
+   * move: only across or along the room, or only turning or tilting their head), or as they were. Not while what's in
+   * hand is somewhere else than in front of them: tipped over what it pours into, or under their nose.
+   */
+  private budge(...tries: Partial<Record<'x' | 'z' | 'yaw' | 'pitch', number>>[]): void {
+    const p = this.player;
+    const from = { x: p.x, z: p.z, yaw: p.yaw, pitch: p.pitch };
+    Object.assign(p, tries[0]);
+    const h = this.held;
+    if (!h || this.pinned || this.sniffing) return;
+    const obs = this.carryObstacles(h);
+    const roomy = () => this.reach(h, obs).room !== null;
+    if (roomy()) return;
+    Object.assign(p, from);
+    // (with no room already, they aren't held where they are)
+    if (!roomy()) {
+      Object.assign(p, tries[0]);
+      return;
+    }
+    for (const t of tries.slice(1)) {
+      Object.assign(p, from, t);
+      if (roomy()) return;
+    }
+    Object.assign(p, from);
   }
 
   /** The box of what's held (a hose's nozzle's, for a hose). */
@@ -1471,7 +1586,7 @@ export class GameEngine {
   }
 
   /**
-   * The walls, counters, and everything in the room but what's held (and what rides on it), including the bases of
+   * The walls (see walls, which come first), counters, and everything in the room but what's held (and what rides on it), including the bases of
    * the stands holding up everything else (unless `bases` is false). A held tool's own hoses' nozzles don't get in its
    * way, since one left at its spout (see keepPouring) is rolled back up if it's set down there again (see setDown),
    * nor do the hoses following it (see gather). Nor are the tool `away`, about to be picked up, and the hoses `skip`.
@@ -1482,10 +1597,8 @@ export class GameEngine {
    * are fixed), is in the way of a held sheet, which is laid under whatever stands there.
    */
   private obstacles(h: Held | null, bases = true, away: Tool | null = null, skip: ReadonlySet<Hose> = new Set()): Box[] {
-    // while the airlock's doors are open, its doorway and chamber take the front wall's place
-    const room = this.wake === 'closed' ? roomBoxes(ROOM) : [...roomBoxes(ROOM, false), ...airlockBoxes()];
     const riders = h?.kind === 'scale' ? new Set(h.sc.load.map((l) => l.f)) : new Set<Flask>();
-    const out: Box[] = [...room, ...COUNTER_BOXES, CABINET_BOX, ...this.risers()];
+    const out: Box[] = [...this.walls(), ...this.risers()];
     const gone = (t: Tool) => (h?.kind === 'tool' && h.t === t) || t === away;
     if (h?.kind === 'tool' && h.t.shape.flat) {
       for (const t of this.tools) if (!gone(t) && (t.shape.flat || t.shape.fixed)) out.push(toolBox(t));
@@ -1502,6 +1615,16 @@ export class GameEngine {
       }
     if (bases) for (const t of this.tools) if (!gone(t)) for (const st of toolStands(t)) out.push(standBase(st));
     return out;
+  }
+
+  /**
+   * What's built into the room and solid all through, which nothing is ever reached through (see reach): its walls,
+   * floor and ceiling, the counters and the cabinet.
+   */
+  private walls(): Box[] {
+    // while the airlock's doors are open, its doorway and chamber take the front wall's place
+    const room = this.wake === 'closed' ? roomBoxes(ROOM) : [...roomBoxes(ROOM, false), ...airlockBoxes()];
+    return [...room, ...COUNTER_BOXES, CABINET_BOX];
   }
 
   /** The islands' faucets' risers, each a round post from the counter up to its elbow. */
@@ -1691,8 +1814,13 @@ export class GameEngine {
 
   private clampDist(h: Held, d: number): number {
     const b = this.heldBox(h);
-    const r = Math.hypot(b.hx, b.hz);
-    return Math.max(r + HOLD_NEAR, Math.min(r + HOLD_FAR, d));
+    return Math.max(this.holdNear(h), Math.min(Math.hypot(b.hx, b.hz) + HOLD_FAR, d));
+  }
+
+  /** The nearest the middle of what's held can be to the eyes. */
+  private holdNear(h: Held): number {
+    const b = this.heldBox(h);
+    return Math.hypot(b.hx, b.hz) + HOLD_NEAR;
   }
 
   /** The mouse moved by (dx, dy) pixels: slide a held nozzle's stand (with Shift), or look around. */
@@ -1705,8 +1833,10 @@ export class GameEngine {
     const p = this.player;
     // zoomed in, the mouse turns the view less, so what's seen moves across the screen as it ever does
     const sens = (LOOK_SENS * Math.tan((this.fov() * Math.PI) / 360)) / Math.tan((FOV * Math.PI) / 360);
-    p.yaw = wrapAngle(p.yaw - dx * sens);
-    p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch - dy * sens));
+    // (but not so as to push what's carried into their face, see budge)
+    const yaw = wrapAngle(p.yaw - dx * sens);
+    const pitch = Math.max(-1.45, Math.min(1.45, p.pitch - dy * sens));
+    this.budge({ yaw, pitch }, { yaw }, { pitch });
   }
 
   /** The view's field of view now, top to bottom, in degrees: narrower as far as it's zoomed in (see ZOOM). */
@@ -2179,6 +2309,7 @@ export class GameEngine {
    * straight ahead: what's further off to a side (or behind) is brought round to that, so it's always in front of them.
    */
   private holdInPlace(h: Held): void {
+    h.at = undefined;
     const c = this.boxAt(h, this.heldPose(h));
     const e = this.eye();
     const v = { x: c.x - e.x, y: c.y - e.y, z: c.z - e.z };
@@ -2937,6 +3068,8 @@ export class GameEngine {
   debug(p: Partial<{ x: number; z: number; yaw: number; pitch: number; locked: boolean }>): void {
     const { locked, ...rest } = p;
     Object.assign(this.player, rest);
+    // (what's carried goes straight to where there's room for it from there, see Held.at)
+    if (this.held) this.held.at = undefined;
     if (locked !== undefined) this.locked = locked;
   }
 
@@ -3164,7 +3297,10 @@ export class GameEngine {
     this.raf = requestAnimationFrame(this.frame);
   };
 
-  /** Walk, and carry: what's held follows the eyes, through anything in its way (see placement for where it goes). */
+  /**
+   * Walk, and carry: what's held follows the eyes, brought in nearer by anything in its way (see carry; see placement
+   * for where it goes).
+   */
   private move(dt: number): void {
     const p = this.player;
     const k = this.keys;
@@ -3183,9 +3319,14 @@ export class GameEngine {
       const dz = (-Math.cos(p.yaw) * fwd - Math.sin(p.yaw) * side) * sp;
       const body = { x: p.x, z: p.z, r: PLAYER_R, y0: 0, y1: EYE + 20 };
       // (what's moved by a ghost is still where it was, in the way like anything)
-      const r = walk(body, dx, dz, this.obstacles(h?.ghost ? null : h));
-      p.x = r.x;
-      p.z = r.z;
+      const obstacles = this.obstacles(h?.ghost ? null : h);
+      const to = (dx: number, dz: number) => {
+        const r = walk(body, dx, dz, obstacles);
+        return { x: r.x, z: r.z };
+      };
+      // (nor do they walk so as to push what they carry into their face, see budge, but they may slide along whatever
+      // it's up against)
+      this.budge(to(dx, dz), ...(h ? [to(dx, 0), to(0, dz)] : []));
       // walking into the open pod is getting into it, to sleep
       if (this.wake === 'open' && Math.hypot(p.x - POD.x, p.z - POD.z) < POD.r) {
         this.board();
@@ -3204,6 +3345,8 @@ export class GameEngine {
     if (!aim) this.tapping = false;
     this.dip = aim ? Math.max(0, Math.min(1, this.dip + ((this.using || this.tapping ? 1 : -1) * dt) / DIP_S)) : 0;
     if (!h) return;
+    // what's held is brought in out of whatever's in its way, or back out once there's room (see carry)
+    this.carry(h, dt);
     const lower = ease(this.dip);
     const over = h.kind === 'hose' ? this.nozzleOver(h)
       : aim ? { ...aim.hover, y: aim.hover.y + (aim.dipped.y - aim.hover.y) * lower, x: aim.dipped.x, z: aim.dipped.z }
