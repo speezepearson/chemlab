@@ -3040,6 +3040,20 @@ class HoseView {
       this.tube.geometry = new THREE.TubeGeometry(curve, 40, 3.5, 8);
       this.core.geometry = new THREE.TubeGeometry(curve, 40, 2, 6);
     }
+    // the tube as opaque as the player would have it (see FITTINGS.hose): short of solid it's see-through, and like
+    // glass casts no shadow on the shadow lamp's screen (see Exposer); solid, it does
+    const tube = this.tube.material as THREE.MeshStandardMaterial;
+    const a = FITTINGS.hose;
+    this.tube.visible = a > 0;
+    if (tube.opacity !== a) {
+      const clear = a < 1;
+      if (tube.transparent !== clear) {
+        tube.transparent = clear;
+        tube.depthWrite = !clear;
+        tube.needsUpdate = true;
+      }
+      tube.opacity = a;
+    }
     const rgb = fluid && fluid.N > 0 ? fluidRGB(fluid) : null;
     this.core.visible = !!rgb;
     if (rgb && fluid) {

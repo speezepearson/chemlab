@@ -271,6 +271,31 @@ export function AppearancePanel() {
                 </label>
               </td>
             </tr>
+            <tr className="group">
+              <td colSpan={2}>
+                <b>Hoses</b> <span>how opaque a hose's tube is, 0 not drawn to 1 solid; the fluid in it shows as ever</span>
+              </td>
+            </tr>
+            <tr>
+              <td>opacity</td>
+              <td>
+                <label className="slider">
+                  <input
+                    type="range"
+                    aria-label="hose opacity"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={FITTINGS.hose}
+                    onChange={(e) => {
+                      setFittings({ hose: +e.target.value });
+                      rerender();
+                    }}
+                  />
+                  <output>{FITTINGS.hose}</output>
+                </label>
+              </td>
+            </tr>
           </tbody>
         </table>
         <p>

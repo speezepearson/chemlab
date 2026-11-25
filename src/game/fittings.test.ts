@@ -9,6 +9,13 @@ describe('fittings', () => {
     expect(parseFittings(JSON.stringify({ stands: false }))).toEqual({ ...defaultFittings(), stands: false });
     expect(parseFittings(JSON.stringify({ tall: false }))).toEqual({ ...defaultFittings(), tall: false });
     for (const v of [0, 'false', null]) expect(parseFittings(JSON.stringify({ stands: v, tall: v }))).toEqual(defaultFittings());
+    for (const hose of [0, 0.3, 1]) expect(parseFittings(JSON.stringify({ hose }))).toEqual({ ...defaultFittings(), hose });
+    for (const hose of [-0.1, 1.5, '0.5', null]) expect(parseFittings(JSON.stringify({ hose }))).toEqual(defaultFittings());
+  });
+
+  it("starts with the hoses' tubes somewhere on the slider", () => {
+    const { hose } = defaultFittings();
+    expect(hose >= 0 && hose <= 1).toBe(true);
   });
 
   it('starts with the stands drawn, full height', () => {
