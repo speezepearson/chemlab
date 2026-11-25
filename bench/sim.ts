@@ -99,7 +99,7 @@ interface Scene {
   after?: (e: Engine) => void;
 }
 
-const base = (flasks: (FlaskFill | null)[], id: string): Preset => ({ ...DEFAULT_PRESET, id, name: id, flasks, tools: [] });
+const base = (flasks: (FlaskFill | null)[], id: string): Preset => ({ id, name: id, flasks, tools: [] });
 
 /** A hose from a spout or a faucet into a mouth; a faucet's is opened all the way, as faucets start shut. */
 function hose(e: Engine, on: Hose['on'], into: { x: number; y: number; z: number }, up = 24): void {
