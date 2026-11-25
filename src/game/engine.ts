@@ -2633,12 +2633,9 @@ export class GameEngine {
       this.change(() => p.t.press());
       return;
     }
-    // anywhere else, what's held is set down (but a hose's nozzle: C sets that down), or with empty hands, what's
-    // looked at picked up
-    if (this.held) {
-      if (this.held.kind !== 'hose') this.release();
-    }
-    else if (p && this.grabbable(p)) this.grabOrRelease(shift);
+    // anywhere else, what's held is set down, or put in the cabinet if that's what the crosshair is on (but a hose's
+    // nozzle: C sets that down), or with empty hands, what's looked at picked up
+    if (this.held ? this.held.kind !== 'hose' : p && this.grabbable(p)) this.grabOrRelease(shift);
   }
 
   /**

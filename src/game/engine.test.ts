@@ -1396,6 +1396,18 @@ describe('the left button’s hint', () => {
     l.in.target = null;
     expect(I.leftHint()).toBe(false);
   });
+
+  it('puts what’s in hand in the cabinet, with the crosshair on the cabinet, and shows its hint for that', () => {
+    const l = lab();
+    const I = l.in as unknown as { leftHint(): boolean; flasks: Flask[] };
+    expect(l.e.spawn('flask')).toBe(true);
+    expect(I.flasks).toHaveLength(1);
+    l.in.target = { kind: 'cabinet' } as Inside['target'];
+    expect(I.leftHint()).toBe(true);
+    l.in.leftDown(false);
+    expect(l.in.held).toBeNull();
+    expect(I.flasks).toHaveLength(0);
+  });
 });
 
 describe('setting things down', () => {
