@@ -13,8 +13,8 @@ export interface Fittings {
   hose: number;
 }
 
-/** Where the settings start: the stands drawn, full height, and the hoses' tubes as they always were. */
-export const DEFAULT_FITTINGS: Readonly<Fittings> = { stands: true, tall: true, hose: 0.45 };
+/** Where the settings start, as the user chose: the stands drawn, only as high as their clamps, and the hoses' tubes fairly opaque. */
+export const DEFAULT_FITTINGS: Readonly<Fittings> = { stands: true, tall: false, hose: 0.75 };
 
 /** How far a stand's rod reaches over its clamp when it isn't full height (see Fittings.tall). */
 export const SHORT_ROD = 20;
