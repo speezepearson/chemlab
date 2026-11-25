@@ -1,4 +1,4 @@
-# Notes for agents working on Slurry Lab
+# Notes for agents working on Chemlab
 
 `README.md` is the design doc: it describes every mechanic, number and tool as it currently behaves. Update it in the
 same commit as any behavior change. This file holds what README doesn't: how to work here.
@@ -23,9 +23,9 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   `require(require('child_process').execSync('npm root -g').toString().trim() + '/playwright')`.
   Chromium is preinstalled; don't run `playwright install`.
 - Set up a scene by writing a save before the page loads:
-  `page.addInitScript(s => localStorage.setItem('slurry-lab.save', s), JSON.stringify(save))`. The format is
+  `page.addInitScript(s => localStorage.setItem('chemlab.save', s), JSON.stringify(save))`. The format is
   `SaveState` in `src/game/save.ts`; tool positions are fractions of the old bench's home area (see `fromFrac`).
-- Set `localStorage['slurry-lab.introSeen'] = '1'` to skip the intro. A start button still covers the page (it's
+- Set `localStorage['chemlab.introSeen'] = '1'` to skip the intro. A start button still covers the page (it's
   the click that lets sound play), and the lab stays paused under it, so click `.intro-start` first.
 - Headless Chromium won't capture the mouse, and WebGL needs a software renderer. Launch with
   `args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']`, then in dev builds the engine is

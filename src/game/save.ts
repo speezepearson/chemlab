@@ -203,7 +203,7 @@ export function decodeSave(text: string): SaveState {
     json = new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
   }
   const s = JSON.parse(json) as SaveState;
-  if (!s || s.v !== 1 || !Array.isArray(s.flasks) || !Array.isArray(s.tools)) throw new Error('not a Slurry Lab save');
+  if (!s || s.v !== 1 || !Array.isArray(s.flasks) || !Array.isArray(s.tools)) throw new Error('not a Chemlab save');
   s.scales ??= [];
   s.hoses ??= [];
   return s;
@@ -211,7 +211,7 @@ export function decodeSave(text: string): SaveState {
 
 /* ---------------- local storage ---------------- */
 
-const KEY = 'slurry-lab.save';
+const KEY = 'chemlab.save';
 
 export function storeSave(s: SaveState): void {
   try {
@@ -238,7 +238,7 @@ export function clearStoredSave(): void {
   }
 }
 
-const GOD_KEY = 'slurry-lab.god';
+const GOD_KEY = 'chemlab.god';
 
 /**
  * Whether god mode was on when the player last left it, kept beside the save (but not in it, so exporting a bench

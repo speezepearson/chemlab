@@ -40,7 +40,7 @@ export function parseFittings(json: string | null): Fittings {
   return out;
 }
 
-const KEY = 'slurry-lab.fittings';
+const KEY = 'chemlab.fittings';
 
 function stored(): Fittings {
   try {

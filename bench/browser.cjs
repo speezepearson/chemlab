@@ -25,8 +25,8 @@ const save = fs.readFileSync(path.join(__dirname, 'saves', `${scene}.json`), 'ut
   const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: Number(process.env.VW || 1280), height: Number(process.env.VH || 720) } });
   const page = await context.newPage();
   await page.addInitScript((s) => {
-    localStorage.setItem('slurry-lab.save', s);
-    localStorage.setItem('slurry-lab.introSeen', '1');
+    localStorage.setItem('chemlab.save', s);
+    localStorage.setItem('chemlab.introSeen', '1');
   }, save);
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForSelector('.intro-start', { timeout: 60000 });

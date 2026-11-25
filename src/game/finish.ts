@@ -44,7 +44,7 @@ export function roughnessAt(base: number, s: number, dressed = false): number {
   return s <= AS_BUILT ? top + ((base - top) * s) / AS_BUILT : (base * (1 - s)) / (1 - AS_BUILT);
 }
 
-const KEY = 'slurry-lab.finish';
+const KEY = 'chemlab.finish';
 
 function stored(): Finish {
   try {

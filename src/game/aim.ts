@@ -44,7 +44,7 @@ export function aimCone(deg: number, fov: number, normalFov: number): number {
   return (t(deg) * t(fov / 2)) / t(normalFov / 2);
 }
 
-const KEY = 'slurry-lab.aim';
+const KEY = 'chemlab.aim';
 
 function stored(): Aim {
   try {

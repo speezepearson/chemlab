@@ -37,7 +37,7 @@ export function parseOutline(json: string | null): Outline {
   return out;
 }
 
-const KEY = 'slurry-lab.outline';
+const KEY = 'chemlab.outline';
 
 function stored(): Outline {
   try {
