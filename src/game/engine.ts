@@ -79,18 +79,20 @@ export interface Hud {
   /** Whether Q and E, held, would turn a handwheel or dial near the crosshair (see GameEngine.aimedValve). */
   turn: boolean;
   /**
-   * Whether E, held, would use what's in hand: pour a flask, let fluid out of a hose's nozzle, or dip a wicking strip or
-   * a thermometer into what's looked at.
+   * Whether E would use what's in hand: held, pour a flask, let fluid out of a hose's nozzle, or dip a wicking strip or
+   * a thermometer into what's looked at; or, pressed, empty a flask that's over nothing (see `empty`).
    */
   use: boolean;
   /** Whether E's own hint is up in the lab, over the mouth it'd pour into (see Frame.pourHint), so it needs none by the crosshair. */
   pouring: boolean;
+  /** Whether E would empty the flask in hand, at a press, there being nothing for it to pour into (see GameEngine.wouldEmpty). */
+  empty: boolean;
   /** Whether C would take hold of a hose, by a spout, faucet or nozzle near the crosshair (see GameEngine.hoseAim). */
   hose: boolean;
   /** Whether Enter would write a note about what the crosshair is on (see GameEngine.note). */
   label: boolean;
   /** What E does now with what's in hand, in a word, for the touch screen's button that stands in for it. */
-  hand: 'Pour' | 'Flow' | 'Dip';
+  hand: 'Pour' | 'Empty' | 'Flow' | 'Dip';
   /** A brief note, like there being no room for something. */
   note: string | null;
   /** Whether the note is a tip, something the player can now do, not something they can't. */
@@ -261,6 +263,8 @@ const WHEEL_KEYS = ['1', '2'];
 const POUR_ANG = Math.PI * 0.61;
 /** How long a flask takes to tip to pour, or stand back up, in real seconds. */
 const TIP_S = 0.3;
+/** How many sim seconds a full flask takes to empty, once it's tipped over nothing (see GameEngine.wouldEmpty). */
+const EMPTY_S = 0.4;
 /**
  * A held flask poured into what the crosshair is on (see pourPose) goes with its lip over the mouth's middle, at
  * least POUR_GAP above it, and as much higher as it has to, up to POUR_RISE, to clear everything.
@@ -448,6 +452,11 @@ export class GameEngine {
    * and a held dipper dips, only while it is (see useDown).
    */
   private using = false;
+  /**
+   * Whether the flask in hand is being emptied, from a press of E with it over nothing (see wouldEmpty): it tips and
+   * stays tipped, E held or not, and lets out all it has in a gush (see EMPTY_S), then rights itself.
+   */
+  private emptying = false;
   /**
    * A valve being turned with Q and E (a tool's handwheel or dial, a stopcock's, or a faucet's; see stepTurn): which way
    * it's turning, as the keys held say (1 clockwise as seen, −1 anticlockwise, 0 neither), and for how many real
@@ -2795,12 +2804,18 @@ export class GameEngine {
   /**
    * E pressed, with something in hand: use it while E's held (see using). A flask tips to pour (over the flask or tank
    * looked at, if any), a hose's nozzle lets fluid out, and a strip or a thermometer dips into the open top looked at.
+   * But a flask that would pour into nothing is emptied instead, at the press (see wouldEmpty and emptying).
    */
   private useDown(): void {
     if (this.dozing()) return;
     if (inPod(this.wake)) return;
     const h = this.held;
-    if (!h) return;
+    if (!h || this.emptying) return;
+    // a flask over nothing is emptied, at a press
+    if (this.wouldEmpty()) {
+      this.emptying = true;
+      return;
+    }
     this.using = true;
     if (h.kind === 'flask') {
       // on a flask or tank, the held flask goes over it to pour in
@@ -2813,6 +2828,17 @@ export class GameEngine {
     }
     // a strip aimed at an open top goes all the way in, however soon E's let go
     if (h.kind === 'tool' && h.t.kind === 'strip' && this.mouthAimed()) this.tapping = true;
+  }
+
+  /**
+   * Whether E would empty the flask in hand rather than pour it while it's held: it has something in it, the
+   * crosshair is on no open top nor sheet it would be poured into or onto (see mouthAimed), and there's none under
+   * where its lip would be, tipped where it's held. What it holds would only go down the drain, so it all goes at once.
+   */
+  private wouldEmpty(): boolean {
+    const h = this.held;
+    if (h?.kind !== 'flask' || this.using || this.emptying || !(h.f.N > TRACE) || this.mouthAimed(true)) return false;
+    return !mouthBelow(this.open.filter((m) => m.v !== h.f), flaskLip(h.f, POUR_ANG));
   }
 
   /**
@@ -3250,6 +3276,8 @@ export class GameEngine {
     }
     // (what's let go of is no longer being used, so the next thing taken in hand isn't until E's pressed again)
     if (!h) this.using = false;
+    // (and a flask being emptied is done once it's empty, or out of the hand)
+    if (h?.kind !== 'flask' || !(h.f.N > TRACE)) this.emptying = false;
     if (h?.kind !== 'flask' || !this.using) this.pinned = null;
     // a nozzle held with the crosshair on an open top goes straight over it, where it would be set down to pour in;
     // and a strip or a thermometer hovers over it, and lowers into it while E's held, or, a strip, until
@@ -3271,7 +3299,7 @@ export class GameEngine {
     this.placeHeld(h, this.pinned ?? this.heldAt(h));
     if (h.kind === 'flask') {
       this.faceFlask(h.f);
-      const goal = this.using ? POUR_ANG : 0;
+      const goal = this.using || this.emptying ? POUR_ANG : 0;
       const step = (POUR_ANG * dt) / TIP_S;
       h.f.tilt = h.f.tilt < goal ? Math.min(goal, h.f.tilt + step) : Math.max(goal, h.f.tilt - step);
     }
@@ -3348,7 +3376,7 @@ export class GameEngine {
     const h = this.held;
 
     // the held flask, tipped all the way, pours from its lip into whatever's below
-    const D = h?.kind === 'flask' && this.using && h.f.tilt >= POUR_ANG * 0.97 ? h.f : null;
+    const D = h?.kind === 'flask' && (this.using || this.emptying) && h.f.tilt >= POUR_ANG * 0.97 ? h.f : null;
     if (D && simDt > 0) {
       const from = flaskLip(D);
       this.pour = { from, into: mouthBelow(mouths, from) };
@@ -3405,7 +3433,7 @@ export class GameEngine {
         this.stepWake(step);
         if (D && this.pour) {
           const out = new Vessel(Infinity);
-          transfer(D, out, POUR_RATE * step);
+          transfer(D, out, this.pourRate() * step);
           this.land(this.pour.into, this.pour.from, out);
         }
         // each faucet runs as far as its valve is open, as a tool's spout does, dripping if that's slow enough
@@ -3962,7 +3990,7 @@ export class GameEngine {
     });
     const h = this.held;
     if (this.pour && h?.kind === 'flask' && h.f.N > TRACE)
-      streams.push({ from: this.pour.from, toY: this.landsAt(this.pour.from, mouths), fluid: h.f, flow: POUR_RATE / CAP });
+      streams.push({ from: this.pour.from, toY: this.landsAt(this.pour.from, mouths), fluid: h.f, flow: this.pourRate() / CAP });
     const drops: Frame['drops'][number][] = [];
     for (const t of this.tools) t.drops.forEach((v, k) => drops.push({ at: this.outletAt(t, k), v, hanging: true }));
     this.faucets.forEach((fa, i) => drops.push({ at: this.faucetOutlet(i), v: fa.drop, hanging: true }));
@@ -4088,6 +4116,7 @@ export class GameEngine {
           : h.kind !== 'flask' ? 'hold to let it flow'
           : this.mouthAimed() ? 'hold to pour into it'
           : this.mouthAimed(true) ? 'hold to pour onto it'
+          : this.wouldEmpty() ? 'empty it'
           : 'hold to pour',
         );
       if (h.kind === 'hose') {
@@ -4469,9 +4498,14 @@ export class GameEngine {
     }
   }
 
-  /** Whether E, held, would use what's in hand now (see useDown and Hud.use). */
+  /** How fast the flask in hand pours, by volume a sim second: POUR_RATE, or, being emptied, all it could hold in EMPTY_S. */
+  private pourRate(): number {
+    return this.emptying ? CAP / EMPTY_S : POUR_RATE;
+  }
+
+  /** Whether E would use what's in hand now (see useDown and Hud.use). */
   private useWouldDo(): boolean {
-    if (this.using) return false;
+    if (this.using || this.emptying) return false;
     const h = this.held;
     if (h?.kind === 'flask') return h.f.N > TRACE;
     // a strip or a thermometer dips into the open top looked at
@@ -4542,9 +4576,10 @@ export class GameEngine {
       turn: this.turnWouldDo() || !!this.turning,
       use: !this.sniffing && this.useWouldDo(),
       pouring: !!this.pourHintAt(),
+      empty: !this.sniffing && this.wouldEmpty(),
       label: !inPod(this.wake) && !!this.targetNote(),
       hose: !!this.hoseAim(),
-      hand: h?.kind === 'flask' ? 'Pour' : h?.kind === 'hose' ? 'Flow' : 'Dip',
+      hand: h?.kind === 'flask' ? (this.wouldEmpty() ? 'Empty' : 'Pour') : h?.kind === 'hose' ? 'Flow' : 'Dip',
       note: this.flash?.text ?? null,
       tip: !!this.flash?.tip,
       actions: this.actions(),

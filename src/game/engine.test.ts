@@ -1241,9 +1241,16 @@ describe('E', () => {
 
   it('uses what’s in hand while it’s held, and neither sets it down nor picks anything up', () => {
     const l = lab();
+    // (with a flask looked at to pour into: over nothing, it would be emptied at the press instead, see below)
+    holdAt(l, 'flask', { x: SPOT.x + 2 * CELL, y: LIFT + 160, z: SPOT.z, yaw: 0 });
+    const into = use(l).held!.f!;
+    l.in.release();
+    expect(l.in.held).toBeNull();
     holdAt(l, 'flask', { x: SPOT.x, y: LIFT + 160, z: SPOT.z, yaw: 0 });
     const f = use(l).held!.f!;
     f.setMolecules(singleOf('G'), 0.5 * CAP);
+    run(l, 0.05);
+    l.in.target = { kind: 'flask', f: into };
     use(l).useDown();
     expect(use(l).using).toBe(true);
     for (let i = 0; i < 20; i++) l.in.move(0.05);
@@ -1263,6 +1270,53 @@ describe('E', () => {
     use(l).useDown();
     expect(l.in.held).toBeNull();
     expect(use(l).using).toBe(false);
+  });
+
+  it('empties a flask that would pour into nothing, at a press, but pours one over an open top while it’s held', () => {
+    const l = lab();
+    const I = l.in as unknown as { wouldEmpty(): boolean; emptying: boolean };
+    // a flask standing on the counter, and another in hand, away from it
+    holdAt(l, 'flask', { x: SPOT.x, y: LIFT + 160, z: SPOT.z, yaw: 0 });
+    const under = use(l).held!.f!;
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    holdAt(l, 'flask', { x: SPOT.x + 3 * CELL, y: LIFT + 200, z: SPOT.z, yaw: 0 });
+    const f = use(l).held!.f!;
+    run(l, 0.05);
+    l.in.target = null;
+    // empty, there's nothing to let out
+    expect(I.wouldEmpty()).toBe(false);
+    f.setMolecules(singleOf('G'), 0.5 * CAP);
+    expect(I.wouldEmpty()).toBe(true);
+    // looking at the other flask, it would be poured into it instead
+    l.in.target = { kind: 'flask', f: under };
+    expect(I.wouldEmpty()).toBe(false);
+    l.in.target = null;
+    // and so it would with its lip, tipped, over the other's mouth, though the crosshair's not on it
+    const was = { ...f.pose };
+    const lip = flaskLip(f, Math.PI * 0.61);
+    const m = flaskMouth(under);
+    hands(l).placeHeld(l.in.held, { ...was, x: was.x + m.x - lip.x, z: was.z + m.z - lip.z });
+    expect(I.wouldEmpty()).toBe(false);
+    use(l).useDown();
+    expect(use(l).using).toBe(true);
+    expect(I.emptying).toBe(false);
+    l.e.touchKey('KeyE', false);
+    // over nothing, one press: it tips, lets it all go and rights itself, with E not held, and stays in hand
+    hands(l).placeHeld(l.in.held, was);
+    use(l).useDown();
+    expect(use(l).using).toBe(false);
+    expect(I.emptying).toBe(true);
+    expect(I.wouldEmpty()).toBe(false);
+    for (let i = 0; i < 60 && (I.emptying || f.tilt > 0); i++) {
+      l.in.move(0.05);
+      run(l, 0.05);
+    }
+    expect(f.N).toBe(0);
+    expect(under.N).toBe(0);
+    expect(f.tilt).toBe(0);
+    expect(I.emptying).toBe(false);
+    expect(use(l).held?.f).toBe(f);
   });
 });
 
