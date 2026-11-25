@@ -1,15 +1,21 @@
 /**
- * The player's settings for how the clamp stands and the hoses are drawn: whether the stands are drawn at all. Only
+ * The player's settings for how the clamp stands and the hoses are drawn: whether the stands are drawn at all, and
+ * if they are, whether their rods are full height, STAND_ROD (see bodies.ts), or end just over their clamps. Only
  * how they look: a stand that isn't drawn still needs its counter and its room, just as one that is (see
  * GameEngine.rest). Kept in local storage, not in saves: they're preferences, like the outline.
  */
 export interface Fittings {
   /** Whether the clamp stands are drawn. */
   stands: boolean;
+  /** Whether a stand's rod is full height, STAND_ROD; if not, it ends SHORT_ROD over its clamp. */
+  tall: boolean;
 }
 
-/** Where the settings start: the stands drawn. */
-export const DEFAULT_FITTINGS: Readonly<Fittings> = { stands: true };
+/** Where the settings start: the stands drawn, full height. */
+export const DEFAULT_FITTINGS: Readonly<Fittings> = { stands: true, tall: true };
+
+/** How far a stand's rod reaches over its clamp when it isn't full height (see Fittings.tall). */
+export const SHORT_ROD = 20;
 
 export function defaultFittings(): Fittings {
   return { ...DEFAULT_FITTINGS };
@@ -25,8 +31,9 @@ export function parseFittings(json: string | null): Fittings {
     return out;
   }
   if (!raw || typeof raw !== 'object') return out;
-  const { stands } = raw as Record<string, unknown>;
+  const { stands, tall } = raw as Record<string, unknown>;
   if (typeof stands === 'boolean') out.stands = stands;
+  if (typeof tall === 'boolean') out.tall = tall;
   return out;
 }
 

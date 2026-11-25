@@ -25,7 +25,7 @@ import { arrival, notice, type Block } from '../intro/notice';
 import { STATION_POSE } from './presets';
 import { litresOf, type Supply } from './supply';
 import { FINISH } from './finish';
-import { FITTINGS } from './fittings';
+import { FITTINGS, SHORT_ROD } from './fittings';
 import { applyShine, boxUV, metal, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
@@ -3084,13 +3084,16 @@ class StandView {
     scene.add(this.group);
   }
 
-  /** Stand it with its base on a surface `y` high: its rod always STAND_ROD tall, and its clamp wherever it holds. */
+  /**
+   * Stand it with its base on a surface `y` high: its rod STAND_ROD tall, or if the player would rather (see
+   * FITTINGS.tall), only SHORT_ROD over its clamp; and its clamp wherever it holds.
+   */
   update(s: Stand, y: number): void {
     const h = STAND_BASE.h;
     this.group.position.set(s.x, 0, s.z);
     this.group.rotation.y = s.yaw;
     this.base.position.y = y + h / 2;
-    const top = y + STAND_ROD;
+    const top = FITTINGS.tall ? y + STAND_ROD : Math.max(y + h + 1, s.clampY + SHORT_ROD);
     this.rod.position.y = (y + h + top) / 2;
     this.rod.scale.set(2.4, top - y - h, 2.4);
     this.boss.position.y = s.clampY;

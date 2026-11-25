@@ -7,10 +7,11 @@ describe('fittings', () => {
     expect(parseFittings('not json')).toEqual(defaultFittings());
     expect(parseFittings('[1, 2]')).toEqual(defaultFittings());
     expect(parseFittings(JSON.stringify({ stands: false }))).toEqual({ ...defaultFittings(), stands: false });
-    for (const stands of [0, 'false', null]) expect(parseFittings(JSON.stringify({ stands }))).toEqual(defaultFittings());
+    expect(parseFittings(JSON.stringify({ tall: false }))).toEqual({ ...defaultFittings(), tall: false });
+    for (const v of [0, 'false', null]) expect(parseFittings(JSON.stringify({ stands: v, tall: v }))).toEqual(defaultFittings());
   });
 
-  it('starts with the stands drawn', () => {
-    expect(defaultFittings().stands).toBe(true);
+  it('starts with the stands drawn, full height', () => {
+    expect(defaultFittings()).toMatchObject({ stands: true, tall: true });
   });
 });

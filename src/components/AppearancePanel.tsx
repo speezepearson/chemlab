@@ -254,6 +254,23 @@ export function AppearancePanel() {
                 </label>
               </td>
             </tr>
+            <tr>
+              <td colSpan={2}>
+                <label className="tog">
+                  <input
+                    type="checkbox"
+                    aria-label="full-height clamp stands"
+                    checked={FITTINGS.tall}
+                    disabled={!FITTINGS.stands}
+                    onChange={(e) => {
+                      setFittings({ tall: e.target.checked });
+                      rerender();
+                    }}
+                  />{' '}
+                  full height, or else only as high as their clamps
+                </label>
+              </td>
+            </tr>
           </tbody>
         </table>
         <p>
