@@ -98,11 +98,8 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .wheel .none .icon{opacity:.25}
 .wheel .pointer{fill:#fff;stroke:rgba(0,0,0,.6);stroke-width:1.2}
 .crosshair{
-  position:absolute;left:50%;top:50%;width:14px;height:14px;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
-  background:
-    linear-gradient(#fff,#fff) center/2px 14px no-repeat,
-    linear-gradient(#fff,#fff) center/14px 2px no-repeat;
-  opacity:.75;mix-blend-mode:difference;
+  position:absolute;left:50%;top:50%;width:6px;height:6px;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
+  border-radius:50%;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.35);opacity:.6;
 }
 .crosshair.dim{opacity:.25}
 /* the hints: at the crosshair's own height, the left button's due left of it and E's due right */
