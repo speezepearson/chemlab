@@ -13,7 +13,7 @@ import {
   NOZZLE_H, STAND_BASE, STAND_ROD, STOPCOCK, TOOL_DEPTH, onScale, onTool, openingOf, plumbZ, tankNoteY, tankRect, valveLocal, valveZ, dialZ, DIAL_REACH, settleAngle, valveAngle, VALVE_WHEEL, type Stand,
 } from './bodies';
 import { SPECIES } from '../chem/species';
-import { CAP, DELIVERY, GOAL_PURITY, TRACE } from './config';
+import { CAP, GOAL_PURITY, TRACE } from './config';
 import { Flask, Vessel, fluidAlpha, fluidRGB, volume } from './flask';
 import { FLASK_H, FLASK_OUTLINE, fillLevel } from './flaskShape';
 import { SCALE_SHAPE, Scale } from './scale';
@@ -28,7 +28,7 @@ import { FINISH } from './finish';
 import { applyShine, boxUV, metal, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
-  clockText, LAMP, SCREEN, TANK_SECTION, ringShare, atomSector, BOND_ENDS, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS,
+  LAMP, SCREEN, TANK_SECTION, ringShare, atomSector, BOND_ENDS, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS,
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, TEST_PAPER, paperTriangles, sectorInset, BOND_PAPER, bondDots, isBlotter, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
   type Cock, type Hose, type Piece, Tool,
 } from './tools';
@@ -143,10 +143,10 @@ export interface Frame {
    */
   turnHint: { at: Vec3; yaw: number; r: number; lit: number } | null;
   /**
-   * Where C would take hold of a hose, for its hint there (see hoseHint): a spout's outlet, or a nozzle (`nozzle`),
-   * with a stopcock on it or not (`cock`).
+   * Where C's hint goes (see hoseHint): the outlet C would take hold of a hose by, a spout's or a set-down nozzle's,
+   * which its picture hangs from; or (`stand`) where C would set down the nozzle in hand, which its picture stands on.
    */
-  hoseHint: { at: Vec3; nozzle: boolean; cock: boolean } | null;
+  hoseHint: { at: Vec3; stand: boolean } | null;
   /** The middle of the mouth E would pour the flask in hand into, for its hint over it (see pourHint). */
   pourHint: Vec3 | null;
   /**
@@ -781,7 +781,7 @@ const wheelDisk = new THREE.ExtrudeGeometry(wheelShape(WHEEL_BEVEL), {
 /** How far out from its middle a handwheel's painted face reaches, inside its rim. */
 const WHEEL_FACE = VALVE_WHEEL.r - VALVE_WHEEL.notch - 1.1;
 const wheelFace = new THREE.CircleGeometry(WHEEL_FACE, 40).translate(0, 0, VALVE_WHEEL.thick + 0.02);
-/** A plain valve's bar, across a whole diameter of its face; and a multiplexer's pointer, from its middle to its rim, and the round boss it turns from. */
+/** A plain valve's bar, across a whole diameter of its face; and a splitter's pointer, from its middle to its rim, and the round boss it turns from. */
 const wheelBar = new THREE.BoxGeometry(VALVE_WHEEL.bar, 2 * WHEEL_FACE + 0.6, 0.9).translate(0, 0, VALVE_WHEEL.thick + 0.45);
 const wheelPointer = new THREE.BoxGeometry(VALVE_WHEEL.bar, WHEEL_FACE + 0.3, 0.9).translate(0, (WHEEL_FACE + 0.3) / 2, VALVE_WHEEL.thick + 0.45);
 const wheelBoss = new THREE.CylinderGeometry(1.7, 1.7, 0.9, 20).rotateX(Math.PI / 2).translate(0, 0, VALVE_WHEEL.thick + 0.45);
@@ -1749,7 +1749,6 @@ class ToolView {
   private note: Label;
   private screen?: Screen;
   /** The station's screen showing how long it's been delivering steadily. */
-  private steadyScreen?: Screen;
   /** The supply station's diverter's LCD (see drawDiverter). */
   private diverter?: Screen;
   /** The supply station's purity needle's dial (see drawNeedle). */
@@ -1829,8 +1828,13 @@ class ToolView {
         arm.rotation.z = -dir * slope;
         outlet(k, [[x, mid + Math.abs(x - peak) * Math.tan(slope)], [x, sh.spoutY - 4]]);
       });
+    } else if (t.kind === 'splitter') {
+      // far enough under its selector to clear its handwheel
+      const fork = sh.valves![0].y + VALVE_WHEEL.r + 4;
+      pipes(art, [[0, TH], [0, fork]]);
+      sh.spouts.forEach((x, k) => outlet(k, [[0, fork], [x, fork + 16], [x, sh.spoutY - 4]]));
     } else if (t.kind === 'multiplexer') {
-      // each funnel's stem in to where they join, over its selector, far enough above it to clear its handwheel
+      // the splitter's fork upside down: each funnel's stem in to where they join, over its selector
       const join = sh.valves![0].y - VALVE_WHEEL.r - 4;
       for (const tk of sh.tanks) pipes(art, [[tankX(tk), TH], [tankX(tk), join - 16], [0, join]]);
       outlet(0, [[0, join], [0, sh.spoutY - 4]]);
@@ -1984,7 +1988,7 @@ class ToolView {
       const back = valveZ(t) - VALVE_WHEEL.thick / 2;
       const hub = rod(art, darkMat, v3(vc.x, vc.y, pz), v3(vc.x, vc.y, back + 0.2), 2.2);
       pick(hub, 'valve', k);
-      const pivot = handwheel(leverMat, wheelFaceMat, leverMat, t.kind === 'multiplexer');
+      const pivot = handwheel(leverMat, wheelFaceMat, leverMat, t.kind === 'splitter' || t.kind === 'multiplexer');
       pivot.position.copy(v3(vc.x, vc.y, back));
       art.add(pivot);
       pivot.traverse((m) => m instanceof THREE.Mesh && pick(m, 'valve', k));
@@ -2612,13 +2616,12 @@ class ToolView {
     valve.position.copy(v3(sh.spouts[0], STATION.paneH + 24, 0));
     art.add(valve);
     pick(valve, 'spout', 0);
-    // the readout of the litres in the reservoir, under its label, and beside it, how long it's been delivering steadily
+    // the readout of the litres in the reservoir, under its label
     const screen = (sc: { x0: number; x1: number; y0: number; y1: number }) => {
       block(art, darkMat, sc.x0 - 1.5, sc.x1 + 1.5, sc.y0 - 1.5, sc.y1 + 1.5, face, face + 0.5);
       return new Screen(art, sc.x0, sc.x1, sc.y0, sc.y1, face + 0.6, 8);
     };
     this.screen = screen(STATION.screen);
-    this.steadyScreen = screen(STATION.steadyScreen);
   }
 
   /**
@@ -2876,11 +2879,8 @@ class ToolView {
     });
     drawDiverter(this.diverter!, t.gate, t.sinceFlow < DIVERTER_HOLD);
     drawNeedle(this.needle!, t.needle);
-    // the screens: the cryostabilizer in the reservoir / what's needed, in litres; and how long it's been delivering
-    // steadily
+    // the screen: the cryostabilizer in the reservoir / what's needed, in litres
     phosphor(this.screen!, STATION.screen, `${litresOf(held).toFixed(2)} L / ${supply.goalL.toFixed(2)} L`);
-    const open = supply.airlock && t.steady >= DELIVERY.streak;
-    phosphor(this.steadyScreen!, STATION.steadyScreen, open ? 'AIRLOCK OPEN' : `STEADY ${clockText(t.steady)}`);
   }
 
   dispose(): void {
@@ -2888,7 +2888,6 @@ class ToolView {
     disposeGeometry(this.root);
     for (const { fm } of this.fluids) fm.dispose();
     this.screen?.tex.dispose();
-    this.steadyScreen?.tex.dispose();
     this.needle?.tex.dispose();
     this.changeover?.lamp.dispose();
     this.changeover?.glow.material.dispose();
@@ -5270,16 +5269,19 @@ class KeyHint {
 
   /**
    * Put it at `at`, facing `yaw`, `size` world units to a unit of its picture (or bigger, far off), drawn for `state`;
-   * raised by `lift` units of its picture, so that it grows away from the point of it that's at `at`.
+   * raised by `lift` units of its picture, and moved `shift` of them to its right, so that it's the point of it
+   * (−shift, −lift) that's at `at`, which it grows away from.
    */
-  show(at: Vec3, yaw: number, size: number, state: number, camera: THREE.PerspectiveCamera, cssH: number, lift = 0): void {
+  show(at: Vec3, yaw: number, size: number, state: number, camera: THREE.PerspectiveCamera, cssH: number, lift = 0, shift = 0): void {
     if (state !== this.state) this.draw(state);
     const p = new THREE.Vector3(at.x, at.y, at.z);
     // how many CSS pixels a unit is there, and how big it must be drawn for its letters to be tall enough
     const px = cssH / (2 * camera.position.distanceTo(p) * Math.tan((camera.fov * Math.PI) / 360));
     const grow = Math.max(1, KEY_HINT.minPx / (this.box.cap * size * px));
     this.mesh.visible = true;
-    this.mesh.position.copy(p).add(new THREE.Vector3(0, lift * size * grow, 0));
+    // (its right, turned to face `yaw`, is (cos yaw, 0, −sin yaw))
+    const k = size * grow;
+    this.mesh.position.copy(p).add(new THREE.Vector3(shift * k * Math.cos(yaw), lift * k, -shift * k * Math.sin(yaw)));
     this.mesh.rotation.set(0, yaw, 0);
     this.mesh.scale.setScalar(size * grow);
   }
@@ -5363,8 +5365,9 @@ function turnHint(scene: THREE.Scene): KeyHint {
 }
 
 /**
- * C's hint where it would take hold of a hose (see Frame.hoseHint), as a KeyHint, in world units from the outlet of
- * a spout, hanging from it; or, at a nozzle, standing on it, its banded end there: on the right, a little hose hanging from it as if fitted there (`hose`: its collar `collar` wide at
+ * C's hint (see Frame.hoseHint), as a KeyHint, in world units from the outlet C would take hold of a hose by (a
+ * spout's, or a set-down nozzle's), hanging from it; or, where a nozzle in hand would be set down, standing on it, the
+ * middle of its banded end there: on the right, a little hose hanging from the outlet as if fitted there (`hose`: its collar `collar` wide at
  * the top, a tube `tube` wide coming down, bending in an S `bend` to the right and down again, `drop` long in all,
  * with a band round it `band` from its end, for the nozzle), drawn light with a dark edge, as the arrow of Q and E
  * is; on its left, a key cap (`cap`: `w` by `h`, its corners rounded `r`, `gap` clear of the hose) with a C on it,
@@ -5373,8 +5376,6 @@ function turnHint(scene: THREE.Scene): KeyHint {
 const HOSE_HINT = {
   hose: { collar: 6, tube: 3.4, bend: 8, drop: 28, band: 3.5, edge: 0.8 },
   cap: { w: 13, h: 16, r: 2.5, gap: 4, letter: 7.5, border: 1.1 },
-  /** How much higher it stands over a nozzle with a stopcock on it, to clear the arrow of Q and E over its handwheel. */
-  overCock: 8,
 };
 
 function hoseHint(scene: THREE.Scene): KeyHint {
@@ -5853,10 +5854,10 @@ export class View {
     const h = fr.hoseHint;
     const eye = this.camera.position;
     if (h) {
-      // at a spout, the picture hangs from it; at a nozzle, it stands on it, its banded end there, and over a stopcock
-      // on the nozzle, clear of the arrow of Q and E over its handwheel
-      const up = h.nozzle ? HOSE_HINT.hose.drop + (h.cock ? HOSE_HINT.overCock : 0) : 0;
-      this.hoseHint.show(h.at, Math.atan2(eye.x - h.at.x, eye.z - h.at.z), 1, 0, this.camera, cssH, up);
+      // at an outlet, the picture hangs from it, its collar's top there; where a nozzle in hand would be set down, it
+      // stands on it, the middle of its banded end there (which is `bend` to the right of its collar)
+      const { drop, bend } = HOSE_HINT.hose;
+      this.hoseHint.show(h.at, Math.atan2(eye.x - h.at.x, eye.z - h.at.z), 1, 0, this.camera, cssH, h.stand ? drop : 0, h.stand ? -bend : 0);
     } else this.hoseHint.hide();
     const m = fr.pourHint;
     // (far off, it grows up and away from the mouth, its stream still ending just over it)

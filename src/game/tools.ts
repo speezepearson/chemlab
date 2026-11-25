@@ -200,11 +200,11 @@ export function drip(drop: Vessel, out: Vessel | null, h: number, rand = Math.ra
   return fell;
 }
 
-/** How much a multiplexer's, size sorter's or heater's funnel holds, in atoms: just a buffer, like a hose's. */
+/** How much a splitter's or multiplexer's funnel holds, in atoms: just a buffer, like a hose's. */
 export const FUNNEL_CAP = CAP / 4;
 /**
- * How fast a size sorter's funnel drains when full, in atoms per sim second; it drains in proportion to how high its
- * fluid stands (see Tool.level). A multiplexer's two funnels
+ * How fast a splitter's or size sorter's funnel drains when full, in atoms per sim second, whatever a splitter's
+ * valve is set to; it drains in proportion to how high its fluid stands (see Tool.level). A multiplexer's two funnels
  * drain at this rate between them, shared out by its selector. An inline instrument's tube drains at this rate however
  * full it is.
  */
@@ -341,8 +341,6 @@ export const STATION = {
   labelY: -31,
   gauge: { x0: 2 * CELL + 20, x1: 2 * CELL + 30, segments: 26 },
   screen: { x0: 2 * CELL - 50, x1: 2 * CELL + 50, y0: -19, y1: -4 },
-  /** The screen showing how long it's been delivering steadily (see Tool.steady), left of the reservoir's. */
-  steadyScreen: { x0: 2 * CELL - 160, x1: 2 * CELL - 60, y0: -19, y1: -4 },
   /** The purity needle's dial (see needleAt), on the plate left of the diverter's LCD. */
   needle: { x0: CELL - 90, x1: CELL - 38, y0: 222, y1: 262 },
   recess: STATION_OUT + STATION_MOUTH.w + 20,
@@ -448,14 +446,6 @@ export const REFERENCE_FLOW = 0.2 * MAX_FLOW;
 export const RESERVOIR_FILTER = 0.05;
 /** The species with a black atom in them, which the reservoir's filter takes out. */
 const BLACK = SPECIES.filter((s) => s.atoms.includes('K')).map((s) => s.i);
-
-/** A length of time on a screen, as a clock does: "0:42", "12:05", "1:02:03". */
-export function clockText(seconds: number): string {
-  const s = Math.max(0, Math.floor(seconds));
-  const two = (n: number) => String(n).padStart(2, '0');
-  const [h, m] = [Math.floor(s / 3600), Math.floor(s / 60) % 60];
-  return h > 0 ? `${h}:${two(m)}:${two(s % 60)}` : `${m}:${two(s % 60)}`;
-}
 
 /**
  * The reservoir's filter over h sim seconds: RESERVOIR_FILTER of each species with a black atom in it each sim
@@ -1017,7 +1007,7 @@ export function bondDots(): { x: number; y: number }[] {
 }
 
 export type ToolKind =
-  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'multiplexer' | 'sorter' | 'heater'
+  | 'dispenser' | 'pipette' | 'exchanger' | 'separator' | 'splitter' | 'multiplexer' | 'sorter' | 'heater'
   | 'spectroscope' | 'meter' | 'thermometer' | 'thermometerWide' | 'dilatometer' | 'strip' | 'column' | 'tank'
   | 'receptacle' | 'shadowlamp' | 'testpaper' | 'bondpaper';
 
@@ -1093,7 +1083,7 @@ export interface ToolShape {
    */
   neck?: { w: number; h: number; body: number; bodies: number[]; necks: number[]; inlet: { h: number; y: number } };
   /**
-   * Where its built-in controls are, one valve per entry: a multiplexer's selector, the heater's tap's
+   * Where its built-in controls are, one valve per entry: a splitter's or multiplexer's selector, the heater's tap's
    * valve, the station's faucet's; or a dial (see dial). A tool has no flow valves of its own: what lets a spout out
    * slower is a stopcock fitted on it (see Tool.cocks), and a spout with none is fully open.
    */
@@ -1193,9 +1183,21 @@ export const SHAPES: Record<ToolKind, ToolShape> = {
     spoutY: TANK_SECTION.h + 57,
     box: { x0: -CELL - 16, x1: CELL + 16, y0: -6, y1: TANK_SECTION.h + 59 },
   },
+  splitter: {
+    tanks: [{ name: 'funnel', x0: -22, x1: 22 }],
+    tankH: 30,
+    tankCap: FUNNEL_CAP,
+    funnel: true,
+    // a cell either side of its funnel, like the separator's of its tank
+    spouts: [-CELL, CELL],
+    // its selector, a handwheel on the pipe over the fork
+    valves: [{ x: 0, y: 42 }],
+    spoutY: 84,
+    box: { x0: -CELL - 16, x1: CELL + 16, y0: -6, y1: 86 },
+  },
   multiplexer: {
-    // a funnel a cell either side of its one spout, their stems joining over its selector, a valve which picks how
-    // much of each goes through
+    // the splitter turned upside down: a funnel a cell either side of its one spout, their stems joining over the
+    // valve, which picks how much of each goes through
     tanks: [
       { name: 'A', x0: -CELL - 22, x1: -CELL + 22 },
       { name: 'B', x0: CELL - 22, x1: CELL + 22 },
@@ -1500,6 +1502,7 @@ export const TOOL_NAMES: Record<ToolKind, string> = {
   pipette: 'Pipette',
   exchanger: 'Heat exchanger',
   separator: 'Separator',
+  splitter: 'Splitter',
   multiplexer: 'Multiplexer',
   sorter: 'Size sorter',
   heater: 'Resistive heater',
@@ -1627,11 +1630,13 @@ export interface Cock {
  *   counterflow on the way to their spouts, trading heat but never mixing.
  * - A **separator** has one tank and two spouts, and sorts what drains
  *   between them by whether it has a black atom in it (see separate).
- * - A **multiplexer** has two small funnels, each draining (at FUNNEL_RATE times how high
+ * - A **splitter** has a small funnel that drains straight through (at
+ *   FUNNEL_RATE) to two spouts. Its selector, a built-in valve, doesn't open or close: it sets the
+ *   share that goes right, from 0 (all left) to 1 (all right).
+ * - A **multiplexer** is a splitter the other way up: two funnels, each draining (at FUNNEL_RATE times how high
  *   its fluid stands) into one spout between them. Its selector picks which: the share of FUNNEL_RATE the right funnel
  *   gets, from 0 (only the left drains) to 1 (only the right), the left getting the rest.
- * - A **size sorter** has a small funnel, with no valve, draining (at FUNNEL_RATE times how high its fluid stands)
- *   down a chute through three
+ * - A **size sorter** has a funnel like the splitter's, with no valve, draining down a chute through three
  *   screens and off its end, each with a spout under it (see sieve).
  * - A **resistive heater** has a funnel draining (at HEATER.feed) into one end of a tube, which carries
  *   it to the other end in HEATER.transit and out a spout there, heating it all the way (see heatBy) with a
@@ -1678,8 +1683,8 @@ export class Tool {
   /** A heater's tube, stretch by stretch from the funnel's end (see HEATER_CELLS); empty for any other tool. */
   readonly tube: Vessel[];
   /**
-   * Per built-in control (see ToolShape.valves): a multiplexer's selector, the share taken from the right, half by
-   * default; the heater's tap's valve, 0 (shut) to 1, and a dial, 0 to 1; the
+   * Per built-in control (see ToolShape.valves): a splitter's selector, the share going right, and a multiplexer's,
+   * the share taken from the right, half by default; the heater's tap's valve, 0 (shut) to 1, and a dial, 0 to 1; the
    * station's faucet's valve. Shut, or at 0, by default. A tool with none has none.
    */
   readonly valves: number[];
@@ -1802,7 +1807,7 @@ export class Tool {
   sinceDelivery = Infinity;
   /**
    * Sim seconds a receptacle has been delivering steadily, letting cryostabilizer into the reservoir at least every
-   * DELIVERY.gap sim seconds; 0 while it isn't. Shown on its screen (see clockText); long enough, and the player can
+   * DELIVERY.gap sim seconds; 0 while it isn't. Nothing shows it; long enough, and the player can
    * nap (see DELIVERY.nap), and the cryostabilizer's opens the airlock (see Supply.airlock).
    */
   steady = 0;
@@ -1843,7 +1848,7 @@ export class Tool {
     this.packing = kind === 'strip' ? new Bed(this.paper) : kind === 'column' ? new Bed(this.bed) : null;
     this.glow = new Float32Array(kind === 'shadowlamp' ? SCREEN.cells ** 2 : 0);
     const nValves = SHAPES[kind].valves?.length ?? 0;
-    this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'multiplexer' ? 0.5 : 0));
+    this.valves = Array.from({ length: nValves }, (_, k) => valves[k] ?? (kind === 'splitter' || kind === 'multiplexer' ? 0.5 : 0));
     this.cocks = this.shape.spouts.map(() => (SHAPES[kind].fitted ? { valve: 0 } : null));
     this.ends = this.shape.spouts.map(() => null);
     this.out = this.shape.spouts.map(() => null);
@@ -1902,7 +1907,7 @@ export class Tool {
       // funnels
       const rate =
         INLINE_TOOLS.includes(this.kind) ? FUNNEL_RATE
-        : this.kind === 'sorter' ? FUNNEL_RATE * this.level(k)
+        : this.kind === 'splitter' || this.kind === 'sorter' ? FUNNEL_RATE * this.level(k)
         : this.kind === 'multiplexer' ? FUNNEL_RATE * this.level(k) * (k ? this.valves[0] : 1 - this.valves[0])
         : (this.shape.maxFlow ?? MAX_FLOW) * this.level(k);
       transfer(tank, p, feeds(k) * rate * h);
@@ -1910,6 +1915,7 @@ export class Tool {
     });
     if (this.kind === 'exchanger') counterflow(packets[0], packets[1], EXCHANGE_RATE * h);
     if (this.kind === 'separator') packets = separate(packets[0], parts(SEPARATOR_OUTLETS));
+    if (this.kind === 'splitter') packets = divide(packets[0], () => 1 - this.valves[0], parts(2));
     if (this.kind === 'multiplexer') {
       transfer(packets[1], packets[0], volume(packets[1]));
       packets = [packets[0]];
@@ -2489,6 +2495,28 @@ export function split(
     Q -= out[j].Q;
   }
   return out;
+}
+
+/**
+ * Split a fluid into left and right, sending `leftShare(s)` of species s left, in whole molecules, heat in
+ * proportion. The parts go into `out`, empty vessels, if it's given.
+ */
+export function divide(
+  f: Fluid,
+  leftShare: (s: number) => number,
+  out: Vessel[] = [new Vessel(Infinity), new Vessel(Infinity)],
+): [Vessel, Vessel] {
+  for (let s = 0; s < NS; s++) {
+    if (!f.n[s]) continue;
+    const left = Math.min(f.n[s], roundRandom(f.n[s] * leftShare(s)));
+    out[0].n[s] = left;
+    out[1].n[s] = f.n[s] - left;
+    out[0].N += left * SPECIES[s].size;
+    out[1].N += (f.n[s] - left) * SPECIES[s].size;
+  }
+  out[0].Q = f.N > 0 ? Math.min(f.Q, roundRandom((f.Q * out[0].N) / f.N)) : 0;
+  out[1].Q = f.Q - out[0].Q;
+  return [out[0], out[1]];
 }
 
 /**
