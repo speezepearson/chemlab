@@ -4,7 +4,8 @@ import type { SaveState } from './save';
  * The lab a new game starts in, and Reset goes back to (see the Stranded preset): the equipment out on the counters,
  * what's in it, how its valves and stopcocks are set, the hoses, and what's left in the equipment cabinet, as a save
  * keeps them (see SaveState). It's a save the user exported, less what isn't the lab's: the chemistry, where the
- * player stood, and whether the alarms were silenced.
+ * player stood, and whether the alarms were silenced; and with its station fitted for the first supply, the IJ-buffer,
+ * as stocked (see Tool.stock), where the export's was on the antinucleant.
  */
 export const START_LAB: SaveState = {
   v: 1,
@@ -26,7 +27,7 @@ export const START_LAB: SaveState = {
     {"n": {"R": 27345690, "G": 27345690, "R–G": 831617432}, "Q": 12718792526, "x": -0.5036854488453915, "up": 80, "glass": 103.67030211817473, "z": 2774.43809452857, "yaw": 3.141592653589793},
   ],
   tools: [
-    {"kind": "receptacle", "id": 0, "fx": 2.23, "fy": 0.32903225806451614, "z": 1230, "yaw": -1.5707963267948966, "valves": [0], "tanks": [{"n": {}, "Q": 0}, {"n": {"R–B": 29536315434}, "Q": 177217892604}], "cocks": [null, null], "drops": [{"n": {}, "Q": 0}, {"n": {}, "Q": 0}], "memory": [0, -1]},
+    {"kind": "receptacle", "id": 0, "fx": 2.23, "fy": 0.32903225806451614, "z": 1230, "yaw": -1.5707963267948966, "valves": [0], "tanks": [{"n": {}, "Q": 0}, {"n": {"R–G": 36653499875}, "Q": 219920999250}], "cocks": [null, null], "drops": [{"n": {}, "Q": 0}, {"n": {}, "Q": 0}], "memory": [2, -1]},
     {"kind": "shadowlamp", "id": 1, "fx": -0.45, "fy": 0.8129032258064516, "z": 2790, "yaw": 3.141592653589793, "valves": [], "tanks": [], "cocks": [], "drops": [], "memory": [1]},
     {"kind": "spectroscope", "id": 3, "fx": 1.47, "fy": 0.5, "z": 150, "yaw": 0, "valves": [], "tanks": [{"n": {}, "Q": 0}], "cocks": [null], "drops": [{"n": {}, "Q": 0}]},
     {"kind": "dispenser", "id": 4, "fx": 1.137318161077104, "fy": 0.6057760948641735, "z": 1700.9642257727726, "yaw": 0, "valves": [], "tanks": [{"n": {"R": 410280263, "G": 2, "R–G": 132304305, "B": 25177430, "R–B": 1961629, "G–R–B": 632604, "R–G–B": 632589, "△RGB": 232592, "K": 748880, "R–K": 11457602, "G–R–K": 3694839, "R–G–K": 5295908, "R–K–G": 2, "△RGK": 382576415, "B–K": 3143, "B–R–K": 54771, "R–B–K": 243, "R–K–B": 48105, "△RBK": 17688, "R(G,B,K)": 17498, "B–G–R–K": 17647, "△GBR–K": 6478, "B–R–G–K": 25296, "G(R,B,K)": 25182, "△RBG–K": 9295, "△GKR–B": 1829346, "△RKG–B": 1829305, "□RBGK+R–G": 672955, "G–R–B–K": 89, "R–G–B–K": 84, "△RGB–K": 34, "G–R–K–B": 15353, "△BKR–G": 5669, "□RGBK": 5718, "□RGBK+R–B": 2079, "R–G–K–B": 22226, "□RGKB": 8118, "△BKG–R": 8122, "□RGKB+G–B": 3008, "△RGK–B": 1606301, "□RGKB+R–K": 590975, "□RGBK+G–K": 590917, "⊠RGBK": 217387}, "Q": 5811760499}], "cocks": [{"valve": 0}], "drops": [{"n": {"R": 2262, "R–G": 730, "B": 139, "R–B": 11, "G–R–B": 3, "R–G–B": 4, "△RGB": 1, "K": 4, "R–K": 64, "G–R–K": 20, "R–G–K": 29, "△RGK": 2110, "R–K–B": 1, "B–G–R–K": 1, "△GKR–B": 10, "△RKG–B": 10, "□RBGK+R–G": 4, "△RGK–B": 9, "□RGKB+R–K": 4, "□RGBK+G–K": 3, "⊠RGBK": 1}, "Q": 32061}]},

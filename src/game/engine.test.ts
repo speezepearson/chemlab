@@ -8,6 +8,7 @@ import { boxesOverlap } from './physics';
 import { STOCK } from './cabinet';
 import { WHEELS } from './wheel';
 import { CAP, TRACE } from './config';
+import { CRYOSTABILIZER, FIRST_SUPPLY } from './supply';
 import type { GameEngine } from './engine';
 import { Vessel, volume, type Flask } from './flask';
 import type { Scale } from './scale';
@@ -3181,4 +3182,59 @@ describe('stopcocks', () => {
     l.in.release();
     return f!;
   }
+});
+
+describe('the airlock', () => {
+  /** The engine's own things these tests reach into. */
+  interface Lock {
+    wake: string;
+    station(): Tool;
+    canNap(): boolean;
+  }
+  const lock = (l: Lab) => l.in as unknown as Lock;
+
+  it('stays shut while the station delivers steadily, and opens once its reservoir holds enough cryostabilizer', () => {
+    const l = lab();
+    const st = lock(l).station();
+    st.stock(CRYOSTABILIZER);
+    const { species, goal } = st.supply;
+    expect(lock(l).wake).toBe('closed');
+    // a long steady delivery, short of the goal
+    for (let i = 0; i < 100; i++) {
+      st.tanks[1].setMolecules(species, goal - 1e6);
+      st.sinceDelivery = 0;
+      l.in.simulate(1);
+    }
+    expect(st.steady).toBeGreaterThan(60);
+    expect(lock(l).wake).toBe('closed');
+    st.tanks[1].setMolecules(species, goal);
+    l.in.simulate(0.1);
+    expect(lock(l).wake).toBe('open');
+  });
+
+  it('stays shut however much of a supply before the cryostabilizer there is', () => {
+    const l = lab();
+    const st = lock(l).station();
+    st.stock(FIRST_SUPPLY);
+    st.tanks[1].setMolecules(st.supply.species, st.supply.goal);
+    l.in.simulate(0.1);
+    expect(lock(l).wake).toBe('closed');
+  });
+});
+
+describe('a new game', () => {
+  it('starts with the station fitted for the first supply, holding what is on board of it', () => {
+    const l = lab();
+    l.e.load(DEFAULT_PRESET);
+    const st = (l.in as unknown as { station(): Tool }).station();
+    expect(st.supply).toBe(FIRST_SUPPLY);
+    expect(st.tanks[1].n[FIRST_SUPPLY.species]).toBe(FIRST_SUPPLY.start);
+  });
+});
+
+describe('N', () => {
+  it('naps in a new lab, before anything has been delivered', () => {
+    const l = lab();
+    expect((l.in as unknown as { canNap(): boolean }).canNap()).toBe(true);
+  });
 });

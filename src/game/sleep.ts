@@ -7,8 +7,8 @@ import { roomFor, type Vessel } from './flask';
 import type { Tool } from './tools';
 
 /*
- * Sleeping in the cryopod, or napping on her feet (see the README's Napping), while a steady line fills the ship's
- * reservoir (see the README's The airlock), much faster
+ * Napping on her feet (see the README's Napping), or sleeping in the cryopod (see the README's Sleeping), while a
+ * steady line fills the ship's reservoir, much faster
  * than the lab can be run substep by substep. The lab is run as ever, as a black box, for a window; how every
  * vessel's contents changed through it is measured; and if they're changing steadily, the lab jumps ahead by applying
  * those changes for a stretch Δ, as long as nothing would happen within it that the window couldn't have seen (a

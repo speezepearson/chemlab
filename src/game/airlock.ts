@@ -52,8 +52,8 @@ export const RISE_S = 1.5;
  * - opening: the pod's front is sliding up.
  * - out: they can walk, and the doors stand open until they're out in the lab.
  * - closed: the doors have closed behind them. This is how every lab starts but the first.
- * - open: the station has been delivering steadily (see DELIVERY), and the doors have slid open again, back to the
- *   pod; they close again once it stops, when the player's out in the lab.
+ * - open: the station's reservoir holds enough cryostabilizer for the voyage, and the doors have slid open again,
+ *   back to the pod, to sleep the rest of it away in.
  * - settling: the player walked into the pod while it was open, and is easing into place in it, facing out: they've
  *   stopped walking, and it's their own movement, so it goes in real time (see SETTLE_S).
  * - boarding: settled in, the pod's front slides down in front of them, and then all fades to black.

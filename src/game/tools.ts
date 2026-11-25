@@ -287,8 +287,9 @@ export function sumpFillHeight(share: number, w: number, h: number, sump: { w: n
 
 /**
  * The station, built into the right wall (see STATION_POSE in presets.ts), for topping up what the ship is short of
- * (see Supply): first the antinucleant, and once there's enough of that, its block of the wall is changed for the
- * cryostabilizer's (see CHANGEOVER), the same but for what it takes and what's printed on it. It's the ship's
+ * (see Supply): first the IJ-buffer, and once there's enough of that, its block of the wall is changed for the
+ * antinucleant's, and then for the cryostabilizer's (see CHANGEOVER), each the same but for what it takes and what's
+ * printed on it. It's the ship's
  * reservoir, a tall
  * column in the wall seen through a narrow glass pane, with a faucet under it; and beside it, low down, a glass funnel
  * over a diverter, which sends what drains from the funnel up into the reservoir if it's pure enough, or else down
@@ -1807,8 +1808,8 @@ export class Tool {
   sinceDelivery = Infinity;
   /**
    * Sim seconds a receptacle has been delivering steadily, letting cryostabilizer into the reservoir at least every
-   * DELIVERY.gap sim seconds; 0 while it isn't. Nothing shows it; long enough, and the player can
-   * nap (see DELIVERY.nap), and the cryostabilizer's opens the airlock (see Supply.airlock).
+   * DELIVERY.gap sim seconds; 0 while it isn't. Nothing shows it; long enough, and the player is told they can
+   * nap (see DELIVERY.nap).
    */
   steady = 0;
   /**
@@ -2075,7 +2076,7 @@ export class Tool {
    * temperature, and 1 if it's broken or 0 if not; how much a wicking strip's paper has drunk, a 0 where how dry it
    * was used to be, when strips dried, and how scorched each stretch is (what's on its paper is saved as vessels, see paper); how much a column's bed has drunk (what's on it is
    * saved as vessels, see bed); which supply a receptacle is
-   * fitted for (its place in SUPPLIES), and how far into its changeover it is, or −1 if none is under way; 1 if a
+   * fitted for (its Supply.id), and how far into its changeover it is, or −1 if none is under way; 1 if a
    * shadow lamp is lit, or 0 if not; and what a sheet of blotting paper shows so far (see showing), while
    * that's still coming up: none once it shows all it's going to, as none means when it's put back (see remember).
    */
@@ -2083,7 +2084,7 @@ export class Tool {
     if (this.kind === 'shadowlamp') return [+this.lit];
     if (this.kind === 'strip') return [this.soaked, 0, ...this.scorch];
     if (this.kind === 'column') return [this.soaked];
-    if (this.kind === 'receptacle') return [SUPPLIES.indexOf(this.supply), this.swap ?? -1];
+    if (this.kind === 'receptacle') return [this.supply.id, this.swap ?? -1];
     // (a sheet that shows all it's going to keeps nothing: that's how it loads)
     if (isBlotter(this.kind)) return this.developed ? undefined : [...this.showing];
     return isThermometer(this.kind) ? [this.temp, +this.broken] : undefined;
@@ -2119,7 +2120,7 @@ export class Tool {
     if (this.kind === 'column') this.soaked = Math.max(0, Math.min(1, (m as number[])[0]));
     if (this.kind === 'receptacle') {
       const [supply, swap] = m as number[];
-      this.supply = SUPPLIES[supply] ?? CRYOSTABILIZER;
+      this.supply = SUPPLIES.find((s) => s.id === supply) ?? CRYOSTABILIZER;
       this.tanks[1].cap = this.supply.cap;
       // from halfway through a changeover, it's already the next supply's, and only has to come out
       this.swap = swap >= 0 && swap < CHANGEOVER_S && (swap >= STOCKED_AT || nextSupply(this.supply)) ? swap : null;

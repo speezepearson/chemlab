@@ -1,69 +1,48 @@
 import { describe, expect, it } from 'vitest';
-import { ANTINUCLEANT, ANTINUCLEANT_L, GOAL_L, VOYAGE } from '../game/config';
+import { SUPPLIES } from '../game/supply';
 import { arrival, notice } from './notice';
 
 const text = (b: unknown) => (b && typeof b === 'object' && 'text' in b ? String(b.text) : '');
-/** The figures for the cryostabilizer, and for the antinucleant if it's still to be made. */
-const figures = (litres?: number, first?: number | null) => {
-  const pre = notice(litres, first).filter((b) => b.kind === 'pre' && b.text.includes('DEFICIT'));
-  return { cryo: text(pre.find((b) => text(b).startsWith('Cryostabilizer:'))), first: text(pre.find((b) => text(b).startsWith('Antinucleant:'))) };
-};
+/** The block of figures, a line to each thing the ship is short of. */
+const figures = (present?: number[]) => text(notice(present).find((b) => b.kind === 'pre' && b.text.includes('DEFICIT')));
 const L = (l: number) => `${l.toFixed(2)} L`;
+const title = (name: string) => `${name[0].toUpperCase()}${name.slice(1)}:`;
 
 describe('the notice in the pod', () => {
-  it("says what's left on board at first, and what must be made", () => {
-    const f = figures().cryo;
-    expect(f).toContain(`Present:  ${L(VOYAGE.presentL)}`);
-    expect(f).toContain(`DEFICIT:  ${L(GOAL_L - VOYAGE.presentL)}`);
+  it("gives a line to each thing the ship is short of, in order: what's on board of it at first, what's needed, and the deficit", () => {
+    const lines = figures().split('\n');
+    expect(lines).toHaveLength(SUPPLIES.length);
+    SUPPLIES.forEach((s, i) => {
+      expect(lines[i].startsWith(title(s.name))).toBe(true);
+      expect(lines[i]).toMatch(new RegExp(` ${L(s.startL)} / +${L(s.goalL)} +DEFICIT: +${L(s.goalL - s.startL)}$`));
+    });
   });
 
-  it('sets out each sum the same way, a line to each factor, the litres lined up', () => {
-    expect(figures().cryo.split('\n')).toEqual([
-      'Cryostabilizer:',
-      '',
-      'Required: 50.22 L  =   32,210 passengers',
-      '                     x 0.3499 uL/pass/day',
-      '                     x 4,456 days',
-      'Present:  28.10 L',
-      '',
-      'DEFICIT:  22.12 L',
-    ]);
-    expect(figures().first.split('\n')).toEqual([
-      'Antinucleant:',
-      '',
-      'Required: 9.20 L  =   32,210 passengers',
-      '                    x 0.0641 uL/pass/day',
-      '                    x 4,456 days',
-      'Present:  8.30 L',
-      '',
-      'DEFICIT:  0.90 L',
-    ]);
-    // a shorter figure is padded to line up with the others
-    expect(figures(5).cryo).toContain('Present:   5.00 L');
+  it('lines up each column, the litres right-aligned', () => {
+    const lines = figures(SUPPLIES.map((s, i) => (i === 0 ? 5 : s.startL))).split('\n');
+    const ends = (re: RegExp) => lines.map((l) => [...l.matchAll(re)].map((m) => m.index! + m[0].length));
+    // where each litres ends, and where DEFICIT starts, is the same on every line
+    expect(new Set(ends(/ L/g).map((e) => e.join()))).toHaveLength(1);
+    expect(new Set(lines.map((l) => l.indexOf('DEFICIT')))).toHaveLength(1);
+    // and the names are padded to the longest
+    const w = Math.max(...SUPPLIES.map((s) => title(s.name).length));
+    for (const l of lines) expect(l[w]).toBe(' ');
+    expect(lines[0]).toContain(' 5.00 L / ');
   });
 
-  it('puts the antinucleant first while it is still to be made, and says nothing else about it', () => {
-    const { first, cryo } = figures();
-    expect(first).toContain(`${ANTINUCLEANT.mlPerPassengerDay * 1000} uL/pass/day`);
-    expect(first).toContain(L(ANTINUCLEANT_L));
-    const all = notice().map(text);
-    expect(all.indexOf(first)).toBe(all.indexOf(cryo) - 1);
-    // with what the station's reservoir holds of it since
-    expect(figures(undefined, 9).first).toContain(`Present:  ${L(9)}`);
-    // and once there's enough, only the cryostabilizer
-    expect(figures(30, null).first).toBe('');
-    // the rest of it is the same however many problems there are: it wasn't written for this
+  it("can say what's on board since, and never that less than nothing must be made", () => {
+    const last = SUPPLIES.length - 1;
+    const goal = SUPPLIES[last].goalL;
+    const said = (l: number) => figures(SUPPLIES.map((s, i) => (i === last ? l : s.goalL))).split('\n')[last];
+    expect(said(goal - 3)).toContain(`${L(goal - 3)} / ${L(goal)}`);
+    expect(said(goal - 3)).toMatch(new RegExp(`DEFICIT: +${L(3)}$`));
+    expect(said(goal + 5)).toMatch(new RegExp(`DEFICIT: +${L(0)}$`));
+  });
+
+  it('says the same otherwise, whatever the figures: it was written for the happy path', () => {
     const rest = (bs: ReturnType<typeof notice>) => bs.map(text).filter((t) => !t.includes('DEFICIT'));
-    expect(rest(notice())).toEqual(rest(notice(30, null)));
-    expect(rest(notice()).join(' ')).not.toMatch(/antinucleant/i);
-    expect(all.some((t) => t.endsWith('following problem(s):'))).toBe(true);
-  });
-
-  it('can say what the reservoir holds since, and never that less than nothing must be made', () => {
-    const f = figures(40, null).cryo;
-    expect(f).toContain(L(40));
-    expect(f).toContain(L(GOAL_L - 40));
-    expect(figures(GOAL_L + 5, null).cryo).toContain(`DEFICIT:   ${L(0)}`);
+    expect(rest(notice())).toEqual(rest(notice(SUPPLIES.map((s) => s.goalL))));
+    expect(notice().map(text).some((t) => t.endsWith('following problem(s):'))).toBe(true);
   });
 
   it('welcomes them to Mu Ceti at the end, and says no more', () => {
