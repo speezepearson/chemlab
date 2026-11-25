@@ -3766,10 +3766,10 @@ export interface AirlockLook {
   /** Whether the crosshair is on the OK button. */
   okHot: boolean;
   /**
-   * What the message says: the notice that wakes the player, with the litres of cryostabilizer on board, and of
-   * what's to be made first, while it is (`first`, else null); or, once there's enough, the one welcoming them to Mu Ceti.
+   * What the message says: the notice that wakes the player, with the litres on board of each of SUPPLIES; or, once
+   * there's enough, the one welcoming them to Mu Ceti.
    */
-  notice: { arrival: true } | { arrival: false; litres: number; first: number | null };
+  notice: { arrival: true } | { arrival: false; litres: readonly number[] };
   /** Whether the green lamp over the doorway is lit: it flashes while the doors stand open to sleep. */
   lamp: boolean;
   /** Whether the pod is in the white void of Mu Ceti, at the end, with nothing of the lab to be seen (see ARRIVAL). */
@@ -3968,10 +3968,10 @@ class AirlockView {
   }
 
   update(a: AirlockLook): void {
-    const said = a.notice.arrival ? 'arrival' : `${a.notice.litres.toFixed(2)} ${a.notice.first?.toFixed(2)}`;
+    const said = a.notice.arrival ? 'arrival' : a.notice.litres.map((l) => l.toFixed(2)).join(' ');
     if (said !== this.said) {
       this.said = said;
-      this.setMessage(a.notice.arrival ? arrival() : notice(a.notice.litres, a.notice.first));
+      this.setMessage(a.notice.arrival ? arrival() : notice(a.notice.litres));
     }
     const l = this.last;
     if (l && l.door === a.door && l.front === a.front && l.dark === a.dark && l.message === a.message && l.okHot === a.okHot && l.lamp === a.lamp) return;

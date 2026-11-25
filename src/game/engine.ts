@@ -22,7 +22,7 @@ import { History, arrange, arrangement, type Arrangement } from './history';
 import { boxesOverlap, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
 import { DEFAULT_PRESET, LAMP_POSE, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
-import { CRYOSTABILIZER, FIRST_SUPPLY, litresOf, type Supply } from './supply';
+import { CRYOSTABILIZER, FIRST_SUPPLY, SUPPLIES, litresOf, type Supply } from './supply';
 import { shatter } from './shatter';
 import { WHEELS, wheelMove, wheelPick, type WheelAim } from './wheel';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
@@ -538,11 +538,8 @@ export class GameEngine {
    * Mu Ceti, and what follows is the end (see Wake's arriving).
    */
   private arrival = false;
-  /**
-   * What the pod's message says is on board, as of when they were put in it: the litres of cryostabilizer, and while
-   * the station is still fitted for something before it (see SUPPLIES), the litres of that; else null.
-   */
-  private podNotice: { litres: number; first: number | null } = { litres: 0, first: null };
+  /** What the pod's message says is on board, as of when they were put in it: the litres of each of SUPPLIES. */
+  private podNotice: readonly number[] = [];
   /**
    * A nap under way (see nap): how far shut the player's eyes are, 0 to 1, and whether they're waking, their eyes
    * opening again. With their eyes shut, the lab runs on as it does while they sleep in the pod (see sleeping).
@@ -4245,14 +4242,14 @@ export class GameEngine {
   }
 
   /**
-   * What's on board, for the pod's message: the litres of cryostabilizer (what the station's reservoir holds, once
-   * it's fitted for it; till then, what was left after the incident), and while the station is fitted for something
-   * before it, the litres of that in its reservoir.
+   * What's on board, for the pod's message: the litres of each of SUPPLIES, in order. Of what the station's fitted for,
+   * what its reservoir holds; of each before it, its goal, as there was enough of it; of each after it, what was left
+   * after the incident.
    */
-  private onBoard(): { litres: number; first: number | null } {
+  private onBoard(): number[] {
     const st = this.station();
-    const held = litresOf(st.tanks[1].n[st.supply.species]);
-    return st.supply === CRYOSTABILIZER ? { litres: held, first: null } : { litres: CRYOSTABILIZER.startL, first: held };
+    const at = SUPPLIES.indexOf(st.supply);
+    return SUPPLIES.map((s, i) => (i < at ? s.goalL : i > at ? s.startL : litresOf(st.tanks[1].n[s.species])));
   }
 
   /** Put the player in the pod, facing the lab, empty-handed (see emptyHanded). */
@@ -4505,7 +4502,7 @@ export class GameEngine {
       // the room's light floods in as the front slides up, and is shut out as it slides down
       dark: 1 - up,
       message: w === 'pod' || flick,
-      notice: this.arrival ? { arrival: true } : { arrival: false, ...this.podNotice },
+      notice: this.arrival ? { arrival: true } : { arrival: false, litres: this.podNotice },
       okHot: w === 'pod' && this.target?.kind === 'wake',
       // flashing while the doors stand open to sleep, a second on and half a second off, on sim time
       lamp: w === 'open' && this.clock % 1.5 < 1,
