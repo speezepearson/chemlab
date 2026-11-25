@@ -3,6 +3,7 @@ import { LOOK, resetLook, type ColorModel, type Look } from '../game/appearance'
 import { DEFAULT_FINISH, FINISH, setFinish } from '../game/finish';
 import { DEFAULT_AIM, AIM, AIM_DEG, setAim } from '../game/aim';
 import { DEFAULT_OUTLINE, MAX_OUTLINE_WIDTH, OUTLINE, setOutline } from '../game/outline';
+import { DEFAULT_FITTINGS, FITTINGS, setFittings } from '../game/fittings';
 import { DragNumber } from './DragNumber';
 
 /** The numeric settings in Look, the ones a DragNumber can edit. */
@@ -32,7 +33,8 @@ const GROUPS: Group[] = [
 /**
  * Debug panel: live-tune the temperature appearance curves and how composition looks (see game/appearance.ts), and
  * the outline round what the crosshair is on (see game/outline.ts), how shiny the lab's metal is (see game/finish.ts),
- * and how far off the crosshair what C, Q and E act on may be (see game/aim.ts).
+ * how far off the crosshair what C, Q and E act on may be (see game/aim.ts), and how the clamp stands and hoses are
+ * drawn (see game/fittings.ts).
  */
 export function AppearancePanel() {
   const [, rerender] = useReducer((x: number) => x + 1, 0);
@@ -231,6 +233,69 @@ export function AppearancePanel() {
                 </label>
               </td>
             </tr>
+            <tr className="group">
+              <td colSpan={2}>
+                <b>Stands</b> <span>only how they look: a stand not drawn still needs its counter and its room</span>
+              </td>
+            </tr>
+            <tr>
+              <td colSpan={2}>
+                <label className="tog">
+                  <input
+                    type="checkbox"
+                    aria-label="draw clamp stands"
+                    checked={FITTINGS.stands}
+                    onChange={(e) => {
+                      setFittings({ stands: e.target.checked });
+                      rerender();
+                    }}
+                  />{' '}
+                  draw them
+                </label>
+              </td>
+            </tr>
+            <tr>
+              <td colSpan={2}>
+                <label className="tog">
+                  <input
+                    type="checkbox"
+                    aria-label="full-height clamp stands"
+                    checked={FITTINGS.tall}
+                    disabled={!FITTINGS.stands}
+                    onChange={(e) => {
+                      setFittings({ tall: e.target.checked });
+                      rerender();
+                    }}
+                  />{' '}
+                  full height, or else only as high as their clamps
+                </label>
+              </td>
+            </tr>
+            <tr className="group">
+              <td colSpan={2}>
+                <b>Hoses</b> <span>how opaque a hose's tube is, 0 not drawn to 1 solid; the fluid in it shows as ever</span>
+              </td>
+            </tr>
+            <tr>
+              <td>opacity</td>
+              <td>
+                <label className="slider">
+                  <input
+                    type="range"
+                    aria-label="hose opacity"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={FITTINGS.hose}
+                    onChange={(e) => {
+                      setFittings({ hose: +e.target.value });
+                      rerender();
+                    }}
+                  />
+                  <output>{FITTINGS.hose}</output>
+                </label>
+              </td>
+            </tr>
           </tbody>
         </table>
         <p>
@@ -243,6 +308,7 @@ export function AppearancePanel() {
               setOutline({ ...DEFAULT_OUTLINE });
               setFinish({ ...DEFAULT_FINISH });
               setAim({ ...DEFAULT_AIM });
+              setFittings({ ...DEFAULT_FITTINGS });
               rerender();
             }}
           >

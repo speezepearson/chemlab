@@ -104,8 +104,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - `flask.ts` has `Vessel`, `transfer`, volume and colors.
   - `cooling.ts` is Newtonian cooling to the room; the engine works out each vessel's exposure from its flat outline.
   - `airlock.ts` is the airlock and cryopod where the player wakes: their size, collisions, and the `Wake` states.
-    `sleep.ts` is sleeping in the pod, or napping (N): the lab run in windows, measured, and jumped ahead
-    while it's steady.
+    `sleep.ts` is napping (N), or sleeping in the pod, which the airlock lets her into only once there's enough
+    cryostabilizer: the lab run in windows, measured, and jumped ahead while it's steady.
     `src/intro/notice.ts` is the messages projected inside the pod: the notice she wakes to (its litres as of then),
     and the welcome to Mu Ceti at the end.
   - `porthole.ts` is the porthole's shape, for how much of the wall it takes up.
@@ -143,7 +143,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     view goes (`gaze()`): the player's body and eyes (`player`, `eye()`) stay where they were, and so does everything
     worked out from them.
   - `supply.ts` is what the ship is short of, in the order the station is fitted for them (`SUPPLIES`): the
-    antinucleant (R–B), then the cryostabilizer.
+    IJ-buffer (R–G), the antinucleant (R–B), then the cryostabilizer. A save names each by its `id`, never by its
+    place in the list.
   - `cabinet.ts` is the equipment cabinet: its layout (each kind's slots on its shelves) and its stock, which the
     equipment wheels take from and putting away puts back into. The view draws what's in it as instanced meshes
     (`CabinetView`), so it's cheap however much it holds.
@@ -305,7 +306,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   `groundAt` don't say `LIFT` over a counter, so use what they say); its button is a part of its own for the crosshair
   (`'button'`), and it has no valves. Its screen, on the inner face of its end wall, is part of it (`SCREEN`,
   `Tool.glow`): never saved, it comes up from dark.
-- **The station is fitted for a supply** (`Tool.supply`, see `supply.ts`): the antinucleant in a new lab, the
+- **The station is fitted for a supply** (`Tool.supply`, see `supply.ts`): the IJ-buffer in a new lab, the
   cryostabilizer in a save from before there was any other. Anything about what it takes or wants goes by
   `t.supply` (its species, goal, start and reservoir's capacity), never by `TARGET` or `GOAL_TARGET`. With enough in
   its reservoir it's changed for the next (`Tool.swap`, `CHANGEOVER`, `changeoverAt`): while its block is `away`,

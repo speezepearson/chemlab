@@ -25,6 +25,7 @@ import { arrival, notice, type Block } from '../intro/notice';
 import { STATION_POSE } from './presets';
 import { litresOf, type Supply } from './supply';
 import { FINISH } from './finish';
+import { FITTINGS, SHORT_ROD } from './fittings';
 import { applyShine, boxUV, metal, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
 import {
@@ -258,9 +259,9 @@ const NOTE_Y = 13;
  * would take a wall seen at a slant for being behind its fluid, and hide a band of it whose edge jitters as the view
  * turns.
  */
-function makeGlass(lie: -1 | 0 | 1): THREE.MeshStandardMaterial {
+function makeGlass(lie: -1 | 0 | 1, side: THREE.Side = THREE.FrontSide): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({
-    color: 0xd6ecf2, transparent: true, opacity: 0.1, roughness: 0.04, metalness: 0, depthWrite: false, side: THREE.DoubleSide,
+    color: 0xd6ecf2, transparent: true, opacity: 0.1, roughness: 0.04, metalness: 0, depthWrite: false, side,
     envMapIntensity: 1.4, premultipliedAlpha: true,
     ...(lie ? { polygonOffset: true, polygonOffsetFactor: lie, polygonOffsetUnits: 4 * lie } : {}),
   });
@@ -277,8 +278,43 @@ const glassMat = makeGlass(0);
 const floorGlassMat = makeGlass(1);
 /** Glass lying right on something else (see makeGlass). */
 const baseGlassMat = makeGlass(-1);
+/**
+ * The far side of each glass (see splitGlass): the same glass, but only its faces turned away from the eye, which on
+ * a vessel are its far walls.
+ */
+const FAR_GLASS = new Map<THREE.Material, THREE.MeshStandardMaterial>(
+  ([[glassMat, 0], [floorGlassMat, 1], [baseGlassMat, -1]] as const).map(([m, lie]) => [m, makeGlass(lie, THREE.BackSide)]),
+);
 /** Every glass material, for whatever's done to all glass alike. */
-const GLASSES = [glassMat, floorGlassMat, baseGlassMat];
+const GLASSES = [glassMat, floorGlassMat, baseGlassMat, ...FAR_GLASS.values()];
+
+/**
+ * Draw the glass under `root` in two, its far side before any fluid and its near side after: each glass mesh is drawn
+ * in its near side's glass (the glass materials are made front-sided), and gets a twin as a child, in its far side's
+ * (see FAR_GLASS), drawn before everything else see-through (renderOrder −2, under a fluid's −1). So fluid in a vessel
+ * is seen over the vessel's far wall and under its near one, however clear it is. Drawn the other way, the far wall,
+ * whose reflections glass adds in full (see makeGlass), was laid over every see-through fluid, and washed out a fluid
+ * only a hair see-through, which an opaque one, drawn with what's solid, hid. The twin is picked as its original is
+ * (see `pickables`), so the crosshair and the outline find glass from either side, as before.
+ */
+function splitGlass(root: THREE.Object3D, pickables?: Map<THREE.Object3D, Pick>): void {
+  const glassy: THREE.Mesh[] = [];
+  root.traverse((o) => {
+    if (!(o instanceof THREE.Mesh) || o.userData.farGlass) return;
+    const mats: THREE.Material[] = Array.isArray(o.material) ? o.material : [o.material];
+    if (mats.some((m) => FAR_GLASS.has(m))) glassy.push(o);
+  });
+  for (const m of glassy) {
+    const far = (x: THREE.Material) => FAR_GLASS.get(x) ?? hidden;
+    const twin = new THREE.Mesh(m.geometry, Array.isArray(m.material) ? m.material.map(far) : far(m.material));
+    twin.renderOrder = -2;
+    twin.userData.farGlass = true;
+    twin.layers.mask = m.layers.mask;
+    m.add(twin);
+    const pick = pickables?.get(m);
+    if (pick) pickables!.set(twin, pick);
+  }
+}
 
 /**
  * Geometry `g` with its triangles within `near` over height `y` (a floor, and the foot of any wall curving into it)
@@ -605,13 +641,8 @@ class FluidMesh {
     }
     this.plane.constant = cut;
     shade(this.mat, f, cut);
-    const key = `${rgb.map(Math.round)}:${a.toFixed(2)}`;
-    if (key === this.key) return;
-    this.key = key;
-    // mostly its own color, lit a little so its shape reads
-    const c = new THREE.Color().setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
-    this.mat.color.copy(c).multiplyScalar(0.45);
-    this.mat.emissive.copy(c).multiplyScalar(0.6);
+    // how see-through it is, every time: a key rounding it would take 0.996 for 1, and leave a fluid that was a hair
+    // see-through drawn so once it's opaque
     this.mat.opacity = a;
     if (this.mat.transparent !== a < 1) {
       // the shader only needs rebuilding when it turns see-through, or back
@@ -619,6 +650,13 @@ class FluidMesh {
       this.mat.depthWrite = a >= 1;
       this.mat.needsUpdate = true;
     }
+    const key = `${rgb.map(Math.round)}`;
+    if (key === this.key) return;
+    this.key = key;
+    // mostly its own color, lit a little so its shape reads
+    const c = new THREE.Color().setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+    this.mat.color.copy(c).multiplyScalar(0.45);
+    this.mat.emissive.copy(c).multiplyScalar(0.6);
   }
 
   dispose(): void {
@@ -1672,6 +1710,7 @@ class FlaskView {
     this.label = new Label(this.root, new THREE.Vector3(0, NOTE_Y, 0));
     scene.add(this.root);
     pickables.set(glass, { kind: 'flask', f });
+    splitGlass(glass, pickables);
   }
 
   /** Draw it as it is now, flashing if it's in `targets` (see Frame.guides). */
@@ -1999,6 +2038,7 @@ class ToolView {
     this.body.traverse((m) => {
       if (m instanceof THREE.Mesh && !pickables.has(m) && !m.userData.bent) pick(m, 'body');
     });
+    splitGlass(this.body, pickables);
     scene.add(this.root);
   }
 
@@ -3039,6 +3079,20 @@ class HoseView {
       this.tube.geometry = new THREE.TubeGeometry(curve, 40, 3.5, 8);
       this.core.geometry = new THREE.TubeGeometry(curve, 40, 2, 6);
     }
+    // the tube as opaque as the player would have it (see FITTINGS.hose): short of solid it's see-through, and like
+    // glass casts no shadow on the shadow lamp's screen (see Exposer); solid, it does
+    const tube = this.tube.material as THREE.MeshStandardMaterial;
+    const a = FITTINGS.hose;
+    this.tube.visible = a > 0;
+    if (tube.opacity !== a) {
+      const clear = a < 1;
+      if (tube.transparent !== clear) {
+        tube.transparent = clear;
+        tube.depthWrite = !clear;
+        tube.needsUpdate = true;
+      }
+      tube.opacity = a;
+    }
     const rgb = fluid && fluid.N > 0 ? fluidRGB(fluid) : null;
     this.core.visible = !!rgb;
     if (rgb && fluid) {
@@ -3083,13 +3137,16 @@ class StandView {
     scene.add(this.group);
   }
 
-  /** Stand it with its base on a surface `y` high: its rod always STAND_ROD tall, and its clamp wherever it holds. */
+  /**
+   * Stand it with its base on a surface `y` high: its rod STAND_ROD tall, or if the player would rather (see
+   * FITTINGS.tall), only SHORT_ROD over its clamp; and its clamp wherever it holds.
+   */
   update(s: Stand, y: number): void {
     const h = STAND_BASE.h;
     this.group.position.set(s.x, 0, s.z);
     this.group.rotation.y = s.yaw;
     this.base.position.y = y + h / 2;
-    const top = y + STAND_ROD;
+    const top = FITTINGS.tall ? y + STAND_ROD : Math.max(y + h + 1, s.clampY + SHORT_ROD);
     this.rod.position.y = (y + h + top) / 2;
     this.rod.scale.set(2.4, top - y - h, 2.4);
     this.boss.position.y = s.clampY;
@@ -3176,7 +3233,7 @@ class GhostView {
     while (this.stands.length < g.stands.length) this.stands.push(new StandView(this.holder));
     this.stands.forEach((v, i) => {
       const st = g.stands[i];
-      v.group.visible = !!st;
+      v.group.visible = !!st && FITTINGS.stands;
       if (st) v.update(st.s, st.y);
     });
     this.red = !g.ok;
@@ -6040,12 +6097,15 @@ export class View {
     this.outliner.render(this.renderer, this.scene, this.camera, part);
   }
 
-  /** Every stand, its base on whatever's under it: a counter, or the floor under something held out over it. */
+  /**
+   * Every stand, its base on whatever's under it: a counter, or the floor under something held out over it; or none,
+   * if the player would rather not see them (see FITTINGS).
+   */
   private updateStands(fr: Frame): void {
     while (this.stands.length < fr.stands.length) this.stands.push(new StandView(this.scene));
     this.stands.forEach((v, i) => {
       const s = fr.stands[i];
-      v.group.visible = !!s;
+      v.group.visible = !!s && FITTINGS.stands;
       if (s) v.update(s, groundAt(s.x, s.z));
     });
   }
