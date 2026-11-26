@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { defaultChemParams } from '../chem/params';
 import { SOLVENT_SPECIES, TARGET, singleOf } from '../chem/species';
 import { Vessel } from './flask';
-import { decodeSave, encodeSave, loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
+import { decodeSave, encodeSave, loadChem, loadVessel, saveChem, saveVessel, savedAgo, type SaveState } from './save';
 
 describe('saves', () => {
   it('round-trip a vessel exactly', () => {
@@ -77,5 +77,18 @@ describe('saves', () => {
   it('reject strings that are not saves', () => {
     expect(() => decodeSave('hello')).toThrow();
     expect(() => decodeSave('{"v":2}')).toThrow();
+  });
+});
+
+describe('savedAgo', () => {
+  it('says just now for the first ten seconds, then counts seconds, minutes and hours', () => {
+    expect(savedAgo(null)).toBe('Not saved');
+    expect(savedAgo(0)).toBe('Saved just now');
+    expect(savedAgo(9_999)).toBe('Saved just now');
+    expect(savedAgo(10_000)).toBe('Saved 10 s ago');
+    expect(savedAgo(59_999)).toBe('Saved 59 s ago');
+    expect(savedAgo(60_000)).toBe('Saved 1 min ago');
+    expect(savedAgo(3_599_999)).toBe('Saved 59 min ago');
+    expect(savedAgo(7_200_000)).toBe('Saved 2 h ago');
   });
 });
