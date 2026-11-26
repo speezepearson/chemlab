@@ -145,6 +145,11 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     `Smell` in `Hud.tsx` brings the pieces up as their times come (they're on the display, not in the world). Only the
     view goes (`gaze()`): the player's body and eyes (`player`, `eye()`) stay where they were, and so does everything
     worked out from them.
+  - `heat.ts` is what she feels of a fluid's heat, pure and DOM-free: its bands (`HEAT`, `felt`, `WARM` to `FAR`) and
+    her words for them, as a smell's pieces (`sniffHeat`, `SNIFF_SAYS`, `SNIFF_OUCH`, `SNIFF_FAR`, `HEAT_PACE`). The
+    engine's `sniff` tests it as she starts (too hot to go near, she says so and doesn't lean in) and `stepSniff` again
+    at the rim (its words come first; a burn has her recoil, `SNIFF.recoil`, smelling nothing), each by `misjudge`.
+    What's there of holding hot flasks (`holdHeat`, `ENDURANCE`, `toss`, `WRECK`) isn't wired up yet.
   - `sense.ts` is Nadia's imperfect judgement (`JUDGE`, `misjudge`): whatever she senses, held up against a threshold,
     is the real thing misjudged by up to 10% either way, afresh each time, by the random source it's handed.
   - `supply.ts` is what the ship is short of, in the order the station is fitted for them (`SUPPLIES`): the

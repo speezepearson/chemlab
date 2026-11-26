@@ -9,6 +9,8 @@ import { STOCK } from './cabinet';
 import { WHEELS } from './wheel';
 import { CAP, TRACE } from './config';
 import { CRYOSTABILIZER, FIRST_SUPPLY } from './supply';
+import { HEAT, SNIFF_FAR, SNIFF_OUCH } from './heat';
+import { NOTHINGS } from './smell';
 import type { GameEngine } from './engine';
 import { Vessel, volume, type Flask } from './flask';
 import type { Scale } from './scale';
@@ -3340,5 +3342,59 @@ describe('N', () => {
   it('naps in a new lab, before anything has been delivered', () => {
     const l = lab();
     expect((l.in as unknown as { canNap(): boolean }).canNap()).toBe(true);
+  });
+});
+
+describe('sniffing something hot', () => {
+  type Said = { script: { text: string }[] } | null;
+  type Sniffing = { lean: number; leaving: boolean; recoil: boolean } | null;
+  const sniffer = (l: Lab) => l.in as unknown as { sniff(): void; stepSniff(dt: number, now: number): void; sniffing: Sniffing; smelled: Said };
+  /** A lab with a flask of solvent in hand at temperature T, judged exactly. */
+  function holding(T: number): Lab {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const l = lab();
+    holdAt(l, 'flask', { x: SPOT.x, y: LIFT + 150, z: SPOT.z, yaw: 0 });
+    const f = l.in.held!.f!;
+    f.setMolecules(SOLVENT_SPECIES, 100);
+    f.setTemperature(T);
+    return l;
+  }
+  /** Sniff, and lean in till her nose is there. */
+  function lean(l: Lab): void {
+    const s = sniffer(l);
+    s.sniff();
+    for (let i = 0; i < 20 && s.sniffing && !s.smelled; i++) s.stepSniff(0.1, 1000 * i);
+  }
+  const texts = (l: Lab) => sniffer(l).smelled!.script.map((f) => f.text);
+  afterEach(() => vi.restoreAllMocks());
+
+  it('won’t lean in to what she feels the heat of from where she stands', () => {
+    const l = holding(HEAT.far * 1.05);
+    sniffer(l).sniff();
+    expect(sniffer(l).sniffing).toBeNull();
+    expect(texts(l)).toEqual([...SNIFF_FAR]);
+  });
+
+  it('jerks back from what burns her face, smelling nothing', () => {
+    const l = holding(12);
+    lean(l);
+    const s = sniffer(l);
+    expect(texts(l)).toEqual([...SNIFF_OUCH]);
+    expect(s.sniffing).toMatchObject({ leaving: true, recoil: true });
+    // back in a fraction of the time it takes to straighten up
+    s.stepSniff(0.1, 2e5);
+    s.stepSniff(0.1, 2e5);
+    expect(s.sniffing).toBeNull();
+    expect(texts(l)).toEqual([...SNIFF_OUCH]);
+  });
+
+  it('says how warm first, and then what she smells', () => {
+    const l = holding(2);
+    lean(l);
+    const said = texts(l);
+    expect(said[0]).toBe('Kinda warm.');
+    expect(NOTHINGS).toContain(said[1]);
+    expect(said).toHaveLength(2);
+    expect(sniffer(l).sniffing!.leaving).toBe(false);
   });
 });

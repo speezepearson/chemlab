@@ -97,8 +97,8 @@ function Wheel({ wheel, engine }: { wheel: NonNullable<HudState['wheel']>; engin
 }
 
 /**
- * What the last sniff smelled of, under the crosshair: each line a strip of its own, the pieces that have come up so
- * far along it, and lines begun later under the ones before. Nothing that's up ever moves as more comes up: the block
+ * What she last said of a sniff, of its smell or its heat, under the crosshair: each line a strip of its own, the
+ * pieces that have come up so far along it, and lines begun later under the ones before. Nothing that's up ever moves as more comes up: the block
  * is as wide from the start as it'll be once it's all said (the whole of it is there unseen, for its width), its top
  * stays put, and its strips grow rightward and downward from their left ends.
  */
@@ -126,7 +126,7 @@ function Smell({ smell }: { smell: NonNullable<HudState['smell']> }) {
 /**
  * The crosshair, with hints by it for what the left button (on its left) and E (on its right) would do, or an equipment
  * wheel while it's held open; under
- * the crosshair, what the last sniff smelled of, coming up a piece at a time and then fading out; and everything
+ * the crosshair, what she last said of a sniff, coming up a piece at a time and then fading out; and everything
  * else that can be done just now, in a corner, unless `/` has hidden it.
  */
 export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; help: boolean }) {
@@ -156,7 +156,7 @@ export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; 
         </>
       )}
       {hud.note && <div className={hud.tip ? 'note tip' : 'note'}>{hud.note}</div>}
-      {/* what the last sniff smelled of: a new one comes up afresh, even if it reads the same */}
+      {/* what she last said of a sniff: a new one comes up afresh, even if it reads the same */}
       {hud.smell && <Smell key={hud.smell.n} smell={hud.smell} />}
       {help && <Actions actions={hud.actions} />}
     </>
