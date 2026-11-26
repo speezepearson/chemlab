@@ -1841,13 +1841,14 @@ function paintWreck(fluid: Fluid, rand: () => number): HTMLCanvasElement {
       return { x: d * Math.cos(th), y: d * Math.sin(th), r: r0 * between(0.08, 0.16) };
     });
     const shapes = [{ x: 0, y: 0, r: r0, w: 1 }, ...splashes.map((s) => ({ ...s, w: 0.6 }))];
-    const [r, g, b] = rgb.map((v) => Math.round(v));
+    // (a little darker than the fluid in glass: the picture isn't lit, and what it lies on is)
+    const [r, g, b] = rgb.map((v) => Math.round(0.8 * v));
     for (const s of shapes) {
       // the floor darkened where it's wet, most where the fluid's clear, and the fluid over it, as see-through as it is
       blob(s.x, s.y, s.r, s.w);
       ctx.fillStyle = `rgba(10, 14, 14, ${0.22 * (1 - alpha) + 0.05})`;
       ctx.fill();
-      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.2 + 0.68 * alpha})`;
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.2 + 0.52 * alpha})`;
       ctx.fill();
       // its pale rim
       ctx.strokeStyle = 'rgba(232, 240, 240, 0.4)';
@@ -1894,10 +1895,10 @@ function paintWreck(fluid: Fluid, rand: () => number): HTMLCanvasElement {
     [...cuts[1], [far, 34], [far, -34]],
   ];
   const spread = [
-    [-6, 1, -0.25],
-    [0, -4.5, 0.12],
-    [1.5, 4.5, -0.1],
-    [6, 0, 0.3],
+    [-6, 1, -0.15],
+    [0, -4, 0.07],
+    [1.5, 4, -0.06],
+    [5, 0, 0.18],
   ];
   pieces.forEach((region, i) => {
     const [dx, dy, rot] = spread[i];
@@ -1923,7 +1924,9 @@ function paintWreck(fluid: Fluid, rand: () => number): HTMLCanvasElement {
     ctx.stroke();
     ctx.fillStyle = 'rgba(236, 248, 252, 0.7)';
     ctx.fillRect(-FLASK_H / 2 - 1.2, -12.5, 2.4, 25);
-    // the broken edge, bright
+    // the broken edge, bright, where it crosses the glass
+    outline();
+    ctx.clip();
     ctx.beginPath();
     region.forEach(([x, y], j) => (j ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
     ctx.closePath();
@@ -4474,10 +4477,10 @@ function mittShape(): THREE.Shape {
 
 /**
  * The heat-proof mitts, on the outer face of the equipment cabinet's right end, a pace in from its front (past the
- * back counter, so nothing stands in front of them), at chest height: a small steel hook on a plate, and a pair of
- * padded mitts hanging from it by loops at their cuffs, quilted gray-tan with darker cuffs, the near one overlapping
- * the far a little, each a little askew. Worn, the mitts are neither drawn nor hit, and the bare hook is what's
- * clicked to hang them back up. Hook, plate and mitts are all one thing for the crosshair (`{ kind: 'mitts' }`); none of
+ * back counter, so nothing stands in front of them), at chest height: two small steel hooks on a plate, and a pair
+ * of padded mitts hanging from them by loops at their cuffs, quilted gray-tan with darker cuffs, the near one overlapping
+ * the far a little, each a little askew. Worn, the mitts are neither drawn nor hit, and the bare hooks are what's
+ * clicked to hang them back up. Hooks, plate and mitts are all one thing for the crosshair (`{ kind: 'mitts' }`); none of
  * it is in anything's way, flat against the cabinet.
  */
 class MittsView {
@@ -4494,43 +4497,48 @@ class MittsView {
       pickables.set(m, { kind: 'mitts' });
       return m;
     };
-    // the plate, and the hook out from it, turning up at its end
+    // the plate, and two hooks out from it, each turning up at its end, the right one longer, so the mitt on it hangs
+    // over the left one's a little
     const TOP = 610;
-    const HOOK_Y = TOP - 16;
+    const HOOK_Y = TOP - 11;
     const steel = metal(new THREE.MeshStandardMaterial({ color: 0xa3aba8, metalness: 0.85, roughness: 0.32 }));
-    const plate = pick(new THREE.Mesh(new RoundedBoxGeometry(26, 34, 3, 2, 1.2), steel));
-    plate.position.set(0, TOP - 17, 1.5);
-    const arm = pick(new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.7, 30, 12).rotateX(Math.PI / 2), steel));
-    arm.position.set(0, HOOK_Y, 3 + 15);
-    const tip = pick(new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.7, 8, 12), steel));
-    tip.position.set(0, HOOK_Y + 3.5, 33);
-    const knob = pick(new THREE.Mesh(new THREE.SphereGeometry(2.3, 12, 8), steel));
-    knob.position.set(0, HOOK_Y + 7.5, 33);
-    g.add(plate, arm, tip, knob);
+    const plate = pick(new THREE.Mesh(new RoundedBoxGeometry(62, 22, 3, 2, 1.2), steel));
+    plate.position.set(0, TOP - 11, 1.5);
+    g.add(plate);
+    // (each mitt: where its hook is across the plate, how far out it hangs, how askew, and which hand it is)
+    const MITTS = [
+      { x: -15, z: 8, lean: -0.05, hand: -1 },
+      { x: 15, z: 21, lean: 0.08, hand: 1 },
+    ];
+    for (const { x, z } of MITTS) {
+      const reach = z + 4;
+      const arm = pick(new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, reach - 3, 12).rotateX(Math.PI / 2), steel));
+      arm.position.set(x, HOOK_Y, (3 + reach) / 2);
+      const tip = pick(new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 7, 12), steel));
+      tip.position.set(x, HOOK_Y + 3, reach);
+      const knob = pick(new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 8), steel));
+      knob.position.set(x, HOOK_Y + 6.5, reach);
+      g.add(arm, tip, knob);
+    }
 
-    // the mitts, each hanging from its loop on the hook
+    // the mitts, each hanging from its loop on its hook
     const cloth = new THREE.MeshStandardMaterial({ map: quiltTexture(false), bumpMap: quiltTexture(true), bumpScale: 1.5, roughness: 0.95, metalness: 0 });
     const cuffMat = new THREE.MeshStandardMaterial({ color: 0x5a4f44, roughness: 0.9, metalness: 0 });
     const loopMat = new THREE.MeshStandardMaterial({ color: 0x3e3730, roughness: 0.85, metalness: 0 });
-    const body = new THREE.ExtrudeGeometry(mittShape(), { depth: 9, bevelEnabled: true, bevelThickness: 3, bevelSize: 2.5, bevelSegments: 3, curveSegments: 18 });
-    body.translate(0, -8, -4.5);
-    const cuff = new RoundedBoxGeometry(46, 22, 19, 3, 4);
-    cuff.translate(0, -8 - 9, 0);
+    const body = new THREE.ExtrudeGeometry(mittShape(), { depth: 7, bevelEnabled: true, bevelThickness: 2.5, bevelSize: 2.5, bevelSegments: 3, curveSegments: 18 });
+    body.translate(0, -8, -3.5);
+    // (over the top of the mitt, bevel and all)
+    const cuff = new RoundedBoxGeometry(46, 23, 14, 3, 5);
+    cuff.translate(0, -15.5, 0);
     const loop = new THREE.TorusGeometry(5, 1.1, 8, 20);
-    // the far one, against the plate, and the near one, a left hand to the far's right, a little over and in front
-    for (const [x, z, lean, hand] of [[-5, 13, 0.07, 1], [6, 30, -0.09, -1]]) {
+    for (const { x, z, lean, hand } of MITTS) {
       const m = new THREE.Group();
-      // (hung from where its loop meets the hook)
-      m.position.set(x * 0.2, HOOK_Y - 1.5, z);
+      // (hung from where its loop meets its hook)
+      m.position.set(x, HOOK_Y - 1.5, z);
       m.rotation.z = lean;
       const b = pick(new THREE.Mesh(body, cloth));
-      b.position.x = x * 0.8;
       b.scale.x = hand;
-      const c = pick(new THREE.Mesh(cuff, cuffMat));
-      c.position.x = x * 0.8;
-      const l = pick(new THREE.Mesh(loop, loopMat));
-      l.position.y = 0;
-      m.add(b, c, l);
+      m.add(b, pick(new THREE.Mesh(cuff, cuffMat)), pick(new THREE.Mesh(loop, loopMat)));
       this.pair.add(m);
     }
     g.add(this.pair);
