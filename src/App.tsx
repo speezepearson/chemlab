@@ -8,6 +8,7 @@ import { FlaskEditor } from './components/FlaskEditor';
 import { Hud, StartHint } from './components/Hud';
 import { LabelEditor } from './components/LabelEditor';
 import { Ending, SleepScreen } from './components/Sleep';
+import { SaveStatus } from './components/SaveStatus';
 import { SoundPanel } from './components/SoundPanel';
 import { Intro } from './components/Intro';
 import { InfoPanel } from './components/InfoPanel';
@@ -113,6 +114,8 @@ export function App() {
     // for checks in a browser (see CLAUDE.md)
     if (import.meta.env.DEV) (window as unknown as { lab?: GameEngine }).lab = e;
     const save = () => storeSave(e.snapshot());
+    // at once, too, so the header's note of when it was saved has something to say from the start
+    save();
     const timer = setInterval(save, AUTOSAVE_MS);
     window.addEventListener('pagehide', save);
     return () => {
@@ -178,6 +181,7 @@ export function App() {
             <input type="checkbox" checked={god} onChange={(e) => setGod(e.target.checked)} /> god mode
           </label>
           <button onClick={reset}>Reset</button>
+          <SaveStatus />
           <button onClick={exportSave} title="Copy a string holding this whole setup">
             {copied ? 'Copied!' : 'Export'}
           </button>

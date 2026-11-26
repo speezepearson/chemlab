@@ -213,12 +213,29 @@ export function decodeSave(text: string): SaveState {
 
 const KEY = 'chemlab.save';
 
+/** When the lab was last written to local storage (`Date.now()`), and why the latest try failed, if it did. */
+export const stored: { at: number | null; error: string | null } = { at: null, error: null };
+
 export function storeSave(s: SaveState): void {
   try {
     localStorage.setItem(KEY, JSON.stringify(s));
-  } catch {
-    // storage full or blocked: the bench just won't survive a refresh
+    stored.at = Date.now();
+    stored.error = null;
+  } catch (e) {
+    // storage full or blocked: the bench just won't survive a refresh, and the header's "Saved ... ago" says so
+    stored.error = e instanceof Error ? e.message || e.name : String(e);
   }
+}
+
+/** The header's note of how long ago the lab was last saved, `ms` after it was (null: never). */
+export function savedAgo(ms: number | null): string {
+  if (ms === null) return 'Not saved';
+  const s = Math.floor(ms / 1000);
+  if (s < 10) return 'Saved just now';
+  if (s < 60) return `Saved ${s} s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `Saved ${m} min ago`;
+  return `Saved ${Math.floor(m / 60)} h ago`;
 }
 
 export function storedSave(): SaveState | null {
