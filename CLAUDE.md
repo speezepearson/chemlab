@@ -139,11 +139,14 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     (`script`): pieces of text, each with the real seconds it waits before coming up, and whether it starts a new line,
     put together from a phrasing for each smell's band (`LEADS`, `FOLLOWS`) and one of its odorant's similes, both
     picked by the random source it's handed (`Math.random` in the engine, a dealt or seeded one in tests).
-    It goes by the fluid alone: there's no state, so the same fluid always smells the same. The engine's
+    It goes by the fluid and her judgement alone: there's no state, and with no random source `smell` is exact, but
+    the engine hands it one, so each odorant's strength is misjudged a little afresh at every sniff (see sense.ts). The engine's
     `sniff` leans the view in to the vessel's rim and back (`sniffing`, `rimGaze`, `stepSniff`), in real time, and
     `Smell` in `Hud.tsx` brings the pieces up as their times come (they're on the display, not in the world). Only the
     view goes (`gaze()`): the player's body and eyes (`player`, `eye()`) stay where they were, and so does everything
     worked out from them.
+  - `sense.ts` is Nadia's imperfect judgement (`JUDGE`, `misjudge`): whatever she senses, held up against a threshold,
+    is the real thing misjudged by up to 10% either way, afresh each time, by the random source it's handed.
   - `supply.ts` is what the ship is short of, in the order the station is fitted for them (`SUPPLIES`): the
     IJ-buffer (R–G), the antinucleant (R–B), then the cryostabilizer. A save names each by its `id`, never by its
     place in the list.

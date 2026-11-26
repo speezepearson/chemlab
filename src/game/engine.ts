@@ -2719,7 +2719,7 @@ export class GameEngine {
    * F: sniff what's in the vessel the crosshair is on, or in the flask in hand (see sniffAim). Her head leans in until
    * her nose is just over the vessel's rim, the view going with it to look down into its mouth (see rimGaze); or the
    * flask in her hand is brought up under her nose (see noseGaze). There she smells what's in it, as it is just then, by
-   * what it's made of and how warm it is, and says what she makes of it, a piece at a time (see stepSniff); a beat
+   * what it's made of and how warm it is, as she judges it (see smell), and says what she makes of it, a piece at a time (see stepSniff); a beat
    * after the last of it she straightens up again, the view going back to just where it was. Until it's back she neither walks nor looks around, and her hands do nothing: only F,
    * or letting go of the mouse, cuts it short (see endSniff). It's her own doing, like her eyes closing for a nap, so
    * it all goes in real time, and works while the lab's paused; the lab runs on under it as ever. Only the view moves:
@@ -2787,7 +2787,7 @@ export class GameEngine {
     }
     if (s.lean < 1) return;
     if (s.until === null) {
-      const says = script(smell(s.v.n, temperature(s.v)));
+      const says = script(smell(s.v.n, temperature(s.v), Math.random));
       const last = now + 1000 * span(says);
       this.smelled = { script: says, n: ++this.sniffs, from: now, cut: null, until: last + SMELL_MS };
       s.until = last + 1000 * SNIFF.beat;

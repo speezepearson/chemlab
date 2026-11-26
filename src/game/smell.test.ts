@@ -246,7 +246,7 @@ describe('mask', () => {
   });
 });
 
-describe('a second sniff', () => {
+describe('a second sniff, judged exactly', () => {
   it('of the same fluid smells the same, whatever was sniffed in between', () => {
     const n = mix({ K: 2.5, 'G–K': 1.5 });
     const first = smell(n);
@@ -255,6 +255,65 @@ describe('a second sniff', () => {
     smell(mix({ 'B–K': 4.4 }));
     smell(fluid({}));
     expect(smell(n)).toEqual(first);
+  });
+});
+
+describe('her judgement', () => {
+  /** A random source that always gives r, counting how many times it's asked. */
+  const always = (r: number) => {
+    const rand = () => (rand.draws++, r);
+    rand.draws = 0;
+    return rand;
+  };
+  /** As high and as low as she can misjudge something. */
+  const UP = 1 - 1e-9;
+  const DOWN = 0;
+  /** The level of a strength. */
+  const at = (strength: number) => levelOf(strength);
+
+  it('smells what’s just under its threshold when she misjudges it up, and misses what’s just over when she misjudges it down', () => {
+    for (const o of [named('K'), named('R–G')]) {
+      const under = fluid({ [o.species]: shareAt(o, at(0.97)) });
+      expect(smell(under)).toEqual([]);
+      expect(species(smell(under, 1, always(UP)))).toEqual([o.species]);
+      expect(smell(under, 1, always(0.5))).toEqual([]);
+      const over = fluid({ [o.species]: shareAt(o, at(1.03)) });
+      expect(species(smell(over))).toEqual([o.species]);
+      expect(smell(over, 1, always(DOWN))).toEqual([]);
+      expect(species(smell(over, 1, always(0.5)))).toEqual([o.species]);
+    }
+  });
+
+  it('puts what’s right at a band’s edge in either band', () => {
+    const n = mix({ 'G–K': 2 + 0.02 });
+    expect(bands(smell(n))).toEqual([['G–K', 2]]);
+    expect(bands(smell(n, 1, always(DOWN)))).toEqual([['G–K', 1]]);
+    expect(bands(smell(n, 1, always(UP)))).toEqual([['G–K', 2]]);
+  });
+
+  it('smells what’s well clear of a threshold and a band’s edge the same, however she judges it', () => {
+    const n = mix({ K: 2.5, 'G–K': 1.5 });
+    const exact = bands(smell(n));
+    expect(exact).toEqual([['K', 2], ['G–K', 1]]);
+    for (const r of [DOWN, 0.1, 0.3, 0.5, 0.7, 0.9, UP]) expect(bands(smell(n, 1, always(r)))).toEqual(exact);
+  });
+
+  it('judges each odorant once, every one of them, whether it’s there or not', () => {
+    for (const n of [mix({ K: 2.5 }), mix({ K: 2.5, 'G–K': 1.5, R: 0.5 }), fluid({}), new Float64Array(NS)]) {
+      const rand = always(0.5);
+      smell(n, 1, rand);
+      expect(rand.draws).toBe(ODORANTS.length);
+    }
+    // in the order of ODORANTS: misjudging only one's down, by its draw, loses that one, and only it
+    const n = mix({ R: 0.01, K: 0.01 });
+    expect(species(smell(n)).sort()).toEqual(['K', 'R']);
+    expect(smell(n, 1, () => DOWN)).toEqual([]);
+    const down = (species: string) => {
+      let k = 0;
+      return () => (k++ === ODORANTS.indexOf(named(species)) ? DOWN : 0.5);
+    };
+    expect(species(smell(n, 1, down('K')))).toEqual(['R']);
+    expect(species(smell(n, 1, down('R')))).toEqual(['K']);
   });
 });
 
