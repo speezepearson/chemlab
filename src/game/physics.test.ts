@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boxesOverlap, cylinderHitsBox, roomBoxes, segmentHitsBox, walk, type Box } from './physics';
+import { boxesOverlap, cylinderHitsBox, mayMeet, roomBoxes, segmentHitsBox, walk, type Box } from './physics';
 
 const box = (x: number, z: number, hx = 10, hz = 10, yaw = 0, y = 0, hy = 10): Box => ({ x, y, z, yaw, hx, hy, hz });
 
@@ -107,5 +107,28 @@ describe('round boxes and parts', () => {
     const turned = { ...t, parts: [{ x: 30, y: 0, z: 0, hx: 5, hy: 20, hz: 5 }], yaw: Math.PI / 2 };
     expect(boxesOverlap(turned, box(0, -30, 3, 3))).toBe(true);
     expect(boxesOverlap(turned, box(30, 0, 3, 3))).toBe(false);
+  });
+});
+
+describe('mayMeet', () => {
+  it('passes every box that a ball swept along a line touches, and leaves out ones well clear of it', () => {
+    const a = { x: 0, y: 0, z: 0 };
+    const b = { x: 100, y: 0, z: 0 };
+    // (a 10-box's ball is about 17.3 in radius)
+    expect(mayMeet(box(50, 20), a, b, 5)).toBe(true);
+    expect(mayMeet(box(50, 30), a, b, 5)).toBe(false);
+    // past the line's ends, by how far from the end
+    expect(mayMeet(box(120, 0), a, b, 5)).toBe(true);
+    expect(mayMeet(box(-30, 0), a, b, 5)).toBe(false);
+    // a line that's a point
+    expect(mayMeet(box(0, 20), a, a, 5)).toBe(true);
+    // never leaving out a box that a box swept along the line overlaps, turned or not
+    for (let i = 0; i < 200; i++) {
+      const o = box(Math.sin(i) * 80 + 50, Math.cos(i * 1.7) * 60, 5 + (i % 7), 3 + (i % 5), i, Math.sin(i * 0.3) * 30, 4 + (i % 3));
+      for (let t = 0; t <= 1; t += 0.05) {
+        const m = box(100 * t, 0, 8, 8, 0, 0, 8);
+        if (boxesOverlap(m, o)) expect(mayMeet(o, a, b, Math.hypot(8, 8, 8))).toBe(true);
+      }
+    }
   });
 });

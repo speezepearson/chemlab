@@ -90,8 +90,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     one place (`settleAngle`, through `valveAngle`; a stopcock's angle lives on its `Cock`). It also has a stopcock's
     shape (`STOPCOCK`, `COCK_EXTENT`, `cockBox`, `cockParts`) and where a spout's tip is (`spoutTip`) as against where
     fluid leaves it (`spoutAt`, the foot of a stopcock at its tip).
-  - `physics.ts` is the collisions: yawed boxes, the player's cylinder and `walk`. What's held collides with nothing; only
-    where it would be set down is checked (the engine's `placement` and `rest`). What stands on stands and a scale
+  - `physics.ts` is the collisions: yawed boxes, the player's cylinder and `walk`. What's held is kept out of everything
+    by being brought in toward the eyes along the line it's held on (the engine's `reach` and `carry`, `Held.at` against
+    `Held.dist`), never past `walls()`; where even as near as it can be held it'd be in something, the player's walking
+    and looking is stopped instead (`budge`). Where it would be set down is checked separately (`placement` and `rest`). What stands on stands and a scale
     are moved by a ghost (`Held.ghost`, set for whatever `ghostly` says, as it's taken; flasks, dippers, blotters
     and hoses' nozzles are carried in hand): the thing itself stays in the lab where it was, running and solid to the player, though
     not aimed at (`heldObject`) nor in the way of its own move, while `heldPose`/`placeHeld` work on the ghost's pose. Code that
