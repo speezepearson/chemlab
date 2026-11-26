@@ -31,8 +31,8 @@ import type { Tool } from './tools';
  * A vessel that nothing drains (a flask, the reservoir, a tank with its spouts shut) feeds nothing back, so each of its
  * components with a clear drift, confirmed, is applied on its own, at its rate pooled over every window since it last
  * changed course: its rate is what's extrapolated furthest (the reservoir's, all the way to the goal), so it has to be
- * known to within `precision` before a long jump. And once any of its components is followed, so is every other with
- * a clear drift, however slow, since a drift that matters for a trace doesn't for what it's being made into, of which
+ * known to within `precision` before a long jump. And once any of its components is followed, so is every species
+ * in it with a clear drift, however slow, since a drift that matters for a trace doesn't for what it's being made into, of which
  * there's a thousand times as much, and following one without the other would make atoms or lose them. A species
  * running out in it loses no more than eps of itself in a jump. Its rate's changed course once a window's rate is clearly changing since
  * the last, or is off the mean of those pooled by more than that window's own noise allows: so a delivery that's
@@ -354,18 +354,21 @@ function plan(
         stats[species].r > 0 &&
         SPECIES[species].atomIdx.every((a) => stats[ELEMENT + a].r > 0 && significant(stats[ELEMENT + a], z));
       const leads = (c: number) => (c === species && delivered ? significant(stats[c], z) : drifting(c, stats[c]));
-      // and once anything in it is followed, so is all else in it with a clear drift, however slow: what's made in it
-      // is made of something in it, of which there may be so much more, or less, that the same drift matters for
-      // the one and not for the other; and following only one of them would make atoms, or lose them
+      // and once anything in it is followed, so is every other species in it with a clear drift, however slow: what's
+      // made in it is made of something in it, of which there may be so much more, or less, that the same drift
+      // matters for the one and not for the other; and following only one of them would make atoms, or lose them.
+      // Such a species goes along as it's going in this window: it needn't be confirmed, and that so slow a rate is
+      // changing (the tail of something settling) holds no jump back
       let any = false;
       for (let c = 0; c <= HEAT && !any; c++) any = leads(c);
       for (let c = 0; c <= HEAT; c++) {
-        if (!any || !significant(stats[c], z)) continue;
-        if (!confirmed(c)) {
-          if (leads(c)) limit(0);
+        const lead = leads(c);
+        if (!lead && !(any && c < NS && significant(stats[c], z))) continue;
+        if (lead && !confirmed(c)) {
+          limit(0);
           continue;
         }
-        steadyRate(c, stats[c].r);
+        if (lead) steadyRate(c, stats[c].r);
         // the rate pooled over every window since it changed course (see the pool, above); and until it's known to
         // within `precision` of itself, no further than leaves what's added uncertain by more than that share of
         // what's there then (but if it's clearly changing since the last window, the rate's moving: start the pool
