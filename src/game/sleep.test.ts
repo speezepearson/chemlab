@@ -223,6 +223,31 @@ describe('sleep', () => {
     expect(Math.abs(ref.n[parts[0]] / left - 1)).toBeLessThan(0.1);
   });
 
+  it("doesn't jump a supply away while it reaches the reservoir a drop at a time", () => {
+    // a tank lets out steadily into a drop hanging from its spout, which falls into the reservoir once it's big
+    // enough, every five sim s or so: too seldom for a window to tell how fast the reservoir is filling
+    const [supply, rate, drop] = [1e10, 2e5, 1e6];
+    const { l, tank, station, now } = lab(supply, (_, dt) => rate * dt, 0);
+    const ref = station.tanks[1];
+    let hanging = 0;
+    l.advance = (dt) => {
+      const m = Math.min(tank.n[TARGET], roundRandom(rate * dt));
+      tank.setMolecules(TARGET, tank.n[TARGET] - m);
+      hanging += m;
+      if (hanging >= drop) {
+        ref.setMolecules(TARGET, ref.n[TARGET] + hanging);
+        hanging = 0;
+      }
+      l.skip(dt);
+    };
+    const it = sleep(l, { plain: 0, jumped: 0, jumps: 0 }, true);
+    for (let i = 0; i < 8000; i++) expect(it.next().done).toBe(false);
+    // whatever left the tank reached the reservoir, or hangs from the spout: no jump took it out of the one without
+    // putting it in the other
+    expect(tank.n[TARGET] + hanging + ref.n[TARGET]).toBe(supply);
+    expect(ref.n[TARGET]).toBeGreaterThan(0.9 * rate * now());
+  });
+
   it("doesn't take a stray drop for a delivery still coming in", () => {
     // nothing's delivered, and what's in the reservoir is coming apart, a clump at a time, fast enough to follow; and
     // in the middle of a window (after `at` sim s run as ever, jumps aside), one big drop of it lands, as the last

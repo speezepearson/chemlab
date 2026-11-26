@@ -56,6 +56,9 @@ import type { Tool } from './tools';
  *  - no vessel reaches its brim within it, nor within half a window after;
  *  - the reservoir goes no further than the goal (if it's short of it), nor, asleep in the pod, past where it fills
  *    slower than the passengers use it up.
+ * And there's no jump at all while anything is coming into a vessel nothing drains that no rate followed accounts
+ * for, nor for `quiet` windows after: a drop at a time, too seldom to tell how fast in a window, while the tank it
+ * drips from drains steadily, and would be jumped on with nowhere for what it lost to have gone.
  * After a jump, the lab runs `settle` sim seconds unmeasured, for whatever the jump knocked out of balance (fast
  * reactions and their reverses) to settle, so the next window doesn't mistake its relaxing for a drift. Anything
  * significant but unconfirmed means no jump yet. A drift too slow to matter (see SLEEP.matter) isn't followed at all,
@@ -98,6 +101,11 @@ export const SLEEP = {
   precision: 0.01,
   /** Sim seconds run, unmeasured, after a jump before the next window, for what the jump knocked off balance to settle. */
   settle: 5,
+  /**
+   * How many windows on end must go by with nothing coming into a vessel that no rate followed accounts for (a drop
+   * at a time, too seldom for a window to say how fast), before there's a jump.
+   */
+  quiet: 5,
   /** Jumps shorter than this many windows aren't worth it: just run on. */
   minJump: 1,
   /** Sim seconds over which the reservoir must gain at least what the passengers use up (SUSTAIN), or the sleeper wakes. */
@@ -149,10 +157,12 @@ interface Track {
  * What a vessel's windows showed, per component: the last window's rate and standard error, and the windows so far
  * pooled, weighting each by SLEEP.memory to the power of its age: the weighted count of increments, the sum of the
  * squared weights, and the weighted sum and sum of squares of the increments. Plus the sim time of the last
- * window's middle.
+ * window's middle, and how many windows on end, this one among them, nothing has come into it unaccounted for (see
+ * SLEEP.quiet).
  */
 interface Seen {
   t: number;
+  quiet: number;
   r: Float64Array;
   se: Float64Array;
   n: Float64Array;
@@ -242,6 +252,7 @@ function plan(
     const mem = tr.terminal ? 1 : memory;
     const now: Seen = {
       t,
+      quiet: Infinity,
       r: new Float64Array(COMPONENTS),
       se: new Float64Array(COMPONENTS),
       n: new Float64Array(COMPONENTS),
@@ -387,6 +398,18 @@ function plan(
         const scale = c === HEAT ? Math.max(ss[K], 0.05) : Math.max(ss[K], SLEEP.shareFloor);
         limit((eps * scale) / Math.abs(q.r));
       }
+    }
+
+    // what's come into a vessel nothing drains, through this window, that the rates followed don't account for the
+    // half of: drops too far apart for a window to say how fast they come. Whatever they're dripping from is likely
+    // followed, draining as steadily as it is, and a jump would take it from there and put it nowhere: so none, till
+    // they've stopped for a while. (Nothing made in it changes how many atoms it holds, so this is what's come in)
+    if (tr.terminal) {
+      const came = N - atoms(tr.xs[0]);
+      let accounted = 0;
+      for (let s = 0; s < NS; s++) accounted += out[s] * SPECIES[s].size * W;
+      now.quiet = came > SLEEP.matter * Math.max(N, 1000) && accounted < came / 2 ? 0 : (was?.quiet ?? Infinity) + 1;
+      if (now.quiet < SLEEP.quiet) limit(0);
     }
 
     // its brim: stop half a window short of it, so it's reached in a window (one already at its brim is overflowing
