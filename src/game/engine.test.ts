@@ -9,7 +9,7 @@ import { STOCK } from './cabinet';
 import { WHEELS } from './wheel';
 import { CAP, TRACE } from './config';
 import { CRYOSTABILIZER, FIRST_SUPPLY } from './supply';
-import { HEAT, SNIFF_FAR, SNIFF_OUCH } from './heat';
+import { ENDURANCE, HEAT, HOLD_FAR, HOLD_OUCH, SNIFF_FAR, SNIFF_OUCH, WRECK, ouches } from './heat';
 import { NOTHINGS } from './smell';
 import type { GameEngine } from './engine';
 import { Vessel, volume, type Flask } from './flask';
@@ -61,7 +61,7 @@ vi.mock('./water', () => ({ WaterSounds: class { update(): void {} stop(): void 
 vi.mock('./diverter', () => ({ diverter: quiet }));
 vi.mock('./changeover', () => ({ changeover: quiet }));
 vi.mock('./chime', () => ({ chime() {} }));
-vi.mock('./shatter', () => ({ shatter() {} }));
+vi.mock('./shatter', () => ({ shatter() {}, smash() {} }));
 vi.mock('./ambience', () => ({ hushAlarms() {} }));
 
 /** The engine's own things, which these tests reach into. */
@@ -3396,5 +3396,173 @@ describe('sniffing something hot', () => {
     expect(NOTHINGS).toContain(said[1]);
     expect(said).toHaveLength(2);
     expect(sniffer(l).sniffing!.leaving).toBe(false);
+  });
+});
+
+describe('a flask’s heat in her hands', () => {
+  type Said = { script: { text: string }[]; cut: number | null } | null;
+  interface Hot {
+    flasks: Flask[];
+    held: { kind: string; f?: Flask; judge?: number } | null;
+    smelled: Said;
+    endurance: number;
+    dropped: { f: Flask; vy: number }[];
+    wrecks: { at: { x: number; y: number; z: number }; fluid: Flask; age: number }[];
+    history: { undos: unknown[]; before: unknown };
+    stepHeat(dt: number, now: number): void;
+    holdInPlace(h: unknown): void;
+    placeHeld(h: unknown, p: Tool['pose']): void;
+  }
+  const hot = (l: Lab) => l.in as unknown as Hot;
+  const texts = (l: Lab) => hot(l).smelled?.script.map((f) => f.text) ?? null;
+  /** Where the player stands to pick up a flask at SPOT: in front of it, facing it, out over the floor. */
+  const STAND = { x: SPOT.x, z: SPOT.z + 400 };
+  /** Over the floor, between the first island and the next, in front of the player. */
+  const FLOOR = { x: SPOT.x, y: 600, z: SPOT.z + 240, yaw: 0 };
+  /**
+   * A lab with a flask standing on the counter at SPOT, `full` of its capacity of one species at temperature T, judged
+   * exactly; the player standing in front of it with the crosshair on it.
+   */
+  function standing(T: number, full = 0.9): { l: Lab; f: Flask } {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const l = lab();
+    holdAt(l, 'flask', { x: SPOT.x, y: LIFT + 160, z: SPOT.z, yaw: 0 });
+    const f = hands(l).held!.f!;
+    l.in.release();
+    expect(l.in.held).toBeNull();
+    f.setMolecules(singleOf('G'), full * CAP);
+    f.setTemperature(T);
+    l.e.debug({ ...STAND, yaw: 0, pitch: -0.3 });
+    l.in.target = { kind: 'flask', f };
+    return { l, f };
+  }
+  /** Pick up what the crosshair's on. */
+  const take = (l: Lab) => l.in.grabOrRelease(false);
+  /** Her hands, for `s` real seconds in steps of `dt`, from real time `t0` ms; returns how long until she let go, if she did. */
+  function feel(l: Lab, s: number, dt = 0.05, t0 = 0): number | null {
+    for (let i = 0; i * dt < s - 1e-9; i++) {
+      const had = l.in.held;
+      hot(l).stepHeat(dt, t0 + 1000 * i * dt);
+      if (had && !l.in.held) return (i + 1) * dt;
+    }
+    return null;
+  }
+  afterEach(() => vi.restoreAllMocks());
+
+  it('says how warm a flask more than half full is as she picks it up', () => {
+    for (const [T, says] of [[2, 'Kinda warm.'], [4, 'Quite warm.'], [6, 'Yikes, hot.']] as const) {
+      const { l, f } = standing(T);
+      take(l);
+      expect(l.in.held?.f).toBe(f);
+      expect(hot(l).held!.judge).toBe(1);
+      expect(texts(l)).toEqual([says]);
+    }
+  });
+
+  it('won’t pick up what she feels the heat of from where she stands, and leaves no step to undo', () => {
+    const { l, f } = standing(HEAT.far + 1);
+    const at = { ...f.pose };
+    const undos = hot(l).history.undos.length;
+    take(l);
+    expect(l.in.held).toBeNull();
+    expect(f.pose).toEqual(at);
+    expect(hot(l).flasks).toContain(f);
+    expect(hot(l).history.undos.length).toBe(undos);
+    expect(hot(l).history.before).toBeNull();
+    expect(texts(l)).toEqual([...HOLD_FAR]);
+  });
+
+  it('feels nothing of a flask half full or less, however hot', () => {
+    const { l, f } = standing(HEAT.far + 1, 0.5);
+    take(l);
+    expect(l.in.held?.f).toBe(f);
+    expect(texts(l)).toBeNull();
+    expect(feel(l, 20)).toBeNull();
+    expect(hot(l).endurance).toBe(1);
+  });
+
+  it('burns her, her ows coming up as her endurance goes, until she sets it down on the counter under it', () => {
+    const { l, f } = standing(12);
+    const n = volume(f);
+    take(l);
+    // nothing yet: the burn says it
+    expect(texts(l)).toBeNull();
+    const seen: number[] = [];
+    let let_go: number | null = null;
+    for (let i = 0; i < 200 && l.in.held; i++) {
+      hot(l).stepHeat(0.05, 50 * i);
+      if (!l.in.held) {
+        let_go = (i + 1) * 0.05;
+        break;
+      }
+      expect(texts(l)).toEqual([...HOLD_OUCH]);
+      expect(hot(l).smelled!.cut).toBe(ouches(hot(l).endurance));
+      if (seen[seen.length - 1] !== hot(l).smelled!.cut) seen.push(hot(l).smelled!.cut!);
+    }
+    // each piece in turn
+    expect(seen).toEqual(HOLD_OUCH.map((_, i) => i + 1));
+    expect(let_go).toBeCloseTo((ENDURANCE.hold * HEAT.burn) / 12, 1);
+    // standing on the counter, upright and still full
+    expect(hot(l).flasks).toContain(f);
+    expect(f.pose.y).toBeCloseTo(LIFT + FLASK_H, 6);
+    expect(f.tilt).toBe(0);
+    expect(volume(f)).toBe(n);
+    // and what she said of it fades
+    expect(hot(l).smelled!.cut).toBe(HOLD_OUCH.length);
+    hot(l).stepHeat(0.05, 1e6);
+    expect(Number.isFinite((hot(l).smelled as unknown as { until: number }).until)).toBe(true);
+  });
+
+  it('drops one held over the floor, which smashes, and is gone; undoing brings it back empty', () => {
+    const { l, f } = standing(12);
+    const from = { ...f.pose };
+    const n = volume(f);
+    take(l);
+    hot(l).placeHeld(l.in.held, FLOOR);
+    hot(l).holdInPlace(l.in.held);
+    expect(counterUnder({ x: FLOOR.x, z: FLOOR.z, hx: 1, hz: 1, yaw: 0 })).toBeNull();
+    expect(feel(l, 10)).toBeCloseTo((ENDURANCE.hold * HEAT.burn) / 12, 1);
+    expect(l.in.held).toBeNull();
+    expect(hot(l).flasks).not.toContain(f);
+    expect(f.N).toBe(0);
+    const [d] = hot(l).dropped;
+    expect(hot(l).dropped).toHaveLength(1);
+    expect(volume(d.f)).toBe(n);
+    // it falls, on sim time, and smashes on the floor
+    for (let i = 0; i < 40 && hot(l).dropped.length; i++) l.in.simulate(0.05);
+    expect(hot(l).dropped).toHaveLength(0);
+    expect(hot(l).wrecks).toHaveLength(1);
+    expect(hot(l).wrecks[0].at).toMatchObject({ x: expect.closeTo(FLOOR.x, 6), y: 0, z: expect.closeTo(FLOOR.z, 6) });
+    expect(volume(hot(l).wrecks[0].fluid)).toBe(n);
+    run(l, WRECK.fade);
+    expect(hot(l).wrecks).toHaveLength(0);
+    // undone, the flask's back where it was picked up from, empty
+    l.e.undo();
+    expect(hot(l).flasks).toContain(f);
+    expect(f.pose).toEqual(from);
+    expect(f.N).toBe(0);
+  });
+
+  it('gets her endurance back with empty hands, and soon lets go of another that burns her before it has', () => {
+    const { l } = standing(12);
+    take(l);
+    hot(l).placeHeld(l.in.held, FLOOR);
+    hot(l).holdInPlace(l.in.held);
+    expect(feel(l, 10)).not.toBeNull();
+    expect(hot(l).endurance).toBe(0);
+    // another, at once
+    holdAt(l, 'flask', { ...FLOOR, x: FLOOR.x + CELL });
+    const g = hands(l).held!.f!;
+    g.setMolecules(singleOf('G'), 0.9 * CAP);
+    g.setTemperature(12);
+    expect(feel(l, 1, 0.05, 2e4)).toBe(0.05);
+    // and with empty hands, it comes back
+    expect(feel(l, ENDURANCE.recover / 2, 0.05, 3e4)).toBeNull();
+    expect(hot(l).endurance).toBeCloseTo(0.5, 6);
+    feel(l, ENDURANCE.recover / 2, 0.05, 4e4);
+    expect(hot(l).endurance).toBeCloseTo(1, 6);
+    // (and no further)
+    feel(l, 1, 0.05, 5e4);
+    expect(hot(l).endurance).toBe(1);
   });
 });

@@ -149,7 +149,14 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     her words for them, as a smell's pieces (`sniffHeat`, `SNIFF_SAYS`, `SNIFF_OUCH`, `SNIFF_FAR`, `HEAT_PACE`). The
     engine's `sniff` tests it as she starts (too hot to go near, she says so and doesn't lean in) and `stepSniff` again
     at the rim (its words come first; a burn has her recoil, `SNIFF.recoil`, smelling nothing), each by `misjudge`.
-    What's there of holding hot flasks (`holdHeat`, `ENDURANCE`, `toss`, `WRECK`) isn't wired up yet.
+    And in her hands: what's more than half full (`GRIP`, the engine's `gripped`) she feels as `grabOrRelease` takes
+    it, judged once for the whole hold (`Held.judge`), and won't take at all over 30 (`holdHeat`). The engine's
+    `stepHeat` (in real seconds, from `frame()`) tests each frame whether it burns her, runs her `endurance` down
+    (`ENDURANCE`, `drain`) with HOLD_OUCH up as far as `ouches` says (`burn`, the speech it keeps up), and juggles it
+    (`tossT`, `tossAmp`, `toss`; drawn only, by `Frame.toss`, which `FlaskView.update` adds on). With none left,
+    `fumble` sets it down, or, too far up, lets a new flask with all its fluid fall (`dropped`, out of the lab, stepped
+    in `simulate`'s substeps) and smash (`smash`, `wrecks`, `WRECK`); the view draws each wreck as a `WreckView`
+    (`Frame.wrecks`), painted once.
   - `sense.ts` is Nadia's imperfect judgement (`JUDGE`, `misjudge`): whatever she senses, held up against a threshold,
     is the real thing misjudged by up to 10% either way, afresh each time, by the random source it's handed.
   - `supply.ts` is what the ship is short of, in the order the station is fitted for them (`SUPPLIES`): the
@@ -164,7 +171,7 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   - Also here: `presets.ts`, `save.ts` and `scale.ts`, and `start.ts`, the lab a new game starts in (`lab` of Stranded, `DEFAULT_PRESET`, the only preset the game has; the bench's scenes are presets too): a save, laid out by the engine's `lay` as a loaded one is. It's in flux, so tests use an empty preset (`EMPTY` in `engine.test.ts`) and never its contents.
   - Sound is Web Audio, all synthesized: `audio.ts` is the context and mixer (a bus per volume slider, see
     `volumes.ts`); `diverter.ts` is the supply station's diverter, `changeover.ts` its changeover, `ambience.ts` the ship, `water.ts` drips and streams, `shatter.ts` a thermometer
-    shattering.
+    shattering and a flask smashing (`smash`).
     New sounds play into a channel's `bus()`, never straight to the destination, so the sliders reach them. A sound
     in the lab goes through a `Spot` (in `audio.ts`), placed each frame by the engine's `hear()` (see `place.ts`),
     so it fades and pans with where it is relative to the player's head.
@@ -179,12 +186,12 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
 - **Volume isn't atoms.** Capacities and flows are in `volume()` units: molecules by default, or atoms when the
   "volume counts molecules" toggle is off. Use `volume()`, `roomFor()` and `volumeUnit()` rather than `N`.
 - **Nothing runs in real time.** This is the user's explicit rule, and it covers faucets, pouring, tools, drops,
-  chemistry, cooling, the instruments' readings, the supply station's diverter, display and needle, and its changeover (block, door, lamp and alarm), a thermometer's bulb and its crack as it shatters, the shadow lamp's screen coming up and fading (`Tool.fluoresce`), what a sheet of test paper or bond paper shows coming up (`Tool.showing`, over about 2 sim s, `PAPER_TAU`), and the drip and stream sounds. All of it
+  chemistry, cooling, the instruments' readings, the supply station's diverter, display and needle, and its changeover (block, door, lamp and alarm), a thermometer's bulb and its crack as it shatters, a flask falling from her hands and smashing, and its wreck's fading (`dropped`, `wrecks`), the shadow lamp's screen coming up and fading (`Tool.fluoresce`), what a sheet of test paper or bond paper shows coming up (`Tool.showing`, over about 2 sim s, `PAPER_TAU`), and the drip and stream sounds. All of it
   runs in sim substeps of at most 0.02 sim s inside `simulate()`, and pausing freezes it. Every vessel's chemistry is stepped every substep too: it was once put off
   while a vessel was quiet and caught up a few substeps at a time, and the user had that taken out, since it made
   brimming tanks spill in bursts. Don't batch or defer the sim's work between substeps. The exceptions, at the
   user's request, are the ship's ambience (`ambience.ts`), which plays on in real time through pauses and the intro's
-  notice; the player themselves (walking, looking, carrying, tipping a flask, turning a handwheel or a dial with Q and E, their eyes closing for a nap, their head leaning in to a vessel's rim to sniff it and coming back), which is input, not the sim; and what
+  notice; the player themselves (walking, looking, carrying, tipping a flask, turning a handwheel or a dial with Q and E, their eyes closing for a nap, their head leaning in to a vessel's rim to sniff it and coming back, her endurance of a flask that burns her hands and her juggling it), which is input, not the sim; and what
   isn't in the world (the HUD, the guides' flashing). While the player sleeps in the cryopod, or naps, the lab is run as ever in
   windows and jumped ahead between them (`sleep.ts`): still sim time, just not substep by substep through the jumps.
   And once the reservoir holds the goal, the lab stands still as it was then through the end (the welcome to Mu Ceti,
@@ -219,7 +226,8 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     `space.ts`), which is now the back wall, plus optional `z` and `yaw`, so old saves keep working.
   - Everything turns only about the vertical, except a flask tipped to pour, and nothing falls: whatever the player
     lets go of is set down squarely on a counter, or held over one by its clamp stands (`toolStands`, `nozzleStand`), or
-    stays in hand (see `GameEngine.placement`). Keep it that way, or `physics.ts` won't do. The sheets of test paper and bond paper
+    stays in hand (see `GameEngine.placement`). Keep it that way, or `physics.ts` won't do. The one exception is a flask
+    she can't hold any longer (see `fumble`): it's out of the lab as it falls (`dropped`), so `physics.ts` never sees it. The sheets of test paper and bond paper
     (the `BLOTTERS`) are the tools set down on the counter itself, lying flat (`ToolShape.flat`): each one's box is
     thin and as deep as it's wide, its face is up, and it has no stand. They're one sheet, printed differently: share
     what they do (`isBlotter`), and keep only the print and the reading apart. A sheet lying there is in nothing's
@@ -260,13 +268,14 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
   raycast, so empty space around it isn't. Register a mesh yourself only to make it a specific part (a tank, valve,
   spout or button: a spout's is its tip and the pipe that runs to it alone, which a stopcock in hand is aimed at, though
   for the left button and the outline it's the tool's); a stopcock's foot is the stopcock's. Sprites (labels) aren't hit. There are
-  three exceptions. Clamp stands (`StandView`) aren't hit at all: the crosshair goes through them to what's behind, and
+  four exceptions. Clamp stands (`StandView`) aren't hit at all: the crosshair goes through them to what's behind, and
   what they hold is picked up by itself (only a sniff's `clearance` counts them). Nor are a hose's tube and nozzle
   (`HoseView`), so a flask under a nozzle is picked up through it; C finds a hose by nearness instead, and a sniff's
   `clearance` counts the nozzle; a stopcock on its end is hit as any stopcock is. And each `FluidMesh`'s bent copy of
   what's behind a clear fluid (`bentMat` in `view.ts`), on a layer of its own (`REFRACT_LAYER`) drawn only in the
   frame's main render. It's the only thing using three.js's `transmission`, whose extra pass runs whenever anything
-  transmissive is in view, so don't give other materials `transmission` lightly.
+  transmissive is in view, so don't give other materials `transmission` lightly. And what's left of a smashed flask
+  (`WreckView`) isn't hit either: the crosshair goes through it.
 - **Metal goes through `metal()`.** Any material at least `METAL` (0.3) metallic must be made through `metal()` in
   `textures.ts` (a clone too: `metal(m.clone())`), or the Appearance panel's shine slider won't reach it; `surfaceMat`
   does it itself. A per-instance one must be disposed with its view, which lets it go.

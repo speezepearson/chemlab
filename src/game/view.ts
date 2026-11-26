@@ -28,6 +28,7 @@ import { FINISH } from './finish';
 import { FITTINGS, SHORT_ROD } from './fittings';
 import { applyShine, boxUV, metal, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
+import { WRECK } from './heat';
 import {
   LAMP, SCREEN, TANK_SECTION, ringShare, atomSector, BOND_ENDS, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS,
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, TEST_PAPER, paperTriangles, sectorInset, BOND_PAPER, bondDots, isBlotter, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
@@ -173,6 +174,18 @@ export interface Frame {
   airlock: AirlockLook;
   /** How far the ship has turned, in radians, which turns the stars about the axis straight out of the porthole. */
   spin: number;
+  /**
+   * The flask in hand while she juggles it, burning her (see stepHeat in engine.ts): how far it's drawn off from where
+   * it's held, in the room, and how far it leans, in radians, toward her right as she sees it (as it tips to pour).
+   * Only how it's drawn: everything else goes by where it's held.
+   */
+  toss: { f: Flask; x: number; y: number; z: number; roll: number } | null;
+  /**
+   * What's left of each flask that smashed (see WreckView): `key` the engine's own wreck, for which is which; where it
+   * lies on the floor or a counter top, turned which way; what was in it; and how much of it is left to fade, from 1,
+   * fresh, to 0, gone.
+   */
+  wrecks: readonly { key: object; at: Vec3; yaw: number; fluid: Fluid; fade: number }[];
 }
 
 export type GuideLook = 'solid' | 'snap';
@@ -1713,18 +1726,22 @@ class FlaskView {
     splitGlass(glass, pickables);
   }
 
-  /** Draw it as it is now, flashing if it's in `targets` (see Frame.guides). */
-  update(targets: ReadonlySet<Vessel>): void {
+  /**
+   * Draw it as it is now, flashing if it's in `targets` (see Frame.guides), and if she's juggling it (see Frame.toss),
+   * off where the toss has it, leaning, its fluid going up and down with it.
+   */
+  update(targets: ReadonlySet<Vessel>, toss: Frame['toss'] = null): void {
     const { f } = this;
+    const t = toss ?? { x: 0, y: 0, z: 0, roll: 0 };
     this.flash.visible = targets.has(f);
-    this.root.position.set(f.pose.x, f.pose.y, f.pose.z);
+    this.root.position.set(f.pose.x + t.x, f.pose.y + t.y, f.pose.z + t.z);
     this.root.rotation.y = f.pose.yaw;
-    this.tilt.rotation.z = -f.tilt;
+    this.tilt.rotation.z = -f.tilt - t.roll;
     // upright, a trace is drawn as a film at least FLASK_FLUID.film deep over the solid's floor (tipped, the level is
     // well above its lowest corner as soon as there's anything in it)
     const level = fillLevel(f.tilt, volume(f) / f.cap);
     const film = f.tilt === 0 ? -FLASK_H + FLASK_FLUID.floor + FLASK_FLUID.film : -Infinity;
-    this.fluid.update(f, f.pose.y + Math.max(level, film));
+    this.fluid.update(f, f.pose.y + t.y + Math.max(level, film));
     this.label.set(f.label);
   }
 
@@ -1732,6 +1749,210 @@ class FlaskView {
     this.root.removeFromParent();
     this.fluid.dispose();
   }
+}
+
+/* ---------------- a smashed flask ---------------- */
+
+/** How many pixels of a wreck's picture (see WreckView) there are to a world unit. */
+const WRECK_PPU = 3;
+
+/**
+ * What's left of a flask that smashed (see Frame.wrecks): a picture lying flat, WRECK.r either way from its middle,
+ * just over the floor or counter top it fell on, turned as it fell, fading out as it goes. It's painted once, as it's
+ * first seen (see paintWreck), and casts no shadow; it isn't hit, so the crosshair goes through it.
+ */
+class WreckView {
+  private mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
+
+  constructor(scene: THREE.Object3D, fluid: Fluid, seed: number) {
+    const side = 2 * WRECK.r;
+    const tex = new THREE.CanvasTexture(paintWreck(fluid, seeded(seed)));
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    // (drawn after what it lies on, without writing depth, pulled toward the eye a hair so it never fights the floor's
+    // or a counter's pixels, or a sink counter's grate's)
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
+    });
+    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(side, side).rotateX(-Math.PI / 2), mat);
+    this.mesh.castShadow = this.mesh.receiveShadow = false;
+    scene.add(this.mesh);
+  }
+
+  update(at: Vec3, yaw: number, fade: number): void {
+    this.mesh.position.set(at.x, at.y + 0.5, at.z);
+    this.mesh.rotation.y = yaw;
+    this.mesh.material.opacity = Math.max(0, Math.min(1, fade));
+  }
+
+  dispose(): void {
+    this.mesh.removeFromParent();
+    this.mesh.geometry.dispose();
+    this.mesh.material.map?.dispose();
+    this.mesh.material.dispose();
+  }
+}
+
+/**
+ * A wreck's picture (see WreckView), seen from above, in world units from its middle: a pool of what the flask held,
+ * an irregular rounded blob with a couple of splashes beside it, as big as there was of it, in the fluid's own color
+ * as the lab draws it, see-through as it is (with a pale rim and a sheen whatever its color, so a clear one still
+ * reads as a wet patch); and in it the flask on its side, its own silhouette (see FLASK_OUTLINE) broken in four (the
+ * neck and rim, the two halves of its shoulders, its base), a little apart and turned, and a scatter of small shards,
+ * pale see-through glass with brighter edges.
+ */
+function paintWreck(fluid: Fluid, rand: () => number): HTMLCanvasElement {
+  const R = WRECK.r;
+  const px = Math.ceil(2 * R * WRECK_PPU);
+  const c = document.createElement('canvas');
+  c.width = c.height = px;
+  const ctx = c.getContext('2d')!;
+  ctx.setTransform(WRECK_PPU, 0, 0, WRECK_PPU, px / 2, px / 2);
+  const between = (a: number, b: number) => a + (b - a) * rand();
+
+  // the pool, as big as there was of it, and a splash or two beside it
+  const rgb = fluidRGB(fluid);
+  if (rgb) {
+    const alpha = fluidAlpha(fluid);
+    const size = Math.sqrt(Math.min(1, volume(fluid) / CAP));
+    const r0 = R * (0.35 + 0.37 * size);
+    const waves = [2, 3, 5].map((k) => ({ k, a: between(0.04, 0.1), ph: between(0, 2 * Math.PI) }));
+    const blob = (cx: number, cy: number, r: number, wobble: number) => {
+      const n = 48;
+      const pts = Array.from({ length: n }, (_, i) => {
+        const th = (2 * Math.PI * i) / n;
+        const k = 1 + wobble * waves.reduce((t, w) => t + w.a * Math.sin(w.k * th + w.ph), 0);
+        return [cx + r * k * Math.cos(th), cy + r * k * Math.sin(th)];
+      });
+      ctx.beginPath();
+      // through the middles of the points, curving round each, so it's smooth
+      const mid = (i: number) => pts[i % n].map((v, j) => (v + pts[(i + 1) % n][j]) / 2);
+      ctx.moveTo(...(mid(0) as [number, number]));
+      for (let i = 1; i <= n; i++) ctx.quadraticCurveTo(pts[i % n][0], pts[i % n][1], ...(mid(i) as [number, number]));
+      ctx.closePath();
+    };
+    const splashes = Array.from({ length: 2 + Math.floor(rand() * 2) }, () => {
+      const th = between(0, 2 * Math.PI);
+      const d = r0 * between(1.12, 1.3);
+      return { x: d * Math.cos(th), y: d * Math.sin(th), r: r0 * between(0.08, 0.16) };
+    });
+    const shapes = [{ x: 0, y: 0, r: r0, w: 1 }, ...splashes.map((s) => ({ ...s, w: 0.6 }))];
+    const [r, g, b] = rgb.map((v) => Math.round(v));
+    for (const s of shapes) {
+      // the floor darkened where it's wet, most where the fluid's clear, and the fluid over it, as see-through as it is
+      blob(s.x, s.y, s.r, s.w);
+      ctx.fillStyle = `rgba(10, 14, 14, ${0.22 * (1 - alpha) + 0.05})`;
+      ctx.fill();
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.2 + 0.68 * alpha})`;
+      ctx.fill();
+      // its pale rim
+      ctx.strokeStyle = 'rgba(232, 240, 240, 0.4)';
+      ctx.lineWidth = 0.9;
+      ctx.stroke();
+    }
+    // and a sheen, off to one side
+    blob(0, 0, r0, 1);
+    ctx.save();
+    ctx.clip();
+    const sheen = ctx.createRadialGradient(-0.35 * r0, -0.3 * r0, 0, -0.35 * r0, -0.3 * r0, 0.6 * r0);
+    sheen.addColorStop(0, 'rgba(255, 255, 255, 0.22)');
+    sheen.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = sheen;
+    ctx.fillRect(-R, -R, 2 * R, 2 * R);
+    ctx.restore();
+  }
+
+  // the flask on its side, mouth to the left, its middle about the pool's: x along it from its mouth, y across it
+  const outline = (): void => {
+    ctx.beginPath();
+    FLASK_OUTLINE.forEach((p, i) => (i ? ctx.lineTo(p.y - FLASK_H / 2, p.x) : ctx.moveTo(p.y - FLASK_H / 2, p.x)));
+    ctx.closePath();
+  };
+  // where it broke: three cracks across it, and one along its shoulders, each jagged, the pieces either side of one
+  // sharing it
+  const across = (d: number) => {
+    const pts: [number, number][] = [];
+    for (let i = 0; i <= 10; i++) pts.push([d - FLASK_H / 2 + between(-4, 4), 6.8 * (i - 5)]);
+    return pts;
+  };
+  const cuts = [across(24), across(47)];
+  const along = [0, 1, 2, 3, 4].map((i): [number, number] => [
+    cuts[0][5][0] + ((cuts[1][5][0] - cuts[0][5][0]) * i) / 4, i === 0 || i === 4 ? 0 : between(-3.5, 3.5),
+  ]);
+  const far = FLASK_H;
+  const pieces: [number, number][][] = [
+    // the neck and rim
+    [[-far, -34], ...cuts[0], [-far, 34]],
+    // the shoulders' two halves
+    [...cuts[0].slice(0, 6), ...along.slice(1), ...cuts[1].slice(0, 5).reverse()],
+    [...cuts[0].slice(5), ...cuts[1].slice(5).reverse(), ...along.slice(1, 4).reverse()],
+    // the base
+    [...cuts[1], [far, 34], [far, -34]],
+  ];
+  const spread = [
+    [-6, 1, -0.25],
+    [0, -4.5, 0.12],
+    [1.5, 4.5, -0.1],
+    [6, 0, 0.3],
+  ];
+  pieces.forEach((region, i) => {
+    const [dx, dy, rot] = spread[i];
+    ctx.save();
+    ctx.translate(dx + between(-1.5, 1.5), dy + between(-1.5, 1.5));
+    ctx.rotate(rot * between(0.6, 1.4));
+    ctx.beginPath();
+    region.forEach(([x, y], j) => (j ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+    ctx.clip();
+    // pale see-through glass, a little darker where it lies thick, with a bright edge, and its lip at the mouth
+    outline();
+    ctx.fillStyle = 'rgba(214, 232, 238, 0.32)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(236, 248, 252, 0.85)';
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(236, 248, 252, 0.3)';
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(-FLASK_H / 2 + 22, 3);
+    ctx.lineTo(FLASK_H / 2 - 8, 15);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(236, 248, 252, 0.7)';
+    ctx.fillRect(-FLASK_H / 2 - 1.2, -12.5, 2.4, 25);
+    // the broken edge, bright
+    ctx.beginPath();
+    region.forEach(([x, y], j) => (j ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+    ctx.strokeStyle = 'rgba(245, 252, 255, 0.9)';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.restore();
+  });
+
+  // and the shards, scattered round it
+  for (let i = 0; i < 14; i++) {
+    const th = between(0, 2 * Math.PI);
+    const d = between(20, R * 0.8);
+    const x = d * Math.cos(th);
+    const y = d * Math.sin(th);
+    const s = between(1.5, 4.5);
+    const a = between(0, 2 * Math.PI);
+    ctx.beginPath();
+    for (let k = 0; k < 3; k++) {
+      const ak = a + (2 * Math.PI * k) / 3 + between(-0.5, 0.5);
+      const sk = s * between(0.6, 1.3);
+      const p: [number, number] = [x + sk * Math.cos(ak), y + sk * Math.sin(ak)];
+      if (k) ctx.lineTo(...p);
+      else ctx.moveTo(...p);
+    }
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(214, 232, 238, 0.35)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(240, 250, 255, 0.85)';
+    ctx.lineWidth = 0.6;
+    ctx.stroke();
+  }
+  return c;
 }
 
 /* ---------------- tools ---------------- */
@@ -5642,6 +5863,8 @@ export class View {
   private scales = new Map<Scale, ScaleView>();
   private hoses = new Map<Hose, HoseView>();
   private stands: StandView[] = [];
+  /** What's left of each smashed flask (see Frame.wrecks), by the engine's own wreck. */
+  private wrecks = new Map<object, WreckView>();
   private ghost: GhostView;
   /** The stopcock in hand, if there is one (see Frame.loose), and the one it was drawn for. */
   private loose: { v: CockView; c: Cock } | null = null;
@@ -5812,7 +6035,8 @@ export class View {
     // the vessels guides end at flash
     const targets = new Set(fr.guides.map((g) => g.v));
     flashMat.opacity = FLASH.lo + (FLASH.hi - FLASH.lo) * (0.5 - 0.5 * Math.cos(2 * Math.PI * FLASH.hz * this.clock));
-    for (const v of this.flasks.values()) v.update(targets);
+    for (const v of this.flasks.values()) v.update(targets, fr.toss?.f === v.f ? fr.toss : null);
+    this.updateWrecks(fr);
     for (const v of this.tools.values()) v.update(fr.clock, fr.energies, targets);
     for (const v of this.scales.values()) v.update(fr.tarePress === v.sc, fr.hot);
     for (const { h, from, fluid, cock } of fr.hoses) this.hoses.get(h)!.update(from, fluid, cock);
@@ -5923,6 +6147,24 @@ export class View {
     const d = fr.dipHint;
     if (d) this.dipHint.show(d.at, Math.atan2(eye.x - d.at.x, eye.z - d.at.z), 1, d.strip ? 1 : 0, this.camera, cssH);
     else this.dipHint.hide();
+  }
+
+  /**
+   * What's left of each smashed flask (see WreckView): a picture of its own for each, painted as it's first seen,
+   * each with its own pieces (seeded by where it lies), and let go of once it's faded.
+   */
+  private updateWrecks(fr: Frame): void {
+    const live = new Set(fr.wrecks.map((w) => w.key));
+    for (const [k, v] of this.wrecks)
+      if (!live.has(k)) {
+        v.dispose();
+        this.wrecks.delete(k);
+      }
+    for (const w of fr.wrecks) {
+      let v = this.wrecks.get(w.key);
+      if (!v) this.wrecks.set(w.key, (v = new WreckView(this.scene, w.fluid, Math.round(w.at.x * 7919 + w.at.z * 104729 + w.yaw * 1e4))));
+      v.update(w.at, w.yaw, w.fade);
+    }
   }
 
   /** Draw the keys' hints over the finished frame, if any are up. */

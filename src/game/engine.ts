@@ -23,12 +23,12 @@ import { boxesOverlap, mayMeet, roomBoxes, walk, type Box } from './physics';
 import { CENTER, placement, type Placement } from './place';
 import { DEFAULT_PRESET, LAMP_POSE, REFERENCE_FILL, SPECTROSCOPE_AT, STATION_POSE, applyFill, type Preset, type Spot } from './presets';
 import { CRYOSTABILIZER, FIRST_SUPPLY, SUPPLIES, litresOf, type Supply } from './supply';
-import { shatter } from './shatter';
+import { shatter, smash } from './shatter';
 import { WHEELS, wheelMove, wheelPick, type WheelAim } from './wheel';
 import { loadChem, loadVessel, saveChem, saveVessel, type SaveState } from './save';
 import { Scale, glassGrams } from './scale';
 import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
-import { BURN, FAR, felt, sniffHeat } from './heat';
+import { BURN, ENDURANCE, FAR, GRIP, HEAT, HOT, TOSS, WARM, WRECK, drain, felt, holdHeat, ouches, sniffHeat, toss } from './heat';
 import { misjudge } from './sense';
 import { script, smell, span, type Fragment } from './smell';
 import {
@@ -234,7 +234,19 @@ type Held = (
    * until it's set down; or, one just made, out of the lab until then. Set for just what ghostly says, as it's taken.
    */
   ghost?: { pose: Pose };
+  /**
+   * For a flask: how she misjudges its heat in her hands for as long as she holds it, as a factor (see misjudge),
+   * drawn once as it's taken (see grabOrRelease), or the first time it's asked for, for one that came to hand some
+   * other way (see stepHeat). One judgement a hold, so a flask right at a threshold doesn't flicker over it.
+   */
+  judge?: number;
 };
+
+/**
+ * A flask she can't hold any longer and lets fall (see GameEngine.fumble), on sim time: how fast it `rate`s over, in
+ * radians a sim second, as it falls, to at `most` this far over.
+ */
+const TUMBLE = { rate: 4, most: 1.3 };
 
 /**
  * Whether what's held is moved by a ghost of it (see Held.ghost): what stands on the bench on stands, and a scale,
@@ -508,6 +520,32 @@ export class GameEngine {
    */
   private smelled: { script: Fragment[]; n: number; from: number; cut: number | null; until: number } | null = null;
   private sniffs = 0;
+  /**
+   * Her endurance of a flask that burns her hands (see ENDURANCE in heat.ts), from 1, fresh, down to 0, when she lets
+   * go of it (see stepHeat): her own body, so it runs out and comes back in real seconds.
+   */
+  private endurance = 1;
+  /**
+   * The burn under way, while she's holding a flask that burns her: what she's saying of it (HOLD_OUCH, shown as far as
+   * her endurance has gone, see ouches), which stays up for as long as it lasts, and fades once it's over.
+   */
+  private burn: { said: NonNullable<GameEngine['smelled']> } | null = null;
+  /**
+   * Her juggling of a flask that burns her (see TOSS in heat.ts): the real seconds it's been going, and how far it's
+   * eased in, from 0, held still, to 1. It's only how the flask is drawn (see Frame.toss).
+   */
+  private tossT = 0;
+  private tossAmp = 0;
+  /**
+   * Flasks she couldn't hold any longer (see fumble), falling, on sim time: each a flask of its own, out of the lab,
+   * with all the fluid of the one she held, and how fast it's falling.
+   */
+  private dropped: { f: Flask; vy: number }[] = [];
+  /**
+   * What's left of the flasks that smashed (see WRECK in heat.ts): where on the floor or counter top, turned which way,
+   * the fluid that was in them, and how many sim seconds they've lain there, fading.
+   */
+  private wrecks: { at: Vec3; yaw: number; fluid: Flask; age: number }[] = [];
   /** Whether the alarms are silenced, by the button under the beacon (see hushAlarms). Saved, and kept through Reset. */
   private alarmsOff = false;
   /** Whether the porthole's blinds are shut, by the button beside it. Saved, and kept through Reset. */
@@ -816,6 +854,12 @@ export class GameEngine {
     this.held = this.turning = this.tarePress = null;
     this.sniffing = null;
     this.smelled = null;
+    // (and her hands are cool and rested, with nothing falling nor smashed)
+    this.endurance = 1;
+    this.burn = null;
+    this.tossT = this.tossAmp = 0;
+    this.dropped = [];
+    this.wrecks = [];
     this.history.clear();
     this.tidyCocks();
   }
@@ -2083,6 +2127,14 @@ export class GameEngine {
       this.say('That stays where it is');
       return;
     }
+    // a flask full enough for its heat to reach her hand she feels as she takes hold of it, as she judges it, once for
+    // as long as she holds it (see Held.judge); and what she feels the heat of from where she stands she won't touch
+    const judge = misjudge(1);
+    const band = p.kind === 'flask' && this.gripped(p.f) ? felt(temperature(p.f) * judge) : 0;
+    if (band === FAR) {
+      this.speak(holdHeat(FAR));
+      return;
+    }
     // picking something up starts a step to undo, done once it's set down (see setDown)
     this.mark();
     if (p.kind === 'flask') {
@@ -2109,6 +2161,95 @@ export class GameEngine {
     h.follow = linked ? this.gather(h) : [];
     this.holdInPlace(h);
     this.held = h;
+    // what burns her she says nothing of yet: that's the burn's to say, from the next frame (see stepHeat)
+    if (h.kind === 'flask') {
+      h.judge = judge;
+      if (band >= WARM && band <= HOT) this.speak(holdHeat(band, Math.random));
+    }
+  }
+
+  /**
+   * Whether a flask is full enough for its heat to reach the hand that holds it (see GRIP in heat.ts): it's held by its
+   * neck, over the fluid.
+   */
+  private gripped(f: Flask): boolean {
+    return volume(f) > GRIP * f.cap;
+  }
+
+  /**
+   * A frame of dt real seconds of her hands, at real time `now`: whether the flask in them burns her (gripped, and
+   * hotter than HEAT.burn as she judges it, see Held.judge), tested afresh every frame, so one that cools in her hand
+   * stops burning, and one heated there starts. While it burns her, she says so (HOLD_OUCH, up as far as ouches says),
+   * her endurance runs out (see drain), and she juggles it (see TOSS), unless she's pouring it; with none of it left,
+   * she lets go (see fumble). Otherwise her endurance comes back, over ENDURANCE.recover from nothing, and what she
+   * said of the burn fades as anything she says does. It's her own body, like her walking, so it's all in real seconds,
+   * and goes on while the lab's paused. Nothing changes while she's sniffing: her nose is in something.
+   */
+  private stepHeat(dt: number, now: number): void {
+    if (this.sniffing) return;
+    const h = this.held;
+    const f = h?.kind === 'flask' && this.gripped(h.f) ? h.f : null;
+    const judge = f ? (h!.judge ??= misjudge(1)) : 1;
+    const hot = !!f && temperature(f) * judge > HEAT.burn;
+    if (!hot) {
+      this.endurance = Math.min(1, this.endurance + dt / ENDURANCE.recover);
+      this.endBurn(now);
+    } else {
+      if (!this.burn) {
+        const said = { script: holdHeat(BURN), n: ++this.sniffs, from: now, cut: ouches(this.endurance), until: Infinity };
+        this.smelled = said;
+        this.burn = { said };
+      }
+      this.endurance = Math.max(0, this.endurance - drain(temperature(f!) * judge) * dt);
+      this.burn.said.cut = ouches(this.endurance);
+      // (if something else she said has come and gone meanwhile, the burn's back up)
+      if (this.smelled === null) this.smelled = this.burn.said;
+      if (this.endurance <= 0) {
+        this.fumble(h!, now);
+        return;
+      }
+    }
+    const juggling = hot && !this.using && !this.pinned;
+    this.tossAmp = Math.max(0, Math.min(1, this.tossAmp + (juggling ? dt : -dt) / TOSS.ease));
+    this.tossT = this.tossAmp > 0 ? this.tossT + dt : 0;
+  }
+
+  /** The burn, if one's under way, is over: what she said of it fades, as anything she says does (see smelled). */
+  private endBurn(now: number): void {
+    if (!this.burn) return;
+    if (this.smelled === this.burn.said) this.burn.said.until = now + SMELL_MS;
+    this.burn = null;
+  }
+
+  /**
+   * She can't hold the flask in her hand any longer (see stepHeat): she lets go of it, where she'd hold it still. If
+   * it'd come to rest no more than ENDURANCE.drop below there (see placement), she sets it down there, as a left
+   * click would. Otherwise it falls, on sim time, and smashes (see simulate): the flask is gone from the lab, empty,
+   * and what falls is a flask of its own with all that was in it, so undoing brings back the one she picked up, where
+   * she picked it up from, empty (it isn't put back in the cabinet: a smashed flask is gone).
+   */
+  private fumble(h: Held, now = performance.now()): void {
+    if (h.kind !== 'flask') return;
+    this.using = false;
+    this.pinned = null;
+    h.f.tilt = 0;
+    this.putAt(h, this.gripPose(h));
+    this.tossT = this.tossAmp = 0;
+    this.endBurn(now);
+    const pl = this.placement(h);
+    if ('rest' in pl && h.f.pose.y - pl.rest.pose.y <= ENDURANCE.drop) {
+      this.setDown(h, pl.rest);
+      return;
+    }
+    this.unfollow(h);
+    this.flasks.splice(this.flasks.indexOf(h.f), 1);
+    const f = new Flask(CAP);
+    f.pose = { ...h.f.pose };
+    f.glass = h.f.glass;
+    transfer(h.f, f, Infinity);
+    this.dropped.push({ f, vy: 0 });
+    this.held = null;
+    this.commit();
   }
 
   /**
@@ -3300,6 +3441,8 @@ export class GameEngine {
     this.stepSniff(dt, now);
     // nodding off, they stand where they are
     if (!nap || nap.waking) this.move(dt);
+    // her hands feel the heat of what's in them, in her own time (see stepHeat)
+    this.stepHeat(dt, now);
     if (this.wake === 'settling') this.settleIn(dt);
     if (this.held && !this.held.ghost) this.follow(this.held);
     const zoomed = this.keys.has('KeyZ') && !this.sniffing ? 1 : 0;
@@ -3308,6 +3451,8 @@ export class GameEngine {
     this.view.look(g.eye, g.yaw, g.pitch, this.fov());
     // (sniffing, the crosshair stays on what it was on from where she stands)
     if (!this.sniffing) this.target = this.previewing ? null : this.view.pick(REACH, this.heldObject());
+    // (a flask that's falling, drawn, is out of the lab: nothing's done to it)
+    if (this.target?.kind === 'flask' && !this.flasks.includes(this.target.f)) this.target = null;
     this.simulate(dt);
     // (what C, Q and E would act on, found at most once for the rest of the frame)
     this.aimMemo = {};
@@ -3487,6 +3632,8 @@ export class GameEngine {
     // what each thermometer's bulb and each strip's foot is in (see dipping)
     const whole = this.tools.map((t) => !t.broken);
     this.dipping(quiet ? 0 : dt);
+    // where flasks that fell smash this frame, to be heard there
+    const smashed: Vec3[] = [];
     if (simDt > 0) {
       const sub = Math.ceil(simDt / 0.02);
       const step = simDt / sub;
@@ -3561,6 +3708,20 @@ export class GameEngine {
           }
           return !lands && d.y > groundAt(d.x, d.z);
         });
+        // a flask she couldn't hold falls, tipping over as it goes, until its foot meets the floor or a counter top,
+        // where it smashes, and what was in it is lost (see fumble): what's left of it lies there a while (see WRECK)
+        this.dropped = this.dropped.filter((d) => {
+          const f = d.f;
+          d.vy += GRAVITY * step;
+          f.pose = { ...f.pose, y: f.pose.y - d.vy * step };
+          f.tilt = Math.min(TUMBLE.most, f.tilt + TUMBLE.rate * step);
+          const ground = groundAt(f.pose.x, f.pose.z);
+          if (f.pose.y - FLASK_H > ground) return true;
+          const at = { x: f.pose.x, y: ground, z: f.pose.z };
+          this.wrecks.push({ at, yaw: Math.random() * 2 * Math.PI, fluid: f, age: 0 });
+          smashed.push(at);
+          return false;
+        });
         for (const v of vessels) {
           this.chem.step(v, step);
           // by molecules, breaking bonds swells a fluid, and whatever no longer fits spills
@@ -3584,6 +3745,8 @@ export class GameEngine {
         });
     }
     this.spillTime = simDt;
+    // what's left of a smashed flask fades, on sim time, and is gone
+    this.wrecks = this.wrecks.filter((w) => (w.age += simDt) < WRECK.fade);
     if (quiet) {
       // nothing's drawn, and what a tool's step handed out is its own, good only until its next step (see Tool.step)
       for (const t of this.tools) {
@@ -3615,6 +3778,8 @@ export class GameEngine {
     this.tools.forEach((t, j) => {
       if (t.broken && whole[j]) shatter(this.hear(footAt(t)));
     });
+    // and a flask that's fallen smashes, with a crash and a tinkle, where it hit
+    for (const at of smashed) smash(this.hear(at));
     // and it chimes as its reservoir comes to hold enough cryostabilizer, and the airlock opens
     if (!enoughFrom && this.enough()) chime(this.hear(this.machineAt(this.station())));
 
@@ -4081,14 +4246,30 @@ export class GameEngine {
     });
     this.view.render({
       ...this.gaze(),
-      flasks: this.flasks, tools: this.tools, scales: this.scales, hoses, faucets: this.faucets, stock: this.stock,
+      flasks: this.dropped.length ? [...this.flasks, ...this.dropped.map((d) => d.f)] : this.flasks, tools: this.tools, scales: this.scales, hoses, faucets: this.faucets, stock: this.stock,
       streams, drops,
       tarePress: this.tarePress, hot: this.hot(), dt, clock: this.clock,
       energies: BOND_KEYS.map((k) => this.chem.params.bonds[k].E), alarmsOff: this.alarmsOff, blindsShut: this.blindsShut, spin: this.spin,
       airlock: this.airlockLook(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(), ghost: this.ghostFrame(pl),
       loose: this.looseFrame(), turnHint: this.turnHint(), hoseHint: this.hoseHintAt(), pourHint: this.pourHintAt(), dipHint: this.dipHintAt(),
+      toss: this.tossFrame(),
+      wrecks: this.wrecks.map((w) => ({ key: w, at: w.at, yaw: w.yaw, fluid: w.fluid, fade: 1 - w.age / WRECK.fade })),
     });
+  }
+
+  /**
+   * How the flask in hand is drawn as she juggles it (see Frame.toss): where it is, t real seconds into it (see toss in
+   * heat.ts), eased in by how far it's gone, as an offset across, along her right, and up, from where she'd hold it
+   * still, and how far it leans. Not while she's sniffing, when it's held still under her nose.
+   */
+  private tossFrame(): Frame['toss'] {
+    const h = this.held;
+    if (h?.kind !== 'flask' || this.tossAmp <= 0 || this.sniffing) return null;
+    const amp = ease(this.tossAmp);
+    const { across, up, lean } = toss(this.tossT);
+    const yaw = this.player.yaw;
+    return { f: h.f, x: Math.cos(yaw) * across * amp, y: up * amp, z: -Math.sin(yaw) * across * amp, roll: lean * TOSS.roll * amp };
   }
 
   /**
