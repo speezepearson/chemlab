@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { roundRandom } from '../chem/reactions';
-import { TARGET } from '../chem/species';
+import { SPECIES, TARGET, singleOf } from '../chem/species';
 import { CAP, DELIVERY, GOAL_TARGET, SUSTAIN } from './config';
 import { Vessel } from './flask';
 import { SLEEP, sleep, sleptFor, type SleepStats, type Sleeper, type Woke } from './sleep';
@@ -170,6 +170,28 @@ describe('sleep', () => {
     expect(it.next().done).toBe(false);
     // what it jumped through reached the reservoir as it would have
     expect(Math.abs((station.tanks[1].n[TARGET] - GOAL_TARGET - 1e9) / (1e6 * now()) - 1)).toBeLessThan(0.01);
+  });
+
+  it("doesn't follow what the station's fitted for slowly breaking down in its reservoir", () => {
+    // nothing delivered: the reservoir's own supply comes apart into its atoms, a hundred-billionth of it a sim
+    // second, as it does on its way to equilibrium, which is far too slow to matter
+    const { l, station, now } = lab(0, share(1e-3), 0);
+    station.stock(FIRST_SUPPLY);
+    const { species, start } = FIRST_SUPPLY;
+    const ref = station.tanks[1];
+    const parts = SPECIES[species].atoms.map(singleOf);
+    const k = 1.4e-10;
+    l.advance = (dt) => {
+      const m = roundRandom(ref.n[species] * k * dt);
+      ref.n[species] -= m;
+      for (const s of parts) ref.n[s] += m;
+      l.skip(dt);
+    };
+    const it = sleep(l, { plain: 0, jumped: 0, jumps: 0 }, true);
+    for (let i = 0; i < 4000; i++) expect(it.next().done).toBe(false);
+    // no more of it is gone than came apart, and all of that is still there as atoms
+    expect(start - ref.n[species]).toBeLessThan(2 * k * start * now());
+    for (const s of parts) expect(ref.n[species] + ref.n[s]).toBe(start);
   });
 
   it('says how long it has gone on', () => {

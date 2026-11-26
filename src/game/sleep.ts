@@ -53,7 +53,8 @@ import type { Tool } from './tools';
  *    slower than the passengers use it up.
  * After a jump, the lab runs `settle` sim seconds unmeasured, for whatever the jump knocked out of balance (fast
  * reactions and their reverses) to settle, so the next window doesn't mistake its relaxing for a drift. Anything
- * significant but unconfirmed means no jump yet. A drift too slow to matter (see SLEEP.matter) isn't followed at all.
+ * significant but unconfirmed means no jump yet. A drift too slow to matter (see SLEEP.matter) isn't followed at all,
+ * but for what the station's fitted for being delivered into the reservoir: a slow line is still a line.
  */
 export const SLEEP = {
   /** The window, in sim seconds, and how many increments it's measured in. */
@@ -323,9 +324,15 @@ function plan(
     } else {
       // nothing drains it: each component on its own, limited by its share of the makeup
       const shares = tr.xs.every((x) => molecules(x) > 0);
+      // what the station's fitted for, coming into the reservoir, is followed however slowly it comes: but only coming
+      // in, the reservoir gaining its atoms. Whatever else it does there (coming apart, on its way to equilibrium, or
+      // made of what came in with it) is as slow a drift as any, and one the goal doesn't stop
+      const delivered =
+        tr.v === reservoir &&
+        stats[species].r > 0 &&
+        SPECIES[species].atomIdx.every((a) => stats[ELEMENT + a].r > 0 && significant(stats[ELEMENT + a], z));
       for (let c = 0; c <= HEAT; c++) {
-        // (what the station's fitted for, coming into the reservoir, is followed however slowly it comes)
-        if (tr.v === reservoir && c === species ? !significant(stats[c], z) : !drifting(c, stats[c])) continue;
+        if (c === species && delivered ? !significant(stats[c], z) : !drifting(c, stats[c])) continue;
         if (!confirmed(c)) {
           limit(0);
           continue;
