@@ -126,8 +126,9 @@ function Smell({ smell }: { smell: NonNullable<HudState['smell']> }) {
 /**
  * The crosshair, with hints by it for what the left button (on its left) and E (on its right) would do, or an equipment
  * wheel while it's held open; under
- * the crosshair, what she last said of a sniff, coming up a piece at a time and then fading out; and everything
- * else that can be done just now, in a corner, unless `/` has hidden it.
+ * the crosshair, what she last said of a sniff, coming up a piece at a time and then fading out; at the foot of the
+ * view, whether she's wearing the mitts; and everything else that can be done just now, in a corner, unless `/` has
+ * hidden it.
  */
 export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; help: boolean }) {
   if (!hud.locked) return null;
@@ -158,6 +159,8 @@ export function Hud({ engine, hud, help }: { engine: GameEngine; hud: HudState; 
       {hud.note && <div className={hud.tip ? 'note tip' : 'note'}>{hud.note}</div>}
       {/* what she last said of a sniff: a new one comes up afresh, even if it reads the same */}
       {hud.smell && <Smell key={hud.smell.n} smell={hud.smell} />}
+      {/* a quiet reminder that she's wearing the heat-proof mitts: nothing to click */}
+      {hud.mitts && <div className="mitts-on">mitts on</div>}
       {help && <Actions actions={hud.actions} />}
     </>
   );

@@ -123,6 +123,8 @@ export interface Hud {
   smell: { n: number; lines: string[][]; shown: number; out: boolean } | null;
   /** Whether she's sniffing something (see GameEngine.sniff): nothing can be aimed at or done until she's back. */
   sniffing: boolean;
+  /** Whether she's wearing the heat-proof mitts (see GameEngine.mitts), which a tag at the foot of the view says. */
+  mitts: boolean;
 }
 
 /**
@@ -550,6 +552,13 @@ export class GameEngine {
   private alarmsOff = false;
   /** Whether the porthole's blinds are shut, by the button beside it. Saved, and kept through Reset. */
   private blindsShut = false;
+  /**
+   * Whether she's wearing the heat-proof mitts that hang on the cabinet's side (see MittsView in view.ts): with them on,
+   * a flask's heat in her hands is nothing to her (see grabOrRelease and stepHeat), though they're no help to her face
+   * (see sniff). Put on, and hung back up, by the left button on them with empty hands, and not a step to undo. Saved,
+   * but not kept through Reset: a new lab has them on their hook.
+   */
+  private mitts = false;
   /** Where the player is in waking up in the airlock (see Wake), and how many sim seconds it's been there. */
   private wake: Wake = 'closed';
   /** How far the ship has turned, in radians (see SPIN), for the stars. */
@@ -755,6 +764,7 @@ export class GameEngine {
 
   load(preset: Preset): void {
     this.preset = preset;
+    this.mitts = false;
     if (preset.lab) {
       this.napTold = false;
       this.lay(preset.lab);
@@ -968,6 +978,7 @@ export class GameEngine {
       ...(this.alarmsOff ? { alarmsOff: true } : {}),
       ...(this.blindsShut ? { blindsShut: true } : {}),
       ...(this.napTold ? { nap: true } : {}),
+      ...(this.mitts ? { mitts: true } : {}),
       player: { x: this.player.x, z: this.player.z, yaw: this.player.yaw, pitch: this.player.pitch },
       chem: saveChem(this.chem.params),
     };
@@ -997,6 +1008,7 @@ export class GameEngine {
     this.setAlarmsOff(!!s.alarmsOff);
     this.blindsShut = !!s.blindsShut;
     this.napTold = !!s.nap;
+    this.mitts = !!s.mitts;
     const pl = s.player;
     if (pl && [pl.x, pl.z, pl.yaw, pl.pitch].every(Number.isFinite)) {
       const p = this.inRoom({ x: pl.x, y: 0, z: pl.z, yaw: pl.yaw });
@@ -2120,7 +2132,7 @@ export class GameEngine {
       this.takeOut(p.item, p.slot);
       return;
     }
-    if (p.kind === 'faucet' || p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake' || p.kind === 'cabinet') return;
+    if (p.kind === 'faucet' || p.kind === 'alarm' || p.kind === 'blinds' || p.kind === 'wake' || p.kind === 'cabinet' || p.kind === 'mitts') return;
     // (the shadow lamp's button is for pressing, with the left button)
     if (p.kind === 'tool' && p.part === 'button') return;
     if (p.kind === 'tool' && p.t.shape.fixed) {
@@ -2128,9 +2140,10 @@ export class GameEngine {
       return;
     }
     // a flask full enough for its heat to reach her hand she feels as she takes hold of it, as she judges it, once for
-    // as long as she holds it (see Held.judge); and what she feels the heat of from where she stands she won't touch
+    // as long as she holds it (see Held.judge); and what she feels the heat of from where she stands she won't touch.
+    // In the mitts she feels nothing of it (see mitts)
     const judge = misjudge(1);
-    const band = p.kind === 'flask' && this.gripped(p.f) ? felt(temperature(p.f) * judge) : 0;
+    const band = p.kind === 'flask' && !this.mitts && this.gripped(p.f) ? felt(temperature(p.f) * judge) : 0;
     if (band === FAR) {
       this.speak(holdHeat(FAR));
       return;
@@ -2183,12 +2196,13 @@ export class GameEngine {
    * her endurance runs out (see drain), and she juggles it (see TOSS), unless she's pouring it; with none of it left,
    * she lets go (see fumble). Otherwise her endurance comes back, over ENDURANCE.recover from nothing, and what she
    * said of the burn fades as anything she says does. It's her own body, like her walking, so it's all in real seconds,
-   * and goes on while the lab's paused. Nothing changes while she's sniffing: her nose is in something.
+   * and goes on while the lab's paused. Nothing changes while she's sniffing: her nose is in something. In the mitts
+   * nothing burns her (see mitts).
    */
   private stepHeat(dt: number, now: number): void {
     if (this.sniffing) return;
     const h = this.held;
-    const f = h?.kind === 'flask' && this.gripped(h.f) ? h.f : null;
+    const f = h?.kind === 'flask' && !this.mitts && this.gripped(h.f) ? h.f : null;
     const judge = f ? (h!.judge ??= misjudge(1)) : 1;
     const hot = !!f && temperature(f) * judge > HEAT.burn;
     if (!hot) {
@@ -2802,6 +2816,11 @@ export class GameEngine {
       this.change(() => (this.blindsShut = !this.blindsShut));
       return;
     }
+    // with empty hands, the mitts are put on, or hung back up (with something in hand, it's set down, as anywhere)
+    if (p?.kind === 'mitts' && !this.held) {
+      this.mitts = !this.mitts;
+      return;
+    }
     if (p?.kind === 'scale' && p.part === 'tare') {
       this.change(() => p.sc.zero());
       this.tarePress = p.sc;
@@ -2866,7 +2885,7 @@ export class GameEngine {
    * flask in her hand is brought up under her nose (see noseGaze). There she smells what's in it, as it is just then, by
    * what it's made of and how warm it is, as she judges it (see smell), and says what she makes of it, a piece at a time (see stepSniff); a beat
    * after the last of it she straightens up again, the view going back to just where it was. What she feels of its heat
-   * on her face comes first (see stepSniff); and what's so hot she feels it from where she stands (see felt in heat.ts,
+   * on her face comes first (see stepSniff), mitts or no (see mitts: they're on her hands, not her face); and what's so hot she feels it from where she stands (see felt in heat.ts,
    * as she judges it: see misjudge) she won't lean in to at all, and says so instead. Until it's back she neither walks nor looks around, and her hands do nothing: only F,
    * or letting go of the mouse, cuts it short (see endSniff). It's her own doing, like her eyes closing for a nap, so
    * it all goes in real time, and works while the lab's paused; the lab runs on under it as ever. Only the view moves:
@@ -4253,7 +4272,7 @@ export class GameEngine {
       airlock: this.airlockLook(),
       guides: this.guides(pl), footprints: this.footprints(pl), stands: this.stands(), ghost: this.ghostFrame(pl),
       loose: this.looseFrame(), turnHint: this.turnHint(), hoseHint: this.hoseHintAt(), pourHint: this.pourHintAt(), dipHint: this.dipHintAt(),
-      toss: this.tossFrame(),
+      toss: this.tossFrame(), mitts: this.mitts,
       wrecks: this.wrecks.map((w) => ({ key: w, at: w.at, yaw: w.yaw, fluid: w.fluid, fade: 1 - w.age / WRECK.fade })),
     });
   }
@@ -4392,6 +4411,7 @@ export class GameEngine {
     if (p?.kind === 'alarm') add(['LMB'], this.alarmsOff ? 'let the alarms sound again' : 'silence the alarms');
     else if (p?.kind === 'blinds') add(['LMB'], this.blindsShut ? 'open the blinds' : 'shut the blinds');
     else if (p?.kind === 'tool' && p.part === 'button') add(['LMB'], p.t.lit ? 'put the lamp out' : 'light the lamp');
+    else if (p?.kind === 'mitts' && !h) add(['LMB'], this.mitts ? 'hang the mitts back up' : 'put the mitts on');
     else if (this.pressable()) add(['LMB'], 'press it');
     const pull = this.hoseAim();
     if (pull) add(['C'], !pull.hose ? 'pull out its hose' : pull.nozzle ? 'take hold of it' : 'take hold of its hose');
@@ -4445,11 +4465,14 @@ export class GameEngine {
     const p = this.target;
     return (
       (p?.kind === 'scale' && p.part === 'tare') || (p?.kind === 'tool' && p.part === 'button') ||
-      p?.kind === 'alarm' || p?.kind === 'blinds' || p?.kind === 'wake'
+      p?.kind === 'alarm' || p?.kind === 'blinds' || p?.kind === 'wake' || (p?.kind === 'mitts' && !this.held)
     );
   }
 
-  /** Whether the left button would press the key or button the crosshair is on. */
+  /**
+   * Whether the left button would press the key or button the crosshair is on, or (with empty hands) put on the mitts
+   * or hang them back up.
+   */
   private pressable(): boolean {
     const p = this.target;
     return (
@@ -4457,14 +4480,15 @@ export class GameEngine {
       (p?.kind === 'tool' && p.part === 'button') ||
       p?.kind === 'alarm' ||
       p?.kind === 'blinds' ||
-      p?.kind === 'wake'
+      p?.kind === 'wake' ||
+      (p?.kind === 'mitts' && !this.held)
     );
   }
 
   /** Whether `p` can be picked up: anything but what's fixed in place. */
   private grabbable(p: Pick): boolean {
     return (
-      p.kind !== 'faucet' && p.kind !== 'alarm' && p.kind !== 'blinds' && p.kind !== 'wake' && p.kind !== 'cabinet' &&
+      p.kind !== 'faucet' && p.kind !== 'alarm' && p.kind !== 'blinds' && p.kind !== 'wake' && p.kind !== 'cabinet' && p.kind !== 'mitts' &&
       !(p.kind === 'tool' && p.t.shape.fixed)
     );
   }
@@ -4857,6 +4881,7 @@ export class GameEngine {
         out: now > this.smelled.until - SMELL_FADE_MS,
       },
       sniffing: !!this.sniffing,
+      mitts: this.mitts,
     };
     const key = JSON.stringify(hud);
     if (key === this.lastHud) return;

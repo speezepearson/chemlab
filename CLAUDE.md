@@ -156,7 +156,10 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     (`tossT`, `tossAmp`, `toss`; drawn only, by `Frame.toss`, which `FlaskView.update` adds on). With none left,
     `fumble` sets it down, or, too far up, lets a new flask with all its fluid fall (`dropped`, out of the lab, stepped
     in `simulate`'s substeps) and smash (`smash`, `wrecks`, `WRECK`); the view draws each wreck as a `WreckView`
-    (`Frame.wrecks`), painted once.
+    (`Frame.wrecks`), painted once. The heat-proof mitts on the cabinet's side (`MittsView` in `view.ts`, a Pick of
+    kind `'mitts'`, toggled by the left button with empty hands in `leftDown`) are the engine's `mitts`: worn
+    (`Frame.mitts`, `Hud.mitts`), they make a flask's heat in her hands nothing, but not on her face. Saved as
+    `SaveState.mitts` only while worn; not part of undo; Reset hangs them back up.
   - `sense.ts` is Nadia's imperfect judgement (`JUDGE`, `misjudge`): whatever she senses, held up against a threshold,
     is the real thing misjudged by up to 10% either way, afresh each time, by the random source it's handed.
   - `supply.ts` is what the ship is short of, in the order the station is fitted for them (`SUPPLIES`): the

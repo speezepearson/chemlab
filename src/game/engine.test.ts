@@ -3565,4 +3565,70 @@ describe('a flask’s heat in her hands', () => {
     feel(l, 1, 0.05, 5e4);
     expect(hot(l).endurance).toBe(1);
   });
+
+  describe('the mitts', () => {
+    const mitts = (l: Lab) => (l.in as unknown as { mitts: boolean }).mitts;
+    /** The left button on the mitts. */
+    function click(l: Lab): void {
+      const was = l.in.target;
+      l.in.target = { kind: 'mitts' };
+      l.in.leftDown(false);
+      l.in.target = was;
+    }
+
+    it('are put on, and hung back up, with empty hands, and no step to undo', () => {
+      const { l } = standing(1);
+      const undos = hot(l).history.undos.length;
+      expect(mitts(l)).toBe(false);
+      click(l);
+      expect(mitts(l)).toBe(true);
+      click(l);
+      expect(mitts(l)).toBe(false);
+      expect(hot(l).history.undos.length).toBe(undos);
+      expect(hot(l).history.before).toBeNull();
+    });
+
+    it('are neither put on nor hung up with something in hand', () => {
+      const { l, f } = standing(1);
+      take(l);
+      expect(l.in.held?.f).toBe(f);
+      hot(l).placeHeld(l.in.held, { x: SPOT.x, y: LIFT + 160, z: SPOT.z, yaw: 0 });
+      hot(l).holdInPlace(l.in.held);
+      click(l);
+      expect(mitts(l)).toBe(false);
+      // (the left button set it down instead, as anywhere)
+      expect(l.in.held).toBeNull();
+    });
+
+    it('make a flask’s heat in her hands nothing to her', () => {
+      const { l, f } = standing(HEAT.far + 1);
+      click(l);
+      expect(mitts(l)).toBe(true);
+      l.in.target = { kind: 'flask', f };
+      take(l);
+      expect(l.in.held?.f).toBe(f);
+      expect(texts(l)).toBeNull();
+      expect(feel(l, 20)).toBeNull();
+      expect(hot(l).endurance).toBe(1);
+      expect(l.in.held?.f).toBe(f);
+      expect(texts(l)).toBeNull();
+    });
+
+    it('are saved when they’re on, and on their hook in a save without them', () => {
+      const { l } = standing(1);
+      expect(l.e.snapshot().mitts).toBeUndefined();
+      click(l);
+      const s = l.e.snapshot();
+      expect(s.mitts).toBe(true);
+      const m = lab();
+      m.e.restore(s, EMPTY);
+      expect(mitts(m)).toBe(true);
+      m.e.restore(bare(), EMPTY);
+      expect(mitts(m)).toBe(false);
+      // and Reset hangs them back up
+      m.e.restore(s, EMPTY);
+      m.e.reset();
+      expect(mitts(m)).toBe(false);
+    });
+  });
 });

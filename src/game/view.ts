@@ -60,6 +60,8 @@ export type Pick =
   | { kind: 'alarm' }
   /** The button by the porthole that shuts its blinds, or opens them. */
   | { kind: 'blinds' }
+  /** The heat-proof mitts on the cabinet's side, or the hook they hang on (see MittsView). */
+  | { kind: 'mitts' }
   /** The OK on the message inside the cryopod. */
   | { kind: 'wake' }
   /**
@@ -171,6 +173,8 @@ export interface Frame {
   alarmsOff: boolean;
   /** Whether the porthole's blinds are shut, leaving it solid black. */
   blindsShut: boolean;
+  /** Whether she's wearing the heat-proof mitts, so they're not on their hook (see MittsView). */
+  mitts: boolean;
   airlock: AirlockLook;
   /** How far the ship has turned, in radians, which turns the stars about the axis straight out of the porthole. */
   spin: number;
@@ -4408,6 +4412,140 @@ class BlindsButton {
   }
 }
 
+/** A tile of the mitts' quilting (see MittsView), as a color map, and as a bump map: puffed up between its stitches. */
+function quiltTexture(bump: boolean): THREE.CanvasTexture {
+  const N = 64;
+  const c = document.createElement('canvas');
+  c.width = c.height = N;
+  const ctx = c.getContext('2d')!;
+  if (bump) {
+    // each diamond puffed up in its middle, down at its stitches
+    const g = ctx.createRadialGradient(N / 2, N / 2, 0, N / 2, N / 2, N * 0.55);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(1, '#808080');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, N, N);
+  } else {
+    ctx.fillStyle = '#a39887';
+    ctx.fillRect(0, 0, N, N);
+    // a little weave
+    for (let i = 0; i < 400; i++) {
+      ctx.fillStyle = `rgba(${Math.random() < 0.5 ? '255, 250, 240' : '40, 32, 24'}, 0.06)`;
+      ctx.fillRect(Math.random() * N, Math.random() * N, 2, 1);
+    }
+  }
+  // the stitches, corner to corner, so the tiles make diamonds
+  ctx.strokeStyle = bump ? '#202020' : 'rgba(70, 60, 48, 0.55)';
+  ctx.lineWidth = bump ? 4 : 2;
+  ctx.beginPath();
+  for (const [x0, y0, x1, y1] of [[0, 0, N, N], [N, 0, 0, N], [-N / 2, N / 2, N / 2, -N / 2], [N / 2, N * 1.5, N * 1.5, N / 2], [N / 2, -N / 2, N * 1.5, N / 2], [-N / 2, N / 2, N / 2, N * 1.5]]) {
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+  }
+  ctx.stroke();
+  const t = new THREE.CanvasTexture(c);
+  if (!bump) t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  // (a diamond to every 22 units of mitt: the extruded mitt's faces are mapped in world units)
+  t.repeat.set(1 / 22, 1 / 22);
+  return t;
+}
+
+/**
+ * A heat-proof mitt's outline, as it hangs, cuff up: in world units, x across (its thumb out to +x), y up from its top,
+ * which the cuff covers, down to its fingertips about 100 below.
+ */
+function mittShape(): THREE.Shape {
+  const m = new THREE.Shape();
+  m.moveTo(-19, 0);
+  m.lineTo(19, 0);
+  m.lineTo(20.5, -30);
+  // the thumb, out to the side and down
+  m.quadraticCurveTo(29, -33, 33, -46);
+  m.quadraticCurveTo(36, -59, 28, -61);
+  m.quadraticCurveTo(24, -61.5, 22, -55);
+  // and round the fingers
+  m.lineTo(22, -76);
+  m.absarc(0, -76, 22, 0, Math.PI, true);
+  m.lineTo(-21, -40);
+  m.lineTo(-19, 0);
+  return m;
+}
+
+/**
+ * The heat-proof mitts, on the outer face of the equipment cabinet's right end, a pace in from its front (past the
+ * back counter, so nothing stands in front of them), at chest height: a small steel hook on a plate, and a pair of
+ * padded mitts hanging from it by loops at their cuffs, quilted gray-tan with darker cuffs, the near one overlapping
+ * the far a little, each a little askew. Worn, the mitts are neither drawn nor hit, and the bare hook is what's
+ * clicked to hang them back up. Hook, plate and mitts are all one thing for the crosshair (`{ kind: 'mitts' }`); none of
+ * it is in anything's way, flat against the cabinet.
+ */
+class MittsView {
+  private pair = new THREE.Group();
+  private worn: boolean | null = null;
+
+  constructor(scene: THREE.Scene, pickables: Map<THREE.Object3D, Pick>) {
+    const g = new THREE.Group();
+    // facing +x, into the room: in g, x runs along the cabinet's end toward its back, y up, z out from it
+    g.position.set(CABINET.x1, 0, CABINET.z1 - 60);
+    g.rotation.y = Math.PI / 2;
+    const pick = (m: THREE.Mesh) => {
+      m.castShadow = m.receiveShadow = true;
+      pickables.set(m, { kind: 'mitts' });
+      return m;
+    };
+    // the plate, and the hook out from it, turning up at its end
+    const TOP = 610;
+    const HOOK_Y = TOP - 16;
+    const steel = metal(new THREE.MeshStandardMaterial({ color: 0xa3aba8, metalness: 0.85, roughness: 0.32 }));
+    const plate = pick(new THREE.Mesh(new RoundedBoxGeometry(26, 34, 3, 2, 1.2), steel));
+    plate.position.set(0, TOP - 17, 1.5);
+    const arm = pick(new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.7, 30, 12).rotateX(Math.PI / 2), steel));
+    arm.position.set(0, HOOK_Y, 3 + 15);
+    const tip = pick(new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.7, 8, 12), steel));
+    tip.position.set(0, HOOK_Y + 3.5, 33);
+    const knob = pick(new THREE.Mesh(new THREE.SphereGeometry(2.3, 12, 8), steel));
+    knob.position.set(0, HOOK_Y + 7.5, 33);
+    g.add(plate, arm, tip, knob);
+
+    // the mitts, each hanging from its loop on the hook
+    const cloth = new THREE.MeshStandardMaterial({ map: quiltTexture(false), bumpMap: quiltTexture(true), bumpScale: 1.5, roughness: 0.95, metalness: 0 });
+    const cuffMat = new THREE.MeshStandardMaterial({ color: 0x5a4f44, roughness: 0.9, metalness: 0 });
+    const loopMat = new THREE.MeshStandardMaterial({ color: 0x3e3730, roughness: 0.85, metalness: 0 });
+    const body = new THREE.ExtrudeGeometry(mittShape(), { depth: 9, bevelEnabled: true, bevelThickness: 3, bevelSize: 2.5, bevelSegments: 3, curveSegments: 18 });
+    body.translate(0, -8, -4.5);
+    const cuff = new RoundedBoxGeometry(46, 22, 19, 3, 4);
+    cuff.translate(0, -8 - 9, 0);
+    const loop = new THREE.TorusGeometry(5, 1.1, 8, 20);
+    // the far one, against the plate, and the near one, a left hand to the far's right, a little over and in front
+    for (const [x, z, lean, hand] of [[-5, 13, 0.07, 1], [6, 30, -0.09, -1]]) {
+      const m = new THREE.Group();
+      // (hung from where its loop meets the hook)
+      m.position.set(x * 0.2, HOOK_Y - 1.5, z);
+      m.rotation.z = lean;
+      const b = pick(new THREE.Mesh(body, cloth));
+      b.position.x = x * 0.8;
+      b.scale.x = hand;
+      const c = pick(new THREE.Mesh(cuff, cuffMat));
+      c.position.x = x * 0.8;
+      const l = pick(new THREE.Mesh(loop, loopMat));
+      l.position.y = 0;
+      m.add(b, c, l);
+      this.pair.add(m);
+    }
+    g.add(this.pair);
+    scene.add(g);
+  }
+
+  update(worn: boolean): void {
+    if (worn === this.worn) return;
+    this.worn = worn;
+    // (worn, off their hook: neither drawn, nor outlined, nor hit)
+    this.pair.visible = !worn;
+    this.pair.traverse((o) => (worn ? o.layers.set(1) : o.layers.set(0)));
+  }
+}
+
 /**
  * The faucets: a manifold along a wall, with each of its faucets a pipe out over the counter; and on each island, a
  * chrome riser up from the counter with a pipe out over it. Each turns down at an elbow to its spout, with its valve
@@ -5883,6 +6021,7 @@ export class View {
   private beacon: { beacon: THREE.PointLight; lamp: THREE.Mesh };
   private alarmButton: AlarmButton;
   private blindsButton: BlindsButton;
+  private mitts: MittsView;
   private airlock: AirlockView;
   private cabinet: CabinetView;
   /** The room's lights, and how bright each is, to be dimmed while the cryopod is shut (see AirlockLook.dark). */
@@ -5941,6 +6080,7 @@ export class View {
     this.scene.add(buildPort(PORT_FRAC));
     this.alarmButton = new AlarmButton(this.scene, this.pickables);
     this.blindsButton = new BlindsButton(this.scene, this.pickables);
+    this.mitts = new MittsView(this.scene, this.pickables);
     this.airlock = new AirlockView(this.scene, this.pickables, eye);
     this.cabinet = new CabinetView(this.scene, this.pickables);
     this.ghost = new GhostView(this.scene);
@@ -6087,6 +6227,7 @@ export class View {
 
     this.alarmButton.update(fr.alarmsOff);
     this.blindsButton.update(fr.blindsShut);
+    this.mitts.update(fr.mitts);
     this.airlock.update(fr.airlock);
     this.cabinet.update(fr.stock);
     // the beacon turns slowly, on sim time like everything else in the lab
