@@ -194,6 +194,35 @@ describe('sleep', () => {
     for (const s of parts) expect(ref.n[species] + ref.n[s]).toBe(start);
   });
 
+  it("follows what's made in a vessel along with what it's made of", () => {
+    // nothing delivered: what was let into the reservoir with its supply, a little of each of its atoms, is joining
+    // up into more of it, quickly for how little of them there is, but slowly for how much of it
+    const { l, station, now } = lab(0, share(1e-3), 0);
+    station.stock(FIRST_SUPPLY);
+    const { species, start } = FIRST_SUPPLY;
+    const ref = station.tanks[1];
+    const parts = SPECIES[species].atoms.map(singleOf);
+    const loose = 4e7;
+    for (const s of parts) ref.n[s] = loose;
+    ref.N += parts.length * loose;
+    const k = 3000 / loose ** 2;
+    l.advance = (dt) => {
+      const m = Math.min(ref.n[parts[0]], roundRandom(k * ref.n[parts[0]] * ref.n[parts[1]] * dt));
+      ref.n[species] += m;
+      for (const s of parts) ref.n[s] -= m;
+      l.skip(dt);
+    };
+    const stats = { plain: 0, jumped: 0, jumps: 0 };
+    const it = sleep(l, stats, true);
+    while (now() < 200_000) expect(it.next().done).toBe(false);
+    // it jumped, and no atom was made or lost by it, give or take the rounding of whole molecules
+    expect(stats.jumps).toBeGreaterThan(0);
+    for (const s of parts) expect(Math.abs(ref.n[species] + ref.n[s] - start - loose)).toBeLessThan(1e-3 * loose);
+    // and there's as much left loose as there would be: 1 / n = 1 / loose + k t
+    const left = 1 / (1 / loose + k * now());
+    expect(Math.abs(ref.n[parts[0]] / left - 1)).toBeLessThan(0.1);
+  });
+
   it("doesn't take a stray drop for a delivery still coming in", () => {
     // nothing's delivered, and what's in the reservoir is coming apart, a clump at a time, fast enough to follow; and
     // in the middle of a window (after `at` sim s run as ever, jumps aside), one big drop of it lands, as the last

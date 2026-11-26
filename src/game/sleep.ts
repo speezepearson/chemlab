@@ -31,7 +31,10 @@ import type { Tool } from './tools';
  * A vessel that nothing drains (a flask, the reservoir, a tank with its spouts shut) feeds nothing back, so each of its
  * components with a clear drift, confirmed, is applied on its own, at its rate pooled over every window since it last
  * changed course: its rate is what's extrapolated furthest (the reservoir's, all the way to the goal), so it has to be
- * known to within `precision` before a long jump. It's changed course once a window's rate is clearly changing since
+ * known to within `precision` before a long jump. And once any of its components is followed, so is every other with
+ * a clear drift, however slow, since a drift that matters for a trace doesn't for what it's being made into, of which
+ * there's a thousand times as much, and following one without the other would make atoms or lose them. A species
+ * running out in it loses no more than eps of itself in a jump. Its rate's changed course once a window's rate is clearly changing since
  * the last, or is off the mean of those pooled by more than that window's own noise allows: so a delivery that's
  * over, or a stray drop, isn't carried on into what the vessel does next.
  *
@@ -339,10 +342,16 @@ function plan(
         tr.v === reservoir &&
         stats[species].r > 0 &&
         SPECIES[species].atomIdx.every((a) => stats[ELEMENT + a].r > 0 && significant(stats[ELEMENT + a], z));
+      const leads = (c: number) => (c === species && delivered ? significant(stats[c], z) : drifting(c, stats[c]));
+      // and once anything in it is followed, so is all else in it with a clear drift, however slow: what's made in it
+      // is made of something in it, of which there may be so much more, or less, that the same drift matters for
+      // the one and not for the other; and following only one of them would make atoms, or lose them
+      let any = false;
+      for (let c = 0; c <= HEAT && !any; c++) any = leads(c);
       for (let c = 0; c <= HEAT; c++) {
-        if (c === species && delivered ? !significant(stats[c], z) : !drifting(c, stats[c])) continue;
+        if (!any || !significant(stats[c], z)) continue;
         if (!confirmed(c)) {
-          limit(0);
+          if (leads(c)) limit(0);
           continue;
         }
         steadyRate(c, stats[c].r);
@@ -362,6 +371,9 @@ function plan(
         }
         const r = p.r;
         out[c] = r;
+        // a species running out is used up slower as it goes, so no more than eps of it (and none is left owing: see
+        // jump, which stops at none, whatever it's being made into)
+        if (c < NS && r < 0) limit((eps * Math.max(last[c], 1000)) / -r);
         const slack = p.se - SLEEP.precision * Math.abs(r);
         if (slack > 0) limit((SLEEP.precision * scaleOf(c)) / slack);
         if (!shares) {
