@@ -30,7 +30,7 @@ import { Scale, glassGrams } from './scale';
 import { sleep, type Sleeper, type SleepStats, type Woke } from './sleep';
 import { script, smell, span, type Fragment } from './smell';
 import {
-  CELL, COUNTERS, EYE, LIFT, PLAYER_R, REACH, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toCardinal, toFrac, toLocal, toWorld, wrapAngle,
+  CELL, COUNTERS, EYE, LIFT, PLAYER_R, REACH, ROOM, SPIN, Z_HOME, counterUnder, dist3, fromFrac, groundAt, toFrac, toLocal, toWorld, wrapAngle,
   type Pose, type Vec3,
 } from './space';
 import {
@@ -1447,9 +1447,8 @@ export class GameEngine {
   }
 
   /**
-   * Where what's held would be, where it's held from the eyes (see Held.dir): facing the nearest of the four ways
-   * along the room (see toCardinal) to how it's turned from the player, so it turns in quarter turns; but while Alt is
-   * held (see free), just as it's turned from them, so it turns as they do.
+   * Where what's held would be, where it's held from the eyes (see Held.dir): turned just as it's turned from the
+   * player (see facing), so it turns as they do.
    */
   private gripPose(h: Held, dist = h.at ?? h.dist, eye = this.eye()): Pose {
     const { right, up, ahead } = this.viewAxes();
@@ -2118,7 +2117,7 @@ export class GameEngine {
     for (const j of this.pouringOut(t)) {
       const sp = spoutAt(t, j);
       const hose = new Hose({ tool: t, spout: j }, sp, NOZZLE_REACH.min);
-      hose.turn = toCardinal(this.player.yaw);
+      hose.turn = wrapAngle(this.player.yaw);
       const r = this.standFor(hose, t);
       if (typeof r === 'string') {
         this.hoses = this.hoses.filter((x) => !made.includes(x));
@@ -2168,7 +2167,7 @@ export class GameEngine {
       const was = hose ? { outlet: { ...hose.outlet }, turn: hose.turn, reach: hose.reach } : null;
       if (!hose) {
         hose = new Hose(m, at, NOZZLE_REACH.min);
-        hose.turn = toCardinal(this.player.yaw);
+        hose.turn = wrapAngle(this.player.yaw);
         this.hoses.push(hose);
       }
       return { hose, into, off: toLocal(frame, hose.outlet), turn: wrapAngle(hose.turn - frame.yaw), was };
@@ -2434,7 +2433,7 @@ export class GameEngine {
     const from: Rest | null = old ? { pose: { ...old.outlet, yaw: 0 }, hose: { turn: old.turn, reach: old.reach } } : null;
     hose.outlet = this.mountAt(m);
     // its stand starts out behind it, as the player faces
-    hose.turn = toCardinal(this.player.yaw);
+    hose.turn = wrapAngle(this.player.yaw);
     if (!old) this.hoses.push(hose);
     this.holdHose(hose, from);
   }
@@ -3708,17 +3707,15 @@ export class GameEngine {
   }
 
   /**
-   * Which way what's held faces, about the vertical, as it's turned from the player: the nearest of the four ways
-   * along the room (see toCardinal), so R turns it a quarter turn; but while Alt is held (see free), just as it's held.
+   * Which way what's held faces, about the vertical: just as it's turned from the player, so it turns as they do,
+   * and R turns it a quarter turn.
    */
   private facing(h: Held): number {
-    const yaw = this.player.yaw + h.relYaw;
-    return this.free() ? wrapAngle(yaw) : toCardinal(yaw);
+    return wrapAngle(this.player.yaw + h.relYaw);
   }
 
   /**
-   * Whether Alt is held: then what's held is set down exactly where and as it's held, turned as it's held (see
-   * facing) and with no magnet (see magnet).
+   * Whether Alt is held: then what's held is set down exactly where it's held, with no magnet (see magnet).
    */
   private free(): boolean {
     return this.keys.has('AltLeft') || this.keys.has('AltRight');
@@ -3726,7 +3723,7 @@ export class GameEngine {
 
   /**
    * Where what's held would be set down, at pose p: just there, but a hose's nozzle over an inline instrument's tube on
-   * its top (see docked), and a flask facing the nearest of the four ways (it's round: see faceFlask).
+   * its top (see docked).
    */
   private snapped(h: Held, p: Pose): Pose {
     if (h.kind === 'hose') {
@@ -3737,7 +3734,6 @@ export class GameEngine {
       const tip = { m: h.h.on, nozzle: false };
       return !this.cockAt(tip) && this.cockRoom(tip, this.cockFrame(tip)) ? d : p;
     }
-    if (h.kind === 'flask') return { ...p, yaw: toCardinal(p.yaw) };
     return p;
   }
 
@@ -3927,10 +3923,8 @@ export class GameEngine {
   }
 
   /**
-   * Where a held nozzle's stand is wanted: turned with the player like anything held (see facing: in quarter turns, so the
-   * nozzle faces the way along the room nearest how it's turned from them, or with Alt held, just as it's turned; with
-   * the stand behind it), as far behind as its
-   * clamp's arm is slid.
+   * Where a held nozzle's stand is wanted: turned with the player like anything held (see facing), with the stand
+   * behind it, as far behind as its clamp's arm is slid.
    */
   private nozzleWant(h: Held & { kind: 'hose' }): NozzleMount {
     return { turn: this.facing(h), reach: snapReach(h.reach) };
