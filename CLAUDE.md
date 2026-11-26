@@ -217,14 +217,13 @@ The view is Three.js code with no unit tests, so verify drawing and interaction 
     through it, and it's laid under what's there. So it must stay thinner than the 0.6 between a flask's floor and
     its fluid's (`FLASK_FLUID` in `view.ts`), or it shows inside a flask standing on it.
   - **Placement is free, with magnets.** What's let go of is set down where it's held (the engine's `placement`,
-    then `rest`), facing the nearest of the four ways (`facing`, `toCardinal`), or exactly as held while Alt is held
-    (`free`). There's no lattice: `CELL` (60) is only a unit of length (the counters' edges, presets, most tools'
-    pitches), and tanks and spouts may be any distance apart. What lines things up is the magnet: within `MAGNET`
+    then `rest`), facing just as it's held (`facing`): nothing snaps its turn to the room's walls. There's no
+    lattice: `CELL` (60) is only a unit of length (the counters' edges, presets, most tools' pitches), and tanks and spouts may be any distance apart. What lines things up is the magnet: within `MAGNET`
     (`bodies.ts`) it shifts what's held across so its outlets are over others' mouths, or its mouths under others'
     outlets, the most pairs at once (`magnetShift`, fed by the engine's `magnets`; a scale has no mouths of its own,
     and a flask stands on its platform wherever it's let go, as on a counter: `platformSpot`, `Scale.load`'s `dx`, `dz`). If that pose can't rest, the free one is tried, then the nearest within `NEAR` (rings `NEAR_STEP`
-    apart); keep that search cheap, since `placement()` runs every frame while something's held. The guides and
-    footprints draw whatever `placement()` says, so anything that changes where things go goes through it. The
+    apart); keep that search cheap, since `placement()` runs every frame while something's held. While Alt is
+    held (`free`) there's no magnet. The guides and footprints draw whatever `placement()` says, so anything that changes where things go goes through it. The
     special snaps sit on top (`snapped`: `docked`; `dipAim` for dippers). On load nothing's moved but
     repairs (`toCounters`). Tests that want a scene laid out in cells use `src/game/testLayout.ts`.
     The splitter, the multiplexer and the separator are three cells across for two outlets or inlets, symmetrical,
