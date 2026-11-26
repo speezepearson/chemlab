@@ -31,7 +31,9 @@ import type { Tool } from './tools';
  * A vessel that nothing drains (a flask, the reservoir, a tank with its spouts shut) feeds nothing back, so each of its
  * components with a clear drift, confirmed, is applied on its own, at its rate pooled over every window since it last
  * changed course: its rate is what's extrapolated furthest (the reservoir's, all the way to the goal), so it has to be
- * known to within `precision` before a long jump.
+ * known to within `precision` before a long jump. It's changed course once a window's rate is clearly changing since
+ * the last, or is off the mean of those pooled by more than that window's own noise allows: so a delivery that's
+ * over, or a stray drop, isn't carried on into what the vessel does next.
  *
  * A rate that's clearly changing from one window to the next (a supply draining away, and what it feeds) is taken
  * to go on changing as fast through the jump, so it's extrapolated along a parabola, not a line.
@@ -252,10 +254,16 @@ function plan(
       stats.push(q);
       now.r[c] = q.r;
       now.se[c] = q.se;
-      now.n[c] = (was?.n[c] ?? 0) * mem + K;
-      now.n2[c] = (was?.n2[c] ?? 0) * mem * mem + K;
-      now.sum[c] = (was?.sum[c] ?? 0) * mem;
-      now.sq[c] = (was?.sq[c] ?? 0) * mem;
+      // (the pool of a vessel nothing drains starts again from this window if this one's rate is off the mean of
+      // those before by more than its own noise would have it, were theirs the same: the rate's changed course, or
+      // they're too noisy to say what it is, as with a stray drop among them, whose window a hundred quiet ones
+      // wouldn't outweigh. Their own spread can't be the judge, since what's wrong with them is what widens it)
+      const old = tr.terminal && was && was.n[c] > 0 ? was.sum[c] / was.n[c] / w : q.r;
+      const keep = Math.abs(q.r - old) > z * q.se * Math.sqrt(1 + K / (was?.n[c] || K)) + 1e-9 * Math.abs(q.r) ? 0 : mem;
+      now.n[c] = (was?.n[c] ?? 0) * keep + K;
+      now.n2[c] = (was?.n2[c] ?? 0) * keep * keep + K;
+      now.sum[c] = (was?.sum[c] ?? 0) * keep;
+      now.sq[c] = (was?.sq[c] ?? 0) * keep;
       for (let k = 0; k < K; k++) {
         const d = ys[k + 1] - ys[k];
         now.sum[c] += d;
@@ -338,13 +346,13 @@ function plan(
           continue;
         }
         steadyRate(c, stats[c].r);
-        // the rate pooled over every window since it changed course; and until it's known to within `precision` of
-        // itself, no further than leaves what's added uncertain by more than that share of what's there then (but if
-        // it's clearly changing since the last window, or this window disagrees with them, the rate's moving: start
-        // the pool again from this window)
+        // the rate pooled over every window since it changed course (see the pool, above); and until it's known to
+        // within `precision` of itself, no further than leaves what's added uncertain by more than that share of
+        // what's there then (but if it's clearly changing since the last window, the rate's moving: start the pool
+        // again from this window)
         let p = pooled(now, c, w);
         out[ACC + c] = trend(c);
-        if (out[ACC + c] || Math.abs(stats[c].r - p.r) > z * Math.hypot(stats[c].se, p.se)) {
+        if (out[ACC + c]) {
           let sq = 0;
           for (let k = 0; k < K; k++) sq += (tr.xs[k + 1][c] - tr.xs[k][c]) ** 2;
           now.sum[c] = stats[c].r * W;

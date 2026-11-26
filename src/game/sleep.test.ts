@@ -194,6 +194,44 @@ describe('sleep', () => {
     for (const s of parts) expect(ref.n[species] + ref.n[s]).toBe(start);
   });
 
+  it("doesn't take a stray drop for a delivery still coming in", () => {
+    // nothing's delivered, and what's in the reservoir is coming apart, a clump at a time, fast enough to follow; and
+    // in the middle of a window (after `at` sim s run as ever, jumps aside), one big drop of it lands, as the last
+    // one hanging from a spout does
+    const [k, clump, drop, at] = [1.4e-6, 100, 1e7, 80];
+    const { l, station, now } = lab(0, share(1e-3), 0);
+    const ref = station.tanks[1];
+    ref.setMolecules(TARGET, 1.4e9);
+    const parts = SPECIES[TARGET].atoms.map(singleOf);
+    // how many clumps, of a mean: Poisson's
+    const clumps = (mean: number) => {
+      let [n, p] = [0, Math.random()];
+      for (const floor = Math.exp(-mean); p > floor; p *= Math.random()) n++;
+      return n;
+    };
+    let [fell, ran] = [0, 0];
+    l.advance = (dt) => {
+      l.skip(dt);
+      ran += dt;
+      const m = clump * clumps((ref.n[TARGET] * k * dt) / clump);
+      ref.n[TARGET] -= m;
+      for (const s of parts) ref.n[s] += m;
+      if (!fell && ran >= at) {
+        ref.setMolecules(TARGET, ref.n[TARGET] + drop);
+        fell = ref.n[TARGET];
+      }
+    };
+    const it = sleep(l, { plain: 0, jumped: 0, jumps: 0 }, true);
+    let most = 0;
+    while (now() < 20_000) {
+      expect(it.next().done).toBe(false);
+      most = Math.max(most, ref.n[TARGET]);
+    }
+    // there's never more of it than once the drop had landed: no jump went on as if more were coming
+    expect(fell).toBeGreaterThan(0);
+    expect(most).toBe(fell);
+  });
+
   it('says how long it has gone on', () => {
     expect(sleptFor(45.9)).toBe('00:00:00:45');
     expect(sleptFor(12 * 60 + 5)).toBe('00:00:12:05');
