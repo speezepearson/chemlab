@@ -28,6 +28,7 @@ import { FINISH } from './finish';
 import { FITTINGS, SHORT_ROD } from './fittings';
 import { applyShine, boxUV, metal, planeUV, surfaceMat, whenSurfaced } from './textures';
 import { WHEEL } from './wheel';
+import { WRECK } from './heat';
 import {
   LAMP, SCREEN, TANK_SECTION, ringShare, atomSector, BOND_ENDS, SECTOR_ATOMS, INSTRUMENT, SPECTROSCOPE, spectroscopeAt, spectroscopeTop, spectroscopeUnit, spectroscopeY, HEATER, HEATER_BOX, HEATER_CELLS, HEATER_TUBE, HELIX, METER_BODY, METER_DIGITS,
   DIVERTER_HOLD, FUNNEL_TIP, INLINE_TOOLS, SORTER_CHUTE, STATION, STATION_FUNNEL, SUMP_TIP, gaugeSegments, needleAt, changeoverAt, BULB, STRIP, stripInk, COLUMN, columnInk, wetness, TEST_PAPER, paperTriangles, sectorInset, BOND_PAPER, bondDots, isBlotter, TANK_H, THERMOMETER, THERMOMETERS, THERMOMETER_ROD, isThermometer, thermometerAt, type ThermometerKind, chuteY, levelIn, meterText, tankPieces, tankX,
@@ -59,6 +60,8 @@ export type Pick =
   | { kind: 'alarm' }
   /** The button by the porthole that shuts its blinds, or opens them. */
   | { kind: 'blinds' }
+  /** The heat-proof mitts on the cabinet's side, or the hook they hang on (see MittsView). */
+  | { kind: 'mitts' }
   /** The OK on the message inside the cryopod. */
   | { kind: 'wake' }
   /**
@@ -170,9 +173,23 @@ export interface Frame {
   alarmsOff: boolean;
   /** Whether the porthole's blinds are shut, leaving it solid black. */
   blindsShut: boolean;
+  /** Whether she's wearing the heat-proof mitts, so they're not on their hook (see MittsView). */
+  mitts: boolean;
   airlock: AirlockLook;
   /** How far the ship has turned, in radians, which turns the stars about the axis straight out of the porthole. */
   spin: number;
+  /**
+   * The flask in hand while she juggles it, burning her (see stepHeat in engine.ts): how far it's drawn off from where
+   * it's held, in the room, and how far it leans, in radians, toward her right as she sees it (as it tips to pour).
+   * Only how it's drawn: everything else goes by where it's held.
+   */
+  toss: { f: Flask; x: number; y: number; z: number; roll: number } | null;
+  /**
+   * What's left of each flask that smashed (see WreckView): `key` the engine's own wreck, for which is which; where it
+   * lies on the floor or a counter top, turned which way; what was in it; and how much of it is left to fade, from 1,
+   * fresh, to 0, gone.
+   */
+  wrecks: readonly { key: object; at: Vec3; yaw: number; fluid: Fluid; fade: number }[];
 }
 
 export type GuideLook = 'solid' | 'snap';
@@ -1713,18 +1730,22 @@ class FlaskView {
     splitGlass(glass, pickables);
   }
 
-  /** Draw it as it is now, flashing if it's in `targets` (see Frame.guides). */
-  update(targets: ReadonlySet<Vessel>): void {
+  /**
+   * Draw it as it is now, flashing if it's in `targets` (see Frame.guides), and if she's juggling it (see Frame.toss),
+   * off where the toss has it, leaning, its fluid going up and down with it.
+   */
+  update(targets: ReadonlySet<Vessel>, toss: Frame['toss'] = null): void {
     const { f } = this;
+    const t = toss ?? { x: 0, y: 0, z: 0, roll: 0 };
     this.flash.visible = targets.has(f);
-    this.root.position.set(f.pose.x, f.pose.y, f.pose.z);
+    this.root.position.set(f.pose.x + t.x, f.pose.y + t.y, f.pose.z + t.z);
     this.root.rotation.y = f.pose.yaw;
-    this.tilt.rotation.z = -f.tilt;
+    this.tilt.rotation.z = -f.tilt - t.roll;
     // upright, a trace is drawn as a film at least FLASK_FLUID.film deep over the solid's floor (tipped, the level is
     // well above its lowest corner as soon as there's anything in it)
     const level = fillLevel(f.tilt, volume(f) / f.cap);
     const film = f.tilt === 0 ? -FLASK_H + FLASK_FLUID.floor + FLASK_FLUID.film : -Infinity;
-    this.fluid.update(f, f.pose.y + Math.max(level, film));
+    this.fluid.update(f, f.pose.y + t.y + Math.max(level, film));
     this.label.set(f.label);
   }
 
@@ -1732,6 +1753,213 @@ class FlaskView {
     this.root.removeFromParent();
     this.fluid.dispose();
   }
+}
+
+/* ---------------- a smashed flask ---------------- */
+
+/** How many pixels of a wreck's picture (see WreckView) there are to a world unit. */
+const WRECK_PPU = 3;
+
+/**
+ * What's left of a flask that smashed (see Frame.wrecks): a picture lying flat, WRECK.r either way from its middle,
+ * just over the floor or counter top it fell on, turned as it fell, fading out as it goes. It's painted once, as it's
+ * first seen (see paintWreck), and casts no shadow; it isn't hit, so the crosshair goes through it.
+ */
+class WreckView {
+  private mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
+
+  constructor(scene: THREE.Object3D, fluid: Fluid, seed: number) {
+    const side = 2 * WRECK.r;
+    const tex = new THREE.CanvasTexture(paintWreck(fluid, seeded(seed)));
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    // (drawn after what it lies on, without writing depth, pulled toward the eye a hair so it never fights the floor's
+    // or a counter's pixels, or a sink counter's grate's)
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
+    });
+    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(side, side).rotateX(-Math.PI / 2), mat);
+    this.mesh.castShadow = this.mesh.receiveShadow = false;
+    scene.add(this.mesh);
+  }
+
+  update(at: Vec3, yaw: number, fade: number): void {
+    this.mesh.position.set(at.x, at.y + 0.5, at.z);
+    this.mesh.rotation.y = yaw;
+    this.mesh.material.opacity = Math.max(0, Math.min(1, fade));
+  }
+
+  dispose(): void {
+    this.mesh.removeFromParent();
+    this.mesh.geometry.dispose();
+    this.mesh.material.map?.dispose();
+    this.mesh.material.dispose();
+  }
+}
+
+/**
+ * A wreck's picture (see WreckView), seen from above, in world units from its middle: a pool of what the flask held,
+ * an irregular rounded blob with a couple of splashes beside it, as big as there was of it, in the fluid's own color
+ * as the lab draws it, see-through as it is (with a pale rim and a sheen whatever its color, so a clear one still
+ * reads as a wet patch); and in it the flask on its side, its own silhouette (see FLASK_OUTLINE) broken in four (the
+ * neck and rim, the two halves of its shoulders, its base), a little apart and turned, and a scatter of small shards,
+ * pale see-through glass with brighter edges.
+ */
+function paintWreck(fluid: Fluid, rand: () => number): HTMLCanvasElement {
+  const R = WRECK.r;
+  const px = Math.ceil(2 * R * WRECK_PPU);
+  const c = document.createElement('canvas');
+  c.width = c.height = px;
+  const ctx = c.getContext('2d')!;
+  ctx.setTransform(WRECK_PPU, 0, 0, WRECK_PPU, px / 2, px / 2);
+  const between = (a: number, b: number) => a + (b - a) * rand();
+
+  // the pool, as big as there was of it, and a splash or two beside it
+  const rgb = fluidRGB(fluid);
+  if (rgb) {
+    const alpha = fluidAlpha(fluid);
+    const size = Math.sqrt(Math.min(1, volume(fluid) / CAP));
+    const r0 = R * (0.35 + 0.37 * size);
+    const waves = [2, 3, 5].map((k) => ({ k, a: between(0.04, 0.1), ph: between(0, 2 * Math.PI) }));
+    const blob = (cx: number, cy: number, r: number, wobble: number) => {
+      const n = 48;
+      const pts = Array.from({ length: n }, (_, i) => {
+        const th = (2 * Math.PI * i) / n;
+        const k = 1 + wobble * waves.reduce((t, w) => t + w.a * Math.sin(w.k * th + w.ph), 0);
+        return [cx + r * k * Math.cos(th), cy + r * k * Math.sin(th)];
+      });
+      ctx.beginPath();
+      // through the middles of the points, curving round each, so it's smooth
+      const mid = (i: number) => pts[i % n].map((v, j) => (v + pts[(i + 1) % n][j]) / 2);
+      ctx.moveTo(...(mid(0) as [number, number]));
+      for (let i = 1; i <= n; i++) ctx.quadraticCurveTo(pts[i % n][0], pts[i % n][1], ...(mid(i) as [number, number]));
+      ctx.closePath();
+    };
+    const splashes = Array.from({ length: 2 + Math.floor(rand() * 2) }, () => {
+      const th = between(0, 2 * Math.PI);
+      const d = r0 * between(1.12, 1.3);
+      return { x: d * Math.cos(th), y: d * Math.sin(th), r: r0 * between(0.08, 0.16) };
+    });
+    const shapes = [{ x: 0, y: 0, r: r0, w: 1 }, ...splashes.map((s) => ({ ...s, w: 0.6 }))];
+    // (a little darker than the fluid in glass: the picture isn't lit, and what it lies on is)
+    const [r, g, b] = rgb.map((v) => Math.round(0.8 * v));
+    for (const s of shapes) {
+      // the floor darkened where it's wet, most where the fluid's clear, and the fluid over it, as see-through as it is
+      blob(s.x, s.y, s.r, s.w);
+      ctx.fillStyle = `rgba(10, 14, 14, ${0.22 * (1 - alpha) + 0.05})`;
+      ctx.fill();
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.2 + 0.52 * alpha})`;
+      ctx.fill();
+      // its pale rim
+      ctx.strokeStyle = 'rgba(232, 240, 240, 0.4)';
+      ctx.lineWidth = 0.9;
+      ctx.stroke();
+    }
+    // and a sheen, off to one side
+    blob(0, 0, r0, 1);
+    ctx.save();
+    ctx.clip();
+    const sheen = ctx.createRadialGradient(-0.35 * r0, -0.3 * r0, 0, -0.35 * r0, -0.3 * r0, 0.6 * r0);
+    sheen.addColorStop(0, 'rgba(255, 255, 255, 0.22)');
+    sheen.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = sheen;
+    ctx.fillRect(-R, -R, 2 * R, 2 * R);
+    ctx.restore();
+  }
+
+  // the flask on its side, mouth to the left, its middle about the pool's: x along it from its mouth, y across it
+  const outline = (): void => {
+    ctx.beginPath();
+    FLASK_OUTLINE.forEach((p, i) => (i ? ctx.lineTo(p.y - FLASK_H / 2, p.x) : ctx.moveTo(p.y - FLASK_H / 2, p.x)));
+    ctx.closePath();
+  };
+  // where it broke: three cracks across it, and one along its shoulders, each jagged, the pieces either side of one
+  // sharing it
+  const across = (d: number) => {
+    const pts: [number, number][] = [];
+    for (let i = 0; i <= 10; i++) pts.push([d - FLASK_H / 2 + between(-4, 4), 6.8 * (i - 5)]);
+    return pts;
+  };
+  const cuts = [across(24), across(47)];
+  const along = [0, 1, 2, 3, 4].map((i): [number, number] => [
+    cuts[0][5][0] + ((cuts[1][5][0] - cuts[0][5][0]) * i) / 4, i === 0 || i === 4 ? 0 : between(-3.5, 3.5),
+  ]);
+  const far = FLASK_H;
+  const pieces: [number, number][][] = [
+    // the neck and rim
+    [[-far, -34], ...cuts[0], [-far, 34]],
+    // the shoulders' two halves
+    [...cuts[0].slice(0, 6), ...along.slice(1), ...cuts[1].slice(0, 5).reverse()],
+    [...cuts[0].slice(5), ...cuts[1].slice(5).reverse(), ...along.slice(1, 4).reverse()],
+    // the base
+    [...cuts[1], [far, 34], [far, -34]],
+  ];
+  const spread = [
+    [-6, 1, -0.15],
+    [0, -4, 0.07],
+    [1.5, 4, -0.06],
+    [5, 0, 0.18],
+  ];
+  pieces.forEach((region, i) => {
+    const [dx, dy, rot] = spread[i];
+    ctx.save();
+    ctx.translate(dx + between(-1.5, 1.5), dy + between(-1.5, 1.5));
+    ctx.rotate(rot * between(0.6, 1.4));
+    ctx.beginPath();
+    region.forEach(([x, y], j) => (j ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+    ctx.clip();
+    // pale see-through glass, a little darker where it lies thick, with a bright edge, and its lip at the mouth
+    outline();
+    ctx.fillStyle = 'rgba(214, 232, 238, 0.32)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(236, 248, 252, 0.85)';
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(236, 248, 252, 0.3)';
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(-FLASK_H / 2 + 22, 3);
+    ctx.lineTo(FLASK_H / 2 - 8, 15);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(236, 248, 252, 0.7)';
+    ctx.fillRect(-FLASK_H / 2 - 1.2, -12.5, 2.4, 25);
+    // the broken edge, bright, where it crosses the glass
+    outline();
+    ctx.clip();
+    ctx.beginPath();
+    region.forEach(([x, y], j) => (j ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+    ctx.strokeStyle = 'rgba(245, 252, 255, 0.9)';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.restore();
+  });
+
+  // and the shards, scattered round it
+  for (let i = 0; i < 14; i++) {
+    const th = between(0, 2 * Math.PI);
+    const d = between(20, R * 0.8);
+    const x = d * Math.cos(th);
+    const y = d * Math.sin(th);
+    const s = between(1.5, 4.5);
+    const a = between(0, 2 * Math.PI);
+    ctx.beginPath();
+    for (let k = 0; k < 3; k++) {
+      const ak = a + (2 * Math.PI * k) / 3 + between(-0.5, 0.5);
+      const sk = s * between(0.6, 1.3);
+      const p: [number, number] = [x + sk * Math.cos(ak), y + sk * Math.sin(ak)];
+      if (k) ctx.lineTo(...p);
+      else ctx.moveTo(...p);
+    }
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(214, 232, 238, 0.35)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(240, 250, 255, 0.85)';
+    ctx.lineWidth = 0.6;
+    ctx.stroke();
+  }
+  return c;
 }
 
 /* ---------------- tools ---------------- */
@@ -4187,6 +4415,145 @@ class BlindsButton {
   }
 }
 
+/** A tile of the mitts' quilting (see MittsView), as a color map, and as a bump map: puffed up between its stitches. */
+function quiltTexture(bump: boolean): THREE.CanvasTexture {
+  const N = 64;
+  const c = document.createElement('canvas');
+  c.width = c.height = N;
+  const ctx = c.getContext('2d')!;
+  if (bump) {
+    // each diamond puffed up in its middle, down at its stitches
+    const g = ctx.createRadialGradient(N / 2, N / 2, 0, N / 2, N / 2, N * 0.55);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(1, '#808080');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, N, N);
+  } else {
+    ctx.fillStyle = '#a39887';
+    ctx.fillRect(0, 0, N, N);
+    // a little weave
+    for (let i = 0; i < 400; i++) {
+      ctx.fillStyle = `rgba(${Math.random() < 0.5 ? '255, 250, 240' : '40, 32, 24'}, 0.06)`;
+      ctx.fillRect(Math.random() * N, Math.random() * N, 2, 1);
+    }
+  }
+  // the stitches, corner to corner, so the tiles make diamonds
+  ctx.strokeStyle = bump ? '#202020' : 'rgba(70, 60, 48, 0.55)';
+  ctx.lineWidth = bump ? 4 : 2;
+  ctx.beginPath();
+  for (const [x0, y0, x1, y1] of [[0, 0, N, N], [N, 0, 0, N], [-N / 2, N / 2, N / 2, -N / 2], [N / 2, N * 1.5, N * 1.5, N / 2], [N / 2, -N / 2, N * 1.5, N / 2], [-N / 2, N / 2, N / 2, N * 1.5]]) {
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+  }
+  ctx.stroke();
+  const t = new THREE.CanvasTexture(c);
+  if (!bump) t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  // (a diamond to every 22 units of mitt: the extruded mitt's faces are mapped in world units)
+  t.repeat.set(1 / 22, 1 / 22);
+  return t;
+}
+
+/**
+ * A heat-proof mitt's outline, as it hangs, cuff up: in world units, x across (its thumb out to +x), y up from its top,
+ * which the cuff covers, down to its fingertips about 100 below.
+ */
+function mittShape(): THREE.Shape {
+  const m = new THREE.Shape();
+  m.moveTo(-19, 0);
+  m.lineTo(19, 0);
+  m.lineTo(20.5, -30);
+  // the thumb, out to the side and down
+  m.quadraticCurveTo(29, -33, 33, -46);
+  m.quadraticCurveTo(36, -59, 28, -61);
+  m.quadraticCurveTo(24, -61.5, 22, -55);
+  // and round the fingers
+  m.lineTo(22, -76);
+  m.absarc(0, -76, 22, 0, Math.PI, true);
+  m.lineTo(-21, -40);
+  m.lineTo(-19, 0);
+  return m;
+}
+
+/**
+ * The heat-proof mitts, on the outer face of the equipment cabinet's right end, a pace in from its front (past the
+ * back counter, so nothing stands in front of them), at chest height: two small steel hooks on a plate, and a pair
+ * of padded mitts hanging from them by loops at their cuffs, quilted gray-tan with darker cuffs, the near one overlapping
+ * the far a little, each a little askew. Worn, the mitts are neither drawn nor hit, and the bare hooks are what's
+ * clicked to hang them back up. Hooks, plate and mitts are all one thing for the crosshair (`{ kind: 'mitts' }`); none of
+ * it is in anything's way, flat against the cabinet.
+ */
+class MittsView {
+  private pair = new THREE.Group();
+  private worn: boolean | null = null;
+
+  constructor(scene: THREE.Scene, pickables: Map<THREE.Object3D, Pick>) {
+    const g = new THREE.Group();
+    // facing +x, into the room: in g, x runs along the cabinet's end toward its back, y up, z out from it
+    g.position.set(CABINET.x1, 0, CABINET.z1 - 60);
+    g.rotation.y = Math.PI / 2;
+    const pick = (m: THREE.Mesh) => {
+      m.castShadow = m.receiveShadow = true;
+      pickables.set(m, { kind: 'mitts' });
+      return m;
+    };
+    // the plate, and two hooks out from it, each turning up at its end, the right one longer, so the mitt on it hangs
+    // over the left one's a little
+    const TOP = 610;
+    const HOOK_Y = TOP - 11;
+    const steel = metal(new THREE.MeshStandardMaterial({ color: 0xa3aba8, metalness: 0.85, roughness: 0.32 }));
+    const plate = pick(new THREE.Mesh(new RoundedBoxGeometry(62, 22, 3, 2, 1.2), steel));
+    plate.position.set(0, TOP - 11, 1.5);
+    g.add(plate);
+    // (each mitt: where its hook is across the plate, how far out it hangs, how askew, and which hand it is)
+    const MITTS = [
+      { x: -15, z: 8, lean: -0.05, hand: -1 },
+      { x: 15, z: 21, lean: 0.08, hand: 1 },
+    ];
+    for (const { x, z } of MITTS) {
+      const reach = z + 4;
+      const arm = pick(new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, reach - 3, 12).rotateX(Math.PI / 2), steel));
+      arm.position.set(x, HOOK_Y, (3 + reach) / 2);
+      const tip = pick(new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 7, 12), steel));
+      tip.position.set(x, HOOK_Y + 3, reach);
+      const knob = pick(new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 8), steel));
+      knob.position.set(x, HOOK_Y + 6.5, reach);
+      g.add(arm, tip, knob);
+    }
+
+    // the mitts, each hanging from its loop on its hook
+    const cloth = new THREE.MeshStandardMaterial({ map: quiltTexture(false), bumpMap: quiltTexture(true), bumpScale: 1.5, roughness: 0.95, metalness: 0 });
+    const cuffMat = new THREE.MeshStandardMaterial({ color: 0x5a4f44, roughness: 0.9, metalness: 0 });
+    const loopMat = new THREE.MeshStandardMaterial({ color: 0x3e3730, roughness: 0.85, metalness: 0 });
+    const body = new THREE.ExtrudeGeometry(mittShape(), { depth: 7, bevelEnabled: true, bevelThickness: 2.5, bevelSize: 2.5, bevelSegments: 3, curveSegments: 18 });
+    body.translate(0, -8, -3.5);
+    // (over the top of the mitt, bevel and all)
+    const cuff = new RoundedBoxGeometry(46, 23, 14, 3, 5);
+    cuff.translate(0, -15.5, 0);
+    const loop = new THREE.TorusGeometry(5, 1.1, 8, 20);
+    for (const { x, z, lean, hand } of MITTS) {
+      const m = new THREE.Group();
+      // (hung from where its loop meets its hook)
+      m.position.set(x, HOOK_Y - 1.5, z);
+      m.rotation.z = lean;
+      const b = pick(new THREE.Mesh(body, cloth));
+      b.scale.x = hand;
+      m.add(b, pick(new THREE.Mesh(cuff, cuffMat)), pick(new THREE.Mesh(loop, loopMat)));
+      this.pair.add(m);
+    }
+    g.add(this.pair);
+    scene.add(g);
+  }
+
+  update(worn: boolean): void {
+    if (worn === this.worn) return;
+    this.worn = worn;
+    // (worn, off their hook: neither drawn, nor outlined, nor hit)
+    this.pair.visible = !worn;
+    this.pair.traverse((o) => (worn ? o.layers.set(1) : o.layers.set(0)));
+  }
+}
+
 /**
  * The faucets: a manifold along a wall, with each of its faucets a pipe out over the counter; and on each island, a
  * chrome riser up from the counter with a pipe out over it. Each turns down at an elbow to its spout, with its valve
@@ -5642,6 +6009,8 @@ export class View {
   private scales = new Map<Scale, ScaleView>();
   private hoses = new Map<Hose, HoseView>();
   private stands: StandView[] = [];
+  /** What's left of each smashed flask (see Frame.wrecks), by the engine's own wreck. */
+  private wrecks = new Map<object, WreckView>();
   private ghost: GhostView;
   /** The stopcock in hand, if there is one (see Frame.loose), and the one it was drawn for. */
   private loose: { v: CockView; c: Cock } | null = null;
@@ -5660,6 +6029,7 @@ export class View {
   private beacon: { beacon: THREE.PointLight; lamp: THREE.Mesh };
   private alarmButton: AlarmButton;
   private blindsButton: BlindsButton;
+  private mitts: MittsView;
   private airlock: AirlockView;
   private cabinet: CabinetView;
   /** The room's lights, and how bright each is, to be dimmed while the cryopod is shut (see AirlockLook.dark). */
@@ -5718,6 +6088,7 @@ export class View {
     this.scene.add(buildPort(PORT_FRAC));
     this.alarmButton = new AlarmButton(this.scene, this.pickables);
     this.blindsButton = new BlindsButton(this.scene, this.pickables);
+    this.mitts = new MittsView(this.scene, this.pickables);
     this.airlock = new AirlockView(this.scene, this.pickables, eye);
     this.cabinet = new CabinetView(this.scene, this.pickables);
     this.ghost = new GhostView(this.scene);
@@ -5812,7 +6183,8 @@ export class View {
     // the vessels guides end at flash
     const targets = new Set(fr.guides.map((g) => g.v));
     flashMat.opacity = FLASH.lo + (FLASH.hi - FLASH.lo) * (0.5 - 0.5 * Math.cos(2 * Math.PI * FLASH.hz * this.clock));
-    for (const v of this.flasks.values()) v.update(targets);
+    for (const v of this.flasks.values()) v.update(targets, fr.toss?.f === v.f ? fr.toss : null);
+    this.updateWrecks(fr);
     for (const v of this.tools.values()) v.update(fr.clock, fr.energies, targets);
     for (const v of this.scales.values()) v.update(fr.tarePress === v.sc, fr.hot);
     for (const { h, from, fluid, cock } of fr.hoses) this.hoses.get(h)!.update(from, fluid, cock);
@@ -5863,6 +6235,7 @@ export class View {
 
     this.alarmButton.update(fr.alarmsOff);
     this.blindsButton.update(fr.blindsShut);
+    this.mitts.update(fr.mitts);
     this.airlock.update(fr.airlock);
     this.cabinet.update(fr.stock);
     // the beacon turns slowly, on sim time like everything else in the lab
@@ -5923,6 +6296,24 @@ export class View {
     const d = fr.dipHint;
     if (d) this.dipHint.show(d.at, Math.atan2(eye.x - d.at.x, eye.z - d.at.z), 1, d.strip ? 1 : 0, this.camera, cssH);
     else this.dipHint.hide();
+  }
+
+  /**
+   * What's left of each smashed flask (see WreckView): a picture of its own for each, painted as it's first seen,
+   * each with its own pieces (seeded by where it lies), and let go of once it's faded.
+   */
+  private updateWrecks(fr: Frame): void {
+    const live = new Set(fr.wrecks.map((w) => w.key));
+    for (const [k, v] of this.wrecks)
+      if (!live.has(k)) {
+        v.dispose();
+        this.wrecks.delete(k);
+      }
+    for (const w of fr.wrecks) {
+      let v = this.wrecks.get(w.key);
+      if (!v) this.wrecks.set(w.key, (v = new WreckView(this.scene, w.fluid, Math.round(w.at.x * 7919 + w.at.z * 104729 + w.yaw * 1e4))));
+      v.update(w.at, w.yaw, w.fade);
+    }
   }
 
   /** Draw the keys' hints over the finished frame, if any are up. */

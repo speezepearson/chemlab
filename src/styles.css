@@ -148,6 +148,11 @@ details label.slider output{width:40px;text-align:right;font-variant-numeric:tab
 .smell .said p{background:rgba(12,17,15,.8);animation:said .2s ease-out both}
 .smell .said span{animation:said .25s ease-out both}
 @keyframes said{from{opacity:0}}
+/* that she's wearing the heat-proof mitts: a small dim tag at the foot of the view, taking no clicks */
+.mitts-on{
+  position:absolute;left:50%;bottom:14px;transform:translateX(-50%);pointer-events:none;z-index:2;
+  color:rgba(223,230,226,.62);background:rgba(12,17,15,.38);padding:2px 9px;border-radius:6px;font-size:12px;letter-spacing:.03em;
+}
 .start-hint{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:2;
   color:#eef0eb;background:rgba(8,12,11,.55);padding:6px 14px;border-radius:8px;font-size:15px;font-weight:600;

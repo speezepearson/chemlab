@@ -32,6 +32,8 @@ export interface SaveState {
   blindsShut?: boolean;
   /** Whether the player has been told they can nap (see GameEngine.nap); not if left out. */
   nap?: boolean;
+  /** Whether she's wearing the heat-proof mitts (see GameEngine.mitts); not if left out, so they're on their hook. */
+  mitts?: boolean;
   /** The sticky notes of saves from when there was a pencil to write them with; no longer written, and ignored. */
   papers?: unknown;
   /**

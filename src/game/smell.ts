@@ -1,5 +1,6 @@
 import { T_ROOM } from '../chem/params';
 import { NS, SPECIES } from '../chem/species';
+import { misjudge } from './sense';
 
 /**
  * A way Nadia has of saying what something smells like: as a `thing`, to go after "of" or "like" or to stand alone
@@ -134,12 +135,16 @@ export function mask(smelled: readonly Smelled[]): Smelled[] {
 
 /**
  * What Nadia makes out of a fluid, by its molecule counts and temperature: every odorant at or over its threshold,
- * masked (see mask), strongest first. It goes by the fluid alone: the same fluid always smells the same.
+ * masked (see mask), strongest first. Given `rand`, she's the imperfect judge she is (see misjudge in sense.ts): each
+ * odorant's strength is misjudged afresh, a draw each, in the order of ODORANTS, whether it's there or not, and
+ * everything after (whether it's at its threshold, its band, the masking) goes by that. So what's well clear of a
+ * threshold or a band's edge smells the same at every sniff, and what's right at one can go either way. Without
+ * `rand`, it's exact: what's there to be smelled.
  */
-export function smell(n: ArrayLike<number>, T = T_ROOM): Smelled[] {
+export function smell(n: ArrayLike<number>, T = T_ROOM, rand?: () => number): Smelled[] {
   const smelled: Smelled[] = [];
   strengths(n, T).forEach((s, i) => {
-    const level = levelOf(s);
+    const level = levelOf(rand ? misjudge(s, rand) : s);
     if (level >= 0) smelled.push({ odorant: ODORANTS[i], level });
   });
   return mask(smelled);
